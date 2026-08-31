@@ -1,4 +1,4 @@
-<h1>Maestro</h1>
+# Maestro
 
 **A workspace where game designers and their AI agents build the design
 of a game together: characters, places, missions, progression, story.**
@@ -28,24 +28,11 @@ own vocabulary, built from four primitives:
 That is the whole model. A genre nobody anticipated has to fit without a
 code change, so nothing about any genre is baked in.
 
-<table>
-<tr><th align="left">Genre</th><th align="left">Declares</th><th align="left">Connected by</th></tr>
-<tr>
-  <td><b>MMORPG</b></td>
-  <td><code>Class</code> <code>Zone</code> <code>Dungeon</code> <code>Quest</code> <code>Talent</code></td>
-  <td><code>connects_to</code> <code>takes_place_in</code> <code>requires</code> <code>rewards</code></td>
-</tr>
-<tr>
-  <td><b>Racing career</b></td>
-  <td><code>Driver</code> <code>Car</code> <code>Circuit</code> <code>Race</code> <code>Licence</code></td>
-  <td><code>unlocks</code> <code>contains</code> <code>requires</code></td>
-</tr>
-<tr>
-  <td><b>Metroidvania</b></td>
-  <td><code>Room</code> <code>Ability</code> <code>Boss</code> <code>Item</code></td>
-  <td><code>connects_to</code>, carrying its own <code>requires_ability</code></td>
-</tr>
-</table>
+| Genre              | Declares                                                        | Connected by                                                                  |
+| :----------------- | :-------------------------------------------------------------- | :---------------------------------------------------------------------------- |
+| **MMORPG**         | `Class` `Zone` `Dungeon` `Quest` `Talent`                        | `connects_to` `takes_place_in` `requires` `rewards`                            |
+| **Racing career**  | `Driver` `Car` `Circuit` `Race` `Licence`                        | `unlocks` `contains` `requires`                                                |
+| **Metroidvania**   | `Room` `Ability` `Boss` `Item`                                   | `connects_to`, carrying its own `requires_ability`                             |
 
 That last one is the point of typed edges: whether a door can be crossed
 belongs to the door, not to either room.

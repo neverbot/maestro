@@ -18,6 +18,7 @@ type ApiToken struct {
 	CreatedAt  pgtype.Timestamptz
 	LastUsedAt pgtype.Timestamptz
 	RevokedAt  pgtype.Timestamptz
+	TokenHint  string
 }
 
 type Invite struct {

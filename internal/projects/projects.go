@@ -485,17 +485,34 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 	})
 }
 
-// RemoveMember drops a user's membership in a project. Removing a user who
-// is not currently a member is not an error: the caller's goal (no
+// RemoveMember drops a user's membership in a project, and revokes every
+// API token in that same project the removed user created — in the same
+// transaction as the membership deletion, so a failure revoking tokens
+// rolls back the membership deletion too, and a crash between the two
+// can never leave a token live for a project its creator no longer
+// belongs to. This is deliberately scoped to this project only: a
+// member can belong to other projects with tokens of their own, and
+// removing them from one project must not touch those. Removing a user
+// who is not currently a member is not an error: the caller's goal (no
 // membership for this user in this project) is already satisfied, the
-// same convention identity.RevokeSession and identity.RevokeInvite already
-// establish. Removing the project's sole owner is refused with
-// ErrLastOwner — see SetRole's doc comment for the two independent layers
-// (this package's row lock and migration 0002's trigger) that defend that
-// invariant under concurrent removal and under a direct user deletion,
-// and for what each one does and does not earn on its own. Like SetRole,
-// this method performs no authorization check of its own; see SetRole's
-// doc comment for why.
+// same convention identity.RevokeSession and identity.RevokeInvite
+// already establish; the token revocation below shares that no-op
+// convention too (see RevokeAPITokensForMember's own comment), so it
+// never needs to check what exists before running. Removing the
+// project's sole owner is refused with ErrLastOwner — see SetRole's doc
+// comment for the two independent layers (this package's row lock and
+// migration 0002's trigger) that defend that invariant under concurrent
+// removal and under a direct user deletion, and for what each one does
+// and does not earn on its own. Like SetRole, this method performs no
+// authorization check of its own; see SetRole's doc comment for why.
+//
+// api_tokens.user_id records who created a token, not a live
+// authorization link, and this package does not import identity to make
+// this call (nor does identity import this package): RevokeAPITokensForMember
+// is plain SQL over api_tokens, defined in this package's own query file
+// and reached through the same shared dbq.Queries handle UpsertMembership
+// elsewhere in this file already uses the other way — a query defined in
+// identity.sql, called from here.
 func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID) error {
 	return s.withTx(ctx, func(q *dbq.Queries) error {
 		current, err := q.GetMembershipRole(ctx, dbq.GetMembershipRoleParams{UserID: userID, ProjectID: projectID})
@@ -516,6 +533,9 @@ func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID)
 		}
 		if err := q.DeleteMembership(ctx, dbq.DeleteMembershipParams{UserID: userID, ProjectID: projectID}); err != nil {
 			return fmt.Errorf("remove member: %w", err)
+		}
+		if err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID}); err != nil {
+			return fmt.Errorf("revoke member's tokens: %w", err)
 		}
 		return nil
 	})

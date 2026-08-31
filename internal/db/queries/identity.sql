@@ -78,8 +78,11 @@ WHERE id = sqlc.arg('id')::uuid
 -- expired: an admin looking for a mis-sent invite to revoke needs to find
 -- it before it necessarily expires on its own, and a lapsed-but-unredeemed
 -- row is also useful context ("this one needs reissuing"). Ordered
--- newest-first, the order an admin scanning for a just-sent mistake wants.
-SELECT * FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC;
+-- newest-first, with id as an explicit tiebreak (matching ListAPITokens
+-- and every other listing in this file that learned this lesson first) so
+-- two invites created in the same transaction don't reshuffle between
+-- calls.
+SELECT * FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC, id DESC;
 
 -- name: RevokeInvite :exec
 -- Setting expires_at to now(), rather than deleting the row, keeps the
@@ -106,9 +109,9 @@ ON CONFLICT (user_id, project_id) DO UPDATE SET role = excluded.role;
 DELETE FROM invites WHERE redeemed_at IS NULL AND expires_at <= now();
 
 -- name: CreateAPIToken :one
-INSERT INTO api_tokens (token_hash, project_id, user_id, label)
+INSERT INTO api_tokens (token_hash, project_id, user_id, label, token_hint)
 VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('project_id')::uuid,
-        sqlc.arg('user_id')::uuid, sqlc.arg('label')::text)
+        sqlc.arg('user_id')::uuid, sqlc.arg('label')::text, sqlc.arg('token_hint')::text)
 RETURNING *;
 
 -- name: GetLiveAPIToken :one
@@ -122,6 +125,13 @@ WHERE token_hash = sqlc.arg('token_hash')::bytea AND revoked_at IS NULL;
 -- more than five minutes stale. An UPDATE whose WHERE clause matches no
 -- row takes no row lock at all, so the common case (touched within the
 -- last five minutes) costs a statement round trip but no lock contention.
+-- The five-minute interval here must match identity.touchThrottle in
+-- tokens.go, which pre-checks the same condition in Go before ever
+-- issuing this statement (so the common case skips the round trip
+-- entirely, not just the lock) — this WHERE clause stays authoritative
+-- regardless, since it is what actually makes the write safe under two
+-- concurrent resolves of the same token, which the Go pre-check alone
+-- cannot guarantee. Change one, change both.
 UPDATE api_tokens SET last_used_at = now()
 WHERE id = sqlc.arg('id')::uuid
   AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes');
@@ -142,8 +152,18 @@ WHERE id = sqlc.arg('id')::uuid AND project_id = sqlc.arg('project_id')::uuid
 -- token_hash is deliberately not selected: this query backs an operator
 -- listing (ListAPITokens in tokens.go), and the hash of a bearer
 -- credential has no reason to leave the database even in a column nothing
--- currently renders.
-SELECT id, project_id, user_id, label, created_at, last_used_at, revoked_at
-FROM api_tokens
-WHERE project_id = sqlc.arg('project_id')::uuid
-ORDER BY created_at DESC;
+-- currently renders. token_hint is selected instead — see its column
+-- comment (migration 0003) for what it is safe to show. Revoked rows are
+-- included on purpose: this is the audit trail for what happened to a
+-- token, not only a list of what is still live. Joined to users so an
+-- operator triaging a leaked token sees who minted it instead of a raw
+-- id, and ordered by created_at then id so ties (two tokens minted in
+-- the same transaction) list in a stable order across repeated calls,
+-- the same tiebreak reasoning ListProjectsForUser and ListMembers
+-- already apply to their own orderings.
+SELECT t.id, t.project_id, t.user_id, u.display_name AS user_display_name,
+       t.label, t.token_hint, t.created_at, t.last_used_at, t.revoked_at
+FROM api_tokens t
+JOIN users u ON u.id = t.user_id
+WHERE t.project_id = sqlc.arg('project_id')::uuid
+ORDER BY t.created_at DESC, t.id DESC;

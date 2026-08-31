@@ -639,6 +639,86 @@ func TestRemoveMemberOfNonMemberIsNoop(t *testing.T) {
 	}
 }
 
+// TestRemoveMemberRevokesTheirTokensInThatProject guards the hole a
+// review found in Task 9's original draft: Task 10's auth middleware
+// reads a resolved token's ProjectID and treats it as the caller's
+// scope, so a removed member whose token kept working would still have
+// full access to a game they were just expelled from. RemoveMember must
+// close that in the same call, not leave it as something an operator
+// remembers to do separately.
+func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	svc := projects.New(pool)
+	ctx := context.Background()
+
+	owner := newUser(t, ids, "owner10@studio.com")
+	member := newUser(t, ids, "member1@studio.com")
+	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: project.ID, UserID: member.ID, Label: "member's agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	if err := svc.RemoveMember(ctx, member.ID, project.ID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	if _, err := ids.ResolveAPIToken(ctx, token); !errors.Is(err, identity.ErrTokenInvalid) {
+		t.Fatalf("err = %v, want ErrTokenInvalid: a removed member's token in that game must stop working", err)
+	}
+}
+
+// TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone pins the exact
+// blast radius RemoveMember's own doc comment commits to: removing a
+// member from one game must not touch tokens the same person holds for
+// a different game they are still a member of.
+func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	svc := projects.New(pool)
+	ctx := context.Background()
+
+	owner := newUser(t, ids, "owner11@studio.com")
+	member := newUser(t, ids, "member2@studio.com")
+	azeroth, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create (azeroth): %v", err)
+	}
+	leMans, err := svc.Create(ctx, "le-mans", "Le Mans", owner.ID)
+	if err != nil {
+		t.Fatalf("Create (le mans): %v", err)
+	}
+	if err := svc.SetRole(ctx, member.ID, azeroth.ID, "editor"); err != nil {
+		t.Fatalf("SetRole (azeroth): %v", err)
+	}
+	if err := svc.SetRole(ctx, member.ID, leMans.ID, "editor"); err != nil {
+		t.Fatalf("SetRole (le mans): %v", err)
+	}
+	otherProjectToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: leMans.ID, UserID: member.ID, Label: "member's other agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	if err := svc.RemoveMember(ctx, member.ID, azeroth.ID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	if _, err := ids.ResolveAPIToken(ctx, otherProjectToken); err != nil {
+		t.Fatalf("token in an unrelated project was revoked by a different game's RemoveMember: %v", err)
+	}
+}
+
 func TestByIDRoundTrips(t *testing.T) {
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())

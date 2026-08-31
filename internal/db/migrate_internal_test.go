@@ -74,9 +74,9 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 // migrateDown rolls back a single migration (the most recent one goose
 // hasn't already rolled back), so tearing down everything Migrate applied
 // means calling it once per migration file, not once. This is currently
-// two calls because there are currently two migrations (0001, 0002); a
-// third migration needs a third call here, the same way it needs its own
-// entry in Task 8's file structure table.
+// three calls because there are currently three migrations (0001, 0002,
+// 0003); a fourth migration needs a fourth call here, the same way it
+// needs its own entry in Task 8's file structure table.
 func TestMigrateUpDownUp(t *testing.T) {
 	t.Parallel()
 	pool := newTestDatabase(t)
@@ -84,6 +84,9 @@ func TestMigrateUpDownUp(t *testing.T) {
 
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
+	}
+	if err := migrateDown(ctx, pool); err != nil {
+		t.Fatalf("migrateDown (0003): %v", err)
 	}
 	if err := migrateDown(ctx, pool); err != nil {
 		t.Fatalf("migrateDown (0002): %v", err)

@@ -73,3 +73,21 @@ SELECT count(*) FROM (
 -- name: DeleteMembership :exec
 DELETE FROM memberships
 WHERE user_id = sqlc.arg('user_id')::uuid AND project_id = sqlc.arg('project_id')::uuid;
+
+-- name: RevokeAPITokensForMember :exec
+-- Called from RemoveMember, inside the same transaction as the
+-- membership deletion: every live API token in this project created by
+-- the removed member is revoked — not every token that member has ever
+-- created across every project they belong to, only the ones scoped to
+-- the project they just lost access to. This is SQL over api_tokens, not
+-- a reason for this package to import identity: the query runs through
+-- the same dbq.Queries handle UpsertMembership above already crosses in
+-- the other direction (UpsertMembership is defined in identity.sql and
+-- called from this package). Idempotent and already project-scoped for
+-- the same reason identity's own RevokeAPIToken is (see that query's
+-- comment): a member with no tokens, or already-revoked ones, is a
+-- harmless no-op, so RemoveMember never needs to check what exists
+-- before calling this.
+UPDATE api_tokens SET revoked_at = now()
+WHERE user_id = sqlc.arg('user_id')::uuid AND project_id = sqlc.arg('project_id')::uuid
+  AND revoked_at IS NULL;

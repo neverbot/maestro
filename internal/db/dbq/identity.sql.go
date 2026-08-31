@@ -24,10 +24,10 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createAPIToken = `-- name: CreateAPIToken :one
-INSERT INTO api_tokens (token_hash, project_id, user_id, label)
+INSERT INTO api_tokens (token_hash, project_id, user_id, label, token_hint)
 VALUES ($1::bytea, $2::uuid,
-        $3::uuid, $4::text)
-RETURNING id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at
+        $3::uuid, $4::text, $5::text)
+RETURNING id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at, token_hint
 `
 
 type CreateAPITokenParams struct {
@@ -35,6 +35,7 @@ type CreateAPITokenParams struct {
 	ProjectID uuid.UUID
 	UserID    uuid.UUID
 	Label     string
+	TokenHint string
 }
 
 func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error) {
@@ -43,6 +44,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		arg.ProjectID,
 		arg.UserID,
 		arg.Label,
+		arg.TokenHint,
 	)
 	var i ApiToken
 	err := row.Scan(
@@ -54,6 +56,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		&i.CreatedAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
+		&i.TokenHint,
 	)
 	return i, err
 }
@@ -245,7 +248,7 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (I
 }
 
 const getLiveAPIToken = `-- name: GetLiveAPIToken :one
-SELECT id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at FROM api_tokens
+SELECT id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at, token_hint FROM api_tokens
 WHERE token_hash = $1::bytea AND revoked_at IS NULL
 `
 
@@ -261,6 +264,7 @@ func (q *Queries) GetLiveAPIToken(ctx context.Context, tokenHash []byte) (ApiTok
 		&i.CreatedAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
+		&i.TokenHint,
 	)
 	return i, err
 }
@@ -365,26 +369,38 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 }
 
 const listAPITokens = `-- name: ListAPITokens :many
-SELECT id, project_id, user_id, label, created_at, last_used_at, revoked_at
-FROM api_tokens
-WHERE project_id = $1::uuid
-ORDER BY created_at DESC
+SELECT t.id, t.project_id, t.user_id, u.display_name AS user_display_name,
+       t.label, t.token_hint, t.created_at, t.last_used_at, t.revoked_at
+FROM api_tokens t
+JOIN users u ON u.id = t.user_id
+WHERE t.project_id = $1::uuid
+ORDER BY t.created_at DESC, t.id DESC
 `
 
 type ListAPITokensRow struct {
-	ID         uuid.UUID
-	ProjectID  uuid.UUID
-	UserID     uuid.UUID
-	Label      string
-	CreatedAt  pgtype.Timestamptz
-	LastUsedAt pgtype.Timestamptz
-	RevokedAt  pgtype.Timestamptz
+	ID              uuid.UUID
+	ProjectID       uuid.UUID
+	UserID          uuid.UUID
+	UserDisplayName string
+	Label           string
+	TokenHint       string
+	CreatedAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
 }
 
 // token_hash is deliberately not selected: this query backs an operator
 // listing (ListAPITokens in tokens.go), and the hash of a bearer
 // credential has no reason to leave the database even in a column nothing
-// currently renders.
+// currently renders. token_hint is selected instead — see its column
+// comment (migration 0003) for what it is safe to show. Revoked rows are
+// included on purpose: this is the audit trail for what happened to a
+// token, not only a list of what is still live. Joined to users so an
+// operator triaging a leaked token sees who minted it instead of a raw
+// id, and ordered by created_at then id so ties (two tokens minted in
+// the same transaction) list in a stable order across repeated calls,
+// the same tiebreak reasoning ListProjectsForUser and ListMembers
+// already apply to their own orderings.
 func (q *Queries) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]ListAPITokensRow, error) {
 	rows, err := q.db.Query(ctx, listAPITokens, projectID)
 	if err != nil {
@@ -398,7 +414,9 @@ func (q *Queries) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]Lis
 			&i.ID,
 			&i.ProjectID,
 			&i.UserID,
+			&i.UserDisplayName,
 			&i.Label,
+			&i.TokenHint,
 			&i.CreatedAt,
 			&i.LastUsedAt,
 			&i.RevokedAt,
@@ -414,14 +432,17 @@ func (q *Queries) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]Lis
 }
 
 const listOutstandingInvites = `-- name: ListOutstandingInvites :many
-SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC, id DESC
 `
 
 // "Outstanding" means not yet redeemed, regardless of whether it has since
 // expired: an admin looking for a mis-sent invite to revoke needs to find
 // it before it necessarily expires on its own, and a lapsed-but-unredeemed
 // row is also useful context ("this one needs reissuing"). Ordered
-// newest-first, the order an admin scanning for a just-sent mistake wants.
+// newest-first, with id as an explicit tiebreak (matching ListAPITokens
+// and every other listing in this file that learned this lesson first) so
+// two invites created in the same transaction don't reshuffle between
+// calls.
 func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]Invite, error) {
 	rows, err := q.db.Query(ctx, listOutstandingInvites)
 	if err != nil {
@@ -524,6 +545,13 @@ WHERE id = $1::uuid
 // more than five minutes stale. An UPDATE whose WHERE clause matches no
 // row takes no row lock at all, so the common case (touched within the
 // last five minutes) costs a statement round trip but no lock contention.
+// The five-minute interval here must match identity.touchThrottle in
+// tokens.go, which pre-checks the same condition in Go before ever
+// issuing this statement (so the common case skips the round trip
+// entirely, not just the lock) — this WHERE clause stays authoritative
+// regardless, since it is what actually makes the write safe under two
+// concurrent resolves of the same token, which the Go pre-check alone
+// cannot guarantee. Change one, change both.
 func (q *Queries) TouchAPIToken(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, touchAPIToken, id)
 	return err

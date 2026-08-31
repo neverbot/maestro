@@ -23,6 +23,48 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createInvite = `-- name: CreateInvite :one
+INSERT INTO invites (token_hash, email, project_id, role, created_by, expires_at)
+VALUES ($1::bytea, $2::text,
+        $3::uuid, $4::text,
+        $5::uuid, $6::timestamptz)
+RETURNING id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by
+`
+
+type CreateInviteParams struct {
+	TokenHash []byte
+	Email     *string
+	ProjectID *uuid.UUID
+	Role      *string
+	CreatedBy *uuid.UUID
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error) {
+	row := q.db.QueryRow(ctx, createInvite,
+		arg.TokenHash,
+		arg.Email,
+		arg.ProjectID,
+		arg.Role,
+		arg.CreatedBy,
+		arg.ExpiresAt,
+	)
+	var i Invite
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.Email,
+		&i.ProjectID,
+		&i.Role,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RedeemedAt,
+		&i.RedeemedBy,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :exec
 INSERT INTO sessions (token_hash, user_id, expires_at)
 VALUES ($1::bytea, $2::uuid, $3::timestamptz)
@@ -73,6 +115,18 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const deleteExpiredInvites = `-- name: DeleteExpiredInvites :execrows
+DELETE FROM invites WHERE redeemed_at IS NULL AND expires_at <= now()
+`
+
+func (q *Queries) DeleteExpiredInvites(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredInvites)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= now()
 `
@@ -116,6 +170,31 @@ type ExtendSessionParams struct {
 func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) error {
 	_, err := q.db.Exec(ctx, extendSession, arg.ExpiresAt, arg.TokenHash)
 	return err
+}
+
+const getLiveInvite = `-- name: GetLiveInvite :one
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites
+WHERE token_hash = $1::bytea
+  AND redeemed_at IS NULL
+  AND expires_at > now()
+`
+
+func (q *Queries) GetLiveInvite(ctx context.Context, tokenHash []byte) (Invite, error) {
+	row := q.db.QueryRow(ctx, getLiveInvite, tokenHash)
+	var i Invite
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.Email,
+		&i.ProjectID,
+		&i.Role,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RedeemedAt,
+		&i.RedeemedBy,
+	)
+	return i, err
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
@@ -192,6 +271,26 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const markInviteRedeemed = `-- name: MarkInviteRedeemed :execrows
+UPDATE invites SET redeemed_at = now(), redeemed_by = $1::uuid
+WHERE id = $2::uuid
+  AND redeemed_at IS NULL
+  AND expires_at > now()
+`
+
+type MarkInviteRedeemedParams struct {
+	RedeemedBy uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkInviteRedeemed(ctx context.Context, arg MarkInviteRedeemedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markInviteRedeemed, arg.RedeemedBy, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateUserPasswordHash = `-- name: UpdateUserPasswordHash :exec
 UPDATE users SET password_hash = $1::text
 WHERE id = $2::uuid
@@ -204,5 +303,22 @@ type UpdateUserPasswordHashParams struct {
 
 func (q *Queries) UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) error {
 	_, err := q.db.Exec(ctx, updateUserPasswordHash, arg.PasswordHash, arg.ID)
+	return err
+}
+
+const upsertMembership = `-- name: UpsertMembership :exec
+INSERT INTO memberships (user_id, project_id, role)
+VALUES ($1::uuid, $2::uuid, $3::text)
+ON CONFLICT (user_id, project_id) DO UPDATE SET role = excluded.role
+`
+
+type UpsertMembershipParams struct {
+	UserID    uuid.UUID
+	ProjectID uuid.UUID
+	Role      string
+}
+
+func (q *Queries) UpsertMembership(ctx context.Context, arg UpsertMembershipParams) error {
+	_, err := q.db.Exec(ctx, upsertMembership, arg.UserID, arg.ProjectID, arg.Role)
 	return err
 }

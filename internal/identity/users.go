@@ -123,7 +123,19 @@ func (s *Service) CreateUser(ctx context.Context, req CreateUserRequest) (User, 
 	return s.createUser(ctx, req, false)
 }
 
+// createUser is the non-transactional entry point: everything that isn't
+// inside someone else's withTx call goes through s.q via this thin wrapper.
 func (s *Service) createUser(ctx context.Context, req CreateUserRequest, isAdmin bool) (User, error) {
+	return s.createUserWith(ctx, s.q, req, isAdmin)
+}
+
+// createUserWith is createUser's body, parameterized on the *dbq.Queries to
+// run its insert against. Every non-transactional caller goes through
+// createUser above, which passes s.q; invites.go's RedeemInvite passes the
+// transaction-scoped Queries handed to it by withTx, so the user insert,
+// marking the invite redeemed and granting the membership either all commit
+// or all roll back together.
+func (s *Service) createUserWith(ctx context.Context, q *dbq.Queries, req CreateUserRequest, isAdmin bool) (User, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	displayName := strings.TrimSpace(req.DisplayName)
 	password := req.Password
@@ -156,7 +168,7 @@ func (s *Service) createUser(ctx context.Context, req CreateUserRequest, isAdmin
 		return User{}, err
 	}
 
-	dbUser, err := s.q.CreateUser(ctx, dbq.CreateUserParams{
+	dbUser, err := q.CreateUser(ctx, dbq.CreateUserParams{
 		Email:        email,
 		DisplayName:  displayName,
 		PasswordHash: hash,

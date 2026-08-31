@@ -157,7 +157,9 @@ spec.
 
 - Commit messages: single line, Conventional Commits. No body, no
   trailers, no `Co-Authored-By`.
-- Don't touch `git config`. Don't push without an explicit request.
+- Don't touch `git config`.
+- **Never `git push`, and never ask about pushing.** Work ends at the
+  commit; the human pushes. Report the commit and what is unpushed.
 - No `--no-verify`, `reset --hard`, `clean -f`, `branch -D`, amend or
   any history rewrite unless explicitly asked.
 - Prefer `git add <specific files>` over `git add -A`.

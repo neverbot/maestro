@@ -226,25 +226,3 @@ func NeedsRehash(encoded string, p config.Argon2Params) (bool, error) {
 		h.threads != p.Threads ||
 		uint32(len(h.key)) != p.KeyLen, nil
 }
-
-// dummyPassword is only ever fed to VerifyDummy's derivation; it never
-// verifies against anything real.
-const dummyPassword = "maestro-dummy-password-do-not-use"
-
-// VerifyDummy performs a single argon2id derivation with cost parameters p
-// and discards the result. Call it on the "user not found" path of a login
-// flow, in place of VerifyPassword, so that path costs the same as verifying
-// against a real user: without it, a missing user returns immediately while
-// an existing one costs a full derivation, and that timing difference lets
-// an attacker enumerate which email addresses have accounts.
-//
-// It takes p directly and derives fresh each call, rather than hashing once
-// at package load against a hardcoded copy of the production parameters:
-// with a hardcoded copy, tuning config.Load's cost parameters would silently
-// drift this derivation's cost away from a real VerifyPassword call, which
-// is exactly the timing gap this helper exists to close. Deriving fresh
-// keeps the cost identical by construction, with no constant to maintain.
-func VerifyDummy(password string, p config.Argon2Params) {
-	salt := make([]byte, p.SaltLen)
-	_ = argon2.IDKey([]byte(dummyPassword), salt, p.Time, p.Memory, p.Threads, p.KeyLen)
-}

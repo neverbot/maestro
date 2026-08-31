@@ -1,70 +1,95 @@
-# Maestro
+<h1>Maestro</h1>
 
-Open-source, self-hosted workspace where **game designers and their AI
-agents co-design the content of a video game**: characters, places,
-missions, progression and narrative.
+**A workspace where game designers and their AI agents build the design
+of a game together: characters, places, missions, progression, story.**
 
-Maestro is not a project tracker — no backlog, no kanban, no sprints.
-And it never touches a running game: no live instances, no real
-players, no telemetry. Every row in it is a design-time artefact.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](license.md)
+![Status: design phase](https://img.shields.io/badge/status-design%20phase-orange)
 
-> **Status: design phase.** There is no code yet. The design lives in
-> [`docs/superpowers/specs/`](docs/superpowers/specs/).
+Self-hosted. Open source. It holds the *design* of a game, never a
+running one: no live instances, no real players, no telemetry.
 
-## The idea
+> **There is no code yet.** The design lives in
+> [`docs/superpowers/specs/`](docs/superpowers/specs/). Watch the repo
+> if you want to see it get built.
 
-Maestro ships **no built-in game concepts**. There is no quest table,
-no zone table, no character table. Each game declares its own
-vocabulary out of four primitives:
+## Maestro knows nothing about games
 
-| Primitive      | Meaning                                        |
-| -------------- | ---------------------------------------------- |
+No quest table. No zone table. No character table. Every game brings its
+own vocabulary, built from four primitives:
+
+| Primitive      | What it is                                    |
+| :------------- | :-------------------------------------------- |
 | `EntityType`   | a kind of thing, with a field schema           |
-| `Entity`       | an instance of an entity type                  |
+| `Entity`       | one instance of that kind                      |
 | `RelationType` | a kind of directed edge, with its own schema   |
-| `Relation`     | an instance of a relation type between two     |
+| `Relation`     | one edge, from one entity to another           |
 
-An MMORPG declares `Class`, `Zone`, `Dungeon`, `Quest`, `Talent`, and
-edges like `connects_to`, `takes_place_in`, `requires`, `rewards`.
+That is the whole model. A genre nobody anticipated has to fit without a
+code change, so nothing about any genre is baked in.
 
-A racing career game declares `Driver`, `Car`, `Circuit`, `Race`,
-`Championship`, `Licence`, and edges like `unlocks` and `contains`.
+<table>
+<tr><th align="left">Genre</th><th align="left">Declares</th><th align="left">Connected by</th></tr>
+<tr>
+  <td><b>MMORPG</b></td>
+  <td><code>Class</code> <code>Zone</code> <code>Dungeon</code> <code>Quest</code> <code>Talent</code></td>
+  <td><code>connects_to</code> <code>takes_place_in</code> <code>requires</code> <code>rewards</code></td>
+</tr>
+<tr>
+  <td><b>Racing career</b></td>
+  <td><code>Driver</code> <code>Car</code> <code>Circuit</code> <code>Race</code> <code>Licence</code></td>
+  <td><code>unlocks</code> <code>contains</code> <code>requires</code></td>
+</tr>
+<tr>
+  <td><b>Metroidvania</b></td>
+  <td><code>Room</code> <code>Ability</code> <code>Boss</code> <code>Item</code></td>
+  <td><code>connects_to</code>, carrying its own <code>requires_ability</code></td>
+</tr>
+</table>
 
-A metroidvania declares `Room`, `Ability`, `Boss` — with the edge
-itself carrying the condition (`requires_ability`) that decides whether
-a door can be crossed.
+That last one is the point of typed edges: whether a door can be crossed
+belongs to the door, not to either room.
 
-Maestro understands none of those words. It understands typed entities
-and typed directed edges. That is the whole point: a genre it has never
-seen must fit without a code change.
+## What you get on top of the graph
 
-On top of that graph it gives designers:
+**Catalogues.** Every class, every circuit, every mission the game
+contains, listed by type, filterable, searchable.
 
-- **Catalogues** of everything a game contains, by type.
-- **Views** — saved diagrams defined as a query plus a layout, which an
-  agent can create: a world map with real coordinates and a background
-  image, a layered progression tree, a table, a timeline.
-- **Analysis** — prerequisite cycles, unreachable content, orphans, and
-  saved routes ("Mage levelling 1-20") used to validate a design.
-- **Prose** — versioned markdown for lore and mission scripts, linked
-  to the entities it describes.
+**Views.** A saved diagram is a query plus a layout, and an agent can
+write one. A world map with real coordinates over a background image. A
+layered progression tree. A table. A timeline. Ask for *the quests a
+Mage can reach between level 20 and 30, coloured by zone*, and that is a
+view, not a feature request.
+
+**Analysis.** Prerequisite cycles. Content no player can ever reach.
+Orphans. Saved routes such as *Mage levelling 1-20*, used to prove a
+progression actually holds together. This is the reading nobody can do
+by eye across four hundred missions.
+
+**Prose.** Lore and mission scripts as versioned markdown, attached to
+the entities they describe.
+
+## Two ways in
 
 Humans work in a web UI. Agents drive the same data over **MCP**, and
-learn the metamodel from a skill bundle with worked examples per genre.
+learn the metamodel from a skill bundle carrying worked examples per
+genre, so an agent arrives knowing how to declare types and seed a few
+hundred entities without being told twice.
 
-## Design
+## Roadmap
+
+- [ ] **Core.** Server, Postgres, identity, MCP and REST surfaces.
+- [ ] **Metamodel.** The four primitives, field schemas, validation.
+- [ ] **Markdown.** Versioned prose, linked to entities.
+- [ ] **Views.** The query language, saved views, layouts, coordinates.
+- [ ] **Interface.** Maestro's own look, and the renderer catalogue.
+- [ ] **Analysis.** Cycles, unreachable content, orphans, routes.
+- [ ] **Skills.** The agent bundle and genre templates.
+
+Design documents, one per sub-project as they land:
 
 - [Core and metamodel](docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md)
-  — the first sub-project: server, identity, the four primitives, MCP
-  surface. Includes the full roadmap.
-
-## Related
-
-Maestro's architecture follows [Nottario](https://github.com/neverbot/nottario),
-a self-hosted coordinator for developers and their agents — same
-deployment shape (one Go binary, Postgres, MCP over HTTP+SSE), a
-different domain and a different look.
 
 ## License
 
-MIT — see [license.md](license.md).
+MIT. See [license.md](license.md).

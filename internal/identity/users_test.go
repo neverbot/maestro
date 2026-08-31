@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
@@ -15,6 +16,9 @@ func testConfig() config.Config {
 	return config.Config{
 		RegistrationMode: config.RegistrationInviteOnly,
 		Argon2:           config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyLen: 32, SaltLen: 16},
+		// Long enough that no test's session outlives the test itself; the
+		// exact value only matters to TestIssueSessionSetsExpiryFromConfig.
+		SessionTTL: 24 * time.Hour,
 	}
 }
 

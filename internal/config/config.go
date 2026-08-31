@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"time"
 )
 
 // RegistrationMode decides who may create an account.
@@ -27,6 +28,9 @@ var validRegistrationModes = []RegistrationMode{RegistrationInviteOnly, Registra
 // name to stop it from ever running an instance in production.
 const placeholderSessionKey = "change-me-change-me-change-me-32ch"
 
+// defaultSessionTTL is how long a login lasts when SESSION_TTL is unset.
+const defaultSessionTTL = 720 * time.Hour
+
 // Argon2Params are the password hashing cost parameters.
 type Argon2Params struct {
 	Time    uint32
@@ -41,6 +45,7 @@ type Config struct {
 	Addr                string
 	DatabaseURL         string
 	SessionKey          string
+	SessionTTL          time.Duration
 	FirstAdminEmail     string
 	FirstAdminPassword  string
 	AllowedEmailDomains []string
@@ -59,16 +64,23 @@ func (c Config) LogValue() slog.Value {
 		slog.String("first_admin_password", "REDACTED"),
 		slog.Any("allowed_email_domains", c.AllowedEmailDomains),
 		slog.String("registration_mode", string(c.RegistrationMode)),
+		slog.Duration("session_ttl", c.SessionTTL),
 	)
 }
 
 // Load reads configuration through the given lookup function, so tests can
 // supply an environment without touching the real one.
 func Load(getenv func(string) string) (Config, error) {
+	sessionTTL, err := parseSessionTTL(getenv("SESSION_TTL"))
+	if err != nil {
+		return Config{}, err
+	}
+
 	cfg := Config{
 		Addr:               orDefault(getenv("MAESTRO_ADDR"), ":8080"),
 		DatabaseURL:        getenv("DATABASE_URL"),
 		SessionKey:         getenv("SESSION_KEY"),
+		SessionTTL:         sessionTTL,
 		FirstAdminEmail:    strings.ToLower(strings.TrimSpace(getenv("FIRST_ADMIN_EMAIL"))),
 		FirstAdminPassword: getenv("FIRST_ADMIN_PASSWORD"),
 		RegistrationMode:   RegistrationMode(orDefault(getenv("REGISTRATION_MODE"), string(RegistrationInviteOnly))),
@@ -135,6 +147,25 @@ func (c Config) EmailAllowed(email string) bool {
 		}
 	}
 	return false
+}
+
+// parseSessionTTL parses SESSION_TTL, defaulting to defaultSessionTTL when
+// unset. A duration of zero or less is rejected here rather than left for
+// identity.IssueSession to discover: a non-positive TTL would silently mint
+// already-expired sessions (GetSessionUser requires expires_at > now()),
+// turning login into a no-op with no error anywhere near the cause.
+func parseSessionTTL(raw string) (time.Duration, error) {
+	if raw == "" {
+		return defaultSessionTTL, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("SESSION_TTL %q is not a valid duration: %w", raw, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("SESSION_TTL must be positive, got %q", raw)
+	}
+	return d, nil
 }
 
 func orDefault(v, fallback string) string {

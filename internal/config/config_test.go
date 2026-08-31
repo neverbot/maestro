@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
@@ -35,6 +36,52 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if len(cfg.AllowedEmailDomains) != 0 {
 		t.Fatalf("AllowedEmailDomains = %v, want empty", cfg.AllowedEmailDomains)
+	}
+	if cfg.SessionTTL != 720*time.Hour {
+		t.Fatalf("SessionTTL = %v, want 720h", cfg.SessionTTL)
+	}
+}
+
+func TestLoadParsesSessionTTL(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+		"SESSION_TTL":  "168h",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SessionTTL != 168*time.Hour {
+		t.Fatalf("SessionTTL = %v, want 168h", cfg.SessionTTL)
+	}
+}
+
+func TestLoadRejectsInvalidSessionTTL(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+		"SESSION_TTL":  "not-a-duration",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "SESSION_TTL") {
+		t.Fatalf("error = %q, want it to mention SESSION_TTL", err)
+	}
+}
+
+func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
+	for _, raw := range []string{"0h", "-1h"} {
+		env := map[string]string{
+			"DATABASE_URL": "postgres://localhost/maestro",
+			"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+			"SESSION_TTL":  raw,
+		}
+		cfg, err := Load(func(k string) string { return env[k] })
+		err = mustErr(t, cfg, err)
+		if !strings.Contains(err.Error(), "SESSION_TTL") {
+			t.Fatalf("SESSION_TTL=%q: error = %q, want it to mention SESSION_TTL", raw, err)
+		}
 	}
 }
 

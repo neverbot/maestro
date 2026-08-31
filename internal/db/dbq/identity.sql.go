@@ -73,13 +73,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
-const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= now()
 `
 
-func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
-	_, err := q.db.Exec(ctx, deleteExpiredSessions)
-	return err
+func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -100,16 +103,44 @@ func (q *Queries) DeleteSessionsForUser(ctx context.Context, userID uuid.UUID) e
 	return err
 }
 
+const extendSession = `-- name: ExtendSession :exec
+UPDATE sessions SET expires_at = $1::timestamptz
+WHERE token_hash = $2::bytea
+`
+
+type ExtendSessionParams struct {
+	ExpiresAt pgtype.Timestamptz
+	TokenHash []byte
+}
+
+func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) error {
+	_, err := q.db.Exec(ctx, extendSession, arg.ExpiresAt, arg.TokenHash)
+	return err
+}
+
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT u.id, u.email, u.display_name, u.password_hash, u.is_admin, u.created_at, u.updated_at FROM sessions s
+SELECT u.id, u.email, u.display_name, u.password_hash, u.is_admin, u.created_at, u.updated_at,
+       s.expires_at AS session_expires_at
+FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = $1::bytea
   AND s.expires_at > now()
 `
 
-func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (User, error) {
+type GetSessionUserRow struct {
+	ID               uuid.UUID
+	Email            string
+	DisplayName      string
+	PasswordHash     string
+	IsAdmin          bool
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	SessionExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (GetSessionUserRow, error) {
 	row := q.db.QueryRow(ctx, getSessionUser, tokenHash)
-	var i User
+	var i GetSessionUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -118,6 +149,7 @@ func (q *Queries) GetSessionUser(ctx context.Context, tokenHash []byte) (User, e
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SessionExpiresAt,
 	)
 	return i, err
 }

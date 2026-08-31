@@ -22,10 +22,16 @@ INSERT INTO sessions (token_hash, user_id, expires_at)
 VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('user_id')::uuid, sqlc.arg('expires_at')::timestamptz);
 
 -- name: GetSessionUser :one
-SELECT u.* FROM sessions s
+SELECT u.id, u.email, u.display_name, u.password_hash, u.is_admin, u.created_at, u.updated_at,
+       s.expires_at AS session_expires_at
+FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.token_hash = sqlc.arg('token_hash')::bytea
   AND s.expires_at > now();
+
+-- name: ExtendSession :exec
+UPDATE sessions SET expires_at = sqlc.arg('expires_at')::timestamptz
+WHERE token_hash = sqlc.arg('token_hash')::bytea;
 
 -- name: DeleteSession :exec
 DELETE FROM sessions WHERE token_hash = sqlc.arg('token_hash')::bytea;
@@ -33,5 +39,5 @@ DELETE FROM sessions WHERE token_hash = sqlc.arg('token_hash')::bytea;
 -- name: DeleteSessionsForUser :exec
 DELETE FROM sessions WHERE user_id = sqlc.arg('user_id')::uuid;
 
--- name: DeleteExpiredSessions :exec
+-- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= now();

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
+	"github.com/neverbot/maestro/internal/roles"
 )
 
 // Bounds on user-supplied fields, mirroring the rune-count-not-byte-length
@@ -34,6 +36,32 @@ const (
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// reservedSlugs are the first path segments every top-level route in this
+// plan already claims (`/api/...`, `/g/...`, `/login`, `/healthz`,
+// `/version`, `/static/...`, `/mcp`), plus "new": nothing routes there
+// today, but the day a create-game page exists at a human-facing URL
+// (rather than only the JSON POST /api/games this task's sibling task
+// exposes), a game slugged "new" would silently shadow it. A slug
+// colliding with any of these does not break anything today — /g/ has no
+// sibling routes yet — but it becomes an ambiguity some future handler
+// inherits for free the moment it does, and it is cheaper to refuse it
+// now than to migrate an existing game's slug out from under a live link
+// later.
+var reservedSlugs = map[string]bool{
+	"new": true, "api": true, "static": true, "login": true,
+	"healthz": true, "g": true, "mcp": true, "version": true,
+}
+
+// bidiOverrides are the Unicode bidirectional control characters capable
+// of making rendered text read in an order different from its byte order
+// (the family behind "Trojan Source"-style spoofing). unicode.IsControl
+// does not flag these — they are format characters (category Cf), not
+// controls — so validateName checks for them separately.
+var bidiOverrides = map[rune]bool{
+	'‪': true, '‫': true, '‬': true, '‭': true, '‮': true, // LRE RLE PDF LRO RLO
+	'⁦': true, '⁧': true, '⁨': true, '⁩': true, // LRI RLI FSI PDI
+}
+
 // Errors returned by the projects service.
 var (
 	// ErrNotAMember covers both "this user has no membership in this
@@ -43,16 +71,24 @@ var (
 	// data, and telling a non-member which project IDs are real would be
 	// exactly the kind of cross-game leak the isolation invariant exists
 	// to prevent. A caller that needs to tell "no such game" apart from
-	// "not your game" — a 404 page, say — uses BySlug or ByID instead,
-	// whose whole job is looking a project up, not deciding who may see
-	// its contents.
+	// "not your game" for a plain lookup — a 404 page, say — uses ByID or
+	// BySlugForUser instead, whose whole job is looking a project up
+	// (BySlugForUser included, despite its name: see its own doc comment
+	// for why it still collapses "no such slug" and "not yours" into one
+	// answer, for a different reason than RoleOf does).
 	ErrNotAMember = errors.New("user is not a member of this project")
 
-	// ErrProjectNotFound is returned by BySlug and ByID for a project
-	// that does not exist. Unlike RoleOf, both of those are lookups, not
-	// authorization checks, so there is nothing to protect by collapsing
-	// this into a different error.
+	// ErrProjectNotFound is returned by ByID and BySlugForUser for a
+	// project that does not exist (or, for BySlugForUser, is not the
+	// caller's to see — see that method's doc comment).
 	ErrProjectNotFound = errors.New("project not found")
+
+	// ErrUserNotFound is returned by SetRole when the target user does
+	// not exist — a foreign-key violation on memberships_user_id_fkey,
+	// mapped the same way ErrSlugTaken maps projects_slug_key: by
+	// constraint name, so Task 12's handler can report a 404 instead of
+	// leaking a raw SQLSTATE.
+	ErrUserNotFound = errors.New("user not found")
 
 	ErrSlugTaken   = errors.New("slug already in use")
 	ErrSlugInvalid = errors.New("slug does not meet requirements")
@@ -66,21 +102,22 @@ var (
 	// hangs off the project (every entity, token, and membership) with
 	// nobody left who can manage access to it — a state the domain layer
 	// has no way to recover from short of an operator touching the
-	// database directly.
+	// database directly. This is the Go-side half of the guard; migration
+	// 0002 adds the database-side half (a constraint trigger on
+	// memberships) for the path this package cannot see at all: a user
+	// row deleted directly, whose memberships.user_id ON DELETE CASCADE
+	// removes their membership underneath this package entirely.
 	ErrLastOwner = errors.New("project must keep at least one owner")
 )
 
-// membershipRoles are the roles SetRole accepts. This must stay identical
-// to the memberships table's own CHECK constraint (migration 0001,
-// `role IN ('owner', 'editor', 'viewer')`) and to identity.inviteRoles,
-// which enforces the same set for invites — see that var's doc comment for
-// why a raw constraint violation surfacing from deep inside a transaction
-// is worse than failing here in Go first.
-var membershipRoles = map[string]bool{
-	"owner":  true,
-	"editor": true,
-	"viewer": true,
-}
+// ownerRole is string(roles.Owner). Every comparison and every
+// UpsertMembership call in this file works with plain strings — role
+// values arrive from the database or, eventually, an HTTP request body,
+// as plain strings already — so this stays a string constant rather than
+// threading the roles.Role type through every signature in this package;
+// see the roles package's own doc comment for why the shared vocabulary
+// still lives in one place despite that.
+const ownerRole = string(roles.Owner)
 
 // Project is the projects domain's public view of a game. It deliberately
 // mirrors identity.User in shape and in never being a raw dbq struct: a
@@ -98,13 +135,16 @@ func projectFrom(p dbq.Project) Project {
 }
 
 // Member is one row of a project's membership list: a user paired with
-// their role in this project. It exists for the same reason Project and
-// identity.User do — ListMembers' underlying query joins users and
-// memberships, and its generated row type is not something this package
-// hands to a caller.
+// their role in this project. It deliberately does not carry Email:
+// ListMembers is authorization-free by design (see its own doc comment),
+// so every caller holding a Member holds whatever fields this type
+// exposes, including a viewer with no business reading a teammate's
+// address. Display name, id and role are what a member list renders; an
+// owner-only contact-details view, if the product ever wants one, is a
+// separate, deliberately-added query rather than this type growing a
+// field most callers should never see.
 type Member struct {
 	UserID      uuid.UUID
-	Email       string
 	DisplayName string
 	Role        string
 }
@@ -146,10 +186,13 @@ func (s *Service) withTx(ctx context.Context, fn func(*dbq.Queries) error) error
 
 // validateSlug normalises slug (trim, lower-case — the same normalisation
 // identity applies to email) and checks its shape against slugPattern and
-// length bounds. The normalised value is what gets stored: a project
-// created as "Azeroth" is addressable at /g/azeroth, matching
-// GetProjectBySlug's own case-insensitive lookup, so the slug a caller
-// sees in Project.Slug is always exactly what appears in a URL.
+// length bounds, that it is not a reserved word, and that it is not
+// something uuid.Parse would accept — a UUID-shaped slug is exactly the
+// ambiguity a handler that accepts either a slug or an id inherits for
+// free. The normalised value is what gets stored: a project created as
+// "Azeroth" is addressable at /g/azeroth, matching GetProjectBySlug's own
+// case-insensitive lookup, so the slug a caller sees in Project.Slug is
+// always exactly what appears in a URL.
 func validateSlug(slug string) (string, error) {
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	if n := utf8.RuneCountInString(slug); n < minSlugRunes || n > maxSlugRunes {
@@ -158,15 +201,58 @@ func validateSlug(slug string) (string, error) {
 	if !slugPattern.MatchString(slug) {
 		return "", fmt.Errorf("%w: must contain only lower-case letters, digits and single internal hyphens", ErrSlugInvalid)
 	}
+	if reservedSlugs[slug] {
+		return "", fmt.Errorf("%w: %q is reserved", ErrSlugInvalid, slug)
+	}
+	if _, err := uuid.Parse(slug); err == nil {
+		return "", fmt.Errorf("%w: must not be a UUID", ErrSlugInvalid)
+	}
 	return slug, nil
 }
 
+// validateName trims name and checks its length bound and that it carries
+// no control characters or Unicode bidirectional-override characters.
+// Names are stored verbatim and later rendered into page titles, the game
+// picker and SSE payloads, so a newline or a bidi override — invisible in
+// a form field, capable of making the rendered text read in an order
+// different from its byte order — would store cleanly today and only
+// become someone else's problem at render time.
 func validateName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if n := utf8.RuneCountInString(name); n < minNameRunes || n > maxNameRunes {
 		return "", fmt.Errorf("%w: must be between %d and %d characters", ErrNameInvalid, minNameRunes, maxNameRunes)
 	}
+	for _, r := range name {
+		if unicode.IsControl(r) || bidiOverrides[r] {
+			return "", fmt.Errorf("%w: must not contain control or bidirectional-override characters", ErrNameInvalid)
+		}
+	}
 	return name, nil
+}
+
+// mapMembershipInsertError translates a foreign-key violation from an
+// insert or update against memberships into the domain error naming which
+// side was missing. Both UpsertMembership call sites in this file (Create
+// granting the creator ownership, SetRole granting or changing any
+// member's role) can hit either constraint, so the mapping lives here
+// once rather than being duplicated at each call site — the same
+// reasoning as the 23505/projects_slug_key mapping in Create, applied to
+// 23503 (foreign_key_violation) instead of 23505 (unique_violation). It
+// returns nil when err is not a foreign-key violation on either
+// constraint, so callers fall through to their own generic error wrap.
+func mapMembershipInsertError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return nil
+	}
+	switch pgErr.ConstraintName {
+	case "memberships_project_id_fkey":
+		return ErrProjectNotFound
+	case "memberships_user_id_fkey":
+		return ErrUserNotFound
+	default:
+		return nil
+	}
 }
 
 // Create makes a project and its creator its owner, atomically: a failure
@@ -201,8 +287,18 @@ func (s *Service) Create(ctx context.Context, slug, name string, creator uuid.UU
 		if err := q.UpsertMembership(ctx, dbq.UpsertMembershipParams{
 			UserID:    creator,
 			ProjectID: project.ID,
-			Role:      "owner",
+			Role:      ownerRole,
 		}); err != nil {
+			// The only foreign key that can fail here is
+			// memberships_user_id_fkey: project.ID was just returned by
+			// CreateProject in this same transaction, so
+			// memberships_project_id_fkey cannot be the cause. Mapped
+			// anyway through the shared helper rather than assuming that
+			// — a future change to what Create validates before this
+			// point should not have to remember to revisit this comment.
+			if merr := mapMembershipInsertError(err); merr != nil {
+				return merr
+			}
 			return fmt.Errorf("grant ownership: %w", err)
 		}
 		return nil
@@ -214,9 +310,10 @@ func (s *Service) Create(ctx context.Context, slug, name string, creator uuid.UU
 }
 
 // ListForUser returns every project the user is a member of, ordered by
-// name. This is the query behind the single-game navigation shortcut
-// described in the spec: a caller that gets back exactly one project sends
-// the user straight to it instead of showing a picker.
+// name then id (see the query's own doc comment for why the tiebreak).
+// This is the query behind the single-game navigation shortcut described
+// in the spec: a caller that gets back exactly one project sends the user
+// straight to it instead of showing a picker.
 func (s *Service) ListForUser(ctx context.Context, userID uuid.UUID) ([]Project, error) {
 	rows, err := s.q.ListProjectsForUser(ctx, userID)
 	if err != nil {
@@ -243,10 +340,19 @@ func (s *Service) RoleOf(ctx context.Context, userID, projectID uuid.UUID) (stri
 	return role, nil
 }
 
-// BySlug resolves a project from its URL slug. The slug is matched
-// case-insensitively, matching GetProjectBySlug's own `lower(slug) =
-// lower(...)` comparison and Create's own normalisation.
-func (s *Service) BySlug(ctx context.Context, slug string) (Project, error) {
+// bySlug resolves a project from its normalised URL slug, with no
+// authorization check at all. It is unexported: a raw slug lookup is an
+// enumeration oracle, because unlike a project id a slug is a human-chosen
+// game name ("azeroth") — letting any authenticated caller ask "does this
+// slug exist" leaks exactly the cross-game information RoleOf goes out of
+// its way not to (see ErrNotAMember's doc comment). BySlugForUser below is
+// the exported, authorization-checked equivalent; nothing outside this
+// package needs the raw form, and nothing in this plan calls it directly.
+func (s *Service) bySlug(ctx context.Context, slug string) (Project, error) {
+	slug, err := validateSlug(slug)
+	if err != nil {
+		return Project{}, err
+	}
 	project, err := s.q.GetProjectBySlug(ctx, slug)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -257,7 +363,29 @@ func (s *Service) BySlug(ctx context.Context, slug string) (Project, error) {
 	return projectFrom(project), nil
 }
 
-// ByID resolves a project from its id.
+// BySlugForUser resolves a project from its URL slug and checks in the
+// same call that userID is a member of it, returning ErrProjectNotFound
+// for both "no such slug" and "a real game you're just not in" — the same
+// non-distinction RoleOf already makes between a non-existent project and
+// one the caller has no standing in, applied here to slug lookups instead
+// of id lookups. This is the method a /g/{slug} route should call; see
+// bySlug's own doc comment for why that method stays unexported.
+func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UUID) (Project, error) {
+	project, err := s.bySlug(ctx, slug)
+	if err != nil {
+		return Project{}, err
+	}
+	if _, err := s.RoleOf(ctx, userID, project.ID); err != nil {
+		return Project{}, ErrProjectNotFound
+	}
+	return project, nil
+}
+
+// ByID resolves a project from its id, with no membership check: unlike a
+// slug, a UUID is not a human-chosen, guessable name, so a raw id lookup
+// is not the same enumeration oracle bySlug is — reaching this method
+// already requires holding a specific id from somewhere (a caller's own
+// ListForUser result, a token's bound project id), not guessing at one.
 func (s *Service) ByID(ctx context.Context, id uuid.UUID) (Project, error) {
 	project, err := s.q.GetProjectByID(ctx, id)
 	if err != nil {
@@ -270,11 +398,14 @@ func (s *Service) ByID(ctx context.Context, id uuid.UUID) (Project, error) {
 }
 
 // ListMembers returns every member of a project and their role, ordered by
-// display name. It does not distinguish "empty project" from "unknown
-// project" — an empty result for either — because listing members is only
-// ever reached after a caller has already established standing to see the
-// project (typically by RoleOf succeeding first); this method itself does
-// not authorize anything.
+// display name then id (see the query's own doc comment for why the
+// tiebreak). It performs no authorization check of its own and, as of
+// this package's last review, carries no email address either (see
+// Member's own doc comment) — it does not distinguish "empty project"
+// from "unknown project" either, an empty result for both, because
+// listing members is only ever meant to be reached after a caller has
+// already established standing to see the project (typically by RoleOf
+// succeeding first); this method itself decides none of that.
 func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Member, error) {
 	rows, err := s.q.ListMembers(ctx, projectID)
 	if err != nil {
@@ -282,7 +413,7 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Membe
 	}
 	out := make([]Member, len(rows))
 	for i, row := range rows {
-		out[i] = Member{UserID: row.ID, Email: row.Email, DisplayName: row.DisplayName, Role: row.Role}
+		out[i] = Member{UserID: row.ID, DisplayName: row.DisplayName, Role: row.Role}
 	}
 	return out, nil
 }
@@ -295,6 +426,13 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Membe
 // invite a caller to duplicate the role-validation and last-owner checks
 // below across both.
 //
+// SetRole performs no authorization check of its own — it trusts the
+// caller (Task 12's HTTP handler) to have already decided this call is
+// allowed. This is a deliberate decision, not an oversight: authorization
+// here would need to know things this package has no business
+// knowing (who is making the request, and on whose behalf), and Task 12's
+// own corrections explain why that decision belongs at the HTTP layer.
+//
 // The last-owner guard only ever fires when the target is already an
 // owner being moved to a different role: promoting someone, or changing a
 // non-owner's role, can never reduce the owner count. When it does apply,
@@ -303,9 +441,12 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Membe
 // query's own doc comment for why this is what makes two concurrent
 // demotions of a project's last two owners resolve safely (one succeeds,
 // the other sees the now-updated count and fails) instead of racing to
-// leave the project with none.
+// leave the project with none. Migration 0002's constraint trigger is the
+// same invariant's backstop for the one path this method's own lock
+// cannot see: a user deleted directly, whose membership row disappears
+// via ON DELETE CASCADE rather than through this method at all.
 func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role string) error {
-	if !membershipRoles[role] {
+	if !roles.Valid(role) {
 		return fmt.Errorf("%w: %q", ErrRoleInvalid, role)
 	}
 	return s.withTx(ctx, func(q *dbq.Queries) error {
@@ -318,7 +459,7 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 				return fmt.Errorf("lookup membership: %w", err)
 			}
 		}
-		if isMember && current == "owner" && role != "owner" {
+		if isMember && current == ownerRole && role != ownerRole {
 			n, cerr := q.CountOwnersForUpdate(ctx, projectID)
 			if cerr != nil {
 				return fmt.Errorf("count owners: %w", cerr)
@@ -332,6 +473,9 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 			ProjectID: projectID,
 			Role:      role,
 		}); err != nil {
+			if merr := mapMembershipInsertError(err); merr != nil {
+				return merr
+			}
 			return fmt.Errorf("set role: %w", err)
 		}
 		return nil
@@ -343,8 +487,11 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 // membership for this user in this project) is already satisfied, the
 // same convention identity.RevokeSession and identity.RevokeInvite already
 // establish. Removing the project's sole owner is refused with
-// ErrLastOwner — see SetRole's doc comment for the locking that makes this
-// safe under concurrent removal attempts.
+// ErrLastOwner — see SetRole's doc comment for the locking (and migration
+// 0002's database-level backstop) that make this safe under concurrent
+// removal attempts and under a direct user deletion. Like SetRole, this
+// method performs no authorization check of its own; see SetRole's doc
+// comment for why.
 func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID) error {
 	return s.withTx(ctx, func(q *dbq.Queries) error {
 		current, err := q.GetMembershipRole(ctx, dbq.GetMembershipRoleParams{UserID: userID, ProjectID: projectID})
@@ -354,7 +501,7 @@ func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID)
 			}
 			return fmt.Errorf("lookup membership: %w", err)
 		}
-		if current == "owner" {
+		if current == ownerRole {
 			n, cerr := q.CountOwnersForUpdate(ctx, projectID)
 			if cerr != nil {
 				return fmt.Errorf("count owners: %w", cerr)

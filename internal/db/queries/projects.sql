@@ -10,21 +10,35 @@ SELECT * FROM projects WHERE lower(slug) = lower(sqlc.arg('slug')::text);
 SELECT * FROM projects WHERE id = sqlc.arg('id')::uuid;
 
 -- name: ListProjectsForUser :many
+-- Ordered by name then id: name alone is not unique (two games can both
+-- be called "Untitled"), so a name-only order reshuffles ties between
+-- calls in whatever order Postgres happens to return them. id, being a
+-- primary key, is always unique, so appending it as a tiebreak makes the
+-- order stable across repeated calls with identical input.
 SELECT p.* FROM projects p
 JOIN memberships m ON m.project_id = p.id
 WHERE m.user_id = sqlc.arg('user_id')::uuid
-ORDER BY p.name;
+ORDER BY p.name, p.id;
 
 -- name: GetMembershipRole :one
 SELECT role FROM memberships
 WHERE user_id = sqlc.arg('user_id')::uuid AND project_id = sqlc.arg('project_id')::uuid;
 
 -- name: ListMembers :many
-SELECT u.id, u.email, u.display_name, m.role
+-- No u.email: ListMembers is authorization-free by design (see
+-- projects.ListMembers's own doc comment), so every caller holding a
+-- Member holds whatever this query returns, including a viewer with no
+-- business reading a teammate's email. display_name, id and role are what
+-- a member list renders; an owner-only contact-details view, if the
+-- product ever wants one, is a separate query added deliberately rather
+-- than this one growing a field most callers should not see.
+-- Ordered by display_name then id, for the same tiebreak reason as
+-- ListProjectsForUser above: display names are not unique.
+SELECT u.id, u.display_name, m.role
 FROM memberships m
 JOIN users u ON u.id = m.user_id
 WHERE m.project_id = sqlc.arg('project_id')::uuid
-ORDER BY u.display_name;
+ORDER BY u.display_name, u.id;
 
 -- name: CountOwnersForUpdate :one
 -- Locks every owner row of the project before counting, so that SetRole

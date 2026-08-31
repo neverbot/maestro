@@ -15,6 +15,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db/dbq"
+	"github.com/neverbot/maestro/internal/roles"
 )
 
 // ErrInviteInvalid covers unknown, already redeemed and mismatched
@@ -42,18 +43,6 @@ var ErrInviteExpired = errors.New("invite has expired")
 // silently-unusable link mailed to someone who can't fix it themselves.
 var ErrInviteRequestInvalid = errors.New("invite request is invalid")
 
-// inviteRoles are the roles an invite may grant. This must stay identical
-// to the membership CHECK constraint in migration 0001
-// (role IN ('owner', 'editor', 'viewer')): granting an invite a role the
-// memberships table would refuse is exactly the kind of mismatch that
-// should fail loudly here, in Go, rather than as a raw constraint
-// violation from UpsertMembership deep inside RedeemInvite's transaction.
-var inviteRoles = map[string]bool{
-	"owner":  true,
-	"editor": true,
-	"viewer": true,
-}
-
 // InviteRequest describes an invite to mint. Email is optional: an invite
 // with no email binds to whoever redeems it first, but when given it must
 // pass the same length bound and ALLOWED_EMAIL_DOMAINS check CreateUser
@@ -61,7 +50,7 @@ var inviteRoles = map[string]bool{
 // dead link the recipient has no power to fix. ProjectID and Role travel
 // together — an invite with no project only grants an account, and an
 // invite with a project always grants membership at a role from
-// inviteRoles — matching the database's own
+// roles.All() — matching the database's own
 // `CHECK ((project_id IS NULL) = (role IS NULL))`. ExpiresIn is optional:
 // zero means Config.InviteTTL (the instance default), and any nonzero
 // value is bounded above by config.MaxInviteTTL.
@@ -113,7 +102,7 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 	if (req.ProjectID == nil) != (req.Role == "") {
 		return "", InviteSummary{}, fmt.Errorf("%w: project and role must be given together", ErrInviteRequestInvalid)
 	}
-	if req.Role != "" && !inviteRoles[req.Role] {
+	if req.Role != "" && !roles.Valid(req.Role) {
 		return "", InviteSummary{}, fmt.Errorf("%w: role %q is not recognised", ErrInviteRequestInvalid, req.Role)
 	}
 

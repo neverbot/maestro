@@ -67,9 +67,16 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// TestMigrateUpDownUp exercises the Down side of migration 0001, so a
+// TestMigrateUpDownUp exercises the Down side of every migration, so a
 // broken rollback is caught here rather than mid-incident. It is the only
 // place in the codebase able to call migrateDown.
+//
+// migrateDown rolls back a single migration (the most recent one goose
+// hasn't already rolled back), so tearing down everything Migrate applied
+// means calling it once per migration file, not once. This is currently
+// two calls because there are currently two migrations (0001, 0002); a
+// third migration needs a third call here, the same way it needs its own
+// entry in Task 8's file structure table.
 func TestMigrateUpDownUp(t *testing.T) {
 	t.Parallel()
 	pool := newTestDatabase(t)
@@ -79,7 +86,10 @@ func TestMigrateUpDownUp(t *testing.T) {
 		t.Fatalf("Migrate: %v", err)
 	}
 	if err := migrateDown(ctx, pool); err != nil {
-		t.Fatalf("migrateDown: %v", err)
+		t.Fatalf("migrateDown (0002): %v", err)
+	}
+	if err := migrateDown(ctx, pool); err != nil {
+		t.Fatalf("migrateDown (0001): %v", err)
 	}
 
 	var exists bool

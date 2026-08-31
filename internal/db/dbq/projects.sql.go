@@ -127,20 +127,28 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT u.id, u.email, u.display_name, m.role
+SELECT u.id, u.display_name, m.role
 FROM memberships m
 JOIN users u ON u.id = m.user_id
 WHERE m.project_id = $1::uuid
-ORDER BY u.display_name
+ORDER BY u.display_name, u.id
 `
 
 type ListMembersRow struct {
 	ID          uuid.UUID
-	Email       string
 	DisplayName string
 	Role        string
 }
 
+// No u.email: ListMembers is authorization-free by design (see
+// projects.ListMembers's own doc comment), so every caller holding a
+// Member holds whatever this query returns, including a viewer with no
+// business reading a teammate's email. display_name, id and role are what
+// a member list renders; an owner-only contact-details view, if the
+// product ever wants one, is a separate query added deliberately rather
+// than this one growing a field most callers should not see.
+// Ordered by display_name then id, for the same tiebreak reason as
+// ListProjectsForUser above: display names are not unique.
 func (q *Queries) ListMembers(ctx context.Context, projectID uuid.UUID) ([]ListMembersRow, error) {
 	rows, err := q.db.Query(ctx, listMembers, projectID)
 	if err != nil {
@@ -150,12 +158,7 @@ func (q *Queries) ListMembers(ctx context.Context, projectID uuid.UUID) ([]ListM
 	var items []ListMembersRow
 	for rows.Next() {
 		var i ListMembersRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.DisplayName,
-			&i.Role,
-		); err != nil {
+		if err := rows.Scan(&i.ID, &i.DisplayName, &i.Role); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -170,9 +173,14 @@ const listProjectsForUser = `-- name: ListProjectsForUser :many
 SELECT p.id, p.slug, p.name, p.created_at, p.updated_at FROM projects p
 JOIN memberships m ON m.project_id = p.id
 WHERE m.user_id = $1::uuid
-ORDER BY p.name
+ORDER BY p.name, p.id
 `
 
+// Ordered by name then id: name alone is not unique (two games can both
+// be called "Untitled"), so a name-only order reshuffles ties between
+// calls in whatever order Postgres happens to return them. id, being a
+// primary key, is always unique, so appending it as a tiebreak makes the
+// order stable across repeated calls with identical input.
 func (q *Queries) ListProjectsForUser(ctx context.Context, userID uuid.UUID) ([]Project, error) {
 	rows, err := q.db.Query(ctx, listProjectsForUser, userID)
 	if err != nil {

@@ -1,0 +1,28 @@
+# Design-phase scratch space: brainstorming mockups, throwaway artefacts.
+# Deleted once the design is accepted; never versioned.
+/develop/
+.superpowers/
+
+# Throwaway artefacts from agent sessions (screenshots, dumps, probes).
+/.scratch/
+tmp-*.png
+
+# Skill bundles mirrored into .claude/ for local agent sessions.
+# They ship from their own upstream project; the copy here is a local
+# convenience and must not be versioned.
+.claude/skills/
+
+# Environment and secrets
+.env
+*.pem
+*.key
+
+# Build artefacts and binaries
+/maestro
+/bin/
+/dist/
+/tmp/
+*.exe
+
+# OS noise
+.DS_Store

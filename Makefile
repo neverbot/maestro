@@ -1,7 +1,7 @@
 GO ?= go
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: build test fmt vet check run
+.PHONY: build test fmt vet check run tools sqlc sqlc-check
 
 build:
 	$(GO) build -ldflags "-X github.com/neverbot/maestro/internal/version.Version=$(VERSION)" -o bin/maestro ./cmd/maestro
@@ -22,3 +22,12 @@ check:
 
 run: build
 	./bin/maestro
+
+tools:
+	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+sqlc:
+	sqlc generate
+
+sqlc-check:
+	sqlc diff

@@ -57,10 +57,10 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// MigrateDown rolls back the single most recent migration. It exists for
-// tests that need to exercise the Down side of a migration; the running
-// binary only ever calls Migrate.
-func MigrateDown(ctx context.Context, pool *pgxpool.Pool) error {
+// migrateDown rolls back the single most recent migration. It is
+// unexported and used only by this package's own tests to exercise the
+// Down side of a migration; nothing outside internal/db can reach it.
+func migrateDown(ctx context.Context, pool *pgxpool.Pool) error {
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer func() { _ = sqlDB.Close() }()
 

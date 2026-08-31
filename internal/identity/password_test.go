@@ -293,12 +293,14 @@ func TestNeedsRehash(t *testing.T) {
 }
 
 // TestVerifyDummyDoesNotPanic is a minimal smoke test for the helper a login
-// handler calls on its "user not found" path; the interesting property (that
-// it costs a full derivation) isn't asserted here because a timing
-// assertion would be flaky, but it must never panic regardless of input.
+// handler calls on its "user not found" path so that a missing user costs
+// the same as a wrong password, closing what would otherwise be a
+// user-enumeration timing oracle; the interesting property (that it costs a
+// real derivation) isn't asserted here because a timing assertion would be
+// flaky, but it must never panic regardless of input.
 func TestVerifyDummyDoesNotPanic(t *testing.T) {
 	for _, password := range []string{"", "x", "correct horse battery staple", strings.Repeat("y", 1000)} {
-		VerifyDummy(password)
+		VerifyDummy(password, testParams)
 	}
 }
 

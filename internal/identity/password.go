@@ -227,34 +227,24 @@ func NeedsRehash(encoded string, p config.Argon2Params) (bool, error) {
 		uint32(len(h.key)) != p.KeyLen, nil
 }
 
-// dummyHash is a fixed, precomputed argon2id hash, generated once at
-// package load, used only by VerifyDummy. It never verifies against a real
-// password.
-var dummyHash = mustDummyHash()
+// dummyPassword is only ever fed to VerifyDummy's derivation; it never
+// verifies against anything real.
+const dummyPassword = "maestro-dummy-password-do-not-use"
 
-func mustDummyHash() string {
-	// These cost parameters mirror the production defaults in config.Load.
-	// They are copied here, rather than read from config, because this
-	// value is computed once at package load, before any Config exists.
-	hash, err := HashPassword("maestro-dummy-password-do-not-use", config.Argon2Params{
-		Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32, SaltLen: 16,
-	})
-	if err != nil {
-		// This can only fail if crypto/rand is unusable, in which case the
-		// process cannot generate secure salts for real users either; there
-		// is no safe way to continue running.
-		panic(fmt.Sprintf("identity: computing dummy hash: %v", err))
-	}
-	return hash
-}
-
-// VerifyDummy performs a full argon2id derivation against a fixed,
-// precomputed hash and discards the result. Call it on the "user not found"
-// path of a login flow, in place of VerifyPassword, so that path costs the
-// same as verifying against a real user: without it, a missing user returns
-// immediately while an existing one costs a full derivation, and that timing
-// difference lets an attacker enumerate which email addresses have
-// accounts.
-func VerifyDummy(password string) {
-	_, _ = VerifyPassword(password, dummyHash)
+// VerifyDummy performs a single argon2id derivation with cost parameters p
+// and discards the result. Call it on the "user not found" path of a login
+// flow, in place of VerifyPassword, so that path costs the same as verifying
+// against a real user: without it, a missing user returns immediately while
+// an existing one costs a full derivation, and that timing difference lets
+// an attacker enumerate which email addresses have accounts.
+//
+// It takes p directly and derives fresh each call, rather than hashing once
+// at package load against a hardcoded copy of the production parameters:
+// with a hardcoded copy, tuning config.Load's cost parameters would silently
+// drift this derivation's cost away from a real VerifyPassword call, which
+// is exactly the timing gap this helper exists to close. Deriving fresh
+// keeps the cost identical by construction, with no constant to maintain.
+func VerifyDummy(password string, p config.Argon2Params) {
+	salt := make([]byte, p.SaltLen)
+	_ = argon2.IDKey([]byte(dummyPassword), salt, p.Time, p.Memory, p.Threads, p.KeyLen)
 }

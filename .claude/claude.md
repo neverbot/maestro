@@ -122,11 +122,25 @@ Inherited from Nottario unless a design decision overrides them:
   TypeScript. Graph layout by a vendored layout engine; rendering is
   ours in SVG.
 - **Deployment:** Docker Compose, image published by CI, reverse
-  proxy in front. The primary branch is `master`.
+  proxy in front. The primary branch is `master`. A public
+  documentation site is built from `docs/site/` by `cmd/maestro-docs`
+  and published at `neverbot.github.io/maestro`.
+- **Human auth:** local accounts only — email plus argon2id password,
+  invite links, no email delivery and no external identity provider.
+  Designers are not developers and an instance must work with zero
+  external accounts. Registration is `invite_only` or `domain_open`
+  against an allowed-domain list.
+- **Agent auth:** bearer tokens, one token = one game, admins included.
 
-**(pending)** — visual identity and view design, graph layout engine
-choice, auth provider, exact schema of the metamodel tables, MCP tool
-surface.
+Decided in the core/metamodel design and detailed there:
+`docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md` —
+metamodel tables, MCP tool surface, validation and error shapes,
+concurrency, single-game navigation.
+
+**(pending)** — visual identity, the D2 view query language, the
+renderer catalogue and its graph layout engine, the markdown domain,
+the analysis engine, and the agent skill bundle. Each gets its own
+spec.
 
 ## Operational rules
 

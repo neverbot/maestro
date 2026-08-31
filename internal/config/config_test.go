@@ -1,11 +1,20 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
-	_, err := Load(func(string) string { return "" })
+	env := map[string]string{
+		"SESSION_KEY": "0123456789abcdef0123456789abcdef",
+	}
+	_, err := Load(func(k string) string { return env[k] })
 	if err == nil {
 		t.Fatal("expected an error when DATABASE_URL is unset")
+	}
+	if !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Fatalf("error = %q, want it to mention DATABASE_URL", err)
 	}
 }
 
@@ -65,22 +74,103 @@ func TestLoadRejectsUnknownRegistrationMode(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsDomainOpenWithoutDomains(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":      "postgres://localhost/maestro",
+		"SESSION_KEY":       "0123456789abcdef0123456789abcdef",
+		"REGISTRATION_MODE": "domain_open",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "ALLOWED_EMAIL_DOMAINS") {
+		t.Fatalf("error = %q, want it to mention ALLOWED_EMAIL_DOMAINS", err)
+	}
+}
+
+func TestLoadRejectsInvalidDomainEntry(t *testing.T) {
+	cases := []string{"@studio.com", "https://studio.com", "stu dio.com"}
+	for _, entry := range cases {
+		env := map[string]string{
+			"DATABASE_URL":          "postgres://localhost/maestro",
+			"SESSION_KEY":           "0123456789abcdef0123456789abcdef",
+			"ALLOWED_EMAIL_DOMAINS": entry,
+		}
+		if _, err := Load(func(k string) string { return env[k] }); err == nil {
+			t.Errorf("entry %q: expected an error, got none", entry)
+		}
+	}
+}
+
+func TestLoadRejectsShortSessionKey(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "tooshort10",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "SESSION_KEY") {
+		t.Fatalf("error = %q, want it to mention SESSION_KEY", err)
+	}
+}
+
+func TestLoadRejectsPlaceholderSessionKey(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "change-me-change-me-change-me-32ch",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "SESSION_KEY") {
+		t.Fatalf("error = %q, want it to mention SESSION_KEY", err)
+	}
+}
+
+func TestLoadRejectsInvalidAddr(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+		"MAESTRO_ADDR": "8080",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "MAESTRO_ADDR") {
+		t.Fatalf("error = %q, want it to mention MAESTRO_ADDR", err)
+	}
+}
+
 func TestEmailAllowed(t *testing.T) {
 	unrestricted := Config{}
 	if !unrestricted.EmailAllowed("anyone@anywhere.net") {
-		t.Fatal("empty domain list must allow everything")
+		t.Error("empty domain list must allow everything")
+	}
+	if unrestricted.EmailAllowed("not-an-email") {
+		t.Error("an address without @ must never be allowed, even unrestricted")
 	}
 
 	restricted := Config{AllowedEmailDomains: []string{"studio.com"}}
 	cases := map[string]bool{
-		"designer@studio.com": true,
-		"designer@STUDIO.com": true,
-		"designer@other.com":  false,
-		"not-an-email":        false,
+		"designer@studio.com":  true,
+		"designer@STUDIO.com":  true,
+		"designer@other.com":   false,
+		"not-an-email":         false,
+		"designer@studio.com ": true,
 	}
 	for email, want := range cases {
 		if got := restricted.EmailAllowed(email); got != want {
-			t.Fatalf("EmailAllowed(%q) = %v, want %v", email, got, want)
+			t.Errorf("EmailAllowed(%q) = %v, want %v", email, got, want)
 		}
 	}
+
+	mixedCase := Config{AllowedEmailDomains: []string{"Studio.com"}}
+	if !mixedCase.EmailAllowed("designer@studio.com") {
+		t.Error("EmailAllowed must compare case-insensitively even against a mixed-case literal")
+	}
+}
+
+func mustErr(t *testing.T, cfg Config, err error) error {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("Load: expected an error, got cfg = %+v", cfg)
+	}
+	return err
 }

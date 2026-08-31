@@ -10,7 +10,14 @@ import (
 
 // NewPool opens a connection pool and verifies it can reach the server.
 func NewPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	cfg.MaxConns = 10
+	cfg.ConnConfig.RuntimeParams["application_name"] = "maestro"
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)
 	}

@@ -16,3 +16,22 @@ SELECT count(*) FROM users;
 -- name: UpdateUserPasswordHash :exec
 UPDATE users SET password_hash = sqlc.arg('password_hash')::text
 WHERE id = sqlc.arg('id')::uuid;
+
+-- name: CreateSession :exec
+INSERT INTO sessions (token_hash, user_id, expires_at)
+VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('user_id')::uuid, sqlc.arg('expires_at')::timestamptz);
+
+-- name: GetSessionUser :one
+SELECT u.* FROM sessions s
+JOIN users u ON u.id = s.user_id
+WHERE s.token_hash = sqlc.arg('token_hash')::bytea
+  AND s.expires_at > now();
+
+-- name: DeleteSession :exec
+DELETE FROM sessions WHERE token_hash = sqlc.arg('token_hash')::bytea;
+
+-- name: DeleteSessionsForUser :exec
+DELETE FROM sessions WHERE user_id = sqlc.arg('user_id')::uuid;
+
+-- name: DeleteExpiredSessions :exec
+DELETE FROM sessions WHERE expires_at <= now();

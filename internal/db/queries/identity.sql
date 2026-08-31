@@ -12,3 +12,7 @@ SELECT * FROM users WHERE id = sqlc.arg('id')::uuid;
 
 -- name: CountUsers :one
 SELECT count(*) FROM users;
+
+-- name: UpdateUserPasswordHash :exec
+UPDATE users SET password_hash = sqlc.arg('password_hash')::text
+WHERE id = sqlc.arg('id')::uuid;

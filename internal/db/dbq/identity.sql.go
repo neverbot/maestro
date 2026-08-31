@@ -93,3 +93,18 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	)
 	return i, err
 }
+
+const updateUserPasswordHash = `-- name: UpdateUserPasswordHash :exec
+UPDATE users SET password_hash = $1::text
+WHERE id = $2::uuid
+`
+
+type UpdateUserPasswordHashParams struct {
+	PasswordHash string
+	ID           uuid.UUID
+}
+
+func (q *Queries) UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) error {
+	_, err := q.db.Exec(ctx, updateUserPasswordHash, arg.PasswordHash, arg.ID)
+	return err
+}

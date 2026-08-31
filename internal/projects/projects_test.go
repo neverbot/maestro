@@ -664,14 +664,32 @@ func TestByIDRoundTrips(t *testing.T) {
 	}
 }
 
-// TestConcurrentRemovalLeavesExactlyOneOwner is the test FOR UPDATE in
-// CountOwnersForUpdate exists for: every other test in this file drives
-// RemoveMember/SetRole from a single goroutine, so a refactor that quietly
-// dropped the row lock (e.g. swapping CountOwnersForUpdate for a plain,
-// unlocked count) would leave every one of them green. Five runs, two
-// goroutines each racing to remove one of a project's two owners: exactly
-// one must succeed and the other must see ErrLastOwner, every time, and
-// the project must never end up with zero owners.
+// TestConcurrentRemovalLeavesExactlyOneOwner pins the end-to-end
+// invariant: under concurrent removal, a project always keeps exactly one
+// of its last two owners, never zero. Every other test in this file
+// drives RemoveMember/SetRole from a single goroutine, so this is the
+// only one that would notice the invariant breaking under a race at all.
+//
+// It does NOT demonstrate that CountOwnersForUpdate's FOR UPDATE lock is
+// what makes this safe, and its comment used to claim exactly that — a
+// claim a quality review disproved directly: stripping FOR UPDATE from
+// CountOwnersForUpdate and running this test roughly eighty times
+// produced zero failures. The invariant is defended in two independent
+// layers — this package's row lock, and migration 0002's constraint
+// trigger, which re-checks "does this project still have an owner" at
+// commit time regardless of any lock — and the trigger alone already
+// serializes the two-goroutine race this test drives, because only one
+// of two concurrent transactions can be the second to reach its deferred
+// commit-time check. Dropping either layer alone will not turn this test
+// red; both would have to go missing at once for that. What the lock
+// still buys, independent of correctness, is failing fast inside this
+// package with a typed ErrLastOwner instead of the transaction aborting
+// on a raw trigger exception — worth keeping as deliberate defence in
+// depth, not because this test proves it load-bearing.
+//
+// Five runs, two goroutines each racing to remove one of a project's two
+// owners: exactly one must succeed and the other must see ErrLastOwner,
+// every time, and the project must never end up with zero owners.
 func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 	for run := 0; run < 5; run++ {
 		pool := testutil.NewPool(t)

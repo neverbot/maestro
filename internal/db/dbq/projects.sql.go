@@ -29,6 +29,19 @@ SELECT count(*) FROM (
 // WHERE clause against the row's latest committed version, so a row
 // demoted away from 'owner' by the transaction that held the lock is
 // correctly excluded from the count the next transaction sees.
+//
+// This lock is deliberate defence in depth, not the only thing standing
+// between two concurrent callers and a zero-owner project: migration
+// 0002's constraint trigger enforces the identical invariant
+// independently, re-checked at commit time regardless of whether this
+// lock is taken at all, and a quality review confirmed it alone already
+// serializes the two-goroutine race projects_test.go's
+// TestConcurrentRemovalLeavesExactlyOneOwner drives — stripping this
+// FOR UPDATE and running that test roughly eighty times produced no
+// failures. What this lock earns on its own is SetRole/RemoveMember
+// failing fast with a typed ErrLastOwner instead of the transaction
+// aborting on a raw trigger exception; see that test's own comment for
+// the fuller version of this note.
 func (q *Queries) CountOwnersForUpdate(ctx context.Context, projectID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countOwnersForUpdate, projectID)
 	var count int64

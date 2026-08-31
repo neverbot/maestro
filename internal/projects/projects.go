@@ -436,15 +436,18 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Membe
 // The last-owner guard only ever fires when the target is already an
 // owner being moved to a different role: promoting someone, or changing a
 // non-owner's role, can never reduce the owner count. When it does apply,
-// CountOwnersForUpdate is called inside this method's transaction, which
-// takes a row lock on every owner membership of the project — see that
-// query's own doc comment for why this is what makes two concurrent
-// demotions of a project's last two owners resolve safely (one succeeds,
-// the other sees the now-updated count and fails) instead of racing to
-// leave the project with none. Migration 0002's constraint trigger is the
-// same invariant's backstop for the one path this method's own lock
-// cannot see: a user deleted directly, whose membership row disappears
-// via ON DELETE CASCADE rather than through this method at all.
+// CountOwnersForUpdate is called inside this method's transaction, taking
+// a row lock on every owner membership of the project. That lock is
+// deliberate defence in depth, not the sole thing preventing two
+// concurrent demotions of a project's last two owners from both
+// succeeding: migration 0002's constraint trigger enforces the identical
+// invariant independently, re-checked at commit time regardless of this
+// lock, and already serializes that race on its own — see
+// CountOwnersForUpdate's own doc comment for why, and for the review that
+// confirmed it directly by removing this lock and running the concurrency
+// test unchanged. What the lock earns here is failing fast with a typed
+// ErrLastOwner instead of the transaction aborting on a raw trigger
+// exception.
 func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role string) error {
 	if !roles.Valid(role) {
 		return fmt.Errorf("%w: %q", ErrRoleInvalid, role)
@@ -487,11 +490,12 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 // membership for this user in this project) is already satisfied, the
 // same convention identity.RevokeSession and identity.RevokeInvite already
 // establish. Removing the project's sole owner is refused with
-// ErrLastOwner — see SetRole's doc comment for the locking (and migration
-// 0002's database-level backstop) that make this safe under concurrent
-// removal attempts and under a direct user deletion. Like SetRole, this
-// method performs no authorization check of its own; see SetRole's doc
-// comment for why.
+// ErrLastOwner — see SetRole's doc comment for the two independent layers
+// (this package's row lock and migration 0002's trigger) that defend that
+// invariant under concurrent removal and under a direct user deletion,
+// and for what each one does and does not earn on its own. Like SetRole,
+// this method performs no authorization check of its own; see SetRole's
+// doc comment for why.
 func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID) error {
 	return s.withTx(ctx, func(q *dbq.Queries) error {
 		current, err := q.GetMembershipRole(ctx, dbq.GetMembershipRoleParams{UserID: userID, ProjectID: projectID})

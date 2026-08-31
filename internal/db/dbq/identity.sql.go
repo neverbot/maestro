@@ -119,6 +119,12 @@ const deleteExpiredInvites = `-- name: DeleteExpiredInvites :execrows
 DELETE FROM invites WHERE redeemed_at IS NULL AND expires_at <= now()
 `
 
+// Only ever removes unredeemed rows (redeemed_at IS NULL): a redeemed
+// invite past its original expires_at is not "expired" in any sense that
+// matters (it already did its job and MarkInviteRedeemed's own WHERE
+// clause makes it unreachable a second time regardless), and deleting it
+// would erase who created an account or a membership grant and when —
+// exactly the audit trail RevokeInvite above is careful to preserve too.
 func (q *Queries) DeleteExpiredInvites(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredInvites)
 	if err != nil {
@@ -170,6 +176,37 @@ type ExtendSessionParams struct {
 func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) error {
 	_, err := q.db.Exec(ctx, extendSession, arg.ExpiresAt, arg.TokenHash)
 	return err
+}
+
+const getInviteByTokenHash = `-- name: GetInviteByTokenHash :one
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE token_hash = $1::bytea
+`
+
+// Unlike GetLiveInvite, this ignores redeemed_at and expires_at: it exists
+// only for RedeemInvite's fallback path, reached after GetLiveInvite has
+// already found no row, to tell an expired invite apart from a truly
+// unknown or already-redeemed one. Reaching that fallback at all requires
+// the caller to already hold a token whose SHA-256 equals a stored
+// token_hash, which nobody can produce without either holding the real
+// token or having brute-forced 256 bits of entropy — so this query never
+// gives an attacker anything they could not already get by holding the
+// token itself.
+func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (Invite, error) {
+	row := q.db.QueryRow(ctx, getInviteByTokenHash, tokenHash)
+	var i Invite
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.Email,
+		&i.ProjectID,
+		&i.Role,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RedeemedAt,
+		&i.RedeemedBy,
+	)
+	return i, err
 }
 
 const getLiveInvite = `-- name: GetLiveInvite :one
@@ -271,6 +308,46 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const listOutstandingInvites = `-- name: ListOutstandingInvites :many
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC
+`
+
+// "Outstanding" means not yet redeemed, regardless of whether it has since
+// expired: an admin looking for a mis-sent invite to revoke needs to find
+// it before it necessarily expires on its own, and a lapsed-but-unredeemed
+// row is also useful context ("this one needs reissuing"). Ordered
+// newest-first, the order an admin scanning for a just-sent mistake wants.
+func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]Invite, error) {
+	rows, err := q.db.Query(ctx, listOutstandingInvites)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Invite
+	for rows.Next() {
+		var i Invite
+		if err := rows.Scan(
+			&i.ID,
+			&i.TokenHash,
+			&i.Email,
+			&i.ProjectID,
+			&i.Role,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RedeemedAt,
+			&i.RedeemedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markInviteRedeemed = `-- name: MarkInviteRedeemed :execrows
 UPDATE invites SET redeemed_at = now(), redeemed_by = $1::uuid
 WHERE id = $2::uuid
@@ -289,6 +366,22 @@ func (q *Queries) MarkInviteRedeemed(ctx context.Context, arg MarkInviteRedeemed
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const revokeInvite = `-- name: RevokeInvite :exec
+UPDATE invites SET expires_at = now()
+WHERE id = $1::uuid AND redeemed_at IS NULL
+`
+
+// Setting expires_at to now(), rather than deleting the row, keeps the
+// audit trail (who created it, when, for what) intact instead of erasing
+// it — the same reasoning DeleteExpiredInvites documents for why it only
+// ever removes unredeemed rows. Restricted to redeemed_at IS NULL so
+// revoking an already-redeemed or already-expired invite is a no-op that
+// cannot rewrite a real redemption's or an earlier revocation's expires_at.
+func (q *Queries) RevokeInvite(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, revokeInvite, id)
+	return err
 }
 
 const updateUserPasswordHash = `-- name: UpdateUserPasswordHash :exec

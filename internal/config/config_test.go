@@ -40,6 +40,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.SessionTTL != 720*time.Hour {
 		t.Fatalf("SessionTTL = %v, want 720h", cfg.SessionTTL)
 	}
+	if cfg.InviteTTL != 14*24*time.Hour {
+		t.Fatalf("InviteTTL = %v, want 336h", cfg.InviteTTL)
+	}
 }
 
 func TestLoadParsesSessionTTL(t *testing.T) {
@@ -82,6 +85,62 @@ func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
 		if !strings.Contains(err.Error(), "SESSION_TTL") {
 			t.Fatalf("SESSION_TTL=%q: error = %q, want it to mention SESSION_TTL", raw, err)
 		}
+	}
+}
+
+func TestLoadParsesInviteTTL(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+		"INVITE_TTL":   "48h",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.InviteTTL != 48*time.Hour {
+		t.Fatalf("InviteTTL = %v, want 48h", cfg.InviteTTL)
+	}
+}
+
+func TestLoadRejectsInvalidInviteTTL(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+		"INVITE_TTL":   "not-a-duration",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "INVITE_TTL") {
+		t.Fatalf("error = %q, want it to mention INVITE_TTL", err)
+	}
+}
+
+func TestLoadRejectsNonPositiveInviteTTL(t *testing.T) {
+	for _, raw := range []string{"0h", "-1h"} {
+		env := map[string]string{
+			"DATABASE_URL": "postgres://localhost/maestro",
+			"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+			"INVITE_TTL":   raw,
+		}
+		cfg, err := Load(func(k string) string { return env[k] })
+		err = mustErr(t, cfg, err)
+		if !strings.Contains(err.Error(), "INVITE_TTL") {
+			t.Fatalf("INVITE_TTL=%q: error = %q, want it to mention INVITE_TTL", raw, err)
+		}
+	}
+}
+
+func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
+		"INVITE_TTL":   "4320h", // 180 days, above the 90-day maximum
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "INVITE_TTL") {
+		t.Fatalf("error = %q, want it to mention INVITE_TTL", err)
 	}
 }
 

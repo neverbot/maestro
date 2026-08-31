@@ -126,16 +126,33 @@ func (s *Service) CreateUser(ctx context.Context, req CreateUserRequest) (User, 
 // createUser is the non-transactional entry point: everything that isn't
 // inside someone else's withTx call goes through s.q via this thin wrapper.
 func (s *Service) createUser(ctx context.Context, req CreateUserRequest, isAdmin bool) (User, error) {
-	return s.createUserWith(ctx, s.q, req, isAdmin)
+	p, err := s.prepareUser(req)
+	if err != nil {
+		return User{}, err
+	}
+	return s.insertUser(ctx, s.q, p, isAdmin)
 }
 
-// createUserWith is createUser's body, parameterized on the *dbq.Queries to
-// run its insert against. Every non-transactional caller goes through
-// createUser above, which passes s.q; invites.go's RedeemInvite passes the
-// transaction-scoped Queries handed to it by withTx, so the user insert,
-// marking the invite redeemed and granting the membership either all commit
-// or all roll back together.
-func (s *Service) createUserWith(ctx context.Context, q *dbq.Queries, req CreateUserRequest, isAdmin bool) (User, error) {
+// preparedUser is a CreateUserRequest that has passed every validation
+// check and had its password hashed. Producing one is CPU-bound (argon2,
+// specifically) but touches no connection and holds no lock; inserting one
+// (insertUser, below) is the reverse. Keeping them as two steps lets a
+// caller that is about to insert inside a transaction — invites.go's
+// RedeemInvite — call prepareUser before opening it: hashing inside an open
+// transaction would pin a pool connection for the full argon2 derivation
+// and, worse for RedeemInvite specifically, lengthen how long the
+// invite row's lock (see MarkInviteRedeemed's doc comment) is held, for a
+// step that has no interaction with the transaction's atomicity at all.
+type preparedUser struct {
+	email        string
+	displayName  string
+	passwordHash string
+}
+
+// prepareUser validates req and hashes its password, without touching the
+// database. See preparedUser's doc comment for why this is split out from
+// insertUser.
+func (s *Service) prepareUser(req CreateUserRequest) (preparedUser, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	displayName := strings.TrimSpace(req.DisplayName)
 	password := req.Password
@@ -144,34 +161,42 @@ func (s *Service) createUserWith(ctx context.Context, q *dbq.Queries, req Create
 	// rejects a short-but-strong multi-byte passphrase or name while
 	// accepting a longer, weaker ASCII one of the same byte length.
 	if n := utf8.RuneCountInString(email); n < minEmailRunes || n > maxEmailRunes {
-		return User{}, fmt.Errorf("%w: must be between %d and %d characters", ErrEmailInvalid, minEmailRunes, maxEmailRunes)
+		return preparedUser{}, fmt.Errorf("%w: must be between %d and %d characters", ErrEmailInvalid, minEmailRunes, maxEmailRunes)
 	}
 	if n := utf8.RuneCountInString(displayName); n < minDisplayNameRunes || n > maxDisplayNameRunes {
-		return User{}, fmt.Errorf("%w: must be between %d and %d characters", ErrDisplayNameInvalid, minDisplayNameRunes, maxDisplayNameRunes)
+		return preparedUser{}, fmt.Errorf("%w: must be between %d and %d characters", ErrDisplayNameInvalid, minDisplayNameRunes, maxDisplayNameRunes)
 	}
 	if !s.cfg.EmailAllowed(email) {
-		return User{}, ErrEmailNotAllowed
+		return preparedUser{}, ErrEmailNotAllowed
 	}
 	// Bound the byte length before counting runes: password is fed to
 	// argon2 next, and argon2's cost is proportional to its input length,
 	// so this bound must be checked before hashing regardless of how cheap
 	// the rune count above is.
 	if len(password) > maxPasswordBytes {
-		return User{}, fmt.Errorf("%w: must be at most %d bytes", ErrPasswordInvalid, maxPasswordBytes)
+		return preparedUser{}, fmt.Errorf("%w: must be at most %d bytes", ErrPasswordInvalid, maxPasswordBytes)
 	}
 	if utf8.RuneCountInString(password) < minPasswordRunes {
-		return User{}, fmt.Errorf("%w: must be at least %d characters", ErrPasswordInvalid, minPasswordRunes)
+		return preparedUser{}, fmt.Errorf("%w: must be at least %d characters", ErrPasswordInvalid, minPasswordRunes)
 	}
 
 	hash, err := HashPassword(password, s.cfg.Argon2)
 	if err != nil {
-		return User{}, err
+		return preparedUser{}, err
 	}
+	return preparedUser{email: email, displayName: displayName, passwordHash: hash}, nil
+}
 
+// insertUser writes an already-validated, already-hashed user through q.
+// Callers pass s.q outside a transaction (createUser) or a transaction-
+// scoped *dbq.Queries from withTx (invites.go's RedeemInvite), so the
+// insert can participate in a larger atomic write without itself knowing
+// or caring which.
+func (s *Service) insertUser(ctx context.Context, q *dbq.Queries, p preparedUser, isAdmin bool) (User, error) {
 	dbUser, err := q.CreateUser(ctx, dbq.CreateUserParams{
-		Email:        email,
-		DisplayName:  displayName,
-		PasswordHash: hash,
+		Email:        p.email,
+		DisplayName:  p.displayName,
+		PasswordHash: p.passwordHash,
 		IsAdmin:      isAdmin,
 	})
 	if err != nil {

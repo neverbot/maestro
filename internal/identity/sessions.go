@@ -24,11 +24,16 @@ import (
 // since neither should let the caller in.
 var ErrNoSession = errors.New("no active session")
 
-// sessionTokenBytes is the amount of raw entropy in a session token, before
-// base64 encoding. 32 bytes (256 bits) is far beyond what is guessable;
-// encoding expands this to a longer string, so a length check on the
-// encoded token is not itself a check on this constant — see the tests.
-const sessionTokenBytes = 32
+// randomTokenBytes is the amount of raw entropy in a token minted by
+// randomToken, before base64 encoding. Named for the shared helper, not
+// for sessions specifically: invites.go's CreateInvite calls the same
+// randomToken and depends on this same constant, so a name that read
+// "sessionTokenBytes" invited someone tuning session token length to
+// change invite token length without knowing it. 32 bytes (256 bits) is
+// far beyond what is guessable; encoding expands this to a longer string,
+// so a length check on the encoded token is not itself a check on this
+// constant — see the tests.
+const randomTokenBytes = 32
 
 // IssueSession mints a session token and stores only its hash. The token
 // itself is returned once, for the caller to set as an httpOnly cookie
@@ -188,9 +193,11 @@ func (s *Service) PruneExpiredSessions(ctx context.Context) (int64, error) {
 }
 
 // randomToken returns a base64url-encoded string carrying
-// sessionTokenBytes of cryptographic randomness.
+// randomTokenBytes of cryptographic randomness. It is shared by every
+// bearer token this package mints — session tokens (this file) and invite
+// tokens (invites.go) alike.
 func randomToken() (string, error) {
-	raw := make([]byte, sessionTokenBytes)
+	raw := make([]byte, randomTokenBytes)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("read random: %w", err)
 	}

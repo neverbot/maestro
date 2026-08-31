@@ -16,9 +16,12 @@ func testConfig() config.Config {
 	return config.Config{
 		RegistrationMode: config.RegistrationInviteOnly,
 		Argon2:           config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyLen: 32, SaltLen: 16},
-		// Long enough that no test's session outlives the test itself; the
-		// exact value only matters to TestIssueSessionSetsExpiryFromConfig.
+		// Long enough that no test's session or invite outlives the test
+		// itself; the exact value only matters to
+		// TestIssueSessionSetsExpiryFromConfig and
+		// TestCreateInviteUsesConfiguredDefaultTTL.
 		SessionTTL: 24 * time.Hour,
+		InviteTTL:  24 * time.Hour,
 	}
 }
 

@@ -32,21 +32,60 @@ func TestInviteRedemptionCreatesUser(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	token, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "new@studio.com", CreatedBy: &creator.ID})
+	token, summary, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "new@studio.com", CreatedBy: &creator.ID})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
+	if summary.ID == uuid.Nil {
+		t.Fatal("CreateInvite returned a zero id")
+	}
+	if summary.CreatedBy == nil || *summary.CreatedBy != creator.ID {
+		t.Fatalf("CreatedBy = %v, want %v", summary.CreatedBy, creator.ID)
+	}
+	if summary.Email == nil || *summary.Email != "new@studio.com" {
+		t.Fatalf("Email = %v, want new@studio.com", summary.Email)
+	}
 
-	user, err := svc.RedeemInvite(ctx, token, "new@studio.com", "Newcomer", "password12345")
+	user, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "new@studio.com", DisplayName: "Newcomer", Password: "password12345",
+	})
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v", err)
 	}
 	if user.Email != "new@studio.com" {
 		t.Fatalf("Email = %q", user.Email)
 	}
+}
 
-	// A token is single use.
-	_, err = svc.RedeemInvite(ctx, token, "other@studio.com", "Other", "password12345")
+// TestUnboundInviteIsSingleUse is the property TestInviteRedemptionCreatesUser
+// used to assert with a second redemption at a *different* email against an
+// *email-bound* invite — which exits on the mismatch branch before anything
+// single-use is even consulted, so it actually duplicated
+// TestInviteBoundToEmailRejectsAnother and would still pass if
+// MarkInviteRedeemed's redeemed_at IS NULL guard were deleted entirely. This
+// test uses an unbound invite (no email restriction to hide behind) and two
+// distinct emails (so the users table's own email-uniqueness constraint
+// cannot be doing this test's job either) — the only variant that isolates
+// single-use as its own property.
+func TestUnboundInviteIsSingleUse(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if _, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "first@studio.com", DisplayName: "First", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("first RedeemInvite: %v", err)
+	}
+
+	_, err = svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "second@studio.com", DisplayName: "Second", Password: "password12345",
+	})
 	if !errors.Is(err, identity.ErrInviteInvalid) {
 		t.Fatalf("err = %v, want ErrInviteInvalid", err)
 	}
@@ -57,11 +96,13 @@ func TestInviteBoundToEmailRejectsAnother(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	token, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "expected@studio.com"})
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "expected@studio.com"})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	_, err = svc.RedeemInvite(ctx, token, "someone.else@studio.com", "Sneaky", "password12345")
+	_, err = svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "someone.else@studio.com", DisplayName: "Sneaky", Password: "password12345",
+	})
 	if !errors.Is(err, identity.ErrInviteInvalid) {
 		t.Fatalf("err = %v, want ErrInviteInvalid", err)
 	}
@@ -78,12 +119,14 @@ func TestInviteEmailComparisonNormalisesLikeUsers(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	token, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "  New@Studio.com  "})
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "  New@Studio.com  "})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
 
-	user, err := svc.RedeemInvite(ctx, token, "NEW@studio.com", "Newcomer", "password12345")
+	user, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "NEW@studio.com", DisplayName: "Newcomer", Password: "password12345",
+	})
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v", err)
 	}
@@ -95,9 +138,56 @@ func TestInviteEmailComparisonNormalisesLikeUsers(t *testing.T) {
 func TestRedeemUnknownInvite(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
-	_, err := svc.RedeemInvite(context.Background(), "made-up", "x@studio.com", "X", "password12345")
+	_, err := svc.RedeemInvite(context.Background(), "made-up", identity.CreateUserRequest{
+		Email: "x@studio.com", DisplayName: "X", Password: "password12345",
+	})
 	if !errors.Is(err, identity.ErrInviteInvalid) {
 		t.Fatalf("err = %v, want ErrInviteInvalid", err)
+	}
+}
+
+// TestRedeemInviteWithExistingEmailIsRejectedAsInvalid guards against an
+// unbound invite being usable as an oracle for whether an arbitrary address
+// already has an account. Without mapping ErrEmailTaken to ErrInviteInvalid,
+// a caller holding one unbound invite could redeem it repeatedly against
+// many addresses (a failed attempt never consumes the invite) and read
+// account existence straight off the distinguishable error.
+func TestRedeemInviteWithExistingEmailIsRejectedAsInvalid(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	if _, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "existing@studio.com", DisplayName: "Existing", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	_, err = svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "existing@studio.com", DisplayName: "Impersonator", Password: "password12345",
+	})
+	if !errors.Is(err, identity.ErrInviteInvalid) {
+		t.Fatalf("err = %v, want ErrInviteInvalid (never ErrEmailTaken)", err)
+	}
+	if errors.Is(err, identity.ErrEmailTaken) {
+		t.Fatalf("err = %v must not also satisfy ErrEmailTaken: that is the oracle this test guards against", err)
+	}
+
+	// The failed attempt must not have consumed the invite: a legitimate
+	// holder who mistyped an address gets to try again.
+	user, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "genuinely-new@studio.com", DisplayName: "Genuine", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("RedeemInvite after a failed attempt: %v", err)
+	}
+	if user.Email != "genuinely-new@studio.com" {
+		t.Fatalf("Email = %q", user.Email)
 	}
 }
 
@@ -110,9 +200,9 @@ func TestInviteWithProjectGrantsMembership(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	projectID := createTestProject(t, ctx, pool, "castle-quest")
+	projectID := createTestProject(ctx, t, pool, "castle-quest")
 
-	token, err := svc.CreateInvite(ctx, identity.InviteRequest{
+	token, summary, err := svc.CreateInvite(ctx, identity.InviteRequest{
 		Email:     "designer@studio.com",
 		ProjectID: &projectID,
 		Role:      "editor",
@@ -120,8 +210,16 @@ func TestInviteWithProjectGrantsMembership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
+	if summary.Role == nil || *summary.Role != "editor" {
+		t.Fatalf("summary.Role = %v, want editor", summary.Role)
+	}
+	if summary.ExpiresAt.Before(time.Now()) {
+		t.Fatalf("summary.ExpiresAt = %v, want a time in the future", summary.ExpiresAt)
+	}
 
-	user, err := svc.RedeemInvite(ctx, token, "designer@studio.com", "Designer", "password12345")
+	user, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+	})
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v", err)
 	}
@@ -147,7 +245,7 @@ func TestCreateInviteRejectsRoleWithoutProject(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	_, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "x@studio.com", Role: "editor"})
+	_, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "x@studio.com", Role: "editor"})
 	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
 		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
 	}
@@ -158,8 +256,8 @@ func TestCreateInviteRejectsProjectWithoutRole(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	projectID := createTestProject(t, ctx, pool, "no-role")
-	_, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "x@studio.com", ProjectID: &projectID})
+	projectID := createTestProject(ctx, t, pool, "no-role")
+	_, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "x@studio.com", ProjectID: &projectID})
 	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
 		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
 	}
@@ -175,8 +273,89 @@ func TestCreateInviteRejectsUnknownRole(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	projectID := createTestProject(t, ctx, pool, "bad-role")
-	_, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "x@studio.com", ProjectID: &projectID, Role: "superadmin"})
+	projectID := createTestProject(ctx, t, pool, "bad-role")
+	_, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "x@studio.com", ProjectID: &projectID, Role: "superadmin"})
+	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
+		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
+	}
+}
+
+// TestCreateInviteRejectsOverlongEmail and TestCreateInviteRejectsDisallowedDomain
+// guard against CreateInvite reopening what Task 5's Correction 8 closed for
+// CreateUser (an unbounded text column fed straight from a request), and
+// against minting a link the recipient has no power to make usable: an
+// invite for a domain this instance would refuse at registration time is a
+// dead credential the moment it is created.
+func TestCreateInviteRejectsOverlongEmail(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	huge := make([]byte, 2000)
+	for i := range huge {
+		huge[i] = 'a'
+	}
+	_, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: string(huge) + "@studio.com"})
+	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
+		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
+	}
+}
+
+func TestCreateInviteRejectsDisallowedDomain(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.AllowedEmailDomains = []string{"studio.com"}
+	svc := identity.New(pool, cfg)
+
+	_, _, err := svc.CreateInvite(context.Background(), identity.InviteRequest{Email: "outsider@elsewhere.com"})
+	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
+		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
+	}
+}
+
+// TestCreateInviteUsesConfiguredDefaultTTL and TestCreateInviteHonoursExpiresIn
+// cover InviteTTL becoming configurable (config.InviteTTL / INVITE_TTL)
+// instead of the hardcoded 14-day constant it used to be, and the optional
+// per-invite override bounded above by config.MaxInviteTTL.
+func TestCreateInviteUsesConfiguredDefaultTTL(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig() // InviteTTL: 24 * time.Hour, see testConfig's doc comment.
+	svc := identity.New(pool, cfg)
+
+	before := time.Now().Add(cfg.InviteTTL)
+	_, summary, err := svc.CreateInvite(context.Background(), identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	after := time.Now().Add(cfg.InviteTTL)
+
+	if summary.ExpiresAt.Before(before) || summary.ExpiresAt.After(after) {
+		t.Fatalf("ExpiresAt = %v, want between %v and %v", summary.ExpiresAt, before, after)
+	}
+}
+
+func TestCreateInviteHonoursExpiresIn(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	const ttl = 2 * time.Hour
+	before := time.Now().Add(ttl)
+	_, summary, err := svc.CreateInvite(ctx, identity.InviteRequest{ExpiresIn: ttl})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	after := time.Now().Add(ttl)
+	if summary.ExpiresAt.Before(before) || summary.ExpiresAt.After(after) {
+		t.Fatalf("ExpiresAt = %v, want between %v and %v", summary.ExpiresAt, before, after)
+	}
+}
+
+func TestCreateInviteRejectsExpiresInAboveMax(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+
+	_, _, err := svc.CreateInvite(context.Background(), identity.InviteRequest{ExpiresIn: 365 * 24 * time.Hour})
 	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
 		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
 	}
@@ -193,7 +372,7 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	token, err := svc.CreateInvite(ctx, identity.InviteRequest{})
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
@@ -207,15 +386,28 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 	// RedeemInvite's transaction (see its doc comment).
 	const attempts = 8
 	var wg sync.WaitGroup
+	// start is closed once, after every goroutine has been spawned and is
+	// blocked waiting on it, so all eight redemptions actually race each
+	// other instead of mostly running one after another depending on how
+	// fast the scheduler gets around to each goroutine — without this the
+	// test can pass even on a build that reintroduces the race, simply
+	// because it rarely gets two redemptions overlapping in practice.
+	start := make(chan struct{})
+	var ready sync.WaitGroup
 	successes := make(chan identity.User, attempts)
 	failures := make(chan error, attempts)
 
+	ready.Add(attempts)
 	for i := 0; i < attempts; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			ready.Done()
+			<-start
 			email := fmt.Sprintf("racer%d@studio.com", i)
-			user, err := svc.RedeemInvite(ctx, token, email, "Racer", "password12345")
+			user, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+				Email: email, DisplayName: "Racer", Password: "password12345",
+			})
 			if err != nil {
 				failures <- err
 				return
@@ -223,6 +415,8 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 			successes <- user
 		}(i)
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
 	close(successes)
 	close(failures)
@@ -249,13 +443,13 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 	}
 }
 
-// TestRedeemExpiredInviteIsRejectedAndPruned mirrors sessions_test.go's
+// TestRedeemExpiredInviteReturnsErrInviteExpired mirrors sessions_test.go's
 // TestExpiredSessionIsRejectedAndPruned: an invite past its expires_at must
-// be indistinguishable from an unknown one to RedeemInvite (see
-// ErrInviteInvalid's doc comment), and PruneExpiredInvites — the
-// counterpart to invites_expires_idx, which exists for exactly this query —
-// must actually remove it.
-func TestRedeemExpiredInviteIsRejectedAndPruned(t *testing.T) {
+// resolve to the specific ErrInviteExpired (not the generic ErrInviteInvalid)
+// — see ErrInviteExpired's doc comment for why that split is safe — and
+// PruneExpiredInvites, the counterpart to invites_expires_idx, must actually
+// remove it.
+func TestRedeemExpiredInviteReturnsErrInviteExpired(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -267,9 +461,11 @@ func TestRedeemExpiredInviteIsRejectedAndPruned(t *testing.T) {
 		t.Fatalf("insert expired invite: %v", err)
 	}
 
-	_, err := svc.RedeemInvite(ctx, "expired-invite-token", "x@studio.com", "X", "password12345")
-	if !errors.Is(err, identity.ErrInviteInvalid) {
-		t.Fatalf("err = %v, want ErrInviteInvalid for an expired invite", err)
+	_, err := svc.RedeemInvite(ctx, "expired-invite-token", identity.CreateUserRequest{
+		Email: "x@studio.com", DisplayName: "X", Password: "password12345",
+	})
+	if !errors.Is(err, identity.ErrInviteExpired) {
+		t.Fatalf("err = %v, want ErrInviteExpired", err)
 	}
 
 	var before int
@@ -297,10 +493,98 @@ func TestRedeemExpiredInviteIsRejectedAndPruned(t *testing.T) {
 	}
 }
 
+// TestRedeemAlreadyRedeemedInviteReturnsGenericError guards the other half
+// of resolveInviteMiss's split: an already-redeemed invite must collapse
+// into the generic ErrInviteInvalid, not ErrInviteExpired or anything else
+// that would tell one holder of a shared link whether another holder
+// already used it.
+func TestRedeemAlreadyRedeemedInviteReturnsGenericError(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if _, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "first@studio.com", DisplayName: "First", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("first RedeemInvite: %v", err)
+	}
+
+	_, err = svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "second@studio.com", DisplayName: "Second", Password: "password12345",
+	})
+	if !errors.Is(err, identity.ErrInviteInvalid) {
+		t.Fatalf("err = %v, want ErrInviteInvalid", err)
+	}
+	if errors.Is(err, identity.ErrInviteExpired) {
+		t.Fatalf("err = %v must not also satisfy ErrInviteExpired", err)
+	}
+}
+
+// TestListOutstandingInvitesAndRevoke covers the admin recovery path for a
+// mis-sent invite: it must be findable (ListOutstandingInvites) and
+// revocable (RevokeInvite) without direct database access, and once
+// revoked it must behave exactly like an expired one to RedeemInvite.
+func TestListOutstandingInvitesAndRevoke(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	token, summary, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "mistake@studio.com"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	outstanding, err := svc.ListOutstandingInvites(ctx)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvites: %v", err)
+	}
+	found := false
+	for _, inv := range outstanding {
+		if inv.ID == summary.ID {
+			found = true
+			if inv.Email == nil || *inv.Email != "mistake@studio.com" {
+				t.Fatalf("listed invite Email = %v, want mistake@studio.com", inv.Email)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("ListOutstandingInvites did not include invite %s", summary.ID)
+	}
+
+	if err := svc.RevokeInvite(ctx, summary.ID); err != nil {
+		t.Fatalf("RevokeInvite: %v", err)
+	}
+
+	_, err = svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "mistake@studio.com", DisplayName: "Mistake", Password: "password12345",
+	})
+	if !errors.Is(err, identity.ErrInviteExpired) {
+		t.Fatalf("err = %v, want ErrInviteExpired after revocation", err)
+	}
+}
+
+// TestRevokeUnknownInviteIsANoOp mirrors sessions_test.go's
+// TestRevokeUnknownSessionIsANoOp: revoking an id nobody minted must not
+// error, the same convention RevokeSession already established.
+func TestRevokeUnknownInviteIsANoOp(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+
+	if err := svc.RevokeInvite(context.Background(), uuid.New()); err != nil {
+		t.Fatalf("RevokeInvite: %v", err)
+	}
+}
+
 // createTestProject inserts a bare project row directly, bypassing the
 // projects package (added in Task 8, which this task precedes), since all
-// this test needs is a project_id to attach an invite to.
-func createTestProject(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slug string) uuid.UUID {
+// this test needs is a project_id to attach an invite to. ctx is taken
+// before t, matching every Service method in this package (ctx always
+// leads).
+func createTestProject(ctx context.Context, t *testing.T, pool *pgxpool.Pool, slug string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	row := pool.QueryRow(ctx, `INSERT INTO projects (slug, name) VALUES ($1, $2) RETURNING id`, slug, slug)

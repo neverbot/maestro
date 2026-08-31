@@ -55,11 +55,41 @@ WHERE token_hash = sqlc.arg('token_hash')::bytea
   AND redeemed_at IS NULL
   AND expires_at > now();
 
+-- name: GetInviteByTokenHash :one
+-- Unlike GetLiveInvite, this ignores redeemed_at and expires_at: it exists
+-- only for RedeemInvite's fallback path, reached after GetLiveInvite has
+-- already found no row, to tell an expired invite apart from a truly
+-- unknown or already-redeemed one. Reaching that fallback at all requires
+-- the caller to already hold a token whose SHA-256 equals a stored
+-- token_hash, which nobody can produce without either holding the real
+-- token or having brute-forced 256 bits of entropy — so this query never
+-- gives an attacker anything they could not already get by holding the
+-- token itself.
+SELECT * FROM invites WHERE token_hash = sqlc.arg('token_hash')::bytea;
+
 -- name: MarkInviteRedeemed :execrows
 UPDATE invites SET redeemed_at = now(), redeemed_by = sqlc.arg('redeemed_by')::uuid
 WHERE id = sqlc.arg('id')::uuid
   AND redeemed_at IS NULL
   AND expires_at > now();
+
+-- name: ListOutstandingInvites :many
+-- "Outstanding" means not yet redeemed, regardless of whether it has since
+-- expired: an admin looking for a mis-sent invite to revoke needs to find
+-- it before it necessarily expires on its own, and a lapsed-but-unredeemed
+-- row is also useful context ("this one needs reissuing"). Ordered
+-- newest-first, the order an admin scanning for a just-sent mistake wants.
+SELECT * FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC;
+
+-- name: RevokeInvite :exec
+-- Setting expires_at to now(), rather than deleting the row, keeps the
+-- audit trail (who created it, when, for what) intact instead of erasing
+-- it — the same reasoning DeleteExpiredInvites documents for why it only
+-- ever removes unredeemed rows. Restricted to redeemed_at IS NULL so
+-- revoking an already-redeemed or already-expired invite is a no-op that
+-- cannot rewrite a real redemption's or an earlier revocation's expires_at.
+UPDATE invites SET expires_at = now()
+WHERE id = sqlc.arg('id')::uuid AND redeemed_at IS NULL;
 
 -- name: UpsertMembership :exec
 INSERT INTO memberships (user_id, project_id, role)
@@ -67,4 +97,10 @@ VALUES (sqlc.arg('user_id')::uuid, sqlc.arg('project_id')::uuid, sqlc.arg('role'
 ON CONFLICT (user_id, project_id) DO UPDATE SET role = excluded.role;
 
 -- name: DeleteExpiredInvites :execrows
+-- Only ever removes unredeemed rows (redeemed_at IS NULL): a redeemed
+-- invite past its original expires_at is not "expired" in any sense that
+-- matters (it already did its job and MarkInviteRedeemed's own WHERE
+-- clause makes it unreachable a second time regardless), and deleting it
+-- would erase who created an account or a membership grant and when —
+-- exactly the audit trail RevokeInvite above is careful to preserve too.
 DELETE FROM invites WHERE redeemed_at IS NULL AND expires_at <= now();

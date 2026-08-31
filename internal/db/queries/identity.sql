@@ -104,3 +104,46 @@ ON CONFLICT (user_id, project_id) DO UPDATE SET role = excluded.role;
 -- would erase who created an account or a membership grant and when —
 -- exactly the audit trail RevokeInvite above is careful to preserve too.
 DELETE FROM invites WHERE redeemed_at IS NULL AND expires_at <= now();
+
+-- name: CreateAPIToken :one
+INSERT INTO api_tokens (token_hash, project_id, user_id, label)
+VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('project_id')::uuid,
+        sqlc.arg('user_id')::uuid, sqlc.arg('label')::text)
+RETURNING *;
+
+-- name: GetLiveAPIToken :one
+SELECT * FROM api_tokens
+WHERE token_hash = sqlc.arg('token_hash')::bytea AND revoked_at IS NULL;
+
+-- name: TouchAPIToken :exec
+-- Throttled: this runs on every authenticated agent request, so an
+-- unconditional UPDATE would take a row lock on the hot path for no
+-- observable benefit. Only write when the existing timestamp is missing or
+-- more than five minutes stale. An UPDATE whose WHERE clause matches no
+-- row takes no row lock at all, so the common case (touched within the
+-- last five minutes) costs a statement round trip but no lock contention.
+UPDATE api_tokens SET last_used_at = now()
+WHERE id = sqlc.arg('id')::uuid
+  AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes');
+
+-- name: RevokeAPIToken :exec
+-- Scoped to project_id as well as id: revoking an id that exists but
+-- belongs to a different project, like revoking an unknown or
+-- already-revoked id, is a no-op rather than an error — the caller's goal
+-- (no live token under this id in this project) is already satisfied, the
+-- same convention RevokeSession and RevokeInvite already establish. This
+-- also means the project scope of the caller is enforced by the query
+-- itself, not by a separate ownership check the caller could forget.
+UPDATE api_tokens SET revoked_at = now()
+WHERE id = sqlc.arg('id')::uuid AND project_id = sqlc.arg('project_id')::uuid
+  AND revoked_at IS NULL;
+
+-- name: ListAPITokens :many
+-- token_hash is deliberately not selected: this query backs an operator
+-- listing (ListAPITokens in tokens.go), and the hash of a bearer
+-- credential has no reason to leave the database even in a column nothing
+-- currently renders.
+SELECT id, project_id, user_id, label, created_at, last_used_at, revoked_at
+FROM api_tokens
+WHERE project_id = sqlc.arg('project_id')::uuid
+ORDER BY created_at DESC;

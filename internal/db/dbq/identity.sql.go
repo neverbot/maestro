@@ -23,6 +23,41 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createAPIToken = `-- name: CreateAPIToken :one
+INSERT INTO api_tokens (token_hash, project_id, user_id, label)
+VALUES ($1::bytea, $2::uuid,
+        $3::uuid, $4::text)
+RETURNING id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at
+`
+
+type CreateAPITokenParams struct {
+	TokenHash []byte
+	ProjectID uuid.UUID
+	UserID    uuid.UUID
+	Label     string
+}
+
+func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error) {
+	row := q.db.QueryRow(ctx, createAPIToken,
+		arg.TokenHash,
+		arg.ProjectID,
+		arg.UserID,
+		arg.Label,
+	)
+	var i ApiToken
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.ProjectID,
+		&i.UserID,
+		&i.Label,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const createInvite = `-- name: CreateInvite :one
 INSERT INTO invites (token_hash, email, project_id, role, created_by, expires_at)
 VALUES ($1::bytea, $2::text,
@@ -209,6 +244,27 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (I
 	return i, err
 }
 
+const getLiveAPIToken = `-- name: GetLiveAPIToken :one
+SELECT id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at FROM api_tokens
+WHERE token_hash = $1::bytea AND revoked_at IS NULL
+`
+
+func (q *Queries) GetLiveAPIToken(ctx context.Context, tokenHash []byte) (ApiToken, error) {
+	row := q.db.QueryRow(ctx, getLiveAPIToken, tokenHash)
+	var i ApiToken
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.ProjectID,
+		&i.UserID,
+		&i.Label,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getLiveInvite = `-- name: GetLiveInvite :one
 SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites
 WHERE token_hash = $1::bytea
@@ -308,6 +364,55 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const listAPITokens = `-- name: ListAPITokens :many
+SELECT id, project_id, user_id, label, created_at, last_used_at, revoked_at
+FROM api_tokens
+WHERE project_id = $1::uuid
+ORDER BY created_at DESC
+`
+
+type ListAPITokensRow struct {
+	ID         uuid.UUID
+	ProjectID  uuid.UUID
+	UserID     uuid.UUID
+	Label      string
+	CreatedAt  pgtype.Timestamptz
+	LastUsedAt pgtype.Timestamptz
+	RevokedAt  pgtype.Timestamptz
+}
+
+// token_hash is deliberately not selected: this query backs an operator
+// listing (ListAPITokens in tokens.go), and the hash of a bearer
+// credential has no reason to leave the database even in a column nothing
+// currently renders.
+func (q *Queries) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]ListAPITokensRow, error) {
+	rows, err := q.db.Query(ctx, listAPITokens, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAPITokensRow
+	for rows.Next() {
+		var i ListAPITokensRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.UserID,
+			&i.Label,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOutstandingInvites = `-- name: ListOutstandingInvites :many
 SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC
 `
@@ -368,6 +473,29 @@ func (q *Queries) MarkInviteRedeemed(ctx context.Context, arg MarkInviteRedeemed
 	return result.RowsAffected(), nil
 }
 
+const revokeAPIToken = `-- name: RevokeAPIToken :exec
+UPDATE api_tokens SET revoked_at = now()
+WHERE id = $1::uuid AND project_id = $2::uuid
+  AND revoked_at IS NULL
+`
+
+type RevokeAPITokenParams struct {
+	ID        uuid.UUID
+	ProjectID uuid.UUID
+}
+
+// Scoped to project_id as well as id: revoking an id that exists but
+// belongs to a different project, like revoking an unknown or
+// already-revoked id, is a no-op rather than an error — the caller's goal
+// (no live token under this id in this project) is already satisfied, the
+// same convention RevokeSession and RevokeInvite already establish. This
+// also means the project scope of the caller is enforced by the query
+// itself, not by a separate ownership check the caller could forget.
+func (q *Queries) RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) error {
+	_, err := q.db.Exec(ctx, revokeAPIToken, arg.ID, arg.ProjectID)
+	return err
+}
+
 const revokeInvite = `-- name: RevokeInvite :exec
 UPDATE invites SET expires_at = now()
 WHERE id = $1::uuid AND redeemed_at IS NULL
@@ -381,6 +509,23 @@ WHERE id = $1::uuid AND redeemed_at IS NULL
 // cannot rewrite a real redemption's or an earlier revocation's expires_at.
 func (q *Queries) RevokeInvite(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeInvite, id)
+	return err
+}
+
+const touchAPIToken = `-- name: TouchAPIToken :exec
+UPDATE api_tokens SET last_used_at = now()
+WHERE id = $1::uuid
+  AND (last_used_at IS NULL OR last_used_at < now() - interval '5 minutes')
+`
+
+// Throttled: this runs on every authenticated agent request, so an
+// unconditional UPDATE would take a row lock on the hot path for no
+// observable benefit. Only write when the existing timestamp is missing or
+// more than five minutes stale. An UPDATE whose WHERE clause matches no
+// row takes no row lock at all, so the common case (touched within the
+// last five minutes) costs a statement round trip but no lock contention.
+func (q *Queries) TouchAPIToken(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, touchAPIToken, id)
 	return err
 }
 

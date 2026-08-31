@@ -13,12 +13,25 @@ import (
 	"github.com/neverbot/maestro/internal/config"
 )
 
-// maxDecodedMemoryKiB bounds the memory cost accepted from an encoded hash.
-// argon2.IDKey allocates memory proportional to this value, so without a
-// ceiling a corrupted or maliciously crafted hash string could make
-// VerifyPassword allocate an unbounded amount of memory before any password
-// comparison happens. 4 GiB is far above any sane production setting.
-const maxDecodedMemoryKiB = 4 * 1024 * 1024
+// maxDecodedMemoryKiB is a sanity bound on the "m=" cost parameter accepted
+// from an encoded hash, not a tuning knob: every hash this system produces
+// uses the configured production cost (64 MiB), so 1 GiB is already far more
+// headroom than any legitimate hash ever needs. argon2.IDKey allocates memory
+// proportional to this value, so without a ceiling a corrupted or
+// maliciously crafted hash string could make VerifyPassword allocate
+// gigabytes before any password comparison happens.
+const maxDecodedMemoryKiB = 1024 * 1024
+
+// maxDecodedSaltLen and maxDecodedKeyLen bound the decoded lengths of the
+// salt and key embedded in an encoded hash. Real hashes use 16 and 32 bytes
+// respectively; these ceilings are generous multiples of that, kept only to
+// stop a crafted hash with an oversized base64 field from forcing a large
+// allocation (the key length in particular is passed straight through as
+// argon2.IDKey's keyLen) before any password comparison happens.
+const (
+	maxDecodedSaltLen = 256
+	maxDecodedKeyLen  = 256
+)
 
 // HashPassword returns an encoded argon2id hash, salt included.
 func HashPassword(password string, p config.Argon2Params) (string, error) {
@@ -78,12 +91,26 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("malformed salt: %w", err)
 	}
+	if len(salt) == 0 {
+		return false, fmt.Errorf("malformed salt: empty")
+	}
+	if len(salt) > maxDecodedSaltLen {
+		return false, fmt.Errorf("malformed salt: %d bytes exceeds the maximum of %d", len(salt), maxDecodedSaltLen)
+	}
 	want, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return false, fmt.Errorf("malformed key: %w", err)
 	}
+	// An empty key is not just malformed input: argon2.IDKey with keyLen=0
+	// returns a zero-length slice, and subtle.ConstantTimeCompare reports two
+	// zero-length slices as equal, so without this check any password would
+	// verify against a hash string ending in "$<salt>$" — an authentication
+	// bypass, not merely a robustness issue.
 	if len(want) == 0 {
 		return false, fmt.Errorf("malformed key: empty")
+	}
+	if len(want) > maxDecodedKeyLen {
+		return false, fmt.Errorf("malformed key: %d bytes exceeds the maximum of %d", len(want), maxDecodedKeyLen)
 	}
 
 	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))

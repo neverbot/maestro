@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -86,5 +87,60 @@ func TestVerifyRejectsUnsupportedVersion(t *testing.T) {
 	encoded := "$argon2id$v=16$m=8192,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	if _, err := VerifyPassword("x", encoded); err == nil {
 		t.Fatal("expected an error for an unsupported argon2 version")
+	}
+}
+
+// TestVerifyRejectsEmptyKey guards against an authentication bypass: without
+// this check, a hash string ending in "$<salt>$" decodes to a zero-length
+// key, argon2.IDKey with keyLen=0 returns a zero-length slice, and
+// subtle.ConstantTimeCompare reports two zero-length slices as equal, so
+// every password would verify against such a row.
+func TestVerifyRejectsEmptyKey(t *testing.T) {
+	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
+	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$"
+
+	ok, err := VerifyPassword("literally anything", encoded)
+	if err == nil {
+		t.Fatal("expected an error for an empty key")
+	}
+	if ok {
+		t.Fatal("a password verified against a hash with an empty key")
+	}
+}
+
+// TestVerifyRejectsEmptySalt guards against the same class of malformed
+// input on the salt field, for symmetry with the empty-key check.
+func TestVerifyRejectsEmptySalt(t *testing.T) {
+	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
+	encoded := "$argon2id$v=19$m=8192,t=1,p=1$$" + key
+
+	if _, err := VerifyPassword("x", encoded); err == nil {
+		t.Fatal("expected an error for an empty salt")
+	}
+}
+
+// TestVerifyRejectsOversizedSalt and TestVerifyRejectsOversizedKey guard
+// against a resource-exhaustion vector on the two axes adjacent to the "m="
+// check: without a ceiling, a crafted hash with an oversized base64 salt or
+// key field forces a correspondingly large allocation before any comparison
+// happens (the key length in particular is passed straight through as
+// argon2.IDKey's keyLen).
+func TestVerifyRejectsOversizedSalt(t *testing.T) {
+	salt := base64.RawStdEncoding.EncodeToString(make([]byte, maxDecodedSaltLen+1))
+	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
+	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
+
+	if _, err := VerifyPassword("x", encoded); err == nil {
+		t.Fatal("expected an error for an oversized salt")
+	}
+}
+
+func TestVerifyRejectsOversizedKey(t *testing.T) {
+	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
+	key := base64.RawStdEncoding.EncodeToString(make([]byte, maxDecodedKeyLen+1))
+	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
+
+	if _, err := VerifyPassword("x", encoded); err == nil {
+		t.Fatal("expected an error for an oversized key")
 	}
 }

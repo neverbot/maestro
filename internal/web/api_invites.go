@@ -42,20 +42,48 @@ func requireAdminCaller(w http.ResponseWriter, caller Caller) bool {
 	return true
 }
 
-// inviteResponse is the wire shape of one outstanding invite, shared by
-// every listing and creation response in this file. It carries exactly
-// what InviteSummary carries — never a token or a hash: unlike
-// api_tokens.go's apiTokenResponse, an invite has no hint field at all
-// (identity.InviteSummary's own doc comment says so), so once the clear
-// value in a creation response is gone, it is gone; the only remedy for a
-// lost link is to revoke this row and mint a new one.
+// inviteResponse is the wire shape of one outstanding invite — the single
+// shape every listing and creation response in this file builds from, by
+// embedding, never by hand-writing a second map that happens to carry the
+// same fields. A quality review caught exactly that drift on this task's
+// first pass: writeCreatedInvite built its own map literal instead of
+// using this type, and it observably differed (the map always emitted
+// "email", "project_id" and "role" as null where this type's `omitempty`
+// tags drop them) — the exact divergence between the two surfaces this
+// type exists to prevent, arriving inside a single file. See
+// writeCreatedInvite below for how creation now reuses this type instead
+// of re-declaring its fields.
+//
+// It carries what InviteSummary carries, including CreatedBy — never a
+// token or a hash: unlike api_tokens.go's apiTokenResponse, an invite has
+// no hint field at all (identity.InviteSummary's own doc comment says
+// so), so once the clear value in a creation response is gone, it is
+// gone; the only remedy for a lost link is to revoke this row (findable
+// by CreatedBy, on a game with several owners) and mint a new one.
+//
+// Revoked mirrors CreatedBy in why it exists: RevokeInvite and
+// RevokeProjectInvite both revoke by setting expires_at to now() rather
+// than deleting the row (their own doc comments explain why — the audit
+// trail), which means a revoked invite keeps appearing in this listing,
+// indistinguishable from a still-live one by eye, until
+// PruneExpiredInvites next runs. Revoked is computed here, not stored: it
+// is true exactly when ExpiresAt is no longer in the future, which is
+// also true of an invite that simply ran out its own TTL rather than
+// being revoked — RevokeInvite's own mechanism makes those two states
+// identical at the data level (see that method's doc comment), so this
+// field answers "is this row still redeemable", not "did an admin
+// deliberately pull it", the same question RedeemInvite itself answers
+// with ErrInviteExpired for both cases (see this task's plan corrections
+// for why that response is left undifferentiated on purpose).
 type inviteResponse struct {
 	ID        uuid.UUID  `json:"id"`
 	Email     *string    `json:"email,omitempty"`
 	ProjectID *uuid.UUID `json:"project_id,omitempty"`
 	Role      *string    `json:"role,omitempty"`
+	CreatedBy *uuid.UUID `json:"created_by,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt time.Time  `json:"expires_at"`
+	Revoked   bool       `json:"revoked"`
 }
 
 func inviteResponseFrom(inv identity.InviteSummary) inviteResponse {
@@ -64,8 +92,10 @@ func inviteResponseFrom(inv identity.InviteSummary) inviteResponse {
 		Email:     inv.Email,
 		ProjectID: inv.ProjectID,
 		Role:      inv.Role,
+		CreatedBy: inv.CreatedBy,
 		CreatedAt: inv.CreatedAt,
 		ExpiresAt: inv.ExpiresAt,
+		Revoked:   !inv.ExpiresAt.After(time.Now()),
 	}
 }
 
@@ -83,18 +113,24 @@ func redeemPath(token string) string {
 	return "/login#invite=" + token
 }
 
+// createdInviteResponse is a creation response: everything
+// inviteResponse already says about the row, plus the clear token and
+// its redemption path, shown exactly once. Embedding inviteResponse
+// (rather than a second, hand-written field list) is the fix for the
+// drift this file shipped with on its first pass — see inviteResponse's
+// own doc comment.
+type createdInviteResponse struct {
+	inviteResponse
+	Token      string `json:"token"`
+	RedeemPath string `json:"redeem_path"`
+}
+
 func writeCreatedInvite(w http.ResponseWriter, token string, summary identity.InviteSummary) {
-	payload := map[string]any{
-		"id":          summary.ID,
-		"email":       summary.Email,
-		"project_id":  summary.ProjectID,
-		"role":        summary.Role,
-		"created_at":  summary.CreatedAt,
-		"expires_at":  summary.ExpiresAt,
-		"token":       token,
-		"redeem_path": redeemPath(token),
-	}
-	writeJSON(w, http.StatusCreated, payload)
+	writeJSON(w, http.StatusCreated, createdInviteResponse{
+		inviteResponse: inviteResponseFrom(summary),
+		Token:          token,
+		RedeemPath:     redeemPath(token),
+	})
 }
 
 func writeCreateInviteError(w http.ResponseWriter, r *http.Request, err error) {
@@ -205,6 +241,29 @@ func (s *Server) handleRevokeInstanceInvite(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// requireProjectOwner combines requireHumanCaller with the owner-only
+// gate shared by handleCreateProjectInvite, handleListProjectInvites and
+// handleRevokeProjectInvite. A quality review found the human-caller
+// check and the role comparison repeated verbatim across all three, with
+// three slightly different messages the only thing that varied — three
+// edit sites for one gate, the exact drift risk inviteResponse's own doc
+// comment names for the response shape above. action names the specific
+// thing refused ("invite someone into a game", "list this game's
+// invites", "revoke this game's invites") so each call site keeps its
+// own wording; the check itself is now written once. See
+// handleCreateProjectInvite's own doc comment for why owner, not
+// editor-or-owner the way handleCreateToken is gated.
+func requireProjectOwner(w http.ResponseWriter, caller Caller, scope ProjectScope, action string) bool {
+	if !requireHumanCaller(w, caller) {
+		return false
+	}
+	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may "+action)
+		return false
+	}
+	return true
+}
+
 // createProjectInviteRequest is the body POST /api/games/{game}/invites
 // accepts. There is no project_id field: the game comes from the URL,
 // resolved by requireProject before this handler ever runs, the same
@@ -231,11 +290,7 @@ type createProjectInviteRequest struct {
 // to get wrong, because every request this handler accepts already
 // required an owner regardless of which role it names.
 func (s *Server) handleCreateProjectInvite(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !requireHumanCaller(w, caller) {
-		return
-	}
-	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may invite someone into a game")
+	if !requireProjectOwner(w, caller, scope, "invite someone into a game") {
 		return
 	}
 	var req createProjectInviteRequest
@@ -270,11 +325,7 @@ func (s *Server) handleCreateProjectInvite(w http.ResponseWriter, r *http.Reques
 // handleListTokens/handleListMembers' owner-only siblings in what it
 // exposes about the game's future, not its present.
 func (s *Server) handleListProjectInvites(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !requireHumanCaller(w, caller) {
-		return
-	}
-	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may list this game's invites")
+	if !requireProjectOwner(w, caller, scope, "list this game's invites") {
 		return
 	}
 	rows, err := s.opts.Identity.ListOutstandingInvitesForProject(r.Context(), scope.ProjectID)
@@ -298,11 +349,7 @@ func (s *Server) handleListProjectInvites(w http.ResponseWriter, r *http.Request
 // identical reason: distinguishing the cases would let an owner of one
 // game probe whether some other id belongs to a different one.
 func (s *Server) handleRevokeProjectInvite(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !requireHumanCaller(w, caller) {
-		return
-	}
-	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may revoke this game's invites")
+	if !requireProjectOwner(w, caller, scope, "revoke this game's invites") {
 		return
 	}
 	inviteID, err := uuid.Parse(r.PathValue("invite"))

@@ -419,6 +419,117 @@ func TestOwnerCanInviteAsOwner(t *testing.T) {
 	}
 }
 
+// TestProjectInviteListingAttributesCreatorAndFlagsRevoked pins the two
+// gaps a review found in the listing: with two owners on the same game,
+// a pending owner-role invite must be attributable to whichever owner
+// minted it (created_by), and a revoked-but-not-yet-pruned row must not
+// read the same as a still-live one (revoked) — RevokeProjectInvite only
+// ever pushes expires_at into the past, so without an explicit flag the
+// two are indistinguishable in the listing until the next prune.
+func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+	founder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "founder@studio.com", DisplayName: "Founder", Password: "password12345"})
+	cofounder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cofounder@studio.com", DisplayName: "Cofounder", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", founder.ID)
+	if _, err := projSvc.SetRole(ctx, cofounder.ID, project.ID, "owner"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	founderCookie := loginAs(t, srv, "founder@studio.com")
+	cofounderCookie := loginAs(t, srv, "cofounder@studio.com")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"email":"third@studio.com","role":"owner"}`))
+	createReq.AddCookie(founderCookie)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	srv.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d, want 201: %s", createRec.Code, createRec.Body.String())
+	}
+	var created struct {
+		ID        string `json:"id"`
+		CreatedBy string `json:"created_by"`
+		Revoked   bool   `json:"revoked"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if created.CreatedBy != founder.ID.String() {
+		t.Fatalf("created_by = %q, want founder %s", created.CreatedBy, founder.ID)
+	}
+	if created.Revoked {
+		t.Fatal("a freshly minted invite reported revoked = true")
+	}
+
+	// The co-founder — who did not mint it — can still attribute it, and
+	// sees it as live.
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq.AddCookie(cofounderCookie)
+	listRec := httptest.NewRecorder()
+	srv.ServeHTTP(listRec, listReq)
+	var listed struct {
+		Invites []struct {
+			ID        string `json:"id"`
+			CreatedBy string `json:"created_by"`
+			Revoked   bool   `json:"revoked"`
+		} `json:"invites"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	found := false
+	for _, inv := range listed.Invites {
+		if inv.ID == created.ID {
+			found = true
+			if inv.CreatedBy != founder.ID.String() {
+				t.Fatalf("listed created_by = %q, want founder %s", inv.CreatedBy, founder.ID)
+			}
+			if inv.Revoked {
+				t.Fatal("listed a live invite as revoked")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("listing did not include %q", created.ID)
+	}
+
+	// The co-founder revokes it; it must now list as revoked, not
+	// disappear and not read as still live.
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/invites/"+created.ID, nil)
+	revokeReq.AddCookie(cofounderCookie)
+	revokeRec := httptest.NewRecorder()
+	srv.ServeHTTP(revokeRec, revokeReq)
+	if revokeRec.Code != http.StatusNoContent {
+		t.Fatalf("revoke: status = %d, want 204: %s", revokeRec.Code, revokeRec.Body.String())
+	}
+
+	listRec2 := httptest.NewRecorder()
+	listReq2 := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq2.AddCookie(founderCookie)
+	srv.ServeHTTP(listRec2, listReq2)
+	var listedAfter struct {
+		Invites []struct {
+			ID      string `json:"id"`
+			Revoked bool   `json:"revoked"`
+		} `json:"invites"`
+	}
+	if err := json.NewDecoder(listRec2.Body).Decode(&listedAfter); err != nil {
+		t.Fatalf("decode list after revoke: %v", err)
+	}
+	found = false
+	for _, inv := range listedAfter.Invites {
+		if inv.ID == created.ID {
+			found = true
+			if !inv.Revoked {
+				t.Fatal("revoked invite still listed as revoked = false")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("revoked invite disappeared from the listing instead of showing revoked = true")
+	}
+}
+
 // TestRevokingAnUnknownOrForeignProjectInviteIsANoop mirrors
 // TestRevokingAnUnknownOrForeignTokenIsANoop for invites: an id that does
 // not exist, or belongs to a different game, is a silent 204, never a
@@ -457,22 +568,49 @@ func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 // TestNonMemberCannotSeeOrTouchProjectInvites mirrors
 // TestNonMemberCannotDeleteGameAndLearnsNothing: a caller with no
 // standing at all gets the same 403 as any other project-scoped route,
-// not a 404 that would confirm the game id is real.
+// not a 404 that would confirm the game id is real. "See" and "touch"
+// are both exercised, not just the read: a review caught the original
+// version of this test naming both in its title while only ever sending
+// the GET, which left create and revoke's own non-member handling
+// unpinned.
 func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	outsider, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "outsider@studio.com", DisplayName: "Outsider", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "outsider@studio.com", DisplayName: "Outsider", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	ownerID := owner.ID
+	_, existing, err := ids.CreateInvite(ctx, identity.InviteRequest{ProjectID: &project.ID, Role: "viewer", CreatedBy: &ownerID})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
 	cookie := loginAs(t, srv, "outsider@studio.com")
-	_ = outsider
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
-	req.AddCookie(cookie)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq.AddCookie(cookie)
+	listRec := httptest.NewRecorder()
+	srv.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusForbidden {
+		t.Fatalf("list: status = %d, want 403: %s", listRec.Code, listRec.Body.String())
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"role":"viewer"}`))
+	createReq.AddCookie(cookie)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	srv.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusForbidden {
+		t.Fatalf("create: status = %d, want 403: %s", createRec.Code, createRec.Body.String())
+	}
+
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/invites/"+existing.ID.String(), nil)
+	revokeReq.AddCookie(cookie)
+	revokeRec := httptest.NewRecorder()
+	srv.ServeHTTP(revokeRec, revokeReq)
+	if revokeRec.Code != http.StatusForbidden {
+		t.Fatalf("revoke: status = %d, want 403: %s", revokeRec.Code, revokeRec.Body.String())
 	}
 }
 

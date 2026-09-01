@@ -102,6 +102,18 @@ type Server struct {
 	loginIPLimiter    *identity.Limiter
 	registerIPLimiter *identity.Limiter
 
+	// changePasswordLimiter guards PATCH /api/me/password, keyed on the
+	// caller's own user id rather than an IP. Unlike every limiter above,
+	// this endpoint is only ever reached by an already-authenticated
+	// caller — caller.UserID comes from a resolved session, not an
+	// attacker-supplied claim — so there is no "attacker picks their own
+	// key" concern a second, IP-keyed budget would need to close (see
+	// handleChangePassword's own comment). One budget per account is
+	// enough: every guess against this endpoint already spends the
+	// budget tied to the one account being attacked, regardless of
+	// origin.
+	changePasswordLimiter *identity.Limiter
+
 	// registeredPatterns and projectScopedPatterns exist for exactly one
 	// reason: TestEveryGameScopedRouteGoesThroughRequireProject
 	// (server_test.go). registeredPatterns records every pattern ever
@@ -165,15 +177,16 @@ func NewServer(opts Options) *Server {
 	}
 
 	s := &Server{
-		mux:                  http.NewServeMux(),
-		opts:                 opts,
-		loginLimiter:         identity.NewLimiter(10, time.Minute),
-		loginIPLimiter:       identity.NewLimiter(40, time.Minute),
-		registerIPLimiter:    identity.NewLimiter(10, time.Minute),
-		hub:                  hub,
-		sseMaxLifetime:       sseMaxLifetime,
-		sseHeartbeatInterval: sseHeartbeatIntervalOpt,
-		closing:              make(chan struct{}),
+		mux:                   http.NewServeMux(),
+		opts:                  opts,
+		loginLimiter:          identity.NewLimiter(10, time.Minute),
+		loginIPLimiter:        identity.NewLimiter(40, time.Minute),
+		registerIPLimiter:     identity.NewLimiter(10, time.Minute),
+		changePasswordLimiter: identity.NewLimiter(10, time.Minute),
+		hub:                   hub,
+		sseMaxLifetime:        sseMaxLifetime,
+		sseHeartbeatInterval:  sseHeartbeatIntervalOpt,
+		closing:               make(chan struct{}),
 	}
 	s.routeFunc("GET /healthz", s.handleHealthz)
 	s.route("GET /version", requireCaller(s.handleVersion))
@@ -203,6 +216,8 @@ func NewServer(opts Options) *Server {
 	s.route("POST /api/invites", requireCaller(s.handleCreateInstanceInvite))
 	s.route("GET /api/invites", requireCaller(s.handleListInstanceInvites))
 	s.route("DELETE /api/invites/{invite}", requireCaller(s.handleRevokeInstanceInvite))
+	s.route("PATCH /api/me/password", requireCaller(s.handleChangePassword))
+	s.route("PATCH /api/users/{user}/admin", requireCaller(s.handleSetAdmin))
 	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)
 	s.registerProjectRoute("PATCH /api/games/{game}/members/{user}", s.handleChangeRole)
 	s.registerProjectRoute("DELETE /api/games/{game}/members/{user}", s.handleRemoveMember)

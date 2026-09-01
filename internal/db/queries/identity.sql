@@ -35,6 +35,34 @@ SELECT count(*) FROM invites WHERE project_id = sqlc.arg('project_id')::uuid;
 UPDATE users SET password_hash = sqlc.arg('password_hash')::text
 WHERE id = sqlc.arg('id')::uuid;
 
+-- name: UpdateUserIsAdmin :exec
+UPDATE users SET is_admin = sqlc.arg('is_admin')::boolean
+WHERE id = sqlc.arg('id')::uuid;
+
+-- name: CountAdminsForUpdate :one
+-- Locks every admin user row before counting, mirroring
+-- CountOwnersForUpdate's own reasoning (projects.sql) for the identical
+-- shape: identity.SetAdmin calls this from inside its own transaction
+-- before ever demoting an admin, so two concurrent attempts to demote
+-- the instance's last two admins serialize against each other instead
+-- of racing to zero. Under READ COMMITTED, a transaction that blocks on
+-- this FOR UPDATE and then unblocks re-checks the WHERE clause against
+-- the row's latest committed version, so an admin just demoted by the
+-- transaction that held the lock is correctly excluded from the count
+-- the next transaction sees — same mechanism CountOwnersForUpdate's own
+-- comment describes.
+--
+-- Unlike CountOwnersForUpdate, there is no schema-level constraint
+-- trigger backing this invariant: is_admin is a single, unpartitioned
+-- boolean column on users, not a per-project membership row a migration
+-- can reason about the way memberships.role can. This lock is therefore
+-- the sole thing enforcing "at least one admin remains", not defence in
+-- depth for a second, independent mechanism the way its project-scoped
+-- counterpart is.
+SELECT count(*) FROM (
+    SELECT 1 FROM users WHERE is_admin = true FOR UPDATE
+) sub;
+
 -- name: CreateSession :exec
 INSERT INTO sessions (token_hash, user_id, expires_at)
 VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('user_id')::uuid, sqlc.arg('expires_at')::timestamptz);

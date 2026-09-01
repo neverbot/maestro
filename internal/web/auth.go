@@ -43,6 +43,8 @@ const (
 	errCodeLastOwner      = "last_owner"
 	errCodeLabelInvalid   = "label_invalid"
 	errCodeInviteInvalid  = "invite_request_invalid"
+	errCodeLastAdmin      = "last_admin"
+	errCodeRateLimited    = "rate_limited"
 )
 
 // Caller is the authenticated principal of a request. It has exactly two

@@ -144,7 +144,12 @@ func TestRevokeUnknownSessionIsANoOp(t *testing.T) {
 	}
 }
 
-func TestRevokeAllSessions(t *testing.T) {
+// TestChangePasswordRevokesEverySessionOfTheAccount pins ChangePassword's
+// own multi-session claim directly: a designer with several open tabs
+// (several live sessions) who rotates their password loses every one of
+// them, not just the one TestChangePasswordRotatesHashAndRevokesSessions
+// already covers.
+func TestChangePasswordRevokesEverySessionOfTheAccount(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -167,8 +172,8 @@ func TestRevokeAllSessions(t *testing.T) {
 		t.Fatalf("IssueSession: %v", err)
 	}
 
-	if err := svc.RevokeAllSessions(ctx, user.ID); err != nil {
-		t.Fatalf("RevokeAllSessions: %v", err)
+	if err := svc.ChangePassword(ctx, user.ID, "newpassword12345"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
 	}
 
 	if _, _, err := svc.UserForSession(ctx, tokenA); !errors.Is(err, identity.ErrNoSession) {
@@ -179,7 +184,10 @@ func TestRevokeAllSessions(t *testing.T) {
 	}
 }
 
-func TestRevokeAllSessionsLeavesOtherUsersAlone(t *testing.T) {
+// TestChangePasswordLeavesOtherUsersSessionsAlone pins the other half:
+// ChangePassword's DeleteSessionsForUser is scoped to one user, not a
+// blanket wipe.
+func TestChangePasswordLeavesOtherUsersSessionsAlone(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -206,8 +214,8 @@ func TestRevokeAllSessionsLeavesOtherUsersAlone(t *testing.T) {
 		t.Fatalf("IssueSession B: %v", err)
 	}
 
-	if err := svc.RevokeAllSessions(ctx, userA.ID); err != nil {
-		t.Fatalf("RevokeAllSessions: %v", err)
+	if err := svc.ChangePassword(ctx, userA.ID, "newpassword12345"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
 	}
 
 	if _, _, err := svc.UserForSession(ctx, tokenA); !errors.Is(err, identity.ErrNoSession) {
@@ -403,6 +411,92 @@ func TestChangePasswordRejectsWeakPassword(t *testing.T) {
 	}
 
 	if err := svc.ChangePassword(ctx, user.ID, "short"); !errors.Is(err, identity.ErrPasswordInvalid) {
+		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
+	}
+}
+
+func TestChangeOwnPasswordSucceedsAndRevokesSessions(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email:       "self-rotate@studio.com",
+		DisplayName: "Self Rotate",
+		Password:    "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	if err := svc.ChangeOwnPassword(ctx, user.ID, "password12345", "newpassword12345"); err != nil {
+		t.Fatalf("ChangeOwnPassword: %v", err)
+	}
+
+	if _, err := svc.Authenticate(ctx, "self-rotate@studio.com", "newpassword12345"); err != nil {
+		t.Fatalf("new password should authenticate: %v", err)
+	}
+	if _, _, err := svc.UserForSession(ctx, token); !errors.Is(err, identity.ErrNoSession) {
+		t.Fatalf("session issued before ChangeOwnPassword should be revoked, err = %v", err)
+	}
+}
+
+// TestChangeOwnPasswordRejectsWrongCurrentPassword pins this method's
+// entire reason for existing: a caller who does not know the account's
+// actual password — a live session with a stolen cookie, say — must not
+// be able to rotate it, even though the session itself already
+// authenticates the request.
+func TestChangeOwnPasswordRejectsWrongCurrentPassword(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email:       "stolen-session@studio.com",
+		DisplayName: "Stolen Session",
+		Password:    "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	if err := svc.ChangeOwnPassword(ctx, user.ID, "wrongpassword", "newpassword12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+
+	// The password must be unchanged and the session must still be live —
+	// a rejected attempt must have no side effect at all.
+	if _, err := svc.Authenticate(ctx, "stolen-session@studio.com", "password12345"); err != nil {
+		t.Fatalf("original password should still authenticate: %v", err)
+	}
+	if _, _, err := svc.UserForSession(ctx, token); err != nil {
+		t.Fatalf("session must survive a rejected password-change attempt, got %v", err)
+	}
+}
+
+func TestChangeOwnPasswordRejectsWeakNewPassword(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email:       "weak-new@studio.com",
+		DisplayName: "Weak New",
+		Password:    "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	if err := svc.ChangeOwnPassword(ctx, user.ID, "password12345", "short"); !errors.Is(err, identity.ErrPasswordInvalid) {
 		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
 	}
 }

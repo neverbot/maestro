@@ -30,6 +30,38 @@ func (q *Queries) CountAPITokensForProject(ctx context.Context, projectID uuid.U
 	return count, err
 }
 
+const countAdminsForUpdate = `-- name: CountAdminsForUpdate :one
+SELECT count(*) FROM (
+    SELECT 1 FROM users WHERE is_admin = true FOR UPDATE
+) sub
+`
+
+// Locks every admin user row before counting, mirroring
+// CountOwnersForUpdate's own reasoning (projects.sql) for the identical
+// shape: identity.SetAdmin calls this from inside its own transaction
+// before ever demoting an admin, so two concurrent attempts to demote
+// the instance's last two admins serialize against each other instead
+// of racing to zero. Under READ COMMITTED, a transaction that blocks on
+// this FOR UPDATE and then unblocks re-checks the WHERE clause against
+// the row's latest committed version, so an admin just demoted by the
+// transaction that held the lock is correctly excluded from the count
+// the next transaction sees — same mechanism CountOwnersForUpdate's own
+// comment describes.
+//
+// Unlike CountOwnersForUpdate, there is no schema-level constraint
+// trigger backing this invariant: is_admin is a single, unpartitioned
+// boolean column on users, not a per-project membership row a migration
+// can reason about the way memberships.role can. This lock is therefore
+// the sole thing enforcing "at least one admin remains", not defence in
+// depth for a second, independent mechanism the way its project-scoped
+// counterpart is.
+func (q *Queries) CountAdminsForUpdate(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminsForUpdate)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countInvitesForProject = `-- name: CountInvitesForProject :one
 SELECT count(*) FROM invites WHERE project_id = $1::uuid
 `
@@ -744,6 +776,21 @@ WHERE id = $1::uuid
 // cannot guarantee. Change one, change both.
 func (q *Queries) TouchAPIToken(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, touchAPIToken, id)
+	return err
+}
+
+const updateUserIsAdmin = `-- name: UpdateUserIsAdmin :exec
+UPDATE users SET is_admin = $1::boolean
+WHERE id = $2::uuid
+`
+
+type UpdateUserIsAdminParams struct {
+	IsAdmin bool
+	ID      uuid.UUID
+}
+
+func (q *Queries) UpdateUserIsAdmin(ctx context.Context, arg UpdateUserIsAdminParams) error {
+	_, err := q.db.Exec(ctx, updateUserIsAdmin, arg.IsAdmin, arg.ID)
 	return err
 }
 

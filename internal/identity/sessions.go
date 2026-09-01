@@ -167,16 +167,6 @@ func (s *Service) RevokeSession(ctx context.Context, token string) error {
 	return nil
 }
 
-// RevokeAllSessions drops every session of a user. ChangePassword below is
-// the primary caller; it is also exported directly for anything else that
-// needs to force every device out (an admin-initiated suspension, say).
-func (s *Service) RevokeAllSessions(ctx context.Context, userID uuid.UUID) error {
-	if err := s.q.DeleteSessionsForUser(ctx, userID); err != nil {
-		return fmt.Errorf("delete sessions: %w", err)
-	}
-	return nil
-}
-
 // ChangePassword validates and stores a new password, and revokes every
 // session belonging to the account in the same transaction. Rotating the
 // hash and revoking sessions as two independent calls leaves a window (a
@@ -220,6 +210,56 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, newPassw
 		}
 		return nil
 	})
+}
+
+// ChangeOwnPassword is ChangePassword's self-service counterpart: it
+// verifies currentPassword against the account's own stored hash before
+// ever calling ChangePassword to rotate it. This is what the HTTP layer
+// (POST /api/me/password, api_password.go) calls, and it is the whole
+// answer to "what does this endpoint cost an attacker who has a live
+// session but not the password" — without this check, a stolen session
+// cookie alone would be enough to lock the real owner out permanently
+// (ChangePassword itself revokes every session, including the owner's
+// own, the moment it runs), which is strictly worse than what a stolen
+// session can already do. Requiring the current password first means
+// that exact attacker gains nothing here that session hijacking did not
+// already give them elsewhere, and a designer who suspects their
+// password leaked can still rotate it out from under an attacker who
+// only ever had the cookie.
+//
+// A mismatch reports ErrInvalidCredentials, the same sentinel
+// Authenticate uses for a wrong password — not a distinct
+// "wrong-current-password" error — so the HTTP layer maps both to an
+// identical 401 body. There is no enumeration concern to defend against
+// here the way Authenticate's sentinel-hash trick defends against one
+// for an anonymous caller (the caller already proved who they are via
+// their session), but reusing the same sentinel keeps this file from
+// growing a second "credentials were wrong" vocabulary for no behavioural
+// difference.
+//
+// If targetUserID names no user at all — not expected in practice, since
+// the HTTP layer only ever calls this with the id from an already-
+// resolved session, but not impossible if the account is deleted in the
+// instant between session resolution and this call — this also reports
+// ErrInvalidCredentials rather than a distinct not-found error, for the
+// same reason Authenticate's own unknown-user branch does: there is no
+// caller-visible difference worth drawing between "no such account" and
+// "wrong password" once execution has already reached this method.
+func (s *Service) ChangeOwnPassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	dbUser, err := s.q.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidCredentials
+		}
+		return fmt.Errorf("lookup user: %w", err)
+	}
+
+	ok, verr := s.verify(currentPassword, dbUser.PasswordHash)
+	if verr != nil || !ok {
+		return ErrInvalidCredentials
+	}
+
+	return s.ChangePassword(ctx, userID, newPassword)
 }
 
 // PruneExpiredSessions deletes every session past its expires_at and

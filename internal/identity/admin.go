@@ -31,12 +31,27 @@ var ErrUserNotFound = errors.New("user not found")
 // scheduled job while the process keeps running: POST /api/invites,
 // GET/DELETE /api/invites and this surface itself are all gated on
 // Caller.IsAdmin, and nothing else sets it. The one recovery path this
-// codebase does provide is a restart: BootstrapFirstAdmin (users.go) now
-// re-promotes the account named by FIRST_ADMIN_EMAIL when it already
-// exists without the flag, not only when the instance is empty — see
-// that function's own doc comment. That still requires an operator with
-// access to the process environment, which is already equivalent to
-// database access, so this guard is not defeated by it; it only turns a
+// codebase does provide is a restart, and it recovers both halves of
+// being locked out, not just the flag:
+//
+//   - BootstrapFirstAdmin (users.go) re-promotes the account named by
+//     FIRST_ADMIN_EMAIL when it already exists without the flag, not
+//     only when the instance is empty. This half needs no configuration
+//     beyond FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD and happens on any
+//     restart.
+//   - The same boot also resets that account's password to
+//     FIRST_ADMIN_PASSWORD — the recovery for the other way an admin
+//     becomes unreachable, a forgotten or rotated-away password, which
+//     restoring a flag does nothing for. Task 22 found the flag-only
+//     version was not a working recovery at all for that case. This
+//     half is gated behind its own one-shot opt-in,
+//     FIRST_ADMIN_PASSWORD_RESET, so the standing configuration carries
+//     the credential without the permission to apply it; see
+//     repromoteConfiguredAdmin's own doc comment (users.go) for why.
+//
+// Both still require an operator with access to the process
+// environment, which is already equivalent to database access, so this
+// guard is not defeated by either; together they only turn a
 // break-glass `psql` session into a documented restart, which is why the
 // guard below stays unconditional rather than a default an operator can
 // talk their way past inside a running process.

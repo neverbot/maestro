@@ -1,9 +1,12 @@
 package identity_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -428,8 +431,12 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 		t.Fatalf("IssueSession: %v", err)
 	}
 
-	// Simulate a restart with the same, now-stale, configuration.
-	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+	// Simulate a restart with the same, now-stale, configuration, plus
+	// the FIRST_ADMIN_PASSWORD_RESET opt-in an operator sets for exactly
+	// this one boot.
+	resetCfg := cfg
+	resetCfg.FirstAdminPasswordReset = true
+	if err := identity.New(pool, resetCfg).BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("second BootstrapFirstAdmin: %v", err)
 	}
 
@@ -470,8 +477,13 @@ func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testin
 		t.Fatalf("IssueSession: %v", err)
 	}
 
-	// Restart with the exact same, already-correct configuration.
-	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+	// Restart with the exact same, already-correct configuration — and
+	// with the opt-in set, since the verify-then-reset check lives
+	// inside the opted-in path and a redundant reset must still be a
+	// no-op.
+	resetCfg := cfg
+	resetCfg.FirstAdminPasswordReset = true
+	if err := identity.New(pool, resetCfg).BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("second BootstrapFirstAdmin: %v", err)
 	}
 
@@ -531,5 +543,221 @@ func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *tes
 	}
 	if !admin.IsAdmin {
 		t.Fatal("configured admin should still be an admin")
+	}
+}
+
+// TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn pins
+// the gate Task 22's own review demanded after proving live what the
+// unconditional reset cost. FIRST_ADMIN_PASSWORD alone is a bootstrap
+// seed, nothing more: an admin who deliberately rotates their password
+// keeps it across every ordinary restart of an instance that leaves
+// FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD set — as compose.yml ships and
+// the readme normalises — and keeps their sessions too.
+func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if err := svc.ChangeOwnPassword(ctx, admin.ID, "password12345", "a-rotated-password"); err != nil {
+		t.Fatalf("ChangeOwnPassword: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	// An ordinary restart: same configuration, no opt-in.
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("second BootstrapFirstAdmin: %v", err)
+	}
+
+	if _, err := svc.Authenticate(ctx, "admin@studio.com", "a-rotated-password"); err != nil {
+		t.Fatalf("a deliberately rotated password must survive an ordinary restart: %v", err)
+	}
+	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
+		t.Fatalf("the configured password must stay inert without the opt-in, err = %v", err)
+	}
+	if _, _, err := svc.UserForSession(ctx, token); err != nil {
+		t.Fatalf("a session predating an ordinary restart must survive it: %v", err)
+	}
+}
+
+// TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn pins the half of
+// the recovery path the opt-in deliberately does not gate: restoring
+// is_admin destroys nothing an operator would miss, so it stays
+// unconditional. Only the password write is opt-in.
+func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "other@studio.com", DisplayName: "Other", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser other: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, other.ID, true); err != nil {
+		t.Fatalf("SetAdmin other: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, admin.ID, false); err != nil {
+		t.Fatalf("demote configured admin: %v", err)
+	}
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("second BootstrapFirstAdmin: %v", err)
+	}
+
+	recovered, err := svc.UserByID(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if !recovered.IsAdmin {
+		t.Fatal("flag restoration must stay unconditional, opt-in or not")
+	}
+}
+
+// TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn pins the
+// third problem the opt-in dissolves. Once the reset went through
+// ChangePassword, a FIRST_ADMIN_PASSWORD below the minimum length
+// aborted start-up on instances that had booted fine for as long as that
+// value had only ever been a seed for an already-created account. With
+// no opt-in there is no password write, so there is nothing to validate
+// and nothing to abort.
+func TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+
+	shortCfg := cfg
+	shortCfg.FirstAdminPassword = "short"
+	if err := identity.New(pool, shortCfg).BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("a short FIRST_ADMIN_PASSWORD must not abort start-up without the opt-in: %v", err)
+	}
+	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); err != nil {
+		t.Fatalf("the existing password must be untouched: %v", err)
+	}
+}
+
+// TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn pins the
+// other side: once an operator has explicitly asked for the reset, a
+// password the product would refuse from any other surface must fail
+// loudly at start-up rather than half-apply.
+func TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+
+	shortCfg := cfg
+	shortCfg.FirstAdminPassword = "short"
+	shortCfg.FirstAdminPasswordReset = true
+	err := identity.New(pool, shortCfg).BootstrapFirstAdmin(ctx)
+	if err == nil {
+		t.Fatal("expected an error for a too-short FIRST_ADMIN_PASSWORD with the opt-in set")
+	}
+	if !strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD") {
+		t.Fatalf("error = %q, want it to mention FIRST_ADMIN_PASSWORD", err)
+	}
+}
+
+// TestBootstrapFirstAdminLogsTheRecoveryReset pins the audit trail. The
+// reset overwrites a password and revokes every session for the account;
+// before Task 22's review it did all of that with no log line at all, on
+// a boot whose only output was "maestro listening". The same commit had
+// just added actor/target logging to handleSetAdmin on the argument that
+// admin promotion was "the most privilege-sensitive mutation in the
+// product and the least attributable" — this is strictly more so.
+func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if err := svc.ChangeOwnPassword(ctx, admin.ID, "password12345", "a-rotated-password"); err != nil {
+		t.Fatalf("ChangeOwnPassword: %v", err)
+	}
+	// Demote too, so this one boot exercises both log lines.
+	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "other@studio.com", DisplayName: "Other", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser other: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, other.ID, true); err != nil {
+		t.Fatalf("SetAdmin other: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, admin.ID, false); err != nil {
+		t.Fatalf("demote configured admin: %v", err)
+	}
+
+	var buf bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	resetCfg := cfg
+	resetCfg.FirstAdminPasswordReset = true
+	if err := identity.New(pool, resetCfg).BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("recovery BootstrapFirstAdmin: %v", err)
+	}
+
+	logged := buf.String()
+	for _, want := range []string{
+		"level=WARN",
+		"configured admin re-promoted",
+		"configured admin password reset",
+		"sessions_revoked=true",
+		admin.ID.String(),
+	} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("recovery boot logged %q, want it to contain %q", logged, want)
+		}
+	}
+	// The password itself must never reach a log line.
+	if strings.Contains(logged, "password12345") {
+		t.Fatalf("recovery boot logged the configured password: %q", logged)
 	}
 }

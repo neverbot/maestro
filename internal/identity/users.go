@@ -394,9 +394,19 @@ var bootstrapRaceHook func()
 // every session for the account in the same transaction as the hash
 // update, so a stale or stolen session cannot survive a recovery reset
 // any more than an ordinary password change survives one (see
-// ChangePassword's own doc comment, sessions.go) — but only when the
-// stored hash does not already verify against FIRST_ADMIN_PASSWORD (see
-// repromoteConfiguredAdmin below for why that check matters).
+// ChangePassword's own doc comment, sessions.go).
+//
+// That reset is gated behind its own one-shot opt-in,
+// FIRST_ADMIN_PASSWORD_RESET (config.Config.FirstAdminPasswordReset),
+// added by Task 22's own review after it proved live what the
+// ungated version cost on an instance that keeps FIRST_ADMIN_EMAIL and
+// FIRST_ADMIN_PASSWORD set — which compose.yml ships and the readme
+// normalises. Without the opt-in FIRST_ADMIN_PASSWORD is exactly what
+// it always was, a seed for an empty instance, and a restart cannot
+// overwrite an existing account's password at all. Flag restoration is
+// not gated: see repromoteConfiguredAdmin below for the full reasoning
+// and for why the reset still verifies before it writes even once
+// opted in.
 //
 // The count-then-insert below is not atomic, so two replicas booting
 // simultaneously against an empty database can both pass the count check
@@ -450,40 +460,57 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 
 // repromoteConfiguredAdmin is BootstrapFirstAdmin's recovery path for a
 // non-empty instance: if s.cfg.FirstAdminEmail names an existing user, it
-// (a) sets IsAdmin true if it is not already, and (b) resets the
-// account's password to FirstAdminPassword if the stored hash does not
-// already verify against it. A FIRST_ADMIN_EMAIL matching no existing
-// account is left alone — see BootstrapFirstAdmin's own doc comment for
-// why this never creates an account here, only recovers one that already
-// exists.
+// (a) sets IsAdmin true if it is not already, always, and (b) resets the
+// account's password to FirstAdminPassword — but only when
+// s.cfg.FirstAdminPasswordReset is set, and only when the stored hash
+// does not already verify against the configured value. A
+// FIRST_ADMIN_EMAIL matching no existing account is left alone — see
+// BootstrapFirstAdmin's own doc comment for why this never creates an
+// account here, only recovers one that already exists.
 //
-// The password step verifies before it ever writes, rather than
-// resetting unconditionally on every boot. Task 22's own review weighed
-// this against the plan brief's other honest option (never touch the
-// password, and document that a forgotten one is unrecoverable) and
-// chose to implement the reset — access to the process environment
-// already implies database access, so this grants an attacker nothing
-// new, and an instance that can never recover its only admin is a trap.
-// But resetting unconditionally would have made every ordinary restart
-// of an instance that keeps FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD set
-// permanently (compose.yml does exactly this for local development) log
-// that admin out of every session and force a fresh hash, for a
-// password that was never actually wrong — a real, recurring cost for
-// zero benefit in the common case. Verifying first keeps that case a
-// no-op (one extra argon2 verification per boot, not a write) while
-// still catching the one case this exists for: the stored hash no
-// longer matches, because the account's real password was rotated,
-// forgotten, or never matched the configured value in the first place.
+// Why the reset exists at all. Task 22 weighed the plan brief's two
+// honest options and chose to implement it rather than document a
+// forgotten admin password as unrecoverable: access to the process
+// environment already implies database access, so this grants an
+// attacker nothing new, and an instance that can never recover its only
+// admin is a trap.
 //
-// This runs on every boot once FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD
-// are set, regardless of whether anything actually needs fixing. An
-// operator relying on this recovery path in production should unset
-// FIRST_ADMIN_PASSWORD once the account is confirmed recovered — leaving
-// it configured indefinitely means anyone who later learns that value
-// (or the environment it lives in) can always reset that account's
-// password back to it on the next restart, which is the same property
-// every break-glass credential has and is why one is normally rotated
-// out of standing configuration once it has done its job.
+// Why it needs an opt-in. Task 22 first shipped the reset gated on
+// nothing but "both FIRST_ADMIN_* variables are set", which is the
+// steady state of every instance that follows compose.yml. Its own
+// review then proved three consequences live, none of them theoretical:
+// an admin's deliberate password rotation was silently reverted by the
+// next restart, with every session for the account revoked at that
+// moment (so Task 21's self-service password change was not durable for
+// this one account); a typo'd FIRST_ADMIN_PASSWORD of at least twelve
+// characters destroyed a working password with no confirmation
+// anywhere; and a shorter one aborted start-up on instances that had
+// booted fine for as long as the value had only ever been a seed.
+// Requiring a separate FIRST_ADMIN_PASSWORD_RESET=true dissolves all
+// three at once by splitting the capability from the credential: the
+// standing configuration carries the password but not the permission to
+// apply it, so an operator opts in for exactly one restart and unsets
+// the flag afterwards.
+//
+// Why flag restoration stays ungated. Setting is_admin back on an
+// account that lost it destroys nothing an operator would miss, and it
+// is the half of the recovery an instance with zero admins cannot
+// perform any other way while the process runs (ErrLastAdmin's own doc
+// comment, admin.go). Only the destructive half needs a deliberate act.
+//
+// Why the verify-then-reset check survives inside the opted-in path.
+// Even with the opt-in it is worth not rewriting a hash that already
+// matches: an operator who leaves the flag set across several restarts
+// (or restores it from a script) would otherwise log the account out of
+// every device on every boot for a password that was never wrong. One
+// argon2 verification per boot is cheaper than that, and it makes a
+// redundant reset a true no-op.
+//
+// Both branches that actually change something log at WARN — a boot
+// that overwrites a password and revokes every session for an account,
+// or that hands an ordinary account instance-admin authority, is the
+// most privilege-sensitive thing this process does and used to leave no
+// trace between "maestro listening" and "maestro shutting down".
 func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 	dbUser, err := s.q.GetUserByEmail(ctx, s.cfg.FirstAdminEmail)
 	if err != nil {
@@ -497,6 +524,13 @@ func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 		if err := s.SetAdmin(ctx, dbUser.ID, true); err != nil {
 			return fmt.Errorf("re-promote configured admin: %w", err)
 		}
+		slog.WarnContext(ctx, "configured admin re-promoted",
+			"user_id", dbUser.ID,
+			"reason", "FIRST_ADMIN_EMAIL names an existing account that was not an admin")
+	}
+
+	if !s.cfg.FirstAdminPasswordReset {
+		return nil
 	}
 
 	matches, verr := s.verify(s.cfg.FirstAdminPassword, dbUser.PasswordHash)
@@ -513,6 +547,10 @@ func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 	if err := s.ChangePassword(ctx, dbUser.ID, s.cfg.FirstAdminPassword); err != nil {
 		return fmt.Errorf("reset configured admin password: %w", err)
 	}
+	slog.WarnContext(ctx, "configured admin password reset",
+		"user_id", dbUser.ID,
+		"sessions_revoked", true,
+		"reason", "FIRST_ADMIN_PASSWORD_RESET is set and the stored hash did not match FIRST_ADMIN_PASSWORD")
 	return nil
 }
 

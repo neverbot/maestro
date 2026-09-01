@@ -112,8 +112,12 @@ curl -s -b cookies.txt -X PATCH http://localhost:8080/api/me/password \
   -d '{"current_password":"old-password","new_password":"a-new-password"}'
 ```
 
-There is no password reset by design, so this is the only way to get an
-attacker who merely stole a session cookie off the account. It is not a
+Rotating a password this way is the only way to get an attacker who
+merely stole a session cookie off the account: there is no
+forgot-my-password flow anywhere in this product — no email is ever
+sent, by design — and the one reset that does exist (below) is an
+operator restarting the process, not something a signed-in user or a
+locked-out one can reach. It is not a
 way to be sure a thief is locked out entirely: an API token minted
 before the rotation keeps working afterwards (tokens have no expiry,
 only explicit revocation), so anyone rotating a password on suspicion
@@ -130,23 +134,51 @@ curl -s -b cookies.txt -X PATCH http://localhost:8080/api/admins \
 ```
 
 An admin may demote another admin, or themselves, as long as at least
-one remains — the instance refuses to ever be left with zero. There is
-no password reset flow anywhere else in this product, so a forgotten or
-leaked admin password is recovered the same way a lost admin flag is:
-restart the instance with `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
-pointed at that account. This both re-promotes the account if it lost
-the flag and resets its password to the configured value — but only if
-the stored password does not already match, so an instance that leaves
-these two variables set permanently (`compose.yml` does, for local
-development) does not silently log its admin out of every device on
-every ordinary restart. Access to the process environment already
-implies database access, so this grants nothing new; it just turns a
-break-glass `psql` session into a documented restart. Because of that,
-`FIRST_ADMIN_PASSWORD` should be unset again once a recovery is
-confirmed — leaving it configured indefinitely means anyone who later
-learns that value can always reset the account's password back to it on
-the next restart, the same property any standing break-glass credential
-has.
+one remains — the instance refuses to ever be left with zero.
+
+**Recovering a locked-out admin.** With no password reset flow for
+users, a forgotten or leaked admin password is recovered by an operator
+restarting the process. Two separate things happen at boot when
+`FIRST_ADMIN_EMAIL` names an account that already exists:
+
+- **Restoring the admin flag** happens on any restart, with no extra
+  configuration. An account that lost `is_admin` gets it back.
+- **Resetting that account's password** to `FIRST_ADMIN_PASSWORD`
+  happens **only** when `FIRST_ADMIN_PASSWORD_RESET=true` is also set.
+  Without it, `FIRST_ADMIN_PASSWORD` is only ever a seed for a brand-new
+  instance and can never overwrite an existing account's password. That
+  is why `compose.yml` can leave `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
+  set permanently, and why an admin who rotates their own password keeps
+  it across every ordinary restart.
+
+So a recovery is one deliberate boot:
+
+```bash
+FIRST_ADMIN_EMAIL=admin@studio.com \
+FIRST_ADMIN_PASSWORD=the-new-password \
+FIRST_ADMIN_PASSWORD_RESET=true \
+  docker compose up -d
+```
+
+**The reset revokes every session for that account**, on every device,
+in the same transaction that writes the new hash — the same guarantee
+an ordinary password change gives. It does not revoke API tokens; those
+have no expiry and are revoked only explicitly, so check that game's
+token list afterwards. Both the promotion and the reset are logged at
+`WARN` with the account's user id, so a restart that changed either is
+visible in the process log.
+
+**Unset `FIRST_ADMIN_PASSWORD_RESET` again once you have logged in.**
+Left set, it is a standing break-glass credential: anyone who later
+learns `FIRST_ADMIN_PASSWORD`, or can write the environment it lives in,
+can reset that account on the next restart. Access to the process
+environment already implies database access, so this grants nothing new
+— it just turns a break-glass `psql` session into a documented restart —
+but there is no reason to leave the door open after walking through it.
+Note also that with the opt-in set, a `FIRST_ADMIN_PASSWORD` shorter
+than twelve characters aborts start-up rather than half-applying, since
+the reset goes through the same validation every other password change
+in this product does.
 
 **Clicking an invite while already signed in.** A project-bound invite
 redeemed by a browser tab that is already logged in grants membership to

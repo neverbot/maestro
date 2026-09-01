@@ -8,6 +8,12 @@ services:
       DATABASE_URL: postgres://maestro:maestro@db:5432/maestro?sslmode=disable
       FIRST_ADMIN_EMAIL: admin@example.com
       FIRST_ADMIN_PASSWORD: change-me-please
+      # Seeds the admin account on an empty database, and nothing more.
+      # Overwriting an existing account's password needs a separate
+      # one-shot opt-in, FIRST_ADMIN_PASSWORD_RESET=true, for exactly
+      # one restart (see "Recovering a locked-out admin" in readme.md).
+      # Without it, an admin who rotates their own password keeps it
+      # across every restart, sessions included.
       REGISTRATION_MODE: invite_only
     ports:
       - "${MAESTRO_HOST_PORT:-8080}:8080"

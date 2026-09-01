@@ -282,3 +282,59 @@ func mustErr(t *testing.T, cfg Config, err error) error {
 	}
 	return err
 }
+
+func TestLoadDefaultsFirstAdminPasswordResetToFalse(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://localhost/maestro",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.FirstAdminPasswordReset {
+		t.Fatal("FirstAdminPasswordReset = true, want false when FIRST_ADMIN_PASSWORD_RESET is unset")
+	}
+}
+
+func TestLoadParsesFirstAdminPasswordReset(t *testing.T) {
+	for _, raw := range []string{"true", "TRUE", "1", "t", "True"} {
+		env := map[string]string{
+			"DATABASE_URL":               "postgres://localhost/maestro",
+			"FIRST_ADMIN_PASSWORD_RESET": raw,
+		}
+		cfg, err := Load(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("Load(%q): %v", raw, err)
+		}
+		if !cfg.FirstAdminPasswordReset {
+			t.Fatalf("FIRST_ADMIN_PASSWORD_RESET=%q gave FirstAdminPasswordReset = false, want true", raw)
+		}
+	}
+	for _, raw := range []string{"false", "FALSE", "0", "f"} {
+		env := map[string]string{
+			"DATABASE_URL":               "postgres://localhost/maestro",
+			"FIRST_ADMIN_PASSWORD_RESET": raw,
+		}
+		cfg, err := Load(func(k string) string { return env[k] })
+		if err != nil {
+			t.Fatalf("Load(%q): %v", raw, err)
+		}
+		if cfg.FirstAdminPasswordReset {
+			t.Fatalf("FIRST_ADMIN_PASSWORD_RESET=%q gave FirstAdminPasswordReset = true, want false", raw)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidFirstAdminPasswordReset(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":               "postgres://localhost/maestro",
+		"FIRST_ADMIN_PASSWORD_RESET": "yes please",
+	}
+	_, err := Load(func(k string) string { return env[k] })
+	if err == nil {
+		t.Fatal("expected an error for an unparseable FIRST_ADMIN_PASSWORD_RESET")
+	}
+	if !strings.Contains(err.Error(), "FIRST_ADMIN_PASSWORD_RESET") {
+		t.Fatalf("error = %q, want it to mention FIRST_ADMIN_PASSWORD_RESET", err)
+	}
+}

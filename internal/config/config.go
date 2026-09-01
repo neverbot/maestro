@@ -62,6 +62,38 @@ type Config struct {
 	RegistrationMode    RegistrationMode
 	Argon2              Argon2Params
 
+	// FirstAdminPasswordReset is the one-shot opt-in that lets a restart
+	// overwrite the configured admin's password with FIRST_ADMIN_PASSWORD
+	// (identity.BootstrapFirstAdmin -> repromoteConfiguredAdmin). It
+	// defaults to false, and while it is false FIRST_ADMIN_PASSWORD is
+	// what it always was before Task 22: a seed used once, when the
+	// instance has no users at all, and never a value that overwrites an
+	// existing account's password.
+	//
+	// It exists because Task 22 shipped that reset unconditionally on
+	// every boot with both FIRST_ADMIN_* variables set, and its own
+	// review then proved live what that costs on an instance that keeps
+	// them set — which compose.yml ships and the readme normalises.
+	// An admin's deliberate password rotation was silently undone by the
+	// next restart, with every session for the account revoked at that
+	// moment, so Task 21's self-service password change was simply not
+	// durable for the bootstrap admin. A typo'd FIRST_ADMIN_PASSWORD of
+	// at least twelve characters destroyed a working password with no
+	// confirmation anywhere. And a shorter one aborted start-up on
+	// instances that had booted fine for as long as the value had only
+	// ever been a seed.
+	//
+	// Splitting the capability from the credential dissolves all three:
+	// with the opt-in absent the configured password is inert against an
+	// existing account, so compose.yml can keep both variables set with
+	// no standing hazard, and an operator who actually needs the recovery
+	// sets FIRST_ADMIN_PASSWORD_RESET=true for exactly one restart and
+	// unsets it again. Note what it does *not* gate: re-promoting the
+	// configured account to admin (restoring is_admin) stays
+	// unconditional, because that step never destroys anything an
+	// operator would miss.
+	FirstAdminPasswordReset bool
+
 	// TrustedProxyCount is the number of reverse proxies this instance
 	// trusts to sit directly in front of it and to correctly append (never
 	// pass through unchanged, never let a client's own value survive) an
@@ -97,6 +129,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("database_url", c.DatabaseURL),
 		slog.String("first_admin_email", c.FirstAdminEmail),
 		slog.String("first_admin_password", "REDACTED"),
+		slog.Bool("first_admin_password_reset", c.FirstAdminPasswordReset),
 		slog.Any("allowed_email_domains", c.AllowedEmailDomains),
 		slog.String("registration_mode", string(c.RegistrationMode)),
 		slog.Duration("session_ttl", c.SessionTTL),
@@ -138,6 +171,10 @@ func Load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	firstAdminPasswordReset, err := parseBool("FIRST_ADMIN_PASSWORD_RESET", getenv("FIRST_ADMIN_PASSWORD_RESET"), false)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		Addr:               orDefault(getenv("MAESTRO_ADDR"), ":8080"),
@@ -146,8 +183,10 @@ func Load(getenv func(string) string) (Config, error) {
 		InviteTTL:          inviteTTL,
 		FirstAdminEmail:    strings.ToLower(strings.TrimSpace(getenv("FIRST_ADMIN_EMAIL"))),
 		FirstAdminPassword: getenv("FIRST_ADMIN_PASSWORD"),
-		RegistrationMode:   RegistrationMode(orDefault(getenv("REGISTRATION_MODE"), string(RegistrationInviteOnly))),
-		TrustedProxyCount:  trustedProxyCount,
+
+		FirstAdminPasswordReset: firstAdminPasswordReset,
+		RegistrationMode:        RegistrationMode(orDefault(getenv("REGISTRATION_MODE"), string(RegistrationInviteOnly))),
+		TrustedProxyCount:       trustedProxyCount,
 		Argon2: Argon2Params{
 			Time:    3,
 			Memory:  64 * 1024,
@@ -252,6 +291,25 @@ func parseNonNegativeInt(name, raw string, def int) (int, error) {
 		return 0, fmt.Errorf("%s must not be negative, got %q", name, raw)
 	}
 	return n, nil
+}
+
+// parseBool parses a boolean-valued environment variable named name,
+// defaulting to def when raw is empty. It rejects an unparseable value
+// rather than reading it as false, for the same reason
+// parseNonNegativeInt rejects a negative hop count: the one variable
+// parsed this way, FIRST_ADMIN_PASSWORD_RESET, is an opt-in an operator
+// reaches for exactly when they are locked out, and silently reading
+// "yes" or "on" as "do nothing" would leave them staring at a restart
+// that looked clean and changed nothing.
+func parseBool(name, raw string, def bool) (bool, error) {
+	if raw == "" {
+		return def, nil
+	}
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s %q is not a valid boolean: %w", name, raw, err)
+	}
+	return b, nil
 }
 
 func orDefault(v, fallback string) string {

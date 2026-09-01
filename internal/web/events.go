@@ -111,13 +111,26 @@ const sseHeartbeatInterval = 15 * time.Second
 // at least some role (realtime.Event.MinRole) and have it enforced here,
 // at delivery, rather than needing every publish call site to remember
 // to fan out a role-specific payload itself. This is no longer
-// theoretical: publish.go's own publishers (Task 20) do set MinRole —
-// member, token and invite events are gated at roles.Editor or
-// roles.Owner, not left at every subscriber's own game regardless of
-// role — because the mechanism existed here from the one Subscribe call
-// site that needed to get it right, rather than being retrofitted once
+// theoretical: publish.go's own publishers (Task 20) do set MinRole,
+// but only some of them, and MinRole is not the only gate. Token
+// (token.minted, token.revoked) and invite (invite.created,
+// invite.revoked, invite.redeemed) events are gated at roles.Editor or
+// roles.Owner. The member events (member.updated, member.removed) set
+// no MinRole at all — among *human* subscribers they are exactly as
+// open as handleListMembers, which any member may call — and are kept
+// off token subscribers by realtime.Event.HumanOnly instead, mirroring
+// the requireHumanCaller gate on that same REST endpoint. game.deleted
+// sets neither: it reaches every subscriber of the deleted game, token
+// callers included, deliberately (publish.go's own doc comment for that
+// constant explains why).
+//
+// So a publisher adding a new kind here has two independent gates to
+// choose between and must pick each deliberately: MinRole narrows by
+// role, HumanOnly narrows by caller kind, and neither implies the
+// other. Both mechanisms existed here from the one Subscribe call site
+// that needed to get them right, rather than being retrofitted once
 // several publishers already existed that would each need to remember
-// it.
+// them.
 //
 // Event.Seq (assigned by Hub.Publish, realtime/hub.go) is what turns the
 // hub's own silent-drop-on-a-full-buffer behaviour into a detectable

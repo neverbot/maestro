@@ -612,3 +612,31 @@ func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID)
 	}
 	return revokedLabels, nil
 }
+
+// Delete removes a project outright. Every membership, API token and
+// bound invite scoped to it disappears in the same statement, through
+// the ON DELETE CASCADE foreign keys migration 0001 already declares on
+// each — see this task's own plan section for why that is enough on its
+// own, with no hand-rolled transaction here. Migration 0002's last-owner
+// trigger has an explicit escape hatch for exactly this statement (see
+// its own comment): deleting a project cascades to its memberships,
+// including its last owner's, and the trigger does not fire for a
+// membership whose project is already gone — so this never trips the
+// very guard the rest of this package enforces everywhere else.
+//
+// A concurrent second call for the same id — the caller's own handler
+// has already confirmed standing on this project by the time either
+// call reaches here, so this can only be two requests racing, not a
+// guess at an id that never existed — matches zero rows and returns nil,
+// the same idempotent convention DeleteMembership and
+// RevokeAPITokensForMember already follow, not a distinguishable error:
+// pgx's Exec does not report rows-affected as an error condition, and
+// treating "already deleted" as a failure here would turn a benign race
+// (the second owner to click delete) into a spurious 500 instead of the
+// 204 both callers actually want.
+func (s *Service) Delete(ctx context.Context, projectID uuid.UUID) error {
+	if err := s.q.DeleteProject(ctx, projectID); err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	return nil
+}

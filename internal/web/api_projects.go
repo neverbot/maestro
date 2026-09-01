@@ -414,6 +414,58 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 	}
 }
 
+// handleDeleteGame deletes a game outright. Owner-only, like
+// handleChangeRole and unlike self-removal from handleRemoveMember:
+// deleting the game is not a member's own choice the way leaving it is,
+// and its irreversibility (every membership, token and bound invite
+// scoped to it disappears with it — see projects.Delete's own doc
+// comment) is a different order of consequence than one person's own
+// membership row. Maps projects.ErrLastOwner the same 409 way
+// handleChangeRole and handleRemoveMember already do, defensively: a
+// project always has at least one owner by construction (Create grants
+// one atomically, and the last-owner guard refuses to let it drop to
+// zero any other way), so this branch is unreachable today — but it
+// costs nothing to keep mapped, and a future refactor that makes it
+// reachable gets a 409 instead of silently falling through to a 500.
+//
+// A 204 with no body, not a report of what was revoked the way
+// handleRemoveMember and handleChangeRole answer: those endpoints leave
+// the caller inside a game that still exists, where "which of my
+// agents just stopped working" is something the owner needs to act on.
+// Here the whole game is gone, tokens included — there is nothing left
+// to point an owner at, and no membership list left to render a toast
+// against. An agent still holding a token for this game learns nothing
+// about deletion specifically: its next call fails authentication
+// exactly the way a plain revocation already would (see
+// projects.Delete's cascade), so it cannot distinguish "my token was
+// revoked" from "the whole game is gone" — which is correct, since
+// nothing about a token's own scope entitles its holder to know which
+// happened.
+//
+// Reaching this handler at all already required requireProject to
+// confirm the caller is a member with a resolved role, so nothing here
+// (or in requireProject's own 403/404 mapping) lets a non-member learn
+// whether a given game id exists — the same non-leak requireProject's
+// other callers already rely on.
+func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !requireHumanCaller(w, caller) {
+		return
+	}
+	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may delete a game")
+		return
+	}
+	switch err := s.opts.Projects.Delete(r.Context(), scope.ProjectID); {
+	case errors.Is(err, projects.ErrLastOwner):
+		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one owner — promote someone else first")
+	case err != nil:
+		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
+		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // handleRoot implements the single-game shortcut: one visible game goes
 // straight to it, any other count (zero included) falls through to the
 // picker shell — a user in zero games still needs a page to land on (an

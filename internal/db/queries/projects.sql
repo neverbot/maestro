@@ -99,3 +99,17 @@ UPDATE api_tokens SET revoked_at = now()
 WHERE user_id = sqlc.arg('user_id')::uuid AND project_id = sqlc.arg('project_id')::uuid
   AND revoked_at IS NULL
 RETURNING label;
+
+-- name: DeleteProject :exec
+-- Every membership, API token and bound invite scoped to this project
+-- disappears in the same statement, through the ON DELETE CASCADE
+-- foreign keys migration 0001 declares on each (Task 17's own plan
+-- section works through why that is enough on its own). Migration
+-- 0002's last-owner trigger has an explicit escape hatch for exactly
+-- this statement, so it never trips on the project's own last owner
+-- being cascaded away. Matching zero rows (the id was already deleted,
+-- typically a second concurrent DELETE landing after the first already
+-- committed) is not an error here, the same idempotent convention
+-- DeleteMembership and RevokeAPITokensForMember already follow: the
+-- Go layer above does not distinguish "deleted" from "already gone".
+DELETE FROM projects WHERE id = sqlc.arg('id')::uuid;

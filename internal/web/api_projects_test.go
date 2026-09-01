@@ -804,3 +804,179 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 		t.Fatalf("status = %d, want 500 for a database failure resolving membership, not 403 (indistinguishable from an actual rejection); body = %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestOwnerCanDeleteGame confirms the owner-only game-deletion route
+// answers 204 and no body — see handleDeleteGame's own doc comment for
+// why nothing is reported back, unlike handleRemoveMember and
+// handleChangeRole.
+func TestOwnerCanDeleteGame(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rec.Body.String())
+	}
+}
+
+// TestNonOwnerCannotDeleteGame confirms an editor — a real member, just
+// not an owner — is refused the same way handleChangeRole refuses a
+// non-owner: 403, not 404, since a member already has standing to know
+// the game exists.
+func TestNonOwnerCannotDeleteGame(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	cookie := loginAs(t, srv, "editor@studio.com")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+
+	// The game must still exist: a refused delete is not a partial one.
+	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
+		t.Fatalf("RoleOf after refused delete: %v, want the game (and membership) to still exist", err)
+	}
+}
+
+// TestTokenCallerCannotDeleteGame confirms requireHumanCaller's own
+// boundary applies here too: an agent's token is scoped to a game's
+// content, never to deciding whether the game itself keeps existing.
+func TestTokenCallerCannotDeleteGame(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+// TestNonMemberCannotDeleteGameAndLearnsNothing confirms a caller with
+// no standing in the game at all gets the same 403 requireProject
+// already answers every other project-scoped route with, not a 404 that
+// would tell a non-member the id is real, and not a 403 with different
+// wording that would tell them the opposite.
+func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	cookie := loginAs(t, srv, "stranger@studio.com")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
+		t.Fatalf("RoleOf after refused delete: %v, want the game to still exist", err)
+	}
+}
+
+// TestDeletingGameRevokesItsTokens confirms an agent holding a token for
+// a deleted game cannot tell deletion apart from ordinary revocation:
+// the same 401 either way, once the token row itself is gone.
+func TestDeletingGameRevokesItsTokens(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want 204: %s", rec.Code, rec.Body.String())
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+token)
+	meRec := httptest.NewRecorder()
+	srv.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusUnauthorized {
+		t.Fatalf("token after game deletion: status = %d, want 401", meRec.Code)
+	}
+}
+
+// TestDeletingGameTwiceIsIdempotent drives the concurrent-delete case
+// described in Service.Delete's own doc comment through the HTTP layer:
+// a second owner-authenticated DELETE, arriving after the game is
+// already gone, must not surface as a 500 — the caller had standing when
+// they made the request, and by the time their request executes the
+// outcome they wanted ("the game is gone") has already happened. In
+// practice the second call can no longer reach handleDeleteGame at all,
+// because requireProject re-resolves membership first and that
+// membership row cascaded away with the project — so it answers 403,
+// the same "you are not a member of this game" every other
+// already-departed caller sees, not a 404 or 500 that would distinguish
+// "used to exist" from "never did".
+func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	first := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	first.AddCookie(cookie)
+	firstRec := httptest.NewRecorder()
+	srv.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusNoContent {
+		t.Fatalf("first delete status = %d, want 204: %s", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	second.AddCookie(cookie)
+	secondRec := httptest.NewRecorder()
+	srv.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusForbidden {
+		t.Fatalf("second delete status = %d, want 403 (membership already gone), body: %s", secondRec.Code, secondRec.Body.String())
+	}
+}

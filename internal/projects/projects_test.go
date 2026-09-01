@@ -1068,3 +1068,64 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 		t.Fatal("a role outside roles.All() was accepted by the database")
 	}
 }
+
+// TestDeleteProjectCascadesMembershipsAndTokens exercises Task 17's own
+// claim: a plain DELETE FROM projects is enough on its own, with no
+// hand-rolled transaction, because every membership and API token row
+// scoped to the project cascades away through the ON DELETE CASCADE
+// foreign keys migration 0001 already declares, and migration 0002's
+// last-owner trigger has an escape hatch built for exactly this
+// statement (see Service.Delete's own doc comment).
+func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	svc := projects.New(pool)
+	ctx := context.Background()
+
+	owner := newUser(t, ids, "owner@studio.com")
+	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"}); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	if err := svc.Delete(ctx, project.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := svc.ByID(ctx, project.ID); !errors.Is(err, projects.ErrProjectNotFound) {
+		t.Fatalf("ByID after delete: err = %v, want ErrProjectNotFound", err)
+	}
+	if _, err := svc.RoleOf(ctx, owner.ID, project.ID); !errors.Is(err, projects.ErrNotAMember) {
+		t.Fatalf("RoleOf after delete: err = %v, want ErrNotAMember (membership must be gone)", err)
+	}
+}
+
+// TestDeleteProjectTwiceIsIdempotent pins the concurrent-delete
+// behaviour Service.Delete's own doc comment describes: a second delete
+// of an id already gone is not an error, the same convention
+// DeleteMembership and RevokeAPITokensForMember already follow. Two
+// requests racing to delete the same game both see a plain success, not
+// one 204 and one 500 for what is, from either caller's perspective, the
+// same outcome ("the game is gone").
+func TestDeleteProjectTwiceIsIdempotent(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	svc := projects.New(pool)
+	ctx := context.Background()
+
+	owner := newUser(t, ids, "owner@studio.com")
+	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := svc.Delete(ctx, project.ID); err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+	if err := svc.Delete(ctx, project.ID); err != nil {
+		t.Fatalf("second Delete on an already-deleted project: %v, want nil", err)
+	}
+}

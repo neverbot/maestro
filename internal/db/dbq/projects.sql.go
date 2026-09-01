@@ -88,6 +88,26 @@ func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipPara
 	return err
 }
 
+const deleteProject = `-- name: DeleteProject :exec
+DELETE FROM projects WHERE id = $1::uuid
+`
+
+// Every membership, API token and bound invite scoped to this project
+// disappears in the same statement, through the ON DELETE CASCADE
+// foreign keys migration 0001 declares on each (Task 17's own plan
+// section works through why that is enough on its own). Migration
+// 0002's last-owner trigger has an explicit escape hatch for exactly
+// this statement, so it never trips on the project's own last owner
+// being cascaded away. Matching zero rows (the id was already deleted,
+// typically a second concurrent DELETE landing after the first already
+// committed) is not an error here, the same idempotent convention
+// DeleteMembership and RevokeAPITokensForMember already follow: the
+// Go layer above does not distinguish "deleted" from "already gone".
+func (q *Queries) DeleteProject(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteProject, id)
+	return err
+}
+
 const getMembershipRole = `-- name: GetMembershipRole :one
 SELECT role FROM memberships
 WHERE user_id = $1::uuid AND project_id = $2::uuid

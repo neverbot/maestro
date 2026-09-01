@@ -200,6 +200,9 @@ func NewServer(opts Options) *Server {
 	s.routeFunc("GET /api/config", s.handleConfig)
 	s.route("GET /api/games", requireCaller(s.handleListGames))
 	s.route("POST /api/games", requireCaller(s.handleCreateGame))
+	s.route("POST /api/invites", requireCaller(s.handleCreateInstanceInvite))
+	s.route("GET /api/invites", requireCaller(s.handleListInstanceInvites))
+	s.route("DELETE /api/invites/{invite}", requireCaller(s.handleRevokeInstanceInvite))
 	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)
 	s.registerProjectRoute("PATCH /api/games/{game}/members/{user}", s.handleChangeRole)
 	s.registerProjectRoute("DELETE /api/games/{game}/members/{user}", s.handleRemoveMember)
@@ -208,6 +211,9 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("DELETE /api/games/{game}/tokens/{token}", s.handleRevokeToken)
 	s.registerProjectRoute("GET /api/games/{game}/events", s.handleEvents)
 	s.registerProjectRoute("DELETE /api/games/{game}", s.handleDeleteGame)
+	s.registerProjectRoute("POST /api/games/{game}/invites", s.handleCreateProjectInvite)
+	s.registerProjectRoute("GET /api/games/{game}/invites", s.handleListProjectInvites)
+	s.registerProjectRoute("DELETE /api/games/{game}/invites/{invite}", s.handleRevokeProjectInvite)
 
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call

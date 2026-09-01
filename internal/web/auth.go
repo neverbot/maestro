@@ -42,6 +42,7 @@ const (
 	errCodeInvalidRole    = "invalid_role"
 	errCodeLastOwner      = "last_owner"
 	errCodeLabelInvalid   = "label_invalid"
+	errCodeInviteInvalid  = "invite_request_invalid"
 )
 
 // Caller is the authenticated principal of a request. It has exactly two

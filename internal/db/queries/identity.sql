@@ -130,7 +130,26 @@ WHERE id = sqlc.arg('id')::uuid
 -- and every other listing in this file that learned this lesson first) so
 -- two invites created in the same transaction don't reshuffle between
 -- calls.
-SELECT * FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC, id DESC;
+--
+-- project_id IS NULL, added in Task 18: this is the instance-wide admin
+-- surface (POST/GET/DELETE /api/invites, gated on Caller.IsAdmin, never on
+-- project membership), so it must never return a project-bound invite — an
+-- instance admin has no standing in a game they are not a member of
+-- anywhere else in this codebase (requireProject's RoleOf lookup never
+-- consults IsAdmin), and this query returning another game's pending
+-- invite roster would be the one place that stopped being true. A
+-- project-bound invite is listed through its own game's
+-- ListOutstandingProjectInvites instead, gated on that game's own owner
+-- role.
+SELECT * FROM invites WHERE redeemed_at IS NULL AND project_id IS NULL ORDER BY created_at DESC, id DESC;
+
+-- name: ListOutstandingProjectInvites :many
+-- ListOutstandingInvites' project-scoped counterpart, added in Task 18 for
+-- GET /api/games/{game}/invites: the same "outstanding" definition, the
+-- same ordering, scoped to invites that name this one game instead of
+-- account-only ones. See ListOutstandingInvites' own comment for why the
+-- two never overlap.
+SELECT * FROM invites WHERE redeemed_at IS NULL AND project_id = sqlc.arg('project_id')::uuid ORDER BY created_at DESC, id DESC;
 
 -- name: RevokeInvite :exec
 -- Setting expires_at to now(), rather than deleting the row, keeps the
@@ -139,8 +158,26 @@ SELECT * FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC, id DES
 -- ever removes unredeemed rows. Restricted to redeemed_at IS NULL so
 -- revoking an already-redeemed or already-expired invite is a no-op that
 -- cannot rewrite a real redemption's or an earlier revocation's expires_at.
+--
+-- project_id IS NULL, added in Task 18, for the same reason
+-- ListOutstandingInvites above is scoped to it: this backs the
+-- instance-wide DELETE /api/invites/{id}, and a project-bound invite must
+-- only ever be revocable through its own game's RevokeProjectInvite, gated
+-- on that game's owner role — never through the instance admin surface,
+-- which has no standing over a specific game's membership grants.
 UPDATE invites SET expires_at = now()
-WHERE id = sqlc.arg('id')::uuid AND redeemed_at IS NULL;
+WHERE id = sqlc.arg('id')::uuid AND project_id IS NULL AND redeemed_at IS NULL;
+
+-- name: RevokeProjectInvite :exec
+-- RevokeInvite's project-scoped counterpart, added in Task 18 for
+-- DELETE /api/games/{game}/invites/{invite}. Scoped to project_id in
+-- addition to id, the same way RevokeAPIToken is scoped to project_id: an
+-- id that exists but names a different game's invite must be a silent
+-- no-op, not a 404 or a 500, so a caller with standing in one game can
+-- never use this to probe whether some other id belongs to a different
+-- game.
+UPDATE invites SET expires_at = now()
+WHERE id = sqlc.arg('id')::uuid AND project_id = sqlc.arg('project_id')::uuid AND redeemed_at IS NULL;
 
 -- name: UpsertMembership :exec
 INSERT INTO memberships (user_id, project_id, role)

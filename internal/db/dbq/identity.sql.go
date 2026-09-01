@@ -508,7 +508,7 @@ func (q *Queries) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]Lis
 }
 
 const listOutstandingInvites = `-- name: ListOutstandingInvites :many
-SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL ORDER BY created_at DESC, id DESC
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL AND project_id IS NULL ORDER BY created_at DESC, id DESC
 `
 
 // "Outstanding" means not yet redeemed, regardless of whether it has since
@@ -519,8 +519,59 @@ SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_
 // and every other listing in this file that learned this lesson first) so
 // two invites created in the same transaction don't reshuffle between
 // calls.
+//
+// project_id IS NULL, added in Task 18: this is the instance-wide admin
+// surface (POST/GET/DELETE /api/invites, gated on Caller.IsAdmin, never on
+// project membership), so it must never return a project-bound invite — an
+// instance admin has no standing in a game they are not a member of
+// anywhere else in this codebase (requireProject's RoleOf lookup never
+// consults IsAdmin), and this query returning another game's pending
+// invite roster would be the one place that stopped being true. A
+// project-bound invite is listed through its own game's
+// ListOutstandingProjectInvites instead, gated on that game's own owner
+// role.
 func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]Invite, error) {
 	rows, err := q.db.Query(ctx, listOutstandingInvites)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Invite
+	for rows.Next() {
+		var i Invite
+		if err := rows.Scan(
+			&i.ID,
+			&i.TokenHash,
+			&i.Email,
+			&i.ProjectID,
+			&i.Role,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.RedeemedAt,
+			&i.RedeemedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOutstandingProjectInvites = `-- name: ListOutstandingProjectInvites :many
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL AND project_id = $1::uuid ORDER BY created_at DESC, id DESC
+`
+
+// ListOutstandingInvites' project-scoped counterpart, added in Task 18 for
+// GET /api/games/{game}/invites: the same "outstanding" definition, the
+// same ordering, scoped to invites that name this one game instead of
+// account-only ones. See ListOutstandingInvites' own comment for why the
+// two never overlap.
+func (q *Queries) ListOutstandingProjectInvites(ctx context.Context, projectID uuid.UUID) ([]Invite, error) {
+	rows, err := q.db.Query(ctx, listOutstandingProjectInvites, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -595,7 +646,7 @@ func (q *Queries) RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) 
 
 const revokeInvite = `-- name: RevokeInvite :exec
 UPDATE invites SET expires_at = now()
-WHERE id = $1::uuid AND redeemed_at IS NULL
+WHERE id = $1::uuid AND project_id IS NULL AND redeemed_at IS NULL
 `
 
 // Setting expires_at to now(), rather than deleting the row, keeps the
@@ -604,8 +655,37 @@ WHERE id = $1::uuid AND redeemed_at IS NULL
 // ever removes unredeemed rows. Restricted to redeemed_at IS NULL so
 // revoking an already-redeemed or already-expired invite is a no-op that
 // cannot rewrite a real redemption's or an earlier revocation's expires_at.
+//
+// project_id IS NULL, added in Task 18, for the same reason
+// ListOutstandingInvites above is scoped to it: this backs the
+// instance-wide DELETE /api/invites/{id}, and a project-bound invite must
+// only ever be revocable through its own game's RevokeProjectInvite, gated
+// on that game's owner role — never through the instance admin surface,
+// which has no standing over a specific game's membership grants.
 func (q *Queries) RevokeInvite(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeInvite, id)
+	return err
+}
+
+const revokeProjectInvite = `-- name: RevokeProjectInvite :exec
+UPDATE invites SET expires_at = now()
+WHERE id = $1::uuid AND project_id = $2::uuid AND redeemed_at IS NULL
+`
+
+type RevokeProjectInviteParams struct {
+	ID        uuid.UUID
+	ProjectID uuid.UUID
+}
+
+// RevokeInvite's project-scoped counterpart, added in Task 18 for
+// DELETE /api/games/{game}/invites/{invite}. Scoped to project_id in
+// addition to id, the same way RevokeAPIToken is scoped to project_id: an
+// id that exists but names a different game's invite must be a silent
+// no-op, not a 404 or a 500, so a caller with standing in one game can
+// never use this to probe whether some other id belongs to a different
+// game.
+func (q *Queries) RevokeProjectInvite(ctx context.Context, arg RevokeProjectInviteParams) error {
+	_, err := q.db.Exec(ctx, revokeProjectInvite, arg.ID, arg.ProjectID)
 	return err
 }
 

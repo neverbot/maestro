@@ -665,3 +665,137 @@ func createTestProject(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sl
 	}
 	return id
 }
+
+// TestListOutstandingInvitesExcludesProjectBound pins Task 18's split
+// between the instance-wide admin surface and a game's own invite roster:
+// ListOutstandingInvites (POST/GET/DELETE /api/invites, gated on
+// Caller.IsAdmin) must never surface a project-bound invite, since an
+// instance admin has no standing in a game they are not a member of
+// anywhere else in this codebase.
+func TestListOutstandingInvitesExcludesProjectBound(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	projectID := createTestProject(ctx, t, pool, "azeroth")
+	_, bound, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &projectID, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite (bound): %v", err)
+	}
+	_, unbound, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "unbound@studio.com"})
+	if err != nil {
+		t.Fatalf("CreateInvite (unbound): %v", err)
+	}
+
+	outstanding, err := svc.ListOutstandingInvites(ctx)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvites: %v", err)
+	}
+	for _, inv := range outstanding {
+		if inv.ID == bound.ID {
+			t.Fatal("ListOutstandingInvites returned a project-bound invite")
+		}
+	}
+	found := false
+	for _, inv := range outstanding {
+		if inv.ID == unbound.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ListOutstandingInvites did not include the account-only invite")
+	}
+}
+
+// TestRevokeInviteIgnoresProjectBound is RevokeInvite's half of the same
+// pin: DELETE /api/invites/{id} must never be able to revoke a
+// project-bound invite, only the instance-wide account-only kind — a
+// project-bound invite is only ever revocable through its own game's
+// RevokeProjectInvite (TestRevokeProjectInviteScopedToItsGame, below).
+func TestRevokeInviteIgnoresProjectBound(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	projectID := createTestProject(ctx, t, pool, "azeroth")
+	token, bound, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &projectID, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if err := svc.RevokeInvite(ctx, bound.ID); err != nil {
+		t.Fatalf("RevokeInvite: %v", err)
+	}
+
+	// Still live: RevokeInvite's project_id IS NULL clause must not have
+	// touched this project-bound row.
+	if _, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "still.live@studio.com", DisplayName: "Still Live", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("RedeemInvite after no-op RevokeInvite: %v", err)
+	}
+}
+
+// TestListAndRevokeOutstandingProjectInvites covers the project-scoped
+// counterparts Task 18 added for GET and DELETE
+// /api/games/{game}/invites: findable by game, revocable by game, and
+// scoped so one game's revoke can never touch another game's invite.
+func TestListAndRevokeOutstandingProjectInvites(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	azeroth := createTestProject(ctx, t, pool, "azeroth")
+	outland := createTestProject(ctx, t, pool, "outland")
+
+	azerothToken, azerothInvite, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &azeroth, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite (azeroth): %v", err)
+	}
+	_, outlandInvite, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &outland, Role: "viewer"})
+	if err != nil {
+		t.Fatalf("CreateInvite (outland): %v", err)
+	}
+
+	azerothList, err := svc.ListOutstandingInvitesForProject(ctx, azeroth)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvitesForProject: %v", err)
+	}
+	if len(azerothList) != 1 || azerothList[0].ID != azerothInvite.ID {
+		t.Fatalf("ListOutstandingInvitesForProject(azeroth) = %+v, want only %s", azerothList, azerothInvite.ID)
+	}
+
+	// A revoke scoped to the wrong game is a silent no-op, the same
+	// convention RevokeAPIToken's own doc comment establishes for tokens.
+	if err := svc.RevokeProjectInvite(ctx, outland, azerothInvite.ID); err != nil {
+		t.Fatalf("RevokeProjectInvite (wrong game): %v", err)
+	}
+	if _, err := svc.RedeemInvite(ctx, azerothToken, identity.CreateUserRequest{
+		Email: "azeroth.member@studio.com", DisplayName: "Azeroth Member", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("RedeemInvite must still succeed after a cross-game revoke attempt: %v", err)
+	}
+
+	if err := svc.RevokeProjectInvite(ctx, outland, outlandInvite.ID); err != nil {
+		t.Fatalf("RevokeProjectInvite: %v", err)
+	}
+	outlandList, err := svc.ListOutstandingInvitesForProject(ctx, outland)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvitesForProject: %v", err)
+	}
+	// Revoking does not remove the row (see RevokeInvite's own doc
+	// comment: it expires it in place), but a revoked invite still counts
+	// as "outstanding" (not yet redeemed) by ListOutstandingProjectInvites'
+	// own definition of that word — mirroring
+	// TestListOutstandingInvitesAndRevoke's identical assumption for the
+	// account-only listing above.
+	found := false
+	for _, inv := range outlandList {
+		if inv.ID == outlandInvite.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("revoked invite unexpectedly disappeared from ListOutstandingInvitesForProject")
+	}
+}

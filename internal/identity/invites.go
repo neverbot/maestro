@@ -340,10 +340,16 @@ func (s *Service) resolveInviteMiss(ctx context.Context, tokenHash []byte) error
 	return fmt.Errorf("%w (expired %s)", ErrInviteExpired, stale.ExpiresAt.Time.Format("2006-01-02"))
 }
 
-// ListOutstandingInvites returns every invite not yet redeemed, newest
-// first, for an admin surface to review and revoke by (see RevokeInvite).
-// See the query's own doc comment for why "outstanding" includes invites
-// that have since expired.
+// ListOutstandingInvites returns every account-only invite (no game
+// attached) not yet redeemed, newest first, for the instance-wide admin
+// surface (Task 18's POST/GET/DELETE /api/invites, gated on
+// Caller.IsAdmin) to review and revoke by (see RevokeInvite). See the
+// query's own doc comment for why "outstanding" includes invites that
+// have since expired, and for why this is scoped to project_id IS NULL —
+// a project-bound invite is this method's project_id IS NULL clause away
+// from leaking another game's pending roster to an admin with no
+// membership in it. ListOutstandingInvitesForProject is the project-bound
+// counterpart.
 func (s *Service) ListOutstandingInvites(ctx context.Context) ([]InviteSummary, error) {
 	rows, err := s.q.ListOutstandingInvites(ctx)
 	if err != nil {
@@ -356,16 +362,53 @@ func (s *Service) ListOutstandingInvites(ctx context.Context) ([]InviteSummary, 
 	return out, nil
 }
 
-// RevokeInvite makes one invite permanently unredeemable, by expiring it
-// immediately, so an invite pasted into the wrong channel — a live bearer
-// credential for as long as it has left to live — can actually be taken
-// back rather than left to run out the clock. Revoking an unknown,
-// already-redeemed or already-expired id is not an error: the caller's
-// goal (no live invite under this id) is already satisfied, the same
-// convention RevokeSession already established in sessions.go.
+// ListOutstandingInvitesForProject is ListOutstandingInvites' project-
+// scoped counterpart, added in Task 18 for GET /api/games/{game}/invites:
+// every invite naming projectID that is not yet redeemed, newest first.
+// Gated by the HTTP layer on that game's own owner role, not on
+// Caller.IsAdmin — see ListOutstandingInvites' own doc comment for why the
+// two surfaces never share a query.
+func (s *Service) ListOutstandingInvitesForProject(ctx context.Context, projectID uuid.UUID) ([]InviteSummary, error) {
+	rows, err := s.q.ListOutstandingProjectInvites(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list outstanding project invites: %w", err)
+	}
+	out := make([]InviteSummary, len(rows))
+	for i, row := range rows {
+		out[i] = inviteSummaryFrom(row)
+	}
+	return out, nil
+}
+
+// RevokeInvite makes one account-only invite (no game attached)
+// permanently unredeemable, by expiring it immediately, so an invite
+// pasted into the wrong channel — a live bearer credential for as long as
+// it has left to live — can actually be taken back rather than left to
+// run out the clock. Revoking an unknown, already-redeemed,
+// already-expired or project-bound id is not an error: the caller's goal
+// (no live account-only invite under this id) is already satisfied
+// either way, the same convention RevokeSession already established in
+// sessions.go — and see the query's own doc comment for why a
+// project-bound id must fall into that same silent-no-op bucket rather
+// than being revoked here. RevokeProjectInvite is the project-bound
+// counterpart.
 func (s *Service) RevokeInvite(ctx context.Context, id uuid.UUID) error {
 	if err := s.q.RevokeInvite(ctx, id); err != nil {
 		return fmt.Errorf("revoke invite: %w", err)
+	}
+	return nil
+}
+
+// RevokeProjectInvite is RevokeInvite's project-scoped counterpart, added
+// in Task 18 for DELETE /api/games/{game}/invites/{invite}. Revoking an
+// id that does not exist, or belongs to a different game, is the same
+// silent no-op RevokeAPIToken's own doc comment establishes for tokens,
+// and for the same reason: telling the two apart would let a caller with
+// standing in one game probe whether some other id belongs to a
+// different one.
+func (s *Service) RevokeProjectInvite(ctx context.Context, projectID, id uuid.UUID) error {
+	if err := s.q.RevokeProjectInvite(ctx, dbq.RevokeProjectInviteParams{ID: id, ProjectID: projectID}); err != nil {
+		return fmt.Errorf("revoke project invite: %w", err)
 	}
 	return nil
 }

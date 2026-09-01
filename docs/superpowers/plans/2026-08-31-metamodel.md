@@ -339,7 +339,7 @@ func questSchema() Schema {
 	return Schema{
 		{Key: "min_level", Label: "Minimum level", Type: FieldNumber, Required: true, Min: ptrFloat(1), Max: ptrFloat(70)},
 		{Key: "summary", Label: "Summary", Type: FieldLongText},
-		{Key: "repeatable", Label: "Repeatable", Type: FieldBool, Default: false},
+		{Key: "repeatable", Label: "Repeatable", Type: FieldBool, HasDefault: true, Default: false},
 		{Key: "difficulty", Label: "Difficulty", Type: FieldEnum, Options: []string{"trivial", "normal", "elite"}},
 		{Key: "tags", Label: "Tags", Type: FieldListText},
 	}
@@ -360,9 +360,11 @@ func TestValidateAcceptsAWellFormedRow(t *testing.T) {
 	if out["min_level"] != float64(20) {
 		t.Fatalf("min_level = %v", out["min_level"])
 	}
-	// An absent optional field stays absent: it is never zero-filled.
-	if _, present := out["repeatable"]; present {
-		t.Fatal("an omitted optional field must not appear in the output")
+	// repeatable declares a default of false, so an omitted field with a
+	// declared default is filled in — never left absent, and never dropped
+	// for being the zero value of its type.
+	if v, present := out["repeatable"]; !present || v != false {
+		t.Fatalf("repeatable = %v, present=%v; want the declared default false to be applied", v, present)
 	}
 }
 
@@ -420,7 +422,7 @@ func TestValidateChecksListElements(t *testing.T) {
 }
 
 func TestValidateAppliesDefaults(t *testing.T) {
-	schema := Schema{{Key: "repeatable", Type: FieldBool, Default: true}}
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: true}}
 	out, err := schema.Validate(map[string]any{})
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -458,6 +460,12 @@ func TestSchemaRejectsEnumWithoutOptions(t *testing.T) {
 }
 ```
 
+The block above is the starting point, not the finished file. The landed
+`validate_test.go` grew to 72 tests as the corrections below went in; every
+negative test there asserts the exact message *and* path it expects, so it
+can only be satisfied by the failure it names. Read the file, not this
+block, for the full list.
+
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -v`
@@ -481,11 +489,12 @@ import (
 // Stable domain errors. Their names match the wire codes the MCP surface
 // returns, so a change here is a change to the public contract.
 var (
-	ErrNotFound            = errors.New("not_found")
-	ErrVersionConflict     = errors.New("version_conflict")
+	ErrNotFound             = errors.New("not_found")
+	ErrVersionConflict      = errors.New("version_conflict")
 	ErrEndpointTypeMismatch = errors.New("endpoint_type_mismatch")
-	ErrInUse               = errors.New("in_use")
-	ErrSchemaViolation     = errors.New("schema_violation")
+	ErrInUse                = errors.New("in_use")
+	ErrSchemaViolation      = errors.New("schema_violation")
+	ErrInvalidSchema        = errors.New("invalid_schema")
 )
 
 // FieldError is one problem with one field.
@@ -513,6 +522,34 @@ func (e *ValidationError) Error() string {
 // Is makes errors.Is(err, ErrSchemaViolation) true for validation failures.
 func (e *ValidationError) Is(target error) bool { return target == ErrSchemaViolation }
 
+// SchemaError carries every problem found in a schema *declaration*, at
+// field_schema[<i>] paths.
+//
+// It is deliberately a different error from ValidationError, and satisfies a
+// different sentinel. The two failures are told apart by who is at fault: an
+// invalid_schema is a type whose declaration cannot stand, a
+// schema_violation is a row of values that does not fit a declaration that
+// can. The MCP surface returns those as two codes, and a caller must not
+// have to match on path spelling to tell them apart. Introducing the
+// distinction now is cheap; Task 7 puts it on the wire, and after that it is
+// not.
+type SchemaError struct {
+	Fields []FieldError
+}
+
+func (e *SchemaError) Error() string {
+	parts := make([]string, 0, len(e.Fields))
+	for _, f := range e.Fields {
+		parts = append(parts, f.Error())
+	}
+	return fmt.Sprintf("invalid_schema: %s", strings.Join(parts, "; "))
+}
+
+// Is makes errors.Is(err, ErrInvalidSchema) true for schema declaration
+// failures — and, deliberately, leaves errors.Is(err, ErrSchemaViolation)
+// false.
+func (e *SchemaError) Is(target error) bool { return target == ErrInvalidSchema }
+
 // VersionConflictError reports the version the caller must merge onto.
 type VersionConflictError struct {
 	Current int32
@@ -526,6 +563,7 @@ func (e *VersionConflictError) Error() string {
 func (e *VersionConflictError) Is(target error) bool { return target == ErrVersionConflict }
 ```
 
+
 `internal/metamodel/schema.go`:
 
 ```go
@@ -534,6 +572,8 @@ package metamodel
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 // FieldType is one of the declarative field types a game may use. There is
@@ -552,15 +592,103 @@ const (
 )
 
 // Field is one declared field of an entity type or relation type.
+//
+// HasDefault is not part of the wire format. On the wire a default is
+// declared by the presence of the "default" key and by nothing else, so
+// there is exactly one source of truth for the fact; UnmarshalJSON sets
+// HasDefault from that presence and MarshalJSON writes the key back only
+// when HasDefault is set. See Field.UnmarshalJSON.
 type Field struct {
+	// Key identifies the field inside the row's jsonb object. It must be
+	// lower_snake_case ASCII, at most maxKeyLen characters; see keyPattern
+	// for why the rule is that narrow.
 	Key      string    `json:"key"`
 	Label    string    `json:"label,omitempty"`
 	Type     FieldType `json:"type"`
 	Required bool      `json:"required,omitempty"`
-	Default  any       `json:"default,omitempty"`
-	Options  []string  `json:"options,omitempty"`
-	Min      *float64  `json:"min,omitempty"`
-	Max      *float64  `json:"max,omitempty"`
+	// HasDefault reports whether this field declares a default at all,
+	// independently of what Default holds. It exists because Default is
+	// `any`: its Go zero value is nil, the very same value an undeclared
+	// field carries, and false, 0 and "" are ordinary, legitimate defaults
+	// a game may want to declare (repeatable: false, starting_credits: 0).
+	// A reflect-based "is Default the zero value" rule cannot tell "declared
+	// false" from "never declared" apart — that confusion is exactly what
+	// this field replaces.
+	HasDefault bool     `json:"-"`
+	Default    any      `json:"-"`
+	Options    []string `json:"options,omitempty"`
+	Min        *float64 `json:"min,omitempty"`
+	Max        *float64 `json:"max,omitempty"`
+}
+
+// fieldJSON is Field's wire shape. Default is a *json.RawMessage so the
+// decoder can tell "the key was absent" from "the key was present and held
+// false, 0 or an empty string" — the distinction a plain `any` destroys.
+type fieldJSON struct {
+	Key      string           `json:"key"`
+	Label    string           `json:"label,omitempty"`
+	Type     FieldType        `json:"type"`
+	Required bool             `json:"required,omitempty"`
+	Default  *json.RawMessage `json:"default,omitempty"`
+	Options  []string         `json:"options,omitempty"`
+	Min      *float64         `json:"min,omitempty"`
+	Max      *float64         `json:"max,omitempty"`
+}
+
+// UnmarshalJSON decodes a field, declaring a default when — and only when —
+// the "default" key is present and not null.
+//
+// This is the path every agent-authored schema takes: MCP hands Task 3 a
+// field_schema straight off the wire, so a default that is not inferred here
+// is a default that is silently dropped. An explicit null is not a default:
+// null is how this package spells "not set" everywhere else, and Validate
+// already treats a null value as an absent one.
+func (f *Field) UnmarshalJSON(raw []byte) error {
+	var w fieldJSON
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return err
+	}
+	*f = Field{
+		Key:      w.Key,
+		Label:    w.Label,
+		Type:     w.Type,
+		Required: w.Required,
+		Options:  w.Options,
+		Min:      w.Min,
+		Max:      w.Max,
+	}
+	if w.Default != nil && string(*w.Default) != "null" {
+		if err := json.Unmarshal(*w.Default, &f.Default); err != nil {
+			return err
+		}
+		f.HasDefault = true
+	}
+	return nil
+}
+
+// MarshalJSON writes the "default" key only for a field that declares one,
+// so the value round trips back through UnmarshalJSON to the same
+// HasDefault. A field with HasDefault set and a nil Default cannot be
+// spelled on the wire; Check rejects it, since nil is not a value any field
+// type could hold.
+func (f Field) MarshalJSON() ([]byte, error) {
+	w := fieldJSON{
+		Key:      f.Key,
+		Label:    f.Label,
+		Type:     f.Type,
+		Required: f.Required,
+		Options:  f.Options,
+		Min:      f.Min,
+		Max:      f.Max,
+	}
+	if f.HasDefault && f.Default != nil {
+		encoded, err := json.Marshal(f.Default)
+		if err != nil {
+			return nil, err
+		}
+		w.Default = (*json.RawMessage)(&encoded)
+	}
+	return json.Marshal(w)
 }
 
 // Schema is the ordered list of fields a type declares.
@@ -586,46 +714,142 @@ func (s Schema) JSON() ([]byte, error) {
 	return json.Marshal(s)
 }
 
+// maxKeyLen caps a field key. It is generous for a human-readable
+// identifier and short enough that a key can be used verbatim wherever
+// Maestro later needs one — a jsonb key, a view-query token, a flattened
+// column name.
+const maxKeyLen = 64
+
+// keyPattern is the field-key rule: lower_snake_case ASCII, starting with a
+// letter. It is deliberately narrow, and every exclusion pays for itself:
+//
+//   - No dot, because "fields.<key>" is the error path this package returns;
+//     a key containing a dot makes "fields.a.b" ambiguous between the field
+//     "a.b" and a nested "b" inside "a".
+//   - No upper case, so two keys can never differ only by case — a collision
+//     no case-sensitive map would catch but every human reader would trip
+//     over. Lowercasing by rule beats detecting the collision after the fact.
+//   - No whitespace, brackets or dashes, so a key is a single token wherever
+//     it is later quoted, flattened or parsed.
+//   - ASCII only, so no two spellings of one key (NFC and NFD forms of the
+//     same accented word) can coexist as different keys.
+//
+// The rule is enforced at declaration time, where an agent can still act on
+// the news, rather than being discovered six hundred rows later.
+var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
 // Check validates the schema itself, before anything is stored against it.
+// Every problem in the whole schema is reported in one pass, including
+// several problems on one field: an agent authoring a schema should be able
+// to fix all of it at once.
 func (s Schema) Check() error {
 	seen := make(map[string]struct{}, len(s))
 	var problems []FieldError
 
 	for i, f := range s {
 		path := fmt.Sprintf("field_schema[%d]", i)
-		if f.Key == "" {
-			problems = append(problems, FieldError{Path: path, Message: "key is required"})
-			continue
+		problem := func(msg string) {
+			problems = append(problems, FieldError{Path: path, Message: msg})
 		}
-		if _, dup := seen[f.Key]; dup {
-			problems = append(problems, FieldError{Path: path, Message: "duplicate key " + f.Key})
-		}
-		seen[f.Key] = struct{}{}
 
+		// A bad key never short-circuits the rest of the field: it would hide
+		// problems the same agent has to fix in the same edit.
+		switch {
+		case f.Key == "":
+			problem("key is required")
+		case len(f.Key) > maxKeyLen:
+			problem(fmt.Sprintf("key must be at most %d characters", maxKeyLen))
+		case !keyPattern.MatchString(f.Key):
+			problem("key must be lower_snake_case: a letter, then letters, digits or underscores")
+		default:
+			if _, dup := seen[f.Key]; dup {
+				problem("duplicate key " + f.Key)
+			}
+			seen[f.Key] = struct{}{}
+		}
+
+		typeOK := false
 		switch f.Type {
+		case "":
+			problem("type is required")
 		case FieldText, FieldLongText, FieldNumber, FieldBool, FieldListText:
+			typeOK = true
 		case FieldEnum:
 			if len(f.Options) == 0 {
-				problems = append(problems, FieldError{Path: path, Message: "an enum field needs options"})
+				problem("an enum field needs options")
+			} else {
+				typeOK = true
 			}
 		default:
-			problems = append(problems, FieldError{Path: path, Message: "unknown type " + string(f.Type)})
+			problem("unknown type " + string(f.Type))
+		}
+
+		// Options and bounds are per-type facilities. Declaring one on a type
+		// that cannot use it is never what the author meant, and silence here
+		// reads to them as acceptance.
+		if f.Type != FieldEnum && len(f.Options) > 0 {
+			problem("options apply only to an enum field")
+		}
+		if f.Type == FieldEnum {
+			seenOpt := make(map[string]struct{}, len(f.Options))
+			for j, opt := range f.Options {
+				if strings.TrimSpace(opt) == "" {
+					problem(fmt.Sprintf("option %d is empty", j))
+					continue
+				}
+				if _, dup := seenOpt[opt]; dup {
+					problem(fmt.Sprintf("duplicate option %q", opt))
+				}
+				seenOpt[opt] = struct{}{}
+			}
+		}
+		if f.Type != FieldNumber && (f.Min != nil || f.Max != nil) {
+			problem("min and max apply only to a number field")
+		}
+		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
+			problem(fmt.Sprintf("min %v is above max %v, so no value is legal", *f.Min, *f.Max))
+		}
+
+		// Required and a default are mutually exclusive. Validate applies the
+		// default before it can ever complain that the field is missing, so
+		// the pair makes Required unreachable; rejecting it here says so at
+		// the only moment the author can still choose which one they meant.
+		if f.Required && f.HasDefault {
+			problem("a required field cannot also declare a default: the default would always win")
+		}
+
+		// A declared default must itself be a value the field could actually
+		// hold — same coercion and bounds logic Validate applies to a real
+		// value, so a schema can never declare a default no direct write
+		// could ever produce (Default: "yes" on a bool field, Default: 200
+		// on a number field whose Max is 70, and so on).
+		if typeOK && f.HasDefault {
+			if _, err := coerce(f, f.Default); err != nil {
+				problem("default: " + err.Error())
+			}
 		}
 	}
 
 	if len(problems) > 0 {
-		return &ValidationError{Fields: problems}
+		return &SchemaError{Fields: problems}
 	}
 	return nil
 }
 ```
+
 
 `internal/metamodel/validate.go`:
 
 ```go
 package metamodel
 
-import "fmt"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+)
 
 // Validate checks a value map against the schema and returns the normalised
 // map to store. Every problem is reported at once.
@@ -635,8 +859,11 @@ import "fmt"
 //     "min_lvl" must find out immediately, not six hundred rows later.
 //   - An absent optional field with no default stays absent: zero-filling
 //     would make "not set" indistinguishable from "set to zero".
-//   - Declared defaults are applied, so a schema change gives every new row
-//     the value the designer intended.
+//   - A declared default is applied when the field is absent or null, so a
+//     schema change gives every new row the value the designer intended.
+//     See hasDefault for what counts as declared. The default goes through
+//     the same coercion a hand-written value does, so it lands in the row
+//     with the same Go type and cannot smuggle past the field's bounds.
 func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	byKey := make(map[string]Field, len(s))
 	for _, f := range s {
@@ -646,13 +873,22 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	var problems []FieldError
 	out := make(map[string]any, len(values))
 
+	// Unknown keys are found by ranging a map, whose order Go randomises on
+	// every run. They are sorted so the message a caller sees is a function
+	// of the input alone: Tasks 3-6 return these strings to agents, and a
+	// golden test over them has to be possible.
+	var unknown []string
 	for key := range values {
 		if _, known := byKey[key]; !known {
-			problems = append(problems, FieldError{
-				Path:    "fields." + key,
-				Message: "unknown field for this type",
-			})
+			unknown = append(unknown, key)
 		}
+	}
+	sort.Strings(unknown)
+	for _, key := range unknown {
+		problems = append(problems, FieldError{
+			Path:    "fields." + key,
+			Message: "unknown field for this type",
+		})
 	}
 
 	for _, f := range s {
@@ -661,8 +897,21 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 
 		if !present || raw == nil {
 			switch {
-			case f.Default != nil:
-				out[f.Key] = f.Default
+			case hasDefault(f):
+				// The default is coerced exactly like a value written by
+				// hand. A schema read back from jsonb never passes through
+				// Check again, so without this a schema that was never
+				// checked would write an unchecked value into every row it
+				// touches, forever.
+				value, err := coerce(f, f.Default)
+				if err != nil {
+					problems = append(problems, FieldError{
+						Path:    path,
+						Message: "the schema's default is invalid: " + err.Error(),
+					})
+					continue
+				}
+				out[f.Key] = value
 			case f.Required:
 				problems = append(problems, FieldError{Path: path, Message: "is required"})
 			}
@@ -683,9 +932,43 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
+// CheckValues re-validates a stored row against this schema and reports
+// whether it still fits, returning nothing a caller could accidentally write
+// back.
+//
+// This is the re-validation path. When a type's field schema is edited,
+// every stored row of that type has to be re-examined and flagged, and the
+// design is explicit that flagging must not alter the rows: an entity's
+// content is the designer's, and a validation pass is not an edit. Validate
+// cannot serve that purpose safely — it returns a normalised map with
+// declared defaults injected, so a caller who re-validates with it and then
+// stores what came back silently back-fills every row it touched. Returning
+// only an error removes the possibility rather than documenting against it.
+//
+// The rules are exactly Validate's, so the two never disagree about whether
+// a row is valid; the difference is only what comes back.
+func (s Schema) CheckValues(values map[string]any) error {
+	_, err := s.Validate(values)
+	return err
+}
+
+// hasDefault reports whether the field declares a default for Validate to
+// apply. Presence, not value, decides it: Field.HasDefault is set
+// independently of what Default holds, so a declared default of false, 0 or
+// "" — an ordinary thing for a game to declare — is applied exactly like any
+// other declared default. See Field.HasDefault's doc comment for why a
+// value-based rule (checking whether Default is the zero value) cannot make
+// this distinction.
+func hasDefault(f Field) bool {
+	return f.HasDefault
+}
+
 // coerce checks one value against one field declaration.
 func coerce(f Field, raw any) (any, error) {
 	switch f.Type {
+	case "":
+		return nil, errors.New("the schema declares no type for this field")
+
 	case FieldText, FieldLongText:
 		s, ok := raw.(string)
 		if !ok {
@@ -697,6 +980,13 @@ func coerce(f Field, raw any) (any, error) {
 		n, ok := toFloat(raw)
 		if !ok {
 			return nil, fmt.Errorf("expected number, got %T", raw)
+		}
+		// NaN compares false against every bound, so without this it would
+		// slip past both Min and Max; the infinities pass whenever the
+		// matching bound is unset. Neither survives being written to jsonb,
+		// and the failure there carries no field path, so it is caught here.
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return nil, errors.New("must be a finite number")
 		}
 		if f.Min != nil && n < *f.Min {
 			return nil, fmt.Errorf("must be at least %v", *f.Min)
@@ -745,7 +1035,16 @@ func coerce(f Field, raw any) (any, error) {
 	}
 }
 
-// toFloat accepts every numeric shape JSON decoding can produce.
+// toFloat widens every numeric shape that can reach the validator to
+// float64. That is more than encoding/json's default decode produces: a
+// decoder configured with UseNumber yields json.Number, which the MCP SDK is
+// free to do, and Go callers inside Maestro pass the small and unsigned
+// widths. Missing any of them would break every number field at once, and
+// widening is far cheaper than finding out which decoder is in play.
+//
+// Finiteness is deliberately not decided here: NaN and the infinities widen
+// cleanly, and coerce rejects them with a message that says what is actually
+// wrong rather than claiming the value is not a number.
 func toFloat(raw any) (float64, bool) {
 	switch n := raw.(type) {
 	case float64:
@@ -754,20 +1053,39 @@ func toFloat(raw any) (float64, bool) {
 		return float64(n), true
 	case int:
 		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
 	case int32:
 		return float64(n), true
 	case int64:
 		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
 	default:
 		return 0, false
 	}
 }
 ```
 
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `go test ./internal/metamodel/ -v`
-Expected: PASS, eleven tests.
+Expected: PASS. Eleven tests as first written; 72 as landed, after the
+corrections below.
 
 - [ ] **Step 5: Commit**
 
@@ -818,6 +1136,194 @@ landed package, made before Task 3 starts building on `Field`'s shape):
    && ...` and confirming four tests fail: `TestSchemaRejectsADefaultOfTheWrongType`,
    `TestSchemaRejectsADefaultOutsideItsBounds`, `TestSchemaRejectsADefaultNotInEnumOptions`,
    `TestSchemaRejectsANonTextElementInAListTextDefault`.
+
+**Corrections from the review of the first two** (a second pass, still
+before Task 3 begins; the code blocks above were refreshed from the landed
+files in the same pass, so what they show is what shipped):
+
+3. `HasDefault` was a plain JSON field, so **every default an agent declared
+   over the wire was silently dropped**. `ParseSchema` never inferred it from
+   the presence of the `"default"` key:
+   `[{"key":"repeatable","type":"bool","default":false}]` parsed to
+   `HasDefault: false`, `Validate({})` returned an empty map, and `Check()`
+   skipped the default too — the guarantee correction 1 added evaporated on
+   exactly the input shape it was written for. Task 3 accepts `field_schema`
+   straight from MCP and no agent would ever know to send an undocumented
+   `has_default` sibling. Correction 1's reasoning about `omitempty` on an
+   `any` field was right about marshalling and beside the point about
+   unmarshalling, which is where the fact was being lost.
+
+   Fixed at the wire boundary rather than at the call sites: `Field` now has
+   `UnmarshalJSON` and `MarshalJSON` over a shadow struct whose `Default` is
+   a `*json.RawMessage`, and both `HasDefault` and `Default` are tagged
+   `json:"-"`.
+
+   **Decision — `has_default` is not an accepted input key.** A default is
+   declared by the presence of `"default"` and by nothing else. Accepting
+   both would give one fact two sources of truth on the wire, which is the
+   shape of bug this correction exists to close: an agent sending `default`
+   without `has_default`, or the two disagreeing, has no defensible answer.
+   `MarshalJSON` writes `"default"` only when `HasDefault` is set, so a
+   schema round trips to the same `HasDefault` it started with, and
+   `has_default` never appears on the wire in either direction.
+
+   **An explicit `"default": null` is no default.** `null` is how this
+   package spells "not set" everywhere else — `Validate` already treats a
+   null value as an absent one — so a null default declares nothing rather
+   than declaring a default of nil.
+
+   `TestSchemaRoundTripPreservesADeclaredZeroValuedDefault`'s comment claimed
+   it covered the path Tasks 3-6 use while covering only Go -> JSON -> Go; it
+   now covers JSON -> Go first (parse an agent-shaped `field_schema`,
+   validate a row against it) and the comment is true. Proved red by deleting
+   the `f.HasDefault = true` inference:
+   `TestParseSchemaInfersHasDefaultFromThePresenceOfTheDefaultKey` and
+   `TestSchemaRoundTripPreservesADeclaredZeroValuedDefault` both fail.
+
+4. **Defaults were applied raw, bypassing `coerce`.** `out[f.Key] = f.Default`
+   meant `Default: 20` declared as a Go `int` stored `int(20)` while an
+   explicit `20` in the row stored `float64(20)` — two rows of one type
+   carrying two Go types for one field. Worse, a schema that never went
+   through `Check()` wrote an unchecked value forever:
+   `Schema{{Key: "b", Type: FieldBool, HasDefault: true, Default: "yes"}}.Validate(map[string]any{})`
+   returned `map[b:"yes"]` with a nil error, and schemas read back from jsonb
+   via `ParseSchema` are never re-`Check`ed, so it was reachable in
+   production. The default now goes through `coerce` and a failure is
+   reported at `fields.<key>` as `the schema's default is invalid: ...`.
+   Proved red by `TestValidateNormalisesAnAppliedDefault` and
+   `TestValidateRejectsAnUncheckedBadDefault`, neither of which the package
+   had — the change broke no existing test, which was itself the finding.
+
+5. **`NaN` and the infinities passed validation, bounds included.** `NaN`
+   compares false against both `Min` and `Max`, so every number field
+   accepted it; `+Inf` passed whenever `Max` was unset; a `NaN` default
+   passed `Check()`. The row then died inside Task 4's bulk write as an
+   opaque `json: unsupported value: NaN` with no field path. `coerce` now
+   rejects a non-finite number with `must be a finite number` at the field
+   path. The check sits in `coerce`, not in `toFloat`, so the message says
+   what is actually wrong instead of claiming the value is not a number.
+
+6. **`toFloat` did not accept every numeric shape its comment claimed.** It
+   rejected `json.Number` — what `Decoder.UseNumber` produces, which the MCP
+   SDK is free to do — and every unsigned and small integer width. One
+   decoder setting would have broken every number field at once. Widened to
+   `json.Number` and all the integer widths; the comment now says what it
+   does and why finiteness is decided elsewhere.
+
+7. **`Check()` accepted contradictory and meaningless declarations**, all
+   returning nil: `Min: 70, Max: 1`; `Min`/`Max` on a `text` or `bool` field;
+   `Options` on a non-enum field; duplicate or empty enum options; a
+   whitespace-only key; a key containing a dot; keys differing only by case.
+   There was no key-format rule at all. Agents author these schemas, and
+   silence here becomes six hundred rows of a field that never validates.
+   Each is now a problem at `field_schema[<i>]`.
+
+   **Decision — the key rule is `^[a-z][a-z0-9_]*$`, at most 64 characters.**
+   Lower_snake_case ASCII, starting with a letter. Every exclusion pays for
+   itself:
+
+   - No dot, because `fields.<key>` is the error path this package returns
+     and a key holding a dot makes `fields.a.b` ambiguous between the field
+     `a.b` and a nested `b` inside `a`.
+   - No upper case, so two keys can never differ only by case. That is a
+     collision no case-sensitive map catches and every human reader trips
+     over; ruling it out by construction beats detecting it afterwards.
+   - No whitespace, dashes or brackets, so a key stays a single token
+     wherever it is later quoted, flattened or parsed — Task 8's flattening
+     and the view query language both want that.
+   - ASCII only, so two Unicode normalisations of one accented word cannot
+     coexist as two different keys.
+
+   Sixty-four characters is generous for a readable identifier and short
+   enough to be usable verbatim as a column name if Task 8 ever needs one.
+
+8. **`Required` plus a default made `Required` dead**, undocumented and
+   untested, because `Validate`'s default branch runs before it could ever
+   complain the field is missing. **Decision: the combination is rejected in
+   `Check()`.** A field either has a fallback or it does not; the pair is
+   always one of the two written by mistake, and declaration time is the only
+   moment the author can still say which.
+
+9. **`Check()` short-circuited on a bad key**, so `{Key: "", Type: "rgb"}`
+   reported one problem where two existed, denting the package's "every
+   problem in one pass" contract. A bad key is now recorded and the rest of
+   the field is checked anyway; only the duplicate-key bookkeeping is skipped
+   for a key that is not well formed.
+
+10. **Unknown-field errors came out in map order** — three runs, three
+    orderings. Tasks 3-6 return these strings to agents and will want golden
+    tests. Unknown keys are now sorted and reported first, then each declared
+    field in schema order, so the whole message is a function of the input
+    alone.
+
+11. **Enum matching compares exact bytes**, so `Normal` does not match
+    `normal` and an NFD spelling does not match its NFC option. That is the
+    intended behaviour, not an oversight: an option is a token the game
+    declared, and Maestro does not decide on a game's behalf that two
+    spellings are one word. It was undocumented and untested; it is now both
+    (`TestValidateMatchesEnumOptionsByExactBytes`).
+
+12. **Six negative tests passed for the wrong reason.** The reviewer proved
+    each of these mutations survived all 26 tests: replacing the whole text
+    branch with `return fmt.Sprint(raw), nil` — silently stringifying maps,
+    numbers and bools, the most dangerous coercion the package could make —
+    survived, because there was no negative test for `text`/`longtext` at
+    all; swapping the two bound messages survived, and so did skipping the
+    minimum check for non-integral values, because `TestValidateEnforcesRange`
+    asserted only `err != nil`; making enum comparison case-insensitive
+    survived; dropping the list element check survived; and there was no
+    `Validate`-level negative test for `bool` at all.
+
+    Every negative test now asserts the exact message and path, so it can
+    only be satisfied by the failure it names, and each of the six mutations
+    was re-run and confirmed red. The standard for the rest of the plan: a
+    negative test that asserts only `err != nil` is not a test of the thing
+    it is named after.
+
+13. **`Schema.CheckValues(values) error` is the re-validation path.** The
+    plan's `TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem` (Task 4)
+    needs hundreds of stored rows re-validated against a new schema and
+    flagged invalid *without altering their data*, and the only entry point
+    was `Validate`, which returns a normalised map with defaults injected —
+    so Task 4 had to remember to discard it or it would back-fill silently,
+    the exact thing the design forbids. `CheckValues` applies precisely
+    `Validate`'s rules and returns only an error, so there is nothing to
+    forget. **Task 4 must use it** for the flagging pass; `Validate` is for
+    writes.
+
+14. **`ErrInvalidSchema` is a distinct sentinel from `ErrSchemaViolation`.**
+    `Check()` used to return an error satisfying
+    `errors.Is(err, ErrSchemaViolation)` — the same sentinel as a bad row of
+    values, distinguishable only by path convention, so an MCP surface
+    wanting `invalid_schema` separate from `schema_violation` would have had
+    to match on path spelling. `Check()` now returns `*SchemaError`, whose
+    message leads with `invalid_schema:` and which satisfies
+    `ErrInvalidSchema` and deliberately *not* `ErrSchemaViolation`. The two
+    failures differ in who is at fault: a declaration that cannot stand,
+    versus a row that does not fit a declaration that can. **Task 7 puts this
+    on the wire**; adding it now is free and adding it later would be a wire
+    change.
+
+**Open, deliberately not implemented here** — both are decisions for the
+tasks that first feel them, recorded so they are not rediscovered:
+
+- **Schema-evolution classification.** Nothing tells a caller whether an edit
+  to a field schema *widens* it (a new optional field, a new enum option, a
+  loosened bound — every stored row stays valid) or *narrows* it (a new
+  required field, a removed option, a tightened bound, a changed type — some
+  stored rows become invalid). Task 4 needs the distinction to decide whether
+  a schema edit can skip the re-validation sweep entirely, and Task 3 is
+  where the edit is accepted, so **this is a Task 3/4 decision**. Until it
+  lands, a schema edit must assume it narrows and sweep with `CheckValues`.
+- **Reserved-key policy.** Nothing stops a game declaring a field named
+  `key`, `name`, `id`, `type` or `version`. There is no live collision today
+  because game fields live inside the `fields` jsonb, walled off from the
+  row's own columns — but **Task 8's flattening is where it would bite**, the
+  moment a field is lifted alongside an entity's own attributes in a REST
+  payload or a page's data model. **This is a Task 3/8 decision**: either
+  reserve a list in `Check()` (cheap, and a breaking change once games exist)
+  or keep the namespaces separated by construction wherever flattening
+  happens.
 
 ---
 

@@ -54,7 +54,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// (lower-case, trim), so "Bob@x.com", "bob@x.com" and " bob@x.com "
 	// share one rate-limit budget instead of three (Task 6, Correction 9).
 	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if !s.loginLimiter.Allowed(email) {
+	ip := clientIP(r)
+	// Two independent budgets, both consulted before any password check
+	// runs: loginLimiter (per normalized email) stops an attacker who
+	// knows one address from being throttled off by traffic from other
+	// accounts, and loginIPLimiter (per source IP, looser) stops that
+	// same attacker from grinding through many different accounts' own
+	// budgets one at a time from a single origin. See the doc comment on
+	// Server.loginLimiter/loginIPLimiter in server.go for why these stay
+	// separate rather than a single composite "email+ip" key. Both are
+	// checked here, before Authenticate is ever called, so a caller whose
+	// budget is exhausted gets 429 unconditionally — never a 200 for a
+	// correct password that slipped in under the cap, which would
+	// reopen exactly the enumeration oracle the sentinel hash in
+	// Authenticate exists to close (a status code, or its timing, would
+	// leak whether the password was right even though the request was
+	// rate-limited).
+	if !s.loginLimiter.Allowed(email) || !s.loginIPLimiter.Allowed(ip) {
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, wait a minute")
 		return
 	}
@@ -62,6 +78,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user, err := s.opts.Identity.Authenticate(r.Context(), req.Email, req.Password)
 	if err != nil {
 		s.loginLimiter.Record(email)
+		s.loginIPLimiter.Record(ip)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "email or password is wrong")
 		return
 	}
@@ -111,6 +128,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		// is the very secret being guessed, so keying the limiter on it
 		// would hand every guess a fresh, unlimited budget — the limiter
 		// would cap nothing (Task 6, Correction 10).
+		//
+		// This stays IP-only, unlike handleLogin's paired email+IP
+		// limiters above: handleLogin needs a second key precisely
+		// because req.Email there names an *existing* account that an
+		// attacker who merely knows the address can otherwise lock out
+		// for free. Here, req.Email (when an invite carries one) is not
+		// itself the credential being protected — RedeemInvite already
+		// requires the actual invite token to reach this far, and an
+		// invite bound to an email an attacker doesn't hold is simply
+		// rejected by RedeemInvite's own comparison, at no cost to the
+		// invitee, since nothing about that comparison consumes any part
+		// of their own budget. There is no account, and no per-address
+		// budget, for an attacker to exhaust here — only the shared
+		// token-guessing budget IP keying already caps.
 		ip := clientIP(r)
 		if !s.inviteLimiter.Allowed(ip) {
 			writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, wait a minute")

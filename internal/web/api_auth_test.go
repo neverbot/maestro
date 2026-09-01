@@ -170,6 +170,96 @@ func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 	}
 }
 
+func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
+	// The friendly side of loginIPLimiter: a burst of failed attempts
+	// against one account must not, by itself, block a *different*
+	// account logging in correctly from the same source IP — the IP
+	// budget (40/min) is deliberately looser than the per-email budget
+	// (10/min) so a shared office NAT keeps working for everyone else
+	// while one account is under attack.
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "target@studio.com", DisplayName: "Target", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@studio.com", DisplayName: "Colleague", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Exhaust target@studio.com's own 10/min budget (all from the same
+	// default httptest source IP).
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"target@studio.com","password":"nope"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d against target = %d, want 401", i, rec.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"target@studio.com","password":"password12345"}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("target's own budget after 10 failures = %d, want 429", rec.Code)
+	}
+
+	// A colleague logging in correctly from the same source IP is
+	// unaffected: only 10 of the IP's 40/min budget has been spent.
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"colleague@studio.com","password":"password12345"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("colleague's login from the same IP = %d, want 200", rec.Code)
+	}
+}
+
+func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
+	// The hostile side of the same property: an attacker who knows (or
+	// guesses) several addresses at one studio and spreads failed
+	// attempts across them, staying under each account's own 10/min cap,
+	// must still be stopped once the shared IP's 40/min budget runs out
+	// — and, critically, a *correct* password submitted after that must
+	// still come back 429, never a 200, so budget exhaustion cannot be
+	// used to distinguish a right password from a wrong one (the same
+	// oracle Authenticate's sentinel hash exists to close).
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "victim@studio.com", DisplayName: "Victim", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	emails := []string{"a@studio.com", "b@studio.com", "c@studio.com", "d@studio.com", "e@studio.com"}
+	blocked := false
+	for i := 0; i < 45; i++ {
+		email := emails[i%len(emails)]
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"`+email+`","password":"nope"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		switch rec.Code {
+		case http.StatusUnauthorized:
+			// Still within both budgets.
+		case http.StatusTooManyRequests:
+			blocked = true
+		default:
+			t.Fatalf("attempt %d (%s) = %d, want 401 or 429", i, email, rec.Code)
+		}
+	}
+	if !blocked {
+		t.Fatal("spreading failed attempts across five accounts from one IP never hit the shared IP budget")
+	}
+
+	// A correct password for an entirely different, untouched account,
+	// from the same now-exhausted IP, must still be refused — not
+	// silently let through because the guard only ever intended to
+	// throttle wrong passwords.
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"victim@studio.com","password":"password12345"}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("correct password from an IP-exhausted source = %d, want 429 (must not leak a right password via a 200)", rec.Code)
+	}
+}
+
 func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()

@@ -27,13 +27,29 @@ type Server struct {
 	opts    Options
 	handler http.Handler
 
-	// loginLimiter and inviteLimiter guard the two unauthenticated
-	// endpoints that accept a secret to verify: a password and an invite
-	// token, respectively. They are two separate Limiter instances, not
-	// one shared by key prefix, so a burst of failed logins can never
-	// exhaust the budget invite redemption depends on, or vice versa.
-	loginLimiter  *identity.Limiter
-	inviteLimiter *identity.Limiter
+	// loginLimiter, loginIPLimiter and inviteLimiter guard the two
+	// unauthenticated endpoints that accept a secret to verify: a
+	// password and an invite token, respectively. They are separate
+	// Limiter instances, not one shared by key prefix, so a burst of
+	// failed logins can never exhaust the budget invite redemption
+	// depends on, or vice versa.
+	//
+	// loginLimiter and loginIPLimiter are two independent budgets on the
+	// same endpoint, deliberately never combined into one composite
+	// email+ip key: loginLimiter alone (keyed on the normalized email)
+	// caps how hard any one account can be attacked regardless of source,
+	// but by itself it also lets someone who merely knows a colleague's
+	// address lock that account out indefinitely at no cost to
+	// themselves, from anywhere. loginIPLimiter adds a second, looser cap
+	// keyed on source IP so a single origin cannot grind through many
+	// accounts' budgets one at a time either. Composing them into one
+	// "email+ip" key would defeat the per-account protection entirely —
+	// an attacker rotating source IPs would get a fresh per-account
+	// budget on every hop — so handleLogin checks and records both
+	// independently instead.
+	loginLimiter   *identity.Limiter
+	loginIPLimiter *identity.Limiter
+	inviteLimiter  *identity.Limiter
 }
 
 // NewServer builds the routing tree.
@@ -55,10 +71,11 @@ func NewServer(opts Options) *Server {
 	}
 
 	s := &Server{
-		mux:           http.NewServeMux(),
-		opts:          opts,
-		loginLimiter:  identity.NewLimiter(10, time.Minute),
-		inviteLimiter: identity.NewLimiter(10, time.Minute),
+		mux:            http.NewServeMux(),
+		opts:           opts,
+		loginLimiter:   identity.NewLimiter(10, time.Minute),
+		loginIPLimiter: identity.NewLimiter(40, time.Minute),
+		inviteLimiter:  identity.NewLimiter(10, time.Minute),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /version", requireCaller(s.handleVersion))

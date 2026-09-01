@@ -30,23 +30,30 @@ type Server struct {
 func NewServer(opts Options) *Server {
 	s := &Server{mux: http.NewServeMux(), opts: opts}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
-	s.mux.HandleFunc("GET /version", s.handleVersion)
+	s.mux.Handle("GET /version", requireCaller(s.handleVersion))
 	s.mux.Handle("GET /api/me", requireCaller(s.handleMe))
 	return s
 }
 
 // ServeHTTP runs every request through authentication first. authenticate
 // never rejects a request on its own — it only attaches a Caller to the
-// context when one can be resolved — so routes that permit anonymous
-// access (/healthz, /version) are unaffected by wrapping the whole mux
-// here; only handlers wrapped in requireCaller actually enforce anything.
+// context when one can be resolved — so a route not wrapped in
+// requireCaller is unaffected by wrapping the whole mux here; only
+// handlers wrapped in requireCaller actually enforce anything.
 //
-// /healthz and /version stay public deliberately: both are diagnostic
-// endpoints with no user data, the kind of thing a load balancer's health
-// probe or a deploy script checks without carrying credentials, and this
-// is a public repository, so /version's commit SHA is already visible in
-// the source history it is built from — gating it behind auth would cost
-// real operational convenience for no corresponding secrecy gain.
+// /healthz stays public: liveness is genuinely information-free (it says
+// nothing beyond "the process accepted this TCP connection and can
+// answer"), and a load balancer's or orchestrator's health probe needs to
+// reach it without carrying credentials.
+//
+// /version does not: unlike /healthz, it hands back the exact commit an
+// instance is running, which is fingerprinting material, not a health
+// signal. An unauthenticated caller could scan for it and match the
+// returned SHA against whatever was patched afterward, at zero cost — the
+// repository being public makes that matching easier, not harmless, since
+// it hands the attacker a precise diff of what the instance is missing.
+// /version is behind requireCaller for that reason, even though nothing
+// else about it is sensitive.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.authenticate(s.mux).ServeHTTP(w, r)
 }
@@ -56,7 +63,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request, _ Caller) {
 	writeJSON(w, http.StatusOK, map[string]string{"version": s.opts.Version})
 }
 

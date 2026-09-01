@@ -241,15 +241,133 @@ func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
 	}
 }
 
-func TestHealthzAndVersionStayPublic(t *testing.T) {
+func TestHealthzStaysPublic(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
-	for _, path := range []string{"/healthz", "/version"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: status = %d, want 200 with no credentials", path, rec.Code)
-		}
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/healthz: status = %d, want 200 with no credentials", rec.Code)
+	}
+}
+
+func TestVersionRejectsAnonymousRequests(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("/version: status = %d, want 401 with no credentials", rec.Code)
+	}
+}
+
+// TestVersionReturnsBuildVersionToAnAuthenticatedCaller is /version's
+// success path: any authenticated caller (no admin requirement) can read
+// the build version once past the gate TestVersionRejectsAnonymousRequests
+// pins. The unauthenticated case doesn't need a database, so it lives in
+// server_test.go's TestVersionRequiresAuthentication instead; this one
+// needs a real session, hence the DB-backed newTestServer here.
+func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	token, _, err := ids.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/version: status = %d, want 200 for an authenticated caller; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Version string `json:"version"`
+	}
+	if err := decodeJSON(rec, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Version != "test" {
+		t.Fatalf("version = %q, want %q", body.Version, "test")
+	}
+}
+
+// TestSessionRenewsPastHalfwayThroughItsLifetime pins the sliding-session
+// policy resolveSessionCaller implements: a session used after crossing
+// the halfway point of its SESSION_TTL gets pushed back out to a full
+// SESSION_TTL from now, so a caller in continued use is never logged out
+// mid-session. A short SessionTTL makes "past halfway" reachable with a
+// short sleep instead of a mocked clock.
+func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.SessionTTL = 200 * time.Millisecond
+	ids := identity.New(pool, cfg)
+	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projects.New(pool)})
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	token, originalExpiry, err := ids.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	time.Sleep(120 * time.Millisecond) // past the 100ms halfway point of a 200ms TTL
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	_, newExpiry, err := ids.UserForSession(ctx, token)
+	if err != nil {
+		t.Fatalf("UserForSession: %v", err)
+	}
+	if !newExpiry.After(originalExpiry) {
+		t.Fatalf("expiry = %v, want later than the original %v: a session past halfway should renew", newExpiry, originalExpiry)
+	}
+	if extended := newExpiry.Sub(originalExpiry); extended < 80*time.Millisecond {
+		t.Fatalf("expiry moved forward by only %v, want close to a full %v renewal", extended, cfg.SessionTTL)
+	}
+}
+
+// TestSessionDoesNotRenewBeforeHalfway pins the other half of the same
+// policy: a fresh session, nowhere near its expiry, is not written to on
+// every request. Renewing unconditionally would put a write on the
+// hottest session-authenticated path in the product for no behavioural
+// difference most requests would ever need.
+func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	token, originalExpiry, err := ids.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	_, expiryAfter, err := ids.UserForSession(ctx, token)
+	if err != nil {
+		t.Fatalf("UserForSession: %v", err)
+	}
+	if !expiryAfter.Equal(originalExpiry) {
+		t.Fatalf("expiry changed from %v to %v for a fresh session well before halfway", originalExpiry, expiryAfter)
 	}
 }

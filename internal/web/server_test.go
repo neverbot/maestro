@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,27 +20,21 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-func TestVersion(t *testing.T) {
+// TestVersionRequiresAuthentication pins /version's auth gate: unlike
+// /healthz, it hands back the exact commit an instance is running, which is
+// fingerprinting material for an attacker matching the SHA against known
+// patches, not a health signal — see the doc comment on ServeHTTP. The
+// success path (a real caller getting the version back) needs a
+// DB-backed identity service and lives in auth_test.go's
+// TestVersionReturnsBuildVersionToAnAuthenticatedCaller instead.
+func TestVersionRequiresAuthentication(t *testing.T) {
 	srv := NewServer(Options{Version: "test-build"})
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
-		t.Fatalf("content-type = %q, want %q", got, "application/json; charset=utf-8")
-	}
-
-	var body struct {
-		Version string `json:"version"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.Version != "test-build" {
-		t.Fatalf("version = %q, want %q", body.Version, "test-build")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
 

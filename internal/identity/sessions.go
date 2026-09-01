@@ -94,10 +94,15 @@ func (s *Service) UserForSession(ctx context.Context, token string) (User, time.
 	return user, row.SessionExpiresAt.Time, nil
 }
 
-// ExtendSession pushes a session's expiry forward to expiresAt. It exists
-// so a future sliding-session policy (Tasks 10/11) can renew a session on
-// activity without this package needing another schema or sqlc change to
-// support it. Nothing in this task calls it.
+// ExtendSession pushes a session's expiry forward to expiresAt. Task 10's
+// authentication middleware calls it from resolveSessionCaller, on a
+// session more than halfway through its lifetime, to slide the expiry
+// forward without logging the caller out mid-use; that halfway threshold
+// (not "every request") is what keeps this off the per-request write
+// path, the same way touchThrottle keeps ResolveAPIToken's last_used_at
+// write off it (tokens.go). It exists here, in the identity package
+// rather than at the HTTP layer, so that policy needs no schema or sqlc
+// change of its own to support it.
 func (s *Service) ExtendSession(ctx context.Context, token string, expiresAt time.Time) error {
 	sum := sha256.Sum256([]byte(token))
 	if err := s.q.ExtendSession(ctx, dbq.ExtendSessionParams{

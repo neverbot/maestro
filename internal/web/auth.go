@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -139,24 +141,46 @@ func (s *Server) resolveBearerCaller(ctx context.Context, token string) (Caller,
 // (found, error) contract as resolveBearerCaller: an absent or expired
 // session is (false, nil); a database error is (false, err).
 //
-// UserForSession also returns the session's own expiry (Task 6), which
-// would let this method call identity.ExtendSession to slide the session
-// forward on use. Deliberately not done here yet: today's sessions are
-// absolute-lifetime, and renewing on literally every authenticated request
-// would write to the sessions table on the hottest path in the product for
-// no behavioural difference most requests would ever need — the same
-// mistake Task 9 fixed for token last_used_at via touchThrottle. Wiring
-// sliding renewal (with an equivalent threshold, so it writes only once
-// per some interval instead of once per request) is left to whichever task
-// first needs sessions to outlive SESSION_TTL under continued use.
+// This is also where sliding sessions are implemented: UserForSession
+// returns the session's own expiry (Task 6) alongside the user precisely
+// so this method could act on it. A session more than halfway through its
+// SESSION_TTL lifetime is extended back out to a full SESSION_TTL from
+// now, so a caller in continued use never gets logged out mid-session; one
+// that goes quiet simply expires on schedule. The halfway threshold is
+// what keeps this off the per-request write path — extending on literally
+// every authenticated request would write to the sessions table on the
+// hottest session-authenticated path in the product, the same mistake
+// Task 9 fixed for token last_used_at via touchThrottle (tokens.go); a
+// session already past the threshold and used again before it next
+// crosses it costs no extra write.
+//
+// This lives in the authentication middleware, not in a REST handler
+// (Task 11's login/logout/registration endpoints), because resolving a
+// session cookie into a Caller is the one thing every session-authenticated
+// request does, regardless of which route it is headed to — a login
+// handler runs once per session and never sees the requests that follow
+// it, so it cannot be where "still active, worth renewing" gets decided.
 func (s *Server) resolveSessionCaller(ctx context.Context, token string) (Caller, bool, error) {
-	user, _, err := s.opts.Identity.UserForSession(ctx, token)
+	user, expiresAt, err := s.opts.Identity.UserForSession(ctx, token)
 	if err != nil {
 		if errors.Is(err, identity.ErrNoSession) {
 			return Caller{}, false, nil
 		}
 		return Caller{}, false, err
 	}
+
+	if ttl := s.opts.Config.SessionTTL; ttl > 0 && time.Until(expiresAt) < ttl/2 {
+		if err := s.opts.Identity.ExtendSession(ctx, token, time.Now().Add(ttl)); err != nil {
+			// Sliding renewal is a convenience, not part of the
+			// authentication decision: a failed extend must not turn an
+			// otherwise-valid, already-authenticated session into a hard
+			// failure. The session simply keeps its existing expiry and
+			// gets another chance to renew on its next request.
+			slog.ErrorContext(ctx, "extend session failed; continuing with the resolved session",
+				"user_id", user.ID, "error", err)
+		}
+	}
+
 	return Caller{UserID: user.ID, IsAdmin: user.IsAdmin}, true, nil
 }
 

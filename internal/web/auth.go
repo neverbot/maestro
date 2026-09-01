@@ -213,13 +213,19 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 // from the API responses their own script fetches after the page
 // loads), so there is nothing for a lookup here to buy either of them.
 //
+// GET /api/config (api_config.go) is included because it is
+// unauthenticated by design — it exists precisely so a visitor who has
+// not signed in yet can learn this instance's registration mode before
+// login is even possible — so a session lookup ahead of it would only
+// ever resolve a Caller this handler never reads.
+//
 // GET /{$} (handleRoot) is deliberately NOT covered: it is the one
 // public-ish route whose entire response depends on whether a Caller is
 // present and, if so, who — "no caller" redirects to /login, exactly one
 // game redirects straight there, anything else serves the picker shell —
 // so it is the opposite of a route this function exists to fast-path.
 func isPublicPath(p string) bool {
-	if p == "/login" {
+	if p == "/login" || p == "/api/config" {
 		return true
 	}
 	if strings.HasPrefix(p, "/static/") {

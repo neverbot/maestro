@@ -20,7 +20,7 @@ import (
 func TestPublicPathsSkipAuthentication(t *testing.T) {
 	srv := NewServer(stubOptions("test"))
 
-	for _, path := range []string{"/static/styles.css", "/login", "/g/some-slug"} {
+	for _, path := range []string{"/static/styles.css", "/login", "/g/some-slug", "/api/config"} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.AddCookie(&http.Cookie{Name: SessionCookie, Value: "whatever-this-is-never-looked-up"})
@@ -34,15 +34,41 @@ func TestPublicPathsSkipAuthentication(t *testing.T) {
 	}
 }
 
+// TestIsPublicPath pins the exact boundary of the public-path allowlist,
+// including the near-misses a reviewer manually probing this endpoint
+// would try first: a prefix lookalike that shares a few characters but
+// not the trailing slash the check requires ("/staticfoo", "/loginish"),
+// a bare directory name missing that same slash ("/static", "/g"), and
+// "/api/config" itself both matching (exact) and not matching a
+// same-prefix cousin ("/api/configish") — isPublicPath does string
+// prefix/equality checks only, never a regex or a path-segment split, so
+// each of these is deterministic and needs no URL decoding to reason
+// about.
 func TestIsPublicPath(t *testing.T) {
 	cases := map[string]bool{
 		"/static/styles.css": true,
 		"/static/":           true,
+		"/static":            false, // no trailing slash: not a prefix match
+		"/staticfoo":         false, // shares a prefix, but not "/static/"
 		"/login":             true,
+		"/loginish":          false, // isPublicPath("/login") is exact, not a prefix
 		"/g/azeroth":         true,
+		"/g/":                true,
+		"/g":                 false, // no trailing slash: not a prefix match
+		"/api/config":        true,
+		"/api/configish":     false, // isPublicPath("/api/config") is exact, not a prefix
 		"/":                  false,
 		"/api/games":         false,
-		"/loginish":          false,
+		// A traversal segment inside the request path (e.g.
+		// "/static/../api/games") is intentionally still true here: this
+		// check only decides whether authenticate skips its own cookie
+		// lookup, never whether the mux actually dispatches to a
+		// handler. net/http's ServeMux cleans an unclean path and
+		// 301-redirects to the cleaned target rather than serving it in
+		// the same request, so the redirected, re-authenticated request
+		// is what actually reaches /api/games — this function does not
+		// need to, and must not try to, out-guess that.
+		"/static/../api/games": true,
 	}
 	for path, want := range cases {
 		if got := isPublicPath(path); got != want {

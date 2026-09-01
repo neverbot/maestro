@@ -196,7 +196,8 @@ func NewServer(opts Options) *Server {
 	// named path variable keeps the safety net from misreading it as a
 	// bypass.
 	s.routeFunc("GET /g/{slug}", func(w http.ResponseWriter, r *http.Request) { s.serveAsset(w, r, "game.html") })
-	s.route("GET /static/", http.StripPrefix("/static/", http.FileServerFS(assets)))
+	s.route("GET /static/", s.staticFileServer())
+	s.routeFunc("GET /api/config", s.handleConfig)
 	s.route("GET /api/games", requireCaller(s.handleListGames))
 	s.route("POST /api/games", requireCaller(s.handleCreateGame))
 	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)
@@ -223,7 +224,7 @@ func NewServer(opts Options) *Server {
 	// s.mux in a closure, and there is no reason to allocate a fresh one
 	// for every single incoming request when the mux it wraps never
 	// changes after construction.
-	s.handler = s.authenticate(s.mux)
+	s.handler = s.securityHeaders(s.authenticate(s.mux))
 	return s
 }
 
@@ -304,6 +305,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Safe to call more than once (sync.Once); a second call is a no-op.
 func (s *Server) Close() {
 	s.closeOnce.Do(func() { close(s.closing) })
+}
+
+// securityHeaders sets the three response headers every response in this
+// product can carry for free, because nothing it serves needs an
+// exception to any of them: there is no inline script or inline style
+// anywhere in internal/web/static, so Content-Security-Policy: default-src
+// 'self' costs this product nothing while ruling out every injected-script
+// or injected-stylesheet exfiltration path a future XSS bug could reach
+// for; X-Content-Type-Options: nosniff stops a browser from guessing a
+// different content type than the one this package already sets on every
+// response it writes (serveAsset, static.go, and writeJSON, this file);
+// and Referrer-Policy: no-referrer is the same protection login.html's own
+// <meta name="referrer"> gives that one page, applied to every response
+// this server writes rather than left to the one page a quality review
+// happened to check by hand — a query parameter on any other page (a
+// return path, say) deserves the same treatment an invite token got.
+// Wraps the whole handler chain, outermost, so it applies uniformly
+// including to a 404 or a panic recovery, not only to routes that
+// happen to reach a specific handler.
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

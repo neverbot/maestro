@@ -1,31 +1,44 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>Sign in · Maestro</title>
 <link rel="stylesheet" href="/static/styles.css">
 <h1>Maestro</h1>
 <noscript>
   <p class="notice">Signing in needs JavaScript enabled in this browser.</p>
 </noscript>
+<p class="muted" id="mode-notice" hidden></p>
 
 <div id="login-view">
   <p>Sign in to reach your games.</p>
   <form id="login">
-    <input type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
-    <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+    <label for="login-email">Email</label>
+    <input id="login-email" type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
+    <label for="login-password">Password</label>
+    <input id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" required>
     <button type="submit">Sign in</button>
-    <p class="error" id="login-error" role="alert"></p>
+    <p class="error" id="login-error" role="alert" aria-live="assertive"></p>
   </form>
+  <p id="register-toggle-wrap" hidden>
+    <button type="button" id="register-toggle" class="link-button">Create an account</button>
+  </p>
 </div>
 
 <div id="invite-view" hidden>
-  <p>You have been invited to Maestro. Create your account to continue.</p>
+  <p id="invite-copy">You have been invited to Maestro. Create your account to continue.</p>
   <form id="invite">
-    <input type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
-    <input type="text" name="display_name" placeholder="Your name" autocomplete="name" required>
-    <input type="password" name="password" placeholder="Choose a password (at least 12 characters)" autocomplete="new-password" minlength="12" required>
+    <label for="invite-email">Email</label>
+    <input id="invite-email" type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
+    <label for="invite-display-name">Your name</label>
+    <input id="invite-display-name" type="text" name="display_name" placeholder="Your name" autocomplete="name" required>
+    <label for="invite-password">Password</label>
+    <input id="invite-password" type="password" name="password" placeholder="At least 12 characters" autocomplete="new-password" minlength="12" required>
     <button type="submit">Create account</button>
-    <p class="error" id="invite-error" role="alert"></p>
+    <p class="error" id="invite-error" role="alert" aria-live="assertive"></p>
   </form>
+  <p><button type="button" id="back-to-login" class="link-button">Back to sign in</button></p>
 </div>
 
 <script type="module" src="/static/app.js"></script>

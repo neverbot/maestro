@@ -31,6 +31,23 @@ function recallGame() {
   }
 }
 
+// safeReturnPath reads ?return= off the current URL — set by fetchGames
+// below when a 401 interrupts an otherwise-authenticated page — and hands
+// back only a value that is unambiguously a path on this same origin: it
+// must start with exactly one leading slash, never two ("//evil.example"
+// is parsed by a browser as a scheme-relative URL to a different host,
+// not a path) and never contain a scheme of its own. Anything else,
+// including a missing parameter, falls back to "/". This is the one place
+// user-supplied text becomes a navigation target rather than DOM text, so
+// it gets its own guard rather than trusting the query string.
+function safeReturnPath() {
+  const raw = new URLSearchParams(window.location.search).get("return");
+  if (raw && /^\/(?!\/)/.test(raw)) {
+    return raw;
+  }
+  return "/";
+}
+
 // fallbackMessage covers the two cases a server response can't supply its
 // own words for: the network never delivered a response at all, or the
 // body wasn't the JSON error shape (error, message) every handler in
@@ -58,9 +75,12 @@ async function parseErrorBody(response) {
 
 // postJSON posts a JSON body and reports the outcome without ever
 // throwing: a network failure (offline, DNS, a dropped connection) is
-// reported the same shape as a server-side error, so a caller only has
-// to branch on "ok" once instead of wrapping every call in its own
-// try/catch.
+// reported the same shape as a server-side error, so a caller only has to
+// branch on "ok" once instead of wrapping every call in its own
+// try/catch. On success it also hands back the parsed body, defensively —
+// a handler that returns 201 with a created resource (POST /api/games) has
+// something a caller needs; one that returns 204 (nothing) or 200 with a
+// body a caller doesn't care about (login) simply gets an empty object.
 async function postJSON(url, payload) {
   let response;
   try {
@@ -72,10 +92,16 @@ async function postJSON(url, payload) {
   } catch {
     return { ok: false, message: fallbackMessage };
   }
-  if (response.ok) {
-    return { ok: true, response };
+  if (!response.ok) {
+    return { ok: false, status: response.status, message: await parseErrorBody(response) };
   }
-  return { ok: false, status: response.status, message: await parseErrorBody(response) };
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {
+    // A 204, or any other body-less success — nothing to parse.
+  }
+  return { ok: true, status: response.status, body };
 }
 
 // setFormBusy disables every field and the submit button while a request
@@ -98,7 +124,135 @@ function setFormBusy(form, busy, busyLabel) {
   }
 }
 
+// renderHeader prepends the one piece of chrome every authenticated page
+// (the picker, a game) shares: the product name linking back to "/", and
+// a sign-out button. login.html never calls this — there is nothing to
+// sign out of yet, and nowhere useful for "/" to send an anonymous
+// visitor that isn't back to /login. Built with createElement/textContent
+// throughout, never innerHTML, the same rule every other DOM write in
+// this file follows.
+function renderHeader() {
+  const header = document.createElement("header");
+  header.className = "site-header";
+
+  const brand = document.createElement("a");
+  brand.className = "brand";
+  brand.href = "/";
+  brand.textContent = "Maestro";
+  header.append(brand);
+
+  const signOut = document.createElement("button");
+  signOut.type = "button";
+  signOut.className = "sign-out";
+  signOut.textContent = "Sign out";
+  signOut.addEventListener("click", async () => {
+    signOut.disabled = true;
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Best effort: even a failed request here still means the browser
+      // is about to navigate to /login, which is the only thing that
+      // actually matters to the person who just clicked this.
+    }
+    window.location.href = "/login";
+  });
+  header.append(signOut);
+
+  document.body.prepend(header);
+}
+
 const loginForm = document.getElementById("login");
+const inviteForm = document.getElementById("invite");
+
+if (loginForm || inviteForm) {
+  // login.html only: figure out which of the two forms to show, and with
+  // what copy, before either is usable.
+  //
+  // The invite token travels in the URL *fragment* (#invite=…), never the
+  // query string: a fragment is a browser-only construct that is never
+  // sent in an HTTP request at all, so it cannot leak through Referer on
+  // the very next same-origin request (this page's own subresources,
+  // including this script) the way a query parameter demonstrably did in
+  // review. history.replaceState below additionally scrubs it from the
+  // visible URL and from browser history the moment it's read, and the
+  // no-referrer <meta> on this page is a second, independent layer for
+  // anything this page still sends elsewhere.
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const inviteToken = (hashParams.get("invite") ?? "").trim();
+  if (window.location.hash) {
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+  }
+
+  const loginView = document.getElementById("login-view");
+  const inviteView = document.getElementById("invite-view");
+  const inviteCopy = document.getElementById("invite-copy");
+  const modeNotice = document.getElementById("mode-notice");
+  const registerToggleWrap = document.getElementById("register-toggle-wrap");
+  const registerToggle = document.getElementById("register-toggle");
+  const backToLogin = document.getElementById("back-to-login");
+
+  // showInviteView is shared by two paths: an actual invite link, and the
+  // self-service "Create an account" toggle below. The only difference
+  // between them is the copy and whether an invite token is attached to
+  // the eventual POST /api/auth/register — the form and its handler
+  // (further down) do not need to know which one got them here.
+  function showInviteView(copy) {
+    if (!loginView || !inviteView) return;
+    loginView.hidden = true;
+    inviteView.hidden = false;
+    if (inviteCopy) inviteCopy.textContent = copy;
+    document.title = "Create your account · Maestro";
+  }
+  function showLoginView() {
+    if (!loginView || !inviteView) return;
+    loginView.hidden = false;
+    inviteView.hidden = true;
+    document.title = "Sign in · Maestro";
+  }
+
+  if (backToLogin) {
+    backToLogin.addEventListener("click", showLoginView);
+  }
+  if (registerToggle) {
+    registerToggle.addEventListener("click", () => {
+      showInviteView("Create an account to get started.");
+    });
+  }
+
+  if (inviteToken) {
+    showInviteView("You have been invited to Maestro. Create your account to continue.");
+  } else {
+    // No invite token: tell the visitor what this instance actually
+    // admits, driven by GET /api/config (a single-field, unauthenticated
+    // endpoint — see internal/web/api_config.go) rather than leaving a
+    // bare password box with no explanation, or leaving self-service
+    // registration reachable only by someone who happens to know to edit
+    // the URL by hand.
+    fetch("/api/config")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((config) => {
+        if (!config) return;
+        if (config.registration_mode === "domain_open") {
+          if (modeNotice) {
+            modeNotice.textContent = "This instance is open to anyone with an allowed email address.";
+            modeNotice.hidden = false;
+          }
+          if (registerToggleWrap) registerToggleWrap.hidden = false;
+        } else if (config.registration_mode === "invite_only") {
+          if (modeNotice) {
+            modeNotice.textContent = "This instance only admits invited users.";
+            modeNotice.hidden = false;
+          }
+        }
+      })
+      .catch(() => {
+        // The login form itself needs no server round trip to be usable,
+        // so a failed config fetch just means no mode-specific copy —
+        // never a broken sign-in page.
+      });
+  }
+}
+
 if (loginForm) {
   const errorEl = document.getElementById("login-error");
   loginForm.addEventListener("submit", async (event) => {
@@ -113,10 +267,11 @@ if (loginForm) {
     if (result.ok) {
       // Login sets an httpOnly session cookie server-side; this page never
       // sees or stores a token itself, so there is nothing left to do here
-      // but navigate. handleRoot (internal/web/api_projects.go) decides
-      // where from here: straight into the one game the user can reach, or
-      // the picker.
-      window.location.href = "/";
+      // but navigate — to wherever a mid-session 401 sent this visitor to
+      // sign back in from (safeReturnPath), or "/" otherwise. handleRoot
+      // (internal/web/api_projects.go) decides the rest: straight into the
+      // one game the user can reach, or the picker.
+      window.location.href = safeReturnPath();
       return;
     }
     setFormBusy(loginForm, false);
@@ -124,48 +279,33 @@ if (loginForm) {
   });
 }
 
-// The invite form only appears when this page was reached via an invite
-// link (?invite=TOKEN) — see the picker/game logic further down, and the
-// visibility toggle at the bottom of this file, for why the split is on
-// that query parameter rather than a second HTML file: every "invite
-// redemption" concern here is just handleLogin's sibling endpoint, POST
-// /api/auth/register, called with the token from the URL.
-const inviteForm = document.getElementById("invite");
 if (inviteForm) {
   const errorEl = document.getElementById("invite-error");
-  const inviteToken = new URLSearchParams(window.location.search).get("invite") ?? "";
   inviteForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     errorEl.textContent = "";
     const data = new FormData(inviteForm);
+    // The token was already read out of the URL fragment and scrubbed
+    // above; it is closed over here rather than re-read from the URL,
+    // which by this point history.replaceState has already cleared. An
+    // empty token (the self-service "Create an account" path) is exactly
+    // what tells POST /api/auth/register to take its domain_open branch
+    // instead of trying to redeem an invite (internal/web/api_auth.go).
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     setFormBusy(inviteForm, true, "Creating your account…");
     const result = await postJSON("/api/auth/register", {
       email: data.get("email"),
       display_name: data.get("display_name"),
       password: data.get("password"),
-      invite_token: inviteToken,
+      invite_token: hashParams.get("invite") ?? "",
     });
     if (result.ok) {
-      // Same as the login form above: a session cookie is already set,
-      // there is no token for this page to hold, just navigate onward.
-      window.location.href = "/";
+      window.location.href = safeReturnPath();
       return;
     }
     setFormBusy(inviteForm, false);
     errorEl.textContent = result.message;
   });
-}
-
-// Toggle which of the two forms on login.html is shown, based purely on
-// whether an invite token is present in the URL — see inviteForm's own
-// comment above for why this is one HTML file with two forms rather than
-// a second page.
-const loginView = document.getElementById("login-view");
-const inviteView = document.getElementById("invite-view");
-if (loginView && inviteView) {
-  const hasInvite = new URLSearchParams(window.location.search).has("invite");
-  loginView.hidden = hasInvite;
-  inviteView.hidden = !hasInvite;
 }
 
 // fetchGames wraps GET /api/games the same defensive way postJSON wraps a
@@ -195,16 +335,28 @@ async function fetchGames() {
   }
 }
 
+// goToLogin sends the browser to sign in again, carrying the page it was
+// on so a successful sign-in (safeReturnPath, above) can send it right
+// back instead of stranding it on "/" regardless of where the session
+// actually expired.
+function goToLogin() {
+  const here = window.location.pathname + window.location.search;
+  window.location.href = "/login?return=" + encodeURIComponent(here);
+}
+
 // game.html has no #games list; index.html's picker does. Splitting on
 // that, rather than the URL, keeps this one file shared by both pages
 // without either needing to know which page loaded it.
 const gamesList = document.getElementById("games");
 const statusEl = document.getElementById("status");
+const emptyState = document.getElementById("empty-state");
+const createGameForm = document.getElementById("create-game");
 if (gamesList) {
+  renderHeader();
   const result = await fetchGames();
   if (!result.ok) {
     if (result.expired) {
-      window.location.href = "/login";
+      goToLogin();
     } else if (statusEl) {
       statusEl.textContent = result.message;
     }
@@ -221,7 +373,13 @@ if (gamesList) {
     if (remembered && games.some((game) => game.slug === remembered)) {
       window.location.href = `/g/${remembered}`;
     } else if (games.length === 0) {
-      if (statusEl) statusEl.textContent = "You have no games yet.";
+      // A brand new account, or one just removed from its last game, has
+      // nowhere to click at all — handleRoot's own comment names this as
+      // the SPA's job, so the empty state offers the one thing that gets
+      // someone unstuck: creating a game (POST /api/games already exists
+      // and already accepts a session caller).
+      if (statusEl) statusEl.hidden = true;
+      if (emptyState) emptyState.hidden = false;
     } else {
       if (statusEl) statusEl.hidden = true;
       gamesList.hidden = false;
@@ -240,26 +398,42 @@ if (gamesList) {
   }
 }
 
-// game.html: record the slug this page was loaded for, then resolve its
-// name from the same GET /api/games the picker uses — there is no
-// server-side slug resolution on this route (Task 8's Round 2 Correction
-// 12 — /g/{slug} only ever serves this static shell), so the slug comes
-// from the URL the browser already has, and the name comes from whichever
-// row in the list matches it.
+if (createGameForm) {
+  const errorEl = document.getElementById("create-game-error");
+  createGameForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorEl.textContent = "";
+    const data = new FormData(createGameForm);
+    setFormBusy(createGameForm, true, "Creating…");
+    const result = await postJSON("/api/games", {
+      slug: data.get("slug"),
+      name: data.get("name"),
+    });
+    if (result.ok && result.body && result.body.slug) {
+      window.location.href = `/g/${result.body.slug}`;
+      return;
+    }
+    setFormBusy(createGameForm, false);
+    errorEl.textContent = result.ok ? fallbackMessage : result.message;
+  });
+}
+
+// game.html: resolve this page's own name from GET /api/games — there is
+// no server-side slug resolution on this route (Task 8's Round 2
+// Correction 12 — /g/{slug} only ever serves this static shell), so the
+// slug comes from the URL the browser already has, and the name comes
+// from whichever row in the list matches it.
 const gameNameEl = document.getElementById("game-name");
 if (gameNameEl) {
+  renderHeader();
   const gameSlugMatch = window.location.pathname.match(/^\/g\/([^/]+)/);
   const slug = gameSlugMatch ? decodeURIComponent(gameSlugMatch[1]) : null;
   const summaryEl = document.getElementById("game-summary");
 
-  if (slug) {
-    rememberGame(slug);
-  }
-
   const result = await fetchGames();
   if (!result.ok) {
     if (result.expired) {
-      window.location.href = "/login";
+      goToLogin();
     } else {
       gameNameEl.textContent = "Could not load this game";
       if (summaryEl) summaryEl.textContent = result.message;
@@ -271,6 +445,14 @@ if (gameNameEl) {
       // — a game name is attacker-reachable input (anyone who can create
       // a game controls it), not markup this page should ever interpret.
       gameNameEl.textContent = game.name;
+      // Recorded only now, inside the branch that just confirmed this
+      // slug is actually in the server's own list — not unconditionally
+      // from the URL the moment the page loads. A stray or stale link
+      // (a bookmark to a deleted game, a typo, a game the user lost
+      // access to) must never overwrite a good remembered value with one
+      // that cannot be reached; see LAST_GAME_KEY's own comment above for
+      // why a wrong remembered value is never merely harmless.
+      if (slug) rememberGame(slug);
     } else {
       gameNameEl.textContent = "Game not found";
       if (summaryEl) {

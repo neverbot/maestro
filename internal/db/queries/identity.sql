@@ -13,6 +13,24 @@ SELECT * FROM users WHERE id = sqlc.arg('id')::uuid;
 -- name: CountUsers :one
 SELECT count(*) FROM users;
 
+-- name: CountAPITokensForProject :one
+-- Every api_tokens row scoped to project_id, revoked or not — the same
+-- "audit trail, not just what's live" scope ListAPITokens already uses.
+-- Added in Task 18's Round 2 corrections purely so handleDeleteGame can
+-- log how many tokens its cascade is about to take with it, since that
+-- number cannot be recovered afterward — projects.Delete's own DELETE FROM
+-- projects statement carries no rows-affected count for anything it
+-- cascades into (see that method's own doc comment).
+SELECT count(*) FROM api_tokens WHERE project_id = sqlc.arg('project_id')::uuid;
+
+-- name: CountInvitesForProject :one
+-- Every invites row scoped to project_id, redeemed or not — deliberately
+-- wider than ListOutstandingProjectInvites' redeemed_at IS NULL filter,
+-- since a game's cascade takes its already-redeemed (audit-trail) invite
+-- rows with it too, not only its outstanding ones. Added alongside
+-- CountAPITokensForProject above, for the same reason.
+SELECT count(*) FROM invites WHERE project_id = sqlc.arg('project_id')::uuid;
+
 -- name: UpdateUserPasswordHash :exec
 UPDATE users SET password_hash = sqlc.arg('password_hash')::text
 WHERE id = sqlc.arg('id')::uuid;

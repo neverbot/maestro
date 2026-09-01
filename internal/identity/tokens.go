@@ -389,6 +389,21 @@ func (s *Service) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]API
 	return out, nil
 }
 
+// CountAPITokensForProject counts every api_tokens row scoped to
+// projectID, revoked or not — added in Task 18's Round 2 corrections so
+// handleDeleteGame can log how many tokens its cascade is about to
+// remove, since ON DELETE CASCADE gives projects.Delete's own DELETE FROM
+// projects statement no rows-affected count for anything it cascades
+// into. Call this before deleting, not after: once the project is gone,
+// so are these rows, and so is the count.
+func (s *Service) CountAPITokensForProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	n, err := s.q.CountAPITokensForProject(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("count api tokens for project: %w", err)
+	}
+	return n, nil
+}
+
 // newTokenBody generates the random, non-prefix portion of a bearer
 // token: randomTokenBytes of entropy (the same shared helper
 // sessions.go's IssueSession and invites.go's CreateInvite use),

@@ -453,9 +453,15 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 // to point an owner at, and no membership list left to render a toast
 // against. That information is not worthless, though, just aimed
 // elsewhere: this is the one operation with no recovery and no residue,
-// so the success path logs the project id, its slug and the acting user
-// — the record an operator asked "where did this game go and who did
-// it" would otherwise have nothing to find. An agent still holding a
+// so the success path logs the project id, its slug, the acting user,
+// and — since Task 18's Round 2 corrections — how many tokens and
+// invites the cascade just destroyed with it (counted just before
+// Delete runs; see CountAPITokensForProject/CountInvitesForProject's own
+// doc comments for why they must be counted before, not after) — the
+// same record handleRemoveMember and handleChangeRole already return to
+// their own caller for a single member, extended here to the whole
+// game an operator asked "where did this game go and who did it" would
+// otherwise have nothing to find. An agent still holding a
 // token for this game learns nothing about deletion specifically: its
 // next call fails authentication exactly the way a plain revocation
 // already would (see projects.Delete's cascade), so it cannot
@@ -488,12 +494,32 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 
+	// Counted before Delete, not after: once the project row is gone,
+	// ON DELETE CASCADE has already taken every one of these rows with it
+	// and there is nothing left to count — projects.Delete's own single
+	// DELETE FROM projects statement carries no rows-affected count for
+	// anything it cascades into (see that method's own doc comment). A
+	// failure here is logged but never blocks the deletion itself: this
+	// is purely the record an operator would otherwise have no way to
+	// recover afterward (see the log line below), not a precondition of
+	// deleting the game.
+	tokensDestroyed, err := s.opts.Identity.CountAPITokensForProject(r.Context(), scope.ProjectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "count api tokens before game deletion failed", "project_id", scope.ProjectID, "error", err)
+	}
+	invitesDestroyed, err := s.opts.Identity.CountInvitesForProject(r.Context(), scope.ProjectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "count invites before game deletion failed", "project_id", scope.ProjectID, "error", err)
+	}
+
 	if err := s.opts.Projects.Delete(r.Context(), scope.ProjectID); err != nil {
 		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
 		return
 	}
-	slog.InfoContext(r.Context(), "game deleted", "project_id", scope.ProjectID, "slug", project.Slug, "user_id", caller.UserID)
+	slog.InfoContext(r.Context(), "game deleted",
+		"project_id", scope.ProjectID, "slug", project.Slug, "user_id", caller.UserID,
+		"tokens_destroyed", tokensDestroyed, "invites_destroyed", invitesDestroyed)
 	w.WriteHeader(http.StatusNoContent)
 }
 

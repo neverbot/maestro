@@ -380,6 +380,21 @@ func (s *Service) ListOutstandingInvitesForProject(ctx context.Context, projectI
 	return out, nil
 }
 
+// CountInvitesForProject counts every invites row scoped to projectID,
+// redeemed or not — deliberately wider than
+// ListOutstandingInvitesForProject's redeemed_at IS NULL filter, since a
+// game's cascade takes its already-redeemed (audit-trail) invite rows
+// with it too. Added in Task 18's Round 2 corrections alongside
+// CountAPITokensForProject (tokens.go), for the same reason: see that
+// method's own doc comment.
+func (s *Service) CountInvitesForProject(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	n, err := s.q.CountInvitesForProject(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("count invites for project: %w", err)
+	}
+	return n, nil
+}
+
 // RevokeInvite makes one account-only invite (no game attached)
 // permanently unredeemable, by expiring it immediately, so an invite
 // pasted into the wrong channel — a live bearer credential for as long as

@@ -527,3 +527,42 @@ func TestCheckAPITokenNeverTouchesLastUsedAt(t *testing.T) {
 		t.Fatal("CheckAPIToken set last_used_at after backdating — it must be read-only")
 	}
 }
+
+// TestCountAPITokensForProjectIncludesRevoked pins
+// CountAPITokensForProject's own doc comment: it counts every row scoped
+// to a project, revoked included, since a project's cascade takes all of
+// them with it regardless of status — added in Task 18's Round 2
+// corrections so handleDeleteGame (api_projects.go) can log how many
+// tokens a game deletion is about to destroy.
+func TestCountAPITokensForProjectIncludesRevoked(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	projSvc := projects.New(pool)
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
+	otherProject, _ := projSvc.Create(ctx, "outland", "Outland", user.ID)
+
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "live"}); err != nil {
+		t.Fatalf("CreateAPIToken (live): %v", err)
+	}
+	_, revoked, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "to be revoked"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken (to revoke): %v", err)
+	}
+	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: revoked.ID}); err != nil {
+		t.Fatalf("RevokeAPIToken: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: otherProject.ID, UserID: user.ID, Label: "other project"}); err != nil {
+		t.Fatalf("CreateAPIToken (other project): %v", err)
+	}
+
+	n, err := ids.CountAPITokensForProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("CountAPITokensForProject: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("CountAPITokensForProject = %d, want 2 (live + revoked, not the other project's)", n)
+	}
+}

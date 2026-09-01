@@ -859,3 +859,43 @@ func TestRevokeProjectInviteIgnoresAccountOnly(t *testing.T) {
 		t.Fatalf("RedeemInvite after no-op RevokeProjectInvite: %v", err)
 	}
 }
+
+// TestCountInvitesForProjectIncludesRedeemed pins CountInvitesForProject's
+// own doc comment: it counts every invites row scoped to a project,
+// redeemed included, since a game's cascade takes its already-redeemed
+// (audit-trail) invite rows with it too, not only its outstanding ones —
+// added in Task 18's Round 2 corrections so handleDeleteGame
+// (api_projects.go) can log how many invites a game deletion is about to
+// destroy.
+func TestCountInvitesForProjectIncludesRedeemed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	azeroth := createTestProject(ctx, t, pool, "azeroth")
+	outland := createTestProject(ctx, t, pool, "outland")
+
+	if _, _, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &azeroth, Role: "viewer"}); err != nil {
+		t.Fatalf("CreateInvite (outstanding): %v", err)
+	}
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &azeroth, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite (to redeem): %v", err)
+	}
+	if _, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "redeemed@studio.com", DisplayName: "Redeemed", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("RedeemInvite: %v", err)
+	}
+	if _, _, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &outland, Role: "viewer"}); err != nil {
+		t.Fatalf("CreateInvite (other project): %v", err)
+	}
+
+	n, err := svc.CountInvitesForProject(ctx, azeroth)
+	if err != nil {
+		t.Fatalf("CountInvitesForProject: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("CountInvitesForProject = %d, want 2 (outstanding + redeemed, not the other project's)", n)
+	}
+}

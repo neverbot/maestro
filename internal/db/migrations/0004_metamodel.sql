@@ -3,6 +3,17 @@
 -- each carrying a field_schema (a jsonb array of field declarations), and
 -- entities and relations instance them. Every row is scoped by
 -- project_id, so every query over these tables filters on it.
+--
+-- Isolation between games is enforced here, in SQL, not in Go: every key
+-- from a child to its parent is composite, carrying project_id alongside
+-- the parent id, so no row can point at a parent owned by another game.
+-- That needs a UNIQUE (id, project_id) on each parent to reference, which
+-- is why the types and entities carry one on top of their primary key.
+-- projects needs nothing extra: the project_id columns reference its id,
+-- which is already a primary key on its own.
+--
+-- The Down side needs no matching change: dropping the four tables takes
+-- their constraints and indexes with them.
 -- +goose Up
 CREATE TABLE entity_types (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -18,7 +29,9 @@ CREATE TABLE entity_types (
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL
+    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    -- The target of the composite key from entities.
+    UNIQUE (id, project_id)
 );
 -- Keys are the stable handle an agent re-seeds against, and they are
 -- matched case-insensitively so a second run with different casing
@@ -42,16 +55,16 @@ CREATE TABLE relation_types (
     created_at     timestamptz NOT NULL DEFAULT now(),
     updated_at     timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL
+    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    -- The target of the composite key from relations.
+    UNIQUE (id, project_id)
 );
 CREATE UNIQUE INDEX relation_types_key_key ON relation_types (project_id, lower(key));
 
 CREATE TABLE entities (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id     uuid NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    -- RESTRICT, not CASCADE: dropping an entity type that still has
-    -- instances must fail loudly rather than silently delete content.
-    entity_type_id uuid NOT NULL REFERENCES entity_types (id) ON DELETE RESTRICT,
+    entity_type_id uuid NOT NULL,
     key            text NOT NULL,
     name           text NOT NULL,
     fields         jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -61,7 +74,14 @@ CREATE TABLE entities (
     created_at     timestamptz NOT NULL DEFAULT now(),
     updated_at     timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL
+    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    -- RESTRICT, not CASCADE: dropping an entity type that still has
+    -- instances must fail loudly rather than silently delete content.
+    -- Composite, so the type has to belong to the entity's own game.
+    FOREIGN KEY (entity_type_id, project_id)
+        REFERENCES entity_types (id, project_id) ON DELETE RESTRICT,
+    -- The target of the composite keys from relations' two endpoints.
+    UNIQUE (id, project_id)
 );
 CREATE UNIQUE INDEX entities_key_key ON entities (project_id, entity_type_id, lower(key));
 CREATE INDEX entities_type_idx ON entities (entity_type_id);
@@ -71,16 +91,23 @@ CREATE INDEX entities_fields_idx ON entities USING gin (fields jsonb_path_ops);
 CREATE TABLE relations (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id       uuid NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    relation_type_id uuid NOT NULL REFERENCES relation_types (id) ON DELETE RESTRICT,
-    -- CASCADE on both endpoints: an edge without both of its entities is
-    -- not a relation, so deleting either end takes the edge with it.
-    source_id        uuid NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
-    target_id        uuid NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
+    relation_type_id uuid NOT NULL,
+    source_id        uuid NOT NULL,
+    target_id        uuid NOT NULL,
     fields           jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL
+    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    FOREIGN KEY (relation_type_id, project_id)
+        REFERENCES relation_types (id, project_id) ON DELETE RESTRICT,
+    -- CASCADE on both endpoints: an edge without both of its entities is
+    -- not a relation, so deleting either end takes the edge with it. Both
+    -- are composite, so an edge cannot straddle two games.
+    FOREIGN KEY (source_id, project_id)
+        REFERENCES entities (id, project_id) ON DELETE CASCADE,
+    FOREIGN KEY (target_id, project_id)
+        REFERENCES entities (id, project_id) ON DELETE CASCADE
 );
 -- One edge per (type, source, target). The relation type is already
 -- project-scoped, so this is per-project uniqueness too.

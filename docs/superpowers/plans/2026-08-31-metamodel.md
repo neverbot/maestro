@@ -197,6 +197,42 @@ git add internal/db/migrations internal/db/metamodel_schema_test.go
 git commit -m "feat: metamodel tables for types, entities and relations"
 ```
 
+**Corrections made during implementation** (a follow-up pass over the
+landed migration, decided before the later tasks build on its shape):
+
+1. Every key from a child to its parent is now **composite**, carrying
+   `project_id` alongside the parent id: `entities (entity_type_id,
+   project_id) -> entity_types (id, project_id)`, and the same shape for
+   `relations`' three parents (`relation_type_id`, `source_id`,
+   `target_id`). As written above, each key referenced `id` alone, so the
+   database happily accepted an entity instancing another game's entity
+   type, or an edge whose type, source and target straddled two games.
+   Isolation in Maestro is enforced in SQL, not in Go — the Core
+   sub-project was attacked with live cross-tenant requests on that
+   premise across twenty-two tasks — and this is the first table set
+   holding game content, so leaving it to Go-level validation in Tasks
+   3-6 would have contradicted the rule exactly where it matters most.
+   The `ON DELETE` behaviour of each key is unchanged: `RESTRICT` for
+   both type references, `CASCADE` for both endpoints.
+2. `entity_types`, `relation_types` and `entities` each gained a
+   `UNIQUE (id, project_id)`, which is what those composite keys
+   reference. `projects` needs nothing: the `project_id` columns
+   reference its `id`, already a primary key on its own, so no new
+   migration was required — the correction was made in place in
+   `0004_metamodel.sql`, which no instance has ever run.
+3. `internal/db/metamodel_schema_test.go` gained four tests asserting the
+   *database* rejects each cross-project reference with SQLSTATE 23503:
+   an entity borrowing another game's entity type, and a relation whose
+   `relation_type_id`, `source_id` or `target_id` belongs to another
+   game. Each was verified to go red when its own composite key is
+   reduced back to a single-column reference.
+
+This makes the endpoint and type resolution in Tasks 3-6 belt-and-braces
+rather than load-bearing, and needs no edit there: those tasks resolve
+every parent by project-scoped key or by a project-scoped `...ByID`
+query, so no Go path ever hands the database a foreign id, and no test in
+them expects a Go error where the database would now raise one first.
+
 ---
 
 ### Task 2: Field schemas and their validator

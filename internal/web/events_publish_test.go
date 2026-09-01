@@ -563,3 +563,88 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 		t.Fatalf("data = %q, want it to name the revoked invite", data)
 	}
 }
+
+// TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed
+// pins the second critical this task's second review round found:
+// redeeming a project-bound invite through POST /api/auth/register (an
+// unauthenticated, project-less handler) is a second producer of project
+// membership besides handleChangeRole, and it used to publish nothing at
+// all — an owner watching an invite get created would see the invitee
+// redeem it and become a member with no signal on the stream at either
+// end. handleRegister now publishes both eventMemberUpdated (the new
+// member, as an invalidation) and eventInviteRedeemed (the consumed
+// invite) once identity.RedeemInvite reports the project id it granted
+// membership in.
+func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ownerCookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	t.Cleanup(func() { ts.Close() })
+
+	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/invites",
+		strings.NewReader(`{"email":"","role":"viewer"}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(ownerCookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	if kind, _, _ := readOneSSEFrame(t, ownerReader); kind != "invite.created" {
+		t.Fatalf("Kind = %q, want invite.created", kind)
+	}
+
+	registerBody := `{"email":"newbie@studio.com","display_name":"Newbie","password":"password12345","invite_token":"` + created.Token + `"}`
+	regReq, err := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/register", strings.NewReader(registerBody))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	regReq.Header.Set("Content-Type", "application/json")
+	regResp, err := http.DefaultClient.Do(regReq)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer func() { _ = regResp.Body.Close() }()
+	if regResp.StatusCode != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201", regResp.StatusCode)
+	}
+
+	kind, _, data := readOneSSEFrame(t, ownerReader)
+	if kind != "member.updated" {
+		t.Fatalf("first post-redeem Kind = %q, want member.updated", kind)
+	}
+	if strings.Contains(data, "role") {
+		t.Fatalf("member.updated data = %q, must carry no role field", data)
+	}
+
+	kind, _, data = readOneSSEFrame(t, ownerReader)
+	if kind != "invite.redeemed" {
+		t.Fatalf("second post-redeem Kind = %q, want invite.redeemed", kind)
+	}
+	if !strings.Contains(data, created.ID) {
+		t.Fatalf("invite.redeemed data = %q, want it to name the consumed invite", data)
+	}
+}

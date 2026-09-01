@@ -12,6 +12,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/roles"
 )
 
 // maxAuthRequestBodyBytes bounds the request body accepted by every
@@ -201,7 +202,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// An invite token wins over the instance mode: that is the point of a link.
 	if req.InviteToken != "" {
-		user, err := s.opts.Identity.RedeemInvite(r.Context(), req.InviteToken, identity.CreateUserRequest{
+		result, err := s.opts.Identity.RedeemInvite(r.Context(), req.InviteToken, identity.CreateUserRequest{
 			Email:       req.Email,
 			DisplayName: req.DisplayName,
 			Password:    req.Password,
@@ -211,7 +212,20 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			s.writeRegistrationError(w, r, err)
 			return
 		}
-		s.startSessionFor(w, r, user.ID)
+		// This handler has no Caller and no ProjectScope of its own — it
+		// runs before either exists, which is exactly why RedeemInvite
+		// itself was extended to report enough to publish here (see
+		// RedeemInviteResult's own doc comment, invites.go, and
+		// publish.go's own doc comment on eventInviteRedeemed for why
+		// this is the one call site in this package that publishes
+		// outside a project-scoped handler). ProjectID is nil for an
+		// account-only invite — nothing project-scoped to announce, so
+		// nothing is published beyond starting the new session below.
+		if result.ProjectID != nil {
+			s.publish(*result.ProjectID, eventMemberUpdated, "", true, map[string]any{"user_id": result.ID})
+			s.publish(*result.ProjectID, eventInviteRedeemed, roles.Owner, true, map[string]any{"id": result.InviteID})
+		}
+		s.startSessionFor(w, r, result.ID)
 		return
 	}
 

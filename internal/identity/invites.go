@@ -207,16 +207,31 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 // shape — see the prepareUser/prepareUserForInvite selection below, and
 // prepareUserForInvite's own doc comment in users.go, for why a bound
 // invite skips the check and an unbound one does not.
-func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUserRequest) (User, error) {
+//
+// Returns a RedeemInviteResult, not a bare User: a quality review of
+// internal/web's SSE-publishing task found this was the one mutation in
+// the plan that grants project membership through a handler
+// (handleRegister, api_auth.go) with neither a Caller nor a ProjectScope
+// to publish through — every other membership-granting call
+// (handleChangeRole's SetRole) runs behind requireProject, which already
+// hands its handler the project id an event needs. RedeemInviteResult
+// carries exactly what handleRegister needs to publish both halves of
+// what just happened — a new (or promoted) member, and a consumed
+// invite — without this package importing realtime or holding a
+// *realtime.Hub itself: identity.Service's own tests build it with no
+// hub in sight, the same as projects.Service, and this keeps that true
+// rather than threading a publishing dependency into a package whose job
+// is accounts and credentials, not who is subscribed to which stream.
+func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUserRequest) (RedeemInviteResult, error) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	sum := sha256.Sum256([]byte(token))
 
 	invite, err := s.q.GetLiveInvite(ctx, sum[:])
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return User{}, s.resolveInviteMiss(ctx, sum[:])
+			return RedeemInviteResult{}, s.resolveInviteMiss(ctx, sum[:])
 		}
-		return User{}, fmt.Errorf("lookup invite: %w", err)
+		return RedeemInviteResult{}, fmt.Errorf("lookup invite: %w", err)
 	}
 	// invite.Email, like every other email this package stores, was
 	// lower-cased and trimmed by CreateInvite before it was written;
@@ -224,7 +239,7 @@ func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUser
 	// like-for-like comparison rather than one that happens to work only
 	// for already-lowercase input.
 	if invite.Email != nil && *invite.Email != req.Email {
-		return User{}, ErrInviteInvalid
+		return RedeemInviteResult{}, ErrInviteInvalid
 	}
 
 	// Validate and hash before opening the transaction: hashing is
@@ -255,7 +270,7 @@ func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUser
 	}
 	prepared, err := prepareFn(req)
 	if err != nil {
-		return User{}, err
+		return RedeemInviteResult{}, err
 	}
 
 	var user User
@@ -300,9 +315,29 @@ func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUser
 		return nil
 	})
 	if err != nil {
-		return User{}, err
+		return RedeemInviteResult{}, err
 	}
-	return user, nil
+	return RedeemInviteResult{User: user, InviteID: invite.ID, ProjectID: invite.ProjectID}, nil
+}
+
+// RedeemInviteResult is what RedeemInvite reports on success: the account
+// it created (or reused — see RedeemInvite's own doc comment on why an
+// email match still runs through the normal creation path), the id of
+// the invite row it consumed, and, when the invite was project-bound,
+// that project's id. ProjectID is nil for an account-only invite — the
+// same nil-means-unbound convention InviteRequest.ProjectID and
+// InviteSummary.ProjectID already use — which is exactly what
+// handleRegister (api_auth.go) checks before publishing anything
+// project-scoped: no project id, nothing to publish beyond starting the
+// new session.
+type RedeemInviteResult struct {
+	User // embedded: every existing call site that only ever read the
+	// created account (user.ID, user.DisplayName, ...) keeps compiling
+	// unchanged against this wider result, promoted through embedding
+	// rather than a named User field forcing every one of them to add
+	// ".User".
+	InviteID  uuid.UUID
+	ProjectID *uuid.UUID
 }
 
 // resolveInviteMiss is called once GetLiveInvite has found no row for a

@@ -484,7 +484,7 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 				failures <- err
 				return
 			}
-			successes <- user
+			successes <- user.User
 		}(i)
 	}
 	ready.Wait()

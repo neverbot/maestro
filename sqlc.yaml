@@ -18,3 +18,12 @@ sql:
               type: UUID
               import: github.com/google/uuid
               pointer: true
+          # entities.search is a tsvector. Left alone sqlc emits
+          # interface{}; pgx/v5 has a codec for the type, so name it.
+          # Not string or []byte: pgx returns tsvector in binary format
+          # and refuses to scan it into either.
+          - db_type: tsvector
+            go_type: github.com/jackc/pgx/v5/pgtype.TSVector
+          - db_type: tsvector
+            nullable: true
+            go_type: github.com/jackc/pgx/v5/pgtype.TSVector

@@ -5,16 +5,29 @@
 -- project_id, so every query over these tables filters on it.
 --
 -- Isolation between games is enforced here, in SQL, not in Go: every key
--- from a child to its parent is composite, carrying project_id alongside
--- the parent id, so no row can point at a parent owned by another game.
--- That needs a UNIQUE (id, project_id) on each parent to reference, which
--- is why the types and entities carry one on top of their primary key.
--- projects needs nothing extra: the project_id columns reference its id,
--- which is already a primary key on its own.
+-- from one of these tables to a project-scoped parent is composite,
+-- carrying project_id alongside the parent id, so no row can point at a
+-- parent owned by another game. That covers the entity type of an
+-- entity, the relation type and both endpoints of a relation, and
+-- updated_by_token_id on all four tables, since api_tokens belongs to a
+-- single project. A composite key needs a UNIQUE (id, project_id) on the
+-- parent to reference, which is why the types and entities carry one on
+-- top of their primary key, and why api_tokens gains one below.
 --
--- The Down side needs no matching change: dropping the four tables takes
--- their constraints and indexes with them.
+-- Two references are deliberately *not* composite:
+--
+--   * project_id itself references projects (id), which is already a
+--     primary key on its own; there is no outer scope to carry.
+--   * updated_by_user_id references users (id). Users are global, not
+--     project-scoped: the same account edits content in every game it is
+--     a member of, so there is nothing to scope the key by.
 -- +goose Up
+-- api_tokens is project-scoped (0001_identity.sql), so the composite
+-- updated_by_token_id keys below need a unique (id, project_id) target
+-- to reference. It lives here rather than in a later migration because
+-- this is where the referencing keys are created.
+ALTER TABLE api_tokens ADD CONSTRAINT api_tokens_id_project_key UNIQUE (id, project_id);
+
 CREATE TABLE entity_types (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id   uuid NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
@@ -29,7 +42,12 @@ CREATE TABLE entity_types (
     created_at   timestamptz NOT NULL DEFAULT now(),
     updated_at   timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    updated_by_token_id uuid,
+    -- Composite, so the recorded token belongs to this row's own game.
+    -- The SET NULL names its column: project_id is NOT NULL and must
+    -- survive the token's deletion untouched.
+    FOREIGN KEY (updated_by_token_id, project_id)
+        REFERENCES api_tokens (id, project_id) ON DELETE SET NULL (updated_by_token_id),
     -- The target of the composite key from entities.
     UNIQUE (id, project_id)
 );
@@ -37,6 +55,9 @@ CREATE TABLE entity_types (
 -- matched case-insensitively so a second run with different casing
 -- collides with the existing row instead of creating a twin.
 CREATE UNIQUE INDEX entity_types_key_key ON entity_types (project_id, lower(key));
+CREATE TRIGGER entity_types_set_updated_at
+    BEFORE UPDATE ON entity_types
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE relation_types (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -55,11 +76,16 @@ CREATE TABLE relation_types (
     created_at     timestamptz NOT NULL DEFAULT now(),
     updated_at     timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    updated_by_token_id uuid,
+    FOREIGN KEY (updated_by_token_id, project_id)
+        REFERENCES api_tokens (id, project_id) ON DELETE SET NULL (updated_by_token_id),
     -- The target of the composite key from relations.
     UNIQUE (id, project_id)
 );
 CREATE UNIQUE INDEX relation_types_key_key ON relation_types (project_id, lower(key));
+CREATE TRIGGER relation_types_set_updated_at
+    BEFORE UPDATE ON relation_types
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE entities (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -74,7 +100,9 @@ CREATE TABLE entities (
     created_at     timestamptz NOT NULL DEFAULT now(),
     updated_at     timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    updated_by_token_id uuid,
+    FOREIGN KEY (updated_by_token_id, project_id)
+        REFERENCES api_tokens (id, project_id) ON DELETE SET NULL (updated_by_token_id),
     -- RESTRICT, not CASCADE: dropping an entity type that still has
     -- instances must fail loudly rather than silently delete content.
     -- Composite, so the type has to belong to the entity's own game.
@@ -87,6 +115,9 @@ CREATE UNIQUE INDEX entities_key_key ON entities (project_id, entity_type_id, lo
 CREATE INDEX entities_type_idx ON entities (entity_type_id);
 CREATE INDEX entities_search_idx ON entities USING gin (search);
 CREATE INDEX entities_fields_idx ON entities USING gin (fields jsonb_path_ops);
+CREATE TRIGGER entities_set_updated_at
+    BEFORE UPDATE ON entities
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TABLE relations (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -98,7 +129,9 @@ CREATE TABLE relations (
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now(),
     updated_by_user_id  uuid REFERENCES users (id) ON DELETE SET NULL,
-    updated_by_token_id uuid REFERENCES api_tokens (id) ON DELETE SET NULL,
+    updated_by_token_id uuid,
+    FOREIGN KEY (updated_by_token_id, project_id)
+        REFERENCES api_tokens (id, project_id) ON DELETE SET NULL (updated_by_token_id),
     FOREIGN KEY (relation_type_id, project_id)
         REFERENCES relation_types (id, project_id) ON DELETE RESTRICT,
     -- CASCADE on both endpoints: an edge without both of its entities is
@@ -112,11 +145,25 @@ CREATE TABLE relations (
 -- One edge per (type, source, target). The relation type is already
 -- project-scoped, so this is per-project uniqueness too.
 CREATE UNIQUE INDEX relations_edge_key ON relations (relation_type_id, source_id, target_id);
+-- The unfiltered "show me this game's edges" listing, ordered by
+-- created_at, is the most common read on the table expected to hold the
+-- most rows; without a project-leading index it is a sequential scan
+-- across every game's relations plus a sort. It also gives the
+-- projects delete cascade an index to work from.
+CREATE INDEX relations_project_idx ON relations (project_id, created_at);
 CREATE INDEX relations_source_idx ON relations (source_id);
 CREATE INDEX relations_target_idx ON relations (target_id);
+CREATE TRIGGER relations_set_updated_at
+    BEFORE UPDATE ON relations
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- +goose Down
+-- Dropping the four tables takes their constraints, indexes and triggers
+-- with them; set_updated_at() itself belongs to 0001, whose Down drops
+-- it. Only the constraint added to the pre-existing api_tokens has to be
+-- undone by hand.
 DROP TABLE relations;
 DROP TABLE entities;
 DROP TABLE relation_types;
 DROP TABLE entity_types;
+ALTER TABLE api_tokens DROP CONSTRAINT api_tokens_id_project_key;

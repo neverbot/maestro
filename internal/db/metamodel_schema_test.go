@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -215,4 +216,231 @@ func TestRelationCannotPointAtAnotherProjectsTarget(t *testing.T) {
 		`INSERT INTO relations (project_id, relation_type_id, source_id, target_id) VALUES ($1, $2, $3, $4)`,
 		f.projectA, f.relationTypeA, f.entityA1, f.entityB)
 	assertForeignKeyViolation(t, err)
+}
+
+// seedToken creates a user and an api_token owned by the given project
+// and returns the token id. Tokens are project-scoped, so a token from
+// one game must never be recordable as the last editor of another
+// game's content.
+func seedToken(t *testing.T, ctx context.Context, pool *pgxpool.Pool, projectID, label string) string {
+	t.Helper()
+
+	var userID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (email, display_name, password_hash)
+		 VALUES ($1, $1, 'x') RETURNING id`, label+"@example.test").Scan(&userID); err != nil {
+		t.Fatalf("insert user for %s: %v", label, err)
+	}
+	var tokenID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO api_tokens (token_hash, token_hint, project_id, user_id, label)
+		 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		[]byte(label), label, projectID, userID, label).Scan(&tokenID); err != nil {
+		t.Fatalf("insert token %s: %v", label, err)
+	}
+	return tokenID
+}
+
+// TestCannotRecordAnotherProjectsToken pins the last isolation hole in
+// the schema: updated_by_token_id points at api_tokens, which is
+// project-scoped, so the key has to be composite like every other key
+// from these tables to a project-scoped parent. Without it a UI
+// rendering "last edited by <token label>" would show another game's
+// token label.
+func TestCannotRecordAnotherProjectsToken(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	f := seedTwoProjects(t, ctx, pool)
+
+	tokenA := seedToken(t, ctx, pool, f.projectA, "token-a")
+	tokenB := seedToken(t, ctx, pool, f.projectB, "token-b")
+
+	cases := []struct {
+		name string
+		sql  string
+		args func(token string) []any
+	}{
+		{
+			name: "entity_types",
+			sql: `INSERT INTO entity_types (project_id, key, label, label_plural, updated_by_token_id)
+			      VALUES ($1, $2, 'Zone', 'Zones', $3)`,
+			args: func(token string) []any { return []any{f.projectA, "zone-" + token[:8], token} },
+		},
+		{
+			name: "relation_types",
+			sql: `INSERT INTO relation_types (project_id, key, label, updated_by_token_id)
+			      VALUES ($1, $2, 'Unlocks', $3)`,
+			args: func(token string) []any { return []any{f.projectA, "unlocks-" + token[:8], token} },
+		},
+		{
+			name: "entities",
+			sql: `INSERT INTO entities (project_id, entity_type_id, key, name, updated_by_token_id)
+			      VALUES ($1, $2, $3, 'Quest', $4)`,
+			args: func(token string) []any {
+				return []any{f.projectA, f.entityTypeA, "quest-" + token[:8], token}
+			},
+		},
+		{
+			name: "relations",
+			sql: `INSERT INTO relations (project_id, relation_type_id, source_id, target_id, updated_by_token_id)
+			      VALUES ($1, $2, $3, $4, $5)`,
+			args: func(token string) []any {
+				return []any{f.projectA, f.relationTypeA, f.entityA1, f.entityA2, token}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// A token owned by game B on a row owned by game A.
+			_, err := pool.Exec(ctx, tc.sql, tc.args(tokenB)...)
+			assertForeignKeyViolation(t, err)
+
+			// The game's own token is accepted.
+			if _, err := pool.Exec(ctx, tc.sql, tc.args(tokenA)...); err != nil {
+				t.Fatalf("same-project token on %s: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// TestUpdatedAtTriggerFires keeps the metamodel tables on the same
+// mechanism as the Core tables: updated_at comes from a trigger, not
+// from every query remembering to write `updated_at = now()`. Two
+// mechanisms for one column diverge silently.
+func TestUpdatedAtTriggerFires(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	f := seedTwoProjects(t, ctx, pool)
+
+	var relationID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO relations (project_id, relation_type_id, source_id, target_id)
+		 VALUES ($1, $2, $3, $4) RETURNING id`,
+		f.projectA, f.relationTypeA, f.entityA1, f.entityA2).Scan(&relationID); err != nil {
+		t.Fatalf("insert relation: %v", err)
+	}
+
+	cases := []struct {
+		table  string
+		id     string
+		update string
+	}{
+		{"entity_types", f.entityTypeA, `UPDATE entity_types SET label = 'Renamed' WHERE id = $1`},
+		{"relation_types", f.relationTypeA, `UPDATE relation_types SET label = 'Renamed' WHERE id = $1`},
+		{"entities", f.entityA1, `UPDATE entities SET name = 'Renamed' WHERE id = $1`},
+		{"relations", relationID, `UPDATE relations SET fields = '{"note":"x"}'::jsonb WHERE id = $1`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.table, func(t *testing.T) {
+			var before, after time.Time
+			//nolint:gosec // the table name comes from this test's own literal list.
+			read := fmt.Sprintf(`SELECT updated_at FROM %s WHERE id = $1`, tc.table)
+			if err := pool.QueryRow(ctx, read, tc.id).Scan(&before); err != nil {
+				t.Fatalf("read updated_at before: %v", err)
+			}
+			// The update deliberately does not set updated_at: the point
+			// is that the trigger does it.
+			if _, err := pool.Exec(ctx, tc.update, tc.id); err != nil {
+				t.Fatalf("update %s: %v", tc.table, err)
+			}
+			if err := pool.QueryRow(ctx, read, tc.id).Scan(&after); err != nil {
+				t.Fatalf("read updated_at after: %v", err)
+			}
+			if !after.After(before) {
+				t.Fatalf("updated_at did not move on %s: %s -> %s", tc.table, before, after)
+			}
+		})
+	}
+}
+
+// TestDuplicateRelationEdgeIsRejected pins relations_edge_key. It is
+// load-bearing for the relation upsert, whose ON CONFLICT names exactly
+// these three columns: were the index dropped, every upsert would fail
+// at runtime rather than here.
+func TestDuplicateRelationEdgeIsRejected(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	f := seedTwoProjects(t, ctx, pool)
+
+	insert := `INSERT INTO relations (project_id, relation_type_id, source_id, target_id) VALUES ($1, $2, $3, $4)`
+	if _, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeA, f.entityA1, f.entityA2); err != nil {
+		t.Fatalf("first edge: %v", err)
+	}
+
+	_, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeA, f.entityA1, f.entityA2)
+	if err == nil {
+		t.Fatal("expected a unique violation on a duplicate edge, but the insert succeeded")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
+	}
+	if pgErr.Code != "23505" {
+		t.Fatalf("expected SQLSTATE 23505 (unique_violation), got %s: %v", pgErr.Code, err)
+	}
+
+	// The reverse direction is a different edge and must be accepted.
+	if _, err := pool.Exec(ctx, insert, f.projectA, f.relationTypeA, f.entityA2, f.entityA1); err != nil {
+		t.Fatalf("reversed edge: %v", err)
+	}
+}
+
+// TestDeletingAnEntityTypeWithInstancesIsRejected pins the RESTRICT on
+// entities -> entity_types. Flipped to CASCADE it would silently delete
+// every entity of the type instead of failing loudly.
+func TestDeletingAnEntityTypeWithInstancesIsRejected(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	f := seedTwoProjects(t, ctx, pool)
+
+	_, err := pool.Exec(ctx, `DELETE FROM entity_types WHERE id = $1`, f.entityTypeA)
+	assertForeignKeyViolation(t, err)
+
+	// Once its instances are gone the type is deletable.
+	if _, err := pool.Exec(ctx, `DELETE FROM entities WHERE entity_type_id = $1`, f.entityTypeA); err != nil {
+		t.Fatalf("delete entities: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM entity_types WHERE id = $1`, f.entityTypeA); err != nil {
+		t.Fatalf("delete empty entity type: %v", err)
+	}
+}
+
+// TestDeletingATokenClearsOnlyTheTokenColumn covers the one subtlety of
+// making updated_by_token_id composite: a bare ON DELETE SET NULL would
+// try to null project_id too, which is NOT NULL. The key names its
+// column, so revoking a token must leave the row and its project alone.
+func TestDeletingATokenClearsOnlyTheTokenColumn(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	f := seedTwoProjects(t, ctx, pool)
+	tokenA := seedToken(t, ctx, pool, f.projectA, "token-a")
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE entities SET updated_by_token_id = $1 WHERE id = $2`, tokenA, f.entityA1); err != nil {
+		t.Fatalf("stamp entity with token: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM api_tokens WHERE id = $1`, tokenA); err != nil {
+		t.Fatalf("delete token: %v", err)
+	}
+
+	var tokenID *string
+	var projectID string
+	if err := pool.QueryRow(ctx,
+		`SELECT updated_by_token_id, project_id FROM entities WHERE id = $1`,
+		f.entityA1).Scan(&tokenID, &projectID); err != nil {
+		t.Fatalf("read entity after token deletion: %v", err)
+	}
+	if tokenID != nil {
+		t.Fatalf("updated_by_token_id = %q, want NULL after the token was deleted", *tokenID)
+	}
+	if projectID != f.projectA {
+		t.Fatalf("project_id = %q, want %q; the SET NULL must not touch it", projectID, f.projectA)
+	}
 }

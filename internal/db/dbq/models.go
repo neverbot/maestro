@@ -30,7 +30,7 @@ type Entity struct {
 	Fields           []byte
 	Invalid          bool
 	Version          int32
-	Search           interface{}
+	Search           pgtype.TSVector
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
 	UpdatedByUserID  *uuid.UUID

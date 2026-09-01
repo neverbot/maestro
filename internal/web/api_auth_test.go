@@ -11,6 +11,8 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/testutil"
 	"github.com/neverbot/maestro/internal/web"
 )
 
@@ -462,18 +464,76 @@ func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
 	}
 }
 
-func TestRegisterWithOffDomainInviteSucceeds(t *testing.T) {
-	// An unbound invite redeemed with an off-domain email must succeed
-	// even on an instance with a configured allowlist: the admin's
-	// decision to hand out the link is the authorization an outside
-	// contractor needs, not the ALLOWED_EMAIL_DOMAINS check that governs
-	// open self-registration. Task 11's second review pass, item 5.
+func TestRegisterWithOffDomainUnboundInviteIsForbidden(t *testing.T) {
+	// An *unbound* invite (no email attached at creation) only ever said
+	// "whoever holds this link gets in" — it names no domain, so
+	// ALLOWED_EMAIL_DOMAINS is still the only statement anyone has made
+	// about who may hold an account here, and it must still apply. Task
+	// 11's third review pass: an earlier version of this fix skipped the
+	// allowlist for every invite redemption regardless of shape, which
+	// let any unbound invite's holder register with any address at all —
+	// this test pins the corrected, narrower behavior instead.
 	srv, ids, _ := newTestServerWithConfig(t, domainOpenConfig)
 	ctx := context.Background()
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.com","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	if err := decodeJSON(rec, &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "email_not_allowed" {
+		t.Fatalf("error code = %q, want email_not_allowed (there is no attacker to protect here, so the person deserves to know why)", payload["error"])
+	}
+}
+
+func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
+	// A *bound* invite is different: the admin typed this exact address
+	// when they created it, which is the actual contractor case this
+	// fix (Task 11's third review pass) preserves. CreateInvite itself
+	// still applies ALLOWED_EMAIL_DOMAINS when an invite is bound (Task
+	// 5, Correction 8, unchanged), so to isolate "redemption does not
+	// re-apply the allowlist to an already-bound address" from
+	// "CreateInvite would have refused to mint this invite under its own
+	// config", the invite here is minted through one identity.Service
+	// with no domain restriction and redeemed through the HTTP server's
+	// own service, wired with a strict allowlist that would reject the
+	// address on the open self-service path — the two share one
+	// database, only their config differs, the same way an operator
+	// tightening ALLOWED_EMAIL_DOMAINS after minting an invite would
+	// not retroactively break it.
+	pool := testutil.NewPool(t)
+
+	permissiveCfg := testConfig()
+	creator := identity.New(pool, permissiveCfg)
+	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@outside.com"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	// The HTTP server's own identity.Service shares the same pool as
+	// creator above, but is wired with the strict allowlist domain_open
+	// registration would otherwise apply — the invite must still bypass
+	// it, since it is bound.
+	strictCfg := testConfig()
+	domainOpenConfig(&strictCfg)
+	ids := identity.New(pool, strictCfg)
+	projSvc := projects.New(pool)
+	srv := web.NewServer(web.Options{
+		Version:  "test",
+		Config:   strictCfg,
+		Identity: ids,
+		Projects: projSvc,
+	})
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.com","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()

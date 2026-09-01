@@ -313,18 +313,18 @@ func TestCreateInviteRejectsDisallowedDomain(t *testing.T) {
 	}
 }
 
-// TestRedeemUnboundInviteAllowsOffDomainEmail pins Task 11's second review
-// pass, item 5: on an instance with a configured allowlist, an *unbound*
-// invite (no email attached at creation — see CreateInvite's own doc
-// comment) must still be redeemable with an address outside that
-// allowlist. Holding the token is the authorization; ALLOWED_EMAIL_DOMAINS
-// governs open self-registration (CreateUser), not who an admin chooses to
-// hand a link to. Before this fix, RedeemInvite ran the same EmailAllowed
-// check CreateUser does and rejected exactly this redemption with
-// ErrEmailNotAllowed, silently defeating "an invite wins over the
-// instance's registration mode" for the one case that phrase exists to
-// describe — an admin inviting an outside contractor.
-func TestRedeemUnboundInviteAllowsOffDomainEmail(t *testing.T) {
+// TestRedeemUnboundInviteAppliesDomainAllowlist pins Task 11's third
+// review pass: an *unbound* invite (no email attached at creation — see
+// CreateInvite's own doc comment) only ever said "whoever holds this link
+// gets in". It names no domain, so ALLOWED_EMAIL_DOMAINS is still the only
+// statement anyone has made about who may hold an account here, and
+// RedeemInvite must still enforce it. An earlier version of this fix
+// (Task 11's second review pass) skipped the allowlist for every
+// redemption regardless of the invite's shape, which let any unbound
+// invite's holder register with any address at all on an instance that
+// had explicitly configured which domains may hold accounts — this test
+// replaces the one that pinned that overly broad behavior.
+func TestRedeemUnboundInviteAppliesDomainAllowlist(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.AllowedEmailDomains = []string{"studio.com"}
@@ -335,11 +335,50 @@ func TestRedeemUnboundInviteAllowsOffDomainEmail(t *testing.T) {
 		t.Fatalf("CreateInvite: %v", err)
 	}
 
-	user, err := svc.RedeemInvite(context.Background(), token, identity.CreateUserRequest{
+	_, err = svc.RedeemInvite(context.Background(), token, identity.CreateUserRequest{
+		Email: "contractor@elsewhere.com", DisplayName: "Contractor", Password: "password12345",
+	})
+	if !errors.Is(err, identity.ErrEmailNotAllowed) {
+		t.Fatalf("err = %v, want ErrEmailNotAllowed", err)
+	}
+}
+
+// TestRedeemBoundInviteAllowsOffDomainEmail is the other half: a *bound*
+// invite means the admin typed this exact address when they created it —
+// they named the person, and the domain policy has already been applied
+// to their intent (CreateInvite's own EmailAllowed check, Task 5
+// Correction 8, still enforced at creation time). Redemption must not
+// re-apply the allowlist to an address the admin already committed to by
+// name.
+//
+// CreateInvite itself still refuses to *mint* a bound invite for a
+// disallowed domain (see TestCreateInviteRejectsDisallowedDomain), so this
+// test cannot demonstrate the property using one Service end to end — that
+// would only prove CreateInvite's own gate works, not RedeemInvite's. It
+// mints the invite through a permissively configured Service and redeems
+// it through a second Service, sharing the same database, configured with
+// a strict allowlist that would refuse the address on the open
+// self-service path — the same shape as an operator tightening
+// ALLOWED_EMAIL_DOMAINS after an invite was already minted and handed out,
+// which must not retroactively break it.
+func TestRedeemBoundInviteAllowsOffDomainEmail(t *testing.T) {
+	pool := testutil.NewPool(t)
+	creator := identity.New(pool, testConfig())
+
+	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@elsewhere.com"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	strictCfg := testConfig()
+	strictCfg.AllowedEmailDomains = []string{"studio.com"}
+	redeemer := identity.New(pool, strictCfg)
+
+	user, err := redeemer.RedeemInvite(context.Background(), token, identity.CreateUserRequest{
 		Email: "contractor@elsewhere.com", DisplayName: "Contractor", Password: "password12345",
 	})
 	if err != nil {
-		t.Fatalf("RedeemInvite: %v (an unbound invite must not apply ALLOWED_EMAIL_DOMAINS)", err)
+		t.Fatalf("RedeemInvite: %v (a bound invite must not re-apply ALLOWED_EMAIL_DOMAINS at redemption)", err)
 	}
 	if user.Email != "contractor@elsewhere.com" {
 		t.Fatalf("Email = %q, want contractor@elsewhere.com", user.Email)

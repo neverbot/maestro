@@ -158,24 +158,37 @@ func (s *Service) prepareUser(req CreateUserRequest) (preparedUser, error) {
 	return s.prepareUserChecked(req, true)
 }
 
-// prepareUserForInvite is prepareUser's invite-redemption counterpart: it
-// skips the ALLOWED_EMAIL_DOMAINS check prepareUser otherwise applies.
+// prepareUserForInvite is prepareUser's counterpart for a *bound* invite
+// redemption: it skips the ALLOWED_EMAIL_DOMAINS check prepareUser
+// otherwise applies. RedeemInvite (invites.go) selects between the two by
+// invite.Email — this one only when the invite names a specific address;
+// prepareUser (still applying the allowlist) for an unbound one. That
+// split, not "every invite redemption", is deliberate: it turned out to
+// matter where the admin's authorization actually sits.
 //
-// Redeeming an invite is not open self-registration — reaching it at all
-// already requires holding a token an admin chose to hand out — so the
-// domain allowlist has nothing left to protect there that the invite
-// itself doesn't already decide. Concretely: a *bound* invite (one
-// CreateInvite attached a specific email to) already ran EmailAllowed once,
-// at creation time, against that exact address (see CreateInvite's own
-// check in invites.go, which is unchanged and still enforced there); an
-// *unbound* invite carries no email of its own; whatever address its
-// redeemer supplies was never checked by anything upstream, and this
-// product's premise is that an admin hands such a link to one specific
-// person they intend to admit — commonly an outside contractor, which is
-// the expected use of an unbound invite, not an edge case to police again
-// here. Rejecting that redemption with ErrEmailNotAllowed made "an invite
-// wins over the instance's registration mode" true in name only: the
-// domain gate the invite was supposed to override still applied to it.
+// A *bound* invite (one CreateInvite attached a specific email to) means
+// the admin typed that exact address when they created it — they named
+// the person, and CreateInvite already ran EmailAllowed once, at creation
+// time, against it (see CreateInvite's own check in invites.go, which is
+// unchanged and still enforced there). The domain policy has already been
+// applied to the admin's intent; skipping it again at redemption is what
+// makes "an invite wins over the instance's registration mode" true for
+// the case it exists to cover — an admin deliberately inviting a specific
+// outside contractor.
+//
+// An *unbound* invite only ever said "whoever holds this link gets in".
+// It names no domain, so ALLOWED_EMAIL_DOMAINS is still the only
+// statement anyone has made about who may hold an account on this
+// instance, and it should stand — an earlier version of this method
+// skipped the check unconditionally, which let any unbound invite's
+// holder register with any address at all, silently overriding a
+// configured allowlist the admin never actually opted out of for that
+// link. An unbound invite is also the one most likely to end up pasted
+// into a shared channel or forwarded on, which is exactly when that
+// second gate is worth having. A future admin who genuinely needs an
+// unbound link for an off-domain contractor needs a narrower, explicit
+// opt-out on InviteRequest — not a change to this default — and that is
+// deliberately not built here (see the plan's Task 11 corrections).
 func (s *Service) prepareUserForInvite(req CreateUserRequest) (preparedUser, error) {
 	return s.prepareUserChecked(req, false)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 )
 
 // Validate checks a value map against the schema and returns the normalised
@@ -29,13 +30,22 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	var problems []FieldError
 	out := make(map[string]any, len(values))
 
+	// Unknown keys are found by ranging a map, whose order Go randomises on
+	// every run. They are sorted so the message a caller sees is a function
+	// of the input alone: Tasks 3-6 return these strings to agents, and a
+	// golden test over them has to be possible.
+	var unknown []string
 	for key := range values {
 		if _, known := byKey[key]; !known {
-			problems = append(problems, FieldError{
-				Path:    "fields." + key,
-				Message: "unknown field for this type",
-			})
+			unknown = append(unknown, key)
 		}
+	}
+	sort.Strings(unknown)
+	for _, key := range unknown {
+		problems = append(problems, FieldError{
+			Path:    "fields." + key,
+			Message: "unknown field for this type",
+		})
 	}
 
 	for _, f := range s {

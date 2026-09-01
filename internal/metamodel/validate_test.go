@@ -735,3 +735,40 @@ func TestValidationErrorIsNotAnInvalidSchema(t *testing.T) {
 		t.Fatalf("errors.Is(%v, ErrInvalidSchema) = true; a bad row is not a bad declaration", err)
 	}
 }
+
+// --- M4: the order of reported problems is deterministic ------------------
+
+func TestValidateReportsUnknownFieldsInAStableOrder(t *testing.T) {
+	// Unknown fields are discovered by ranging a map, whose order Go
+	// randomises per run. Tasks 3-6 hand these strings straight back to an
+	// agent and will want golden tests, so the order is sorted, not
+	// whichever the runtime happened to pick.
+	values := map[string]any{"min_level": float64(5), "zulu": 1, "alpha": 2, "mike": 3}
+	want := "schema_violation: fields.alpha: unknown field for this type; " +
+		"fields.mike: unknown field for this type; " +
+		"fields.zulu: unknown field for this type"
+	for i := 0; i < 20; i++ {
+		_, err := questSchema().Validate(values)
+		if err == nil {
+			t.Fatal("expected errors")
+		}
+		if err.Error() != want {
+			t.Fatalf("run %d: error = %q, want %q", i, err, want)
+		}
+	}
+}
+
+func TestValidateReportsUnknownFieldsBeforeFieldProblemsInSchemaOrder(t *testing.T) {
+	// The whole message is ordered: unknown keys first, sorted, then each
+	// declared field in the order the schema declares it.
+	_, err := questSchema().Validate(map[string]any{"nonsense": 1, "difficulty": "impossible"})
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	want := "schema_violation: fields.nonsense: unknown field for this type; " +
+		"fields.min_level: is required; " +
+		`fields.difficulty: "impossible" is not one of [trivial normal elite]`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}

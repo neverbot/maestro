@@ -89,6 +89,26 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
+// CheckValues re-validates a stored row against this schema and reports
+// whether it still fits, returning nothing a caller could accidentally write
+// back.
+//
+// This is the re-validation path. When a type's field schema is edited,
+// every stored row of that type has to be re-examined and flagged, and the
+// design is explicit that flagging must not alter the rows: an entity's
+// content is the designer's, and a validation pass is not an edit. Validate
+// cannot serve that purpose safely — it returns a normalised map with
+// declared defaults injected, so a caller who re-validates with it and then
+// stores what came back silently back-fills every row it touched. Returning
+// only an error removes the possibility rather than documenting against it.
+//
+// The rules are exactly Validate's, so the two never disagree about whether
+// a row is valid; the difference is only what comes back.
+func (s Schema) CheckValues(values map[string]any) error {
+	_, err := s.Validate(values)
+	return err
+}
+
 // hasDefault reports whether the field declares a default for Validate to
 // apply. Presence, not value, decides it: Field.HasDefault is set
 // independently of what Default holds, so a declared default of false, 0 or

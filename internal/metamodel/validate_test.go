@@ -935,3 +935,83 @@ func TestValidateRejectsAnUnknownFieldWithTheExactMessage(t *testing.T) {
 		t.Fatalf("error = %q, want %q", err, want)
 	}
 }
+
+// --- CheckValues: re-validate stored rows without touching them ----------
+
+func TestCheckValuesReportsTheSameProblemsAsValidate(t *testing.T) {
+	values := map[string]any{"difficulty": "impossible", "nonsense": 1}
+	_, want := questSchema().Validate(values)
+	got := questSchema().CheckValues(values)
+	if want == nil || got == nil {
+		t.Fatalf("Validate err = %v, CheckValues err = %v; both must fail", want, got)
+	}
+	if got.Error() != want.Error() {
+		t.Fatalf("CheckValues = %q, Validate = %q; the two must agree exactly", got, want)
+	}
+	if !errors.Is(got, ErrSchemaViolation) {
+		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = false", got)
+	}
+}
+
+func TestCheckValuesAcceptsARowThatValidateAccepts(t *testing.T) {
+	if err := questSchema().CheckValues(map[string]any{"min_level": float64(20)}); err != nil {
+		t.Fatalf("CheckValues: %v", err)
+	}
+}
+
+func TestCheckValuesReturnsNoDataToWriteBack(t *testing.T) {
+	// This is the whole point of the method. A schema change flags stored
+	// rows invalid without altering them; the only other entry point returns
+	// a normalised map with defaults injected, and a caller that forgets to
+	// discard it back-fills every row it inspected. CheckValues has nothing
+	// to forget.
+	//
+	// The compile-time shape is the guarantee: CheckValues returns exactly
+	// one value, an error. valueChecker below fails to compile the day it
+	// returns anything else.
+	var checker valueChecker = questSchema()
+	if err := checker.CheckValues(map[string]any{"min_level": float64(20)}); err != nil {
+		t.Fatalf("CheckValues: %v", err)
+	}
+}
+
+// valueChecker pins CheckValues's signature: a row in, a verdict out, and no
+// data a caller could store by mistake.
+type valueChecker interface {
+	CheckValues(map[string]any) error
+}
+
+func TestCheckValuesDoesNotMutateTheRowItInspects(t *testing.T) {
+	// questSchema declares a default for repeatable. Validate would inject
+	// it; re-validation must leave the stored row exactly as it was found.
+	values := map[string]any{"min_level": float64(20)}
+	if err := questSchema().CheckValues(values); err != nil {
+		t.Fatalf("CheckValues: %v", err)
+	}
+	if len(values) != 1 {
+		t.Fatalf("values = %v, want the row untouched", values)
+	}
+	if _, present := values["repeatable"]; present {
+		t.Fatalf("values = %v; CheckValues must not back-fill a default into a stored row", values)
+	}
+}
+
+func TestCheckValuesTreatsAMissingFieldWithADefaultAsSatisfied(t *testing.T) {
+	// A stored row that predates a newly declared default is not invalid:
+	// the default is what the row would get on its next write. Only a
+	// required field with no fallback makes it invalid.
+	schema := Schema{
+		{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false},
+		{Key: "min_level", Type: FieldNumber, Required: true},
+	}
+	if err := schema.CheckValues(map[string]any{"min_level": float64(1)}); err != nil {
+		t.Fatalf("CheckValues: %v", err)
+	}
+	err := schema.CheckValues(map[string]any{})
+	if err == nil {
+		t.Fatal("a row missing a required field with no default must be flagged invalid")
+	}
+	if err.Error() != "schema_violation: fields.min_level: is required" {
+		t.Fatalf("error = %q, want the required-field message", err)
+	}
+}

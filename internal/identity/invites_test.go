@@ -799,3 +799,63 @@ func TestListAndRevokeOutstandingProjectInvites(t *testing.T) {
 		t.Fatal("revoked invite unexpectedly disappeared from ListOutstandingInvitesForProject")
 	}
 }
+
+// TestListOutstandingInvitesForProjectExcludesAccountOnly is the other
+// half of the split TestListOutstandingInvitesExcludesProjectBound pins:
+// both doc comments (ListOutstandingInvites and
+// ListOutstandingProjectInvites) claim the two surfaces never overlap,
+// but until this test existed only one direction was actually checked.
+// An account-only invite (no project) must never appear in a game's own
+// listing.
+func TestListOutstandingInvitesForProjectExcludesAccountOnly(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	projectID := createTestProject(ctx, t, pool, "azeroth")
+	_, bound, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &projectID, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite (bound): %v", err)
+	}
+	if _, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "unbound@studio.com"}); err != nil {
+		t.Fatalf("CreateInvite (unbound): %v", err)
+	}
+
+	outstanding, err := svc.ListOutstandingInvitesForProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvitesForProject: %v", err)
+	}
+	if len(outstanding) != 1 || outstanding[0].ID != bound.ID {
+		t.Fatalf("ListOutstandingInvitesForProject(azeroth) = %+v, want only the bound invite %s", outstanding, bound.ID)
+	}
+}
+
+// TestRevokeProjectInviteIgnoresAccountOnly is
+// TestRevokeInviteIgnoresProjectBound's other half: a game's own
+// RevokeProjectInvite must never be able to revoke an account-only
+// invite, even one an owner happens to guess or otherwise learn the id
+// of — only the instance-wide RevokeInvite (DELETE /api/invites/{id},
+// gated on Caller.IsAdmin) may touch it.
+func TestRevokeProjectInviteIgnoresAccountOnly(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	projectID := createTestProject(ctx, t, pool, "azeroth")
+	token, unbound, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "unbound@studio.com"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if err := svc.RevokeProjectInvite(ctx, projectID, unbound.ID); err != nil {
+		t.Fatalf("RevokeProjectInvite: %v", err)
+	}
+
+	// Still live: RevokeProjectInvite's project_id = $2 clause must not
+	// have touched an account-only row.
+	if _, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "unbound@studio.com", DisplayName: "Unbound", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("RedeemInvite after no-op RevokeProjectInvite: %v", err)
+	}
+}

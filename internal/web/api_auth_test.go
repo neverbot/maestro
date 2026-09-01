@@ -200,12 +200,18 @@ func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 	// The other half of the bug, and the half that outlives the outage:
 	// neither limiter may be charged for an attempt that was never
 	// evaluated. loginLimiter allows 10 per normalized email per minute
-	// (server.go), so eleven more failed attempts through the same dead
-	// pool would cross that budget and start answering 429 — a lockout
-	// that would persist for a further minute after the database itself
-	// recovered, for a caller whose password was correct all along.
-	// Every one of them must still be a 500.
-	for i := range 11 {
+	// and loginIPLimiter allows 40 per source IP per minute (server.go);
+	// every request here shares both the one email and the one IP
+	// httptest.NewRequest assigns. 41 more failed attempts through the
+	// same dead pool cross both budgets, not just loginLimiter's tighter
+	// one — a Task 22 re-review found that only twelve total attempts
+	// (as this loop originally ran) proved loginLimiter alone: adding
+	// back only `s.loginIPLimiter.Record(ip)` to the default branch left
+	// this test green, since twelve attempts never approach 40. A
+	// lockout here would persist for a further minute after the
+	// database itself recovered, for a caller whose password was
+	// correct all along. Every one of them must still be a 500.
+	for i := range 41 {
 		retry := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
 		retryRec := httptest.NewRecorder()
 		srv.ServeHTTP(retryRec, retry)

@@ -417,6 +417,16 @@ var bootstrapRaceHook func()
 // so both replicas finish successfully and exactly one admin row exists.
 func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 	if s.cfg.FirstAdminEmail == "" || s.cfg.FirstAdminPassword == "" {
+		if s.cfg.FirstAdminPasswordReset {
+			// Task 22's re-review found this silent no-op: the opt-in
+			// is set, but the function returns before ever reaching
+			// repromoteConfiguredAdmin, so a boot that looks clean
+			// changes nothing — exactly the outcome parseBool's own doc
+			// comment (config.go) says the opt-in exists not to hide.
+			slog.WarnContext(ctx, "FIRST_ADMIN_PASSWORD_RESET is set but FIRST_ADMIN_EMAIL or FIRST_ADMIN_PASSWORD is unset; no admin recovery happened",
+				"first_admin_email_set", s.cfg.FirstAdminEmail != "",
+				"first_admin_password_set", s.cfg.FirstAdminPassword != "")
+		}
 		return nil
 	}
 	count, err := s.q.CountUsers(ctx)
@@ -515,6 +525,12 @@ func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 	dbUser, err := s.q.GetUserByEmail(ctx, s.cfg.FirstAdminEmail)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			// Another silent no-op Task 22's re-review found: a typo'd
+			// FIRST_ADMIN_EMAIL is at least as likely as a typo'd
+			// FIRST_ADMIN_PASSWORD_RESET, and the latter is already
+			// rejected outright by parseBool (config.go) rather than
+			// read as false for exactly this reason.
+			slog.WarnContext(ctx, "FIRST_ADMIN_EMAIL names no existing account; no admin recovery happened")
 			return nil
 		}
 		return fmt.Errorf("lookup configured admin: %w", err)

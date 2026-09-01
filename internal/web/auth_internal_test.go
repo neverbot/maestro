@@ -27,6 +27,17 @@ func TestErrorCodeValuesArePinned(t *testing.T) {
 		{"errCodeInviteRequired", errCodeInviteRequired, "invite_required"},
 		{"errCodePasswordUnchanged", errCodePasswordUnchanged, "password_unchanged"},
 		{"errCodeInviteRequestInvalid", errCodeInviteRequestInvalid, "invite_request_invalid"},
+		{"errCodeForbidden", errCodeForbidden, "forbidden"},
+		{"errCodeNotFound", errCodeNotFound, "not_found"},
+		{"errCodeBadRequest", errCodeBadRequest, "bad_request"},
+		{"errCodeSlugTaken", errCodeSlugTaken, "slug_taken"},
+		{"errCodeSlugInvalid", errCodeSlugInvalid, "slug_invalid"},
+		{"errCodeNameInvalid", errCodeNameInvalid, "name_invalid"},
+		{"errCodeInvalidRole", errCodeInvalidRole, "invalid_role"},
+		{"errCodeLabelInvalid", errCodeLabelInvalid, "label_invalid"},
+		{"errCodeLastAdmin", errCodeLastAdmin, "last_admin"},
+		{"errCodeRateLimited", errCodeRateLimited, "rate_limited"},
+		{"errCodeEmailInvalid", errCodeEmailInvalid, "email_invalid"},
 	}
 	for _, tc := range cases {
 		if tc.got != tc.want {

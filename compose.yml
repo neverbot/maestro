@@ -8,7 +8,9 @@ services:
       DATABASE_URL: postgres://maestro:maestro@db:5432/maestro?sslmode=disable
       FIRST_ADMIN_EMAIL: admin@example.com
       FIRST_ADMIN_PASSWORD: change-me-please
-      # Seeds the admin account on an empty database, and nothing more.
+      # Seeds the admin account on an empty database. On a non-empty
+      # one, every restart also re-promotes this account to admin if it
+      # isn't already — leaving these two set permanently is deliberate.
       # Overwriting an existing account's password needs a separate
       # one-shot opt-in, FIRST_ADMIN_PASSWORD_RESET=true, for exactly
       # one restart (see "Recovering a locked-out admin" in readme.md).

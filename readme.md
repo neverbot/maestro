@@ -138,11 +138,15 @@ one remains — the instance refuses to ever be left with zero.
 
 **Recovering a locked-out admin.** With no password reset flow for
 users, a forgotten or leaked admin password is recovered by an operator
-restarting the process. Two separate things happen at boot when
-`FIRST_ADMIN_EMAIL` names an account that already exists:
+restarting the process. Both `FIRST_ADMIN_EMAIL` and
+`FIRST_ADMIN_PASSWORD` must be set for either half below to happen; with
+either one empty, the boot is a no-op. Given both, and
+`FIRST_ADMIN_EMAIL` naming an account that already exists, two separate
+things happen at boot:
 
-- **Restoring the admin flag** happens on any restart, with no extra
-  configuration. An account that lost `is_admin` gets it back.
+- **Restoring the admin flag** happens on every such restart. The named
+  account is made an instance admin, whether or not it was ever one
+  before — not only restored if it had lost the flag.
 - **Resetting that account's password** to `FIRST_ADMIN_PASSWORD`
   happens **only** when `FIRST_ADMIN_PASSWORD_RESET=true` is also set.
   Without it, `FIRST_ADMIN_PASSWORD` is only ever a seed for a brand-new

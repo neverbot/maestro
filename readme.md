@@ -83,6 +83,27 @@ For local development without a container: `make build && make run`
 service). `make check` runs the full commit gate — formatting, `go vet`,
 the linter, `sqlc diff`, and the test suite — the same one CI runs.
 
+**Admitting a second person.** `invite_only` is the default
+`REGISTRATION_MODE`, so nobody else can sign up on their own. The admin
+account mints an invite from the terminal — no UI for this yet, no
+`psql` either:
+
+```bash
+curl -s -b cookies.txt -X POST http://localhost:8080/api/invites \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"designer@studio.com"}'
+```
+
+(`-b cookies.txt` reuses the session cookie saved from `POST
+/api/auth/login`.) The response carries `redeem_path`; paste it after
+the instance's own address and hand the link to whoever it's for —
+`http://localhost:8080/login#invite=<token>`. They open it, set a
+password, and they're in — with an account, and nothing else: an
+account-only invite grants no game. A game's own owner can invite
+someone straight into that game instead, at a role, from
+`POST /api/games/{game}/invites` with `{"email":"...","role":"editor"}`,
+the same way.
+
 ## Roadmap
 
 - [x] **Core.** Server, Postgres, identity, MCP and REST surfaces.

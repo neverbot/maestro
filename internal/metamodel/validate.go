@@ -3,7 +3,6 @@ package metamodel
 import (
 	"errors"
 	"fmt"
-	"reflect"
 )
 
 // Validate checks a value map against the schema and returns the normalised
@@ -64,17 +63,14 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 }
 
 // hasDefault reports whether the field declares a default for Validate to
-// apply. A nil Default declares none, and so does a zero value — false, 0 or
-// the empty string. That second rule is forced by storage: Field.Default is
-// tagged `json:",omitempty"`, so a zero-valued default is dropped when the
-// schema is encoded and comes back as nil when it is read again. Honouring it
-// in Go would make an in-memory schema behave differently from the very same
-// schema loaded from the database.
+// apply. Presence, not value, decides it: Field.HasDefault is set
+// independently of what Default holds, so a declared default of false, 0 or
+// "" — an ordinary thing for a game to declare — is applied exactly like any
+// other declared default. See Field.HasDefault's doc comment for why a
+// value-based rule (checking whether Default is the zero value) cannot make
+// this distinction.
 func hasDefault(f Field) bool {
-	if f.Default == nil {
-		return false
-	}
-	return !reflect.ValueOf(f.Default).IsZero()
+	return f.HasDefault
 }
 
 // coerce checks one value against one field declaration.

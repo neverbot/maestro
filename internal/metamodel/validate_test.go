@@ -10,7 +10,7 @@ func questSchema() Schema {
 	return Schema{
 		{Key: "min_level", Label: "Minimum level", Type: FieldNumber, Required: true, Min: ptrFloat(1), Max: ptrFloat(70)},
 		{Key: "summary", Label: "Summary", Type: FieldLongText},
-		{Key: "repeatable", Label: "Repeatable", Type: FieldBool, Default: false},
+		{Key: "repeatable", Label: "Repeatable", Type: FieldBool, HasDefault: true, Default: false},
 		{Key: "difficulty", Label: "Difficulty", Type: FieldEnum, Options: []string{"trivial", "normal", "elite"}},
 		{Key: "tags", Label: "Tags", Type: FieldListText},
 	}
@@ -31,9 +31,25 @@ func TestValidateAcceptsAWellFormedRow(t *testing.T) {
 	if out["min_level"] != float64(20) {
 		t.Fatalf("min_level = %v", out["min_level"])
 	}
-	// An absent optional field stays absent: it is never zero-filled.
+	// repeatable declares a default of false, so an omitted field with a
+	// declared default is filled in — never left absent, and never dropped
+	// for being the zero value of its type.
+	if v, present := out["repeatable"]; !present || v != false {
+		t.Fatalf("repeatable = %v, present=%v; want the declared default false to be applied", v, present)
+	}
+}
+
+func TestValidateLeavesAnUndeclaredOptionalFieldAbsent(t *testing.T) {
+	// Contrast with the declared-zero-default case above: a field with no
+	// default declared at all (HasDefault false) must stay genuinely absent
+	// when omitted, never zero-filled.
+	schema := Schema{{Key: "repeatable", Type: FieldBool}}
+	out, err := schema.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
 	if _, present := out["repeatable"]; present {
-		t.Fatal("an omitted optional field must not appear in the output")
+		t.Fatal("a field with no declared default must stay absent when omitted")
 	}
 }
 
@@ -97,7 +113,7 @@ func TestValidateChecksListElements(t *testing.T) {
 }
 
 func TestValidateAppliesDefaults(t *testing.T) {
-	schema := Schema{{Key: "repeatable", Type: FieldBool, Default: true}}
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: true}}
 	out, err := schema.Validate(map[string]any{})
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -202,16 +218,17 @@ func TestValidateTreatsNullAsAbsent(t *testing.T) {
 	}
 }
 
-func TestValidateIgnoresAZeroValuedDefault(t *testing.T) {
-	// Field.Default is tagged omitempty, so a false default cannot survive
-	// storage. Validate must behave the same way in memory.
-	schema := Schema{{Key: "repeatable", Type: FieldBool, Default: false}}
+func TestValidateAppliesADeclaredZeroValuedDefault(t *testing.T) {
+	// HasDefault, not the value of Default, decides whether a default was
+	// declared. false is an ordinary thing for a game to declare as a
+	// default, and must be applied like any other declared default.
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
 	out, err := schema.Validate(map[string]any{})
 	if err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	if _, present := out["repeatable"]; present {
-		t.Fatalf("out = %v, want a zero-valued default to be treated as no default", out)
+	if v, present := out["repeatable"]; !present || v != false {
+		t.Fatalf("out = %v, want the declared false default to be applied", out)
 	}
 }
 
@@ -260,6 +277,68 @@ func TestSchemaRoundTripsThroughJSON(t *testing.T) {
 	}
 	if err := back.Check(); err != nil {
 		t.Fatalf("Check after round trip: %v", err)
+	}
+}
+
+func TestSchemaRoundTripPreservesADeclaredZeroValuedDefault(t *testing.T) {
+	// This is the path Tasks 3-6 actually use: a schema is encoded to jsonb,
+	// stored, read back and decoded before Validate ever sees it. The round
+	// trip, not the in-memory struct literal, is what must decide whether a
+	// declared false default survives.
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
+	raw, err := schema.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	back, err := ParseSchema(raw)
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	out, err := back.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if v, present := out["repeatable"]; !present || v != false {
+		t.Fatalf("out = %v, want the declared false default to survive the round trip and be applied", out)
+	}
+}
+
+func TestSchemaRejectsADefaultOfTheWrongType(t *testing.T) {
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: "yes"}}
+	err := schema.Check()
+	if err == nil {
+		t.Fatal("a default of the wrong type must be rejected")
+	}
+	if !strings.Contains(err.Error(), "field_schema[0]") {
+		t.Fatalf("error = %q, want the field_schema path", err)
+	}
+}
+
+func TestSchemaRejectsADefaultOutsideItsBounds(t *testing.T) {
+	schema := Schema{{Key: "min_level", Type: FieldNumber, Max: ptrFloat(70), HasDefault: true, Default: float64(200)}}
+	if err := schema.Check(); err == nil {
+		t.Fatal("a default above max must be rejected")
+	}
+}
+
+func TestSchemaRejectsADefaultNotInEnumOptions(t *testing.T) {
+	schema := Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"trivial", "normal"}, HasDefault: true, Default: "impossible"}}
+	if err := schema.Check(); err == nil {
+		t.Fatal("a default outside the enum options must be rejected")
+	}
+}
+
+func TestSchemaRejectsANonTextElementInAListTextDefault(t *testing.T) {
+	schema := Schema{{Key: "tags", Type: FieldListText, HasDefault: true, Default: []any{"ok", 3}}}
+	if err := schema.Check(); err == nil {
+		t.Fatal("a non-text element in a list<text> default must be rejected")
+	}
+}
+
+func TestSchemaAcceptsAWellFormedDefault(t *testing.T) {
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
+	if err := schema.Check(); err != nil {
+		t.Fatalf("Check: %v", err)
 	}
 }
 

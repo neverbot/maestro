@@ -694,6 +694,49 @@ git add internal/metamodel
 git commit -m "feat: field schemas and their validator"
 ```
 
+**Corrections made during implementation** (a follow-up pass over the
+landed package, made before Task 3 starts building on `Field`'s shape):
+
+1. `Field.Default` gained a sibling, `HasDefault bool`. As landed, the plan's
+   `hasDefault` treated any zero value of `Default` (`false`, `0`, `""`) as
+   "no default declared", on the reasoning that `Field.Default`'s
+   `json:",omitempty"` tag would drop a zero-valued default during storage
+   anyway, so an in-memory schema had to behave the same way for consistency.
+   That reasoning does not hold: `encoding/json`'s `omitempty` on an `any`
+   field only omits a nil interface, not a non-nil interface wrapping a zero
+   concrete value, so `Default: false` already survives `Schema.JSON` /
+   `ParseSchema` unchanged (`TestSchemaRoundTripPreservesADeclaredZeroValuedDefault`
+   pins this both ways: a declared `false` round-trips and is applied, and an
+   undeclared field round-trips to genuinely absent). But `repeatable: false`
+   and `starting_credits: 0` are exactly the kind of thing a game should be
+   able to declare — Maestro does not second-guess a game's vocabulary — and
+   the old rule silently dropped them regardless of storage. `HasDefault` is
+   an explicit presence flag, decided independently of `Default`'s value, so
+   "declared and zero" is distinguishable from "undeclared" without leaning
+   on the very reflect-based zero-check that produced this bug. `questSchema()`'s
+   `repeatable` field genuinely means to default to false (most quests are
+   not repeatable), so it now sets `HasDefault: true`; `TestValidateAcceptsAWellFormedRow`,
+   which the plan wrote to assert `repeatable` stays absent from a row that
+   never set it, was asserting the bug — it now asserts `repeatable` comes
+   back `false`. `TestValidateIgnoresAZeroValuedDefault` is gone; its
+   replacement, `TestValidateAppliesADeclaredZeroValuedDefault`, asserts the
+   opposite. Proved red by reverting `hasDefault` to `return false` and
+   confirming three tests fail:
+   `TestValidateAcceptsAWellFormedRow`, `TestValidateAppliesADeclaredZeroValuedDefault`,
+   `TestSchemaRoundTripPreservesADeclaredZeroValuedDefault`.
+2. `Schema.Check()` did not check `Default` against the field it belongs to,
+   so a schema declaring `Default: "yes"` on a bool field, or `Default: 200`
+   on a number field capped at `Max: 70`, was accepted — and would write a
+   value no direct call to `Validate` could ever produce. `Check()` now runs
+   `coerce(f, f.Default)` for every field with `HasDefault: true` and a valid
+   `Type`, reusing the exact type/bounds/enum/list-element logic `Validate`
+   already applies to real values rather than duplicating it, and reports at
+   the same `field_schema[<i>]` path the package uses for every other
+   schema-level problem. Proved red by gating the new check behind `if false
+   && ...` and confirming four tests fail: `TestSchemaRejectsADefaultOfTheWrongType`,
+   `TestSchemaRejectsADefaultOutsideItsBounds`, `TestSchemaRejectsADefaultNotInEnumOptions`,
+   `TestSchemaRejectsANonTextElementInAListTextDefault`.
+
 ---
 
 ### Task 3: Entity types

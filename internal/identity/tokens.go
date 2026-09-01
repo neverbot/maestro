@@ -259,21 +259,9 @@ func mapAPITokenInsertError(err error) error {
 // memberships on every call, so a caller relying on ProjectID for
 // authorization is trusting that revocation path, not re-verifying it.
 func (s *Service) ResolveAPIToken(ctx context.Context, token string) (APITokenSummary, error) {
-	if !verifyTokenChecksum(token) {
-		// A mistyped or truncated paste never matches its own checksum,
-		// so this is rejected without a database round trip at all — the
-		// same reason the checksum exists in the first place (see
-		// newTokenBody's doc comment).
-		return APITokenSummary{}, ErrTokenInvalid
-	}
-
-	sum := sha256.Sum256([]byte(token))
-	row, err := s.q.GetLiveAPIToken(ctx, sum[:])
+	row, err := s.lookupLiveAPIToken(ctx, token)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return APITokenSummary{}, ErrTokenInvalid
-		}
-		return APITokenSummary{}, fmt.Errorf("lookup api token: %w", err)
+		return APITokenSummary{}, err
 	}
 
 	// Pre-checked in Go before ever issuing TouchAPIToken: GetLiveAPIToken
@@ -293,6 +281,48 @@ func (s *Service) ResolveAPIToken(ctx context.Context, token string) (APITokenSu
 			slog.ErrorContext(ctx, "touch api token failed; continuing with the resolved token",
 				"token_id", row.ID, "error", err)
 		}
+	}
+	return apiTokenSummaryFromLive(row), nil
+}
+
+// lookupLiveAPIToken is ResolveAPIToken's own lookup, factored out so
+// CheckAPIToken (below) can share it without sharing ResolveAPIToken's
+// TouchAPIToken write. Nothing outside this file calls it.
+func (s *Service) lookupLiveAPIToken(ctx context.Context, token string) (dbq.GetLiveAPITokenRow, error) {
+	if !verifyTokenChecksum(token) {
+		// A mistyped or truncated paste never matches its own checksum,
+		// so this is rejected without a database round trip at all — the
+		// same reason the checksum exists in the first place (see
+		// newTokenBody's doc comment).
+		return dbq.GetLiveAPITokenRow{}, ErrTokenInvalid
+	}
+
+	sum := sha256.Sum256([]byte(token))
+	row, err := s.q.GetLiveAPIToken(ctx, sum[:])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbq.GetLiveAPITokenRow{}, ErrTokenInvalid
+		}
+		return dbq.GetLiveAPITokenRow{}, fmt.Errorf("lookup api token: %w", err)
+	}
+	return row, nil
+}
+
+// CheckAPIToken is ResolveAPIToken's read-only counterpart: same lookup,
+// same (APITokenSummary, error) contract, but it never calls
+// TouchAPIToken. It exists for exactly one caller today —
+// internal/web/events.go's SSE heartbeat re-check — which asks "is this
+// token still live" every few seconds on a connection that is otherwise
+// idle; routing that through ResolveAPIToken would mean an open browser
+// tab's mere presence keeps refreshing last_used_at forever, which is
+// activity this method must not manufacture. Use ResolveAPIToken for
+// anything that is itself the use being recorded (every ordinary
+// authenticated request); use this only for a check that must not count
+// as one.
+func (s *Service) CheckAPIToken(ctx context.Context, token string) (APITokenSummary, error) {
+	row, err := s.lookupLiveAPIToken(ctx, token)
+	if err != nil {
+		return APITokenSummary{}, err
 	}
 	return apiTokenSummaryFromLive(row), nil
 }

@@ -471,3 +471,59 @@ func TestResolveAPITokenRejectsTamperedTokenWithoutTouchingTheDatabase(t *testin
 		t.Fatalf("err = %v, want ErrTokenInvalid for a tampered token", err)
 	}
 }
+
+// TestCheckAPITokenNeverTouchesLastUsedAt pins CheckAPIToken's whole
+// reason for existing: unlike ResolveAPIToken, it must never move
+// last_used_at, no matter how many times it is called or how far past
+// touchThrottle the previous write was. internal/web/events.go's SSE
+// heartbeat re-check calls this, not ResolveAPIToken, specifically so an
+// open browser tab does nothing to keep a token looking recently used.
+func TestCheckAPITokenNeverTouchesLastUsedAt(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	projSvc := projects.New(pool)
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
+	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	lastUsedAt := func() (time.Time, bool) {
+		t.Helper()
+		var ts *time.Time
+		if err := pool.QueryRow(ctx, `SELECT last_used_at FROM api_tokens WHERE id = $1`, tok.ID).Scan(&ts); err != nil {
+			t.Fatalf("read last_used_at: %v", err)
+		}
+		if ts == nil {
+			return time.Time{}, false
+		}
+		return *ts, true
+	}
+
+	if _, ok := lastUsedAt(); ok {
+		t.Fatal("last_used_at was already set before any resolve")
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := ids.CheckAPIToken(ctx, token); err != nil {
+			t.Fatalf("CheckAPIToken: %v", err)
+		}
+	}
+	if _, ok := lastUsedAt(); ok {
+		t.Fatal("CheckAPIToken set last_used_at — it must be read-only")
+	}
+
+	// Even well past touchThrottle, still no write.
+	if _, err := pool.Exec(ctx, `UPDATE api_tokens SET created_at = created_at - interval '1 hour' WHERE id = $1`, tok.ID); err != nil {
+		t.Fatalf("backdate created_at: %v", err)
+	}
+	if _, err := ids.CheckAPIToken(ctx, token); err != nil {
+		t.Fatalf("CheckAPIToken: %v", err)
+	}
+	if _, ok := lastUsedAt(); ok {
+		t.Fatal("CheckAPIToken set last_used_at after backdating — it must be read-only")
+	}
+}

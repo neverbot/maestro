@@ -15,7 +15,9 @@ import (
 //     would make "not set" indistinguishable from "set to zero".
 //   - A declared default is applied when the field is absent or null, so a
 //     schema change gives every new row the value the designer intended.
-//     See hasDefault for what counts as declared.
+//     See hasDefault for what counts as declared. The default goes through
+//     the same coercion a hand-written value does, so it lands in the row
+//     with the same Go type and cannot smuggle past the field's bounds.
 func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 	byKey := make(map[string]Field, len(s))
 	for _, f := range s {
@@ -41,7 +43,20 @@ func (s Schema) Validate(values map[string]any) (map[string]any, error) {
 		if !present || raw == nil {
 			switch {
 			case hasDefault(f):
-				out[f.Key] = f.Default
+				// The default is coerced exactly like a value written by
+				// hand. A schema read back from jsonb never passes through
+				// Check again, so without this a schema that was never
+				// checked would write an unchecked value into every row it
+				// touches, forever.
+				value, err := coerce(f, f.Default)
+				if err != nil {
+					problems = append(problems, FieldError{
+						Path:    path,
+						Message: "the schema's default is invalid: " + err.Error(),
+					})
+					continue
+				}
+				out[f.Key] = value
 			case f.Required:
 				problems = append(problems, FieldError{Path: path, Message: "is required"})
 			}

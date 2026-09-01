@@ -458,3 +458,39 @@ func TestSchemaJSONOmitsTheDefaultKeyWhenNoDefaultIsDeclared(t *testing.T) {
 		t.Fatalf("JSON = %s, want no default key when none is declared", raw)
 	}
 }
+
+// --- H2: a default is a value, and goes through the same coercion --------
+
+func TestValidateNormalisesAnAppliedDefault(t *testing.T) {
+	// A default declared in Go as an int and an explicit int in the row must
+	// end up as the same Go type, or two rows of one type carry two shapes of
+	// the same field and every reader downstream has to handle both.
+	schema := Schema{{Key: "min_level", Type: FieldNumber, HasDefault: true, Default: 20}}
+	out, err := schema.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if v, ok := out["min_level"].(float64); !ok || v != 20 {
+		t.Fatalf("min_level = %#v, want float64(20) exactly as an explicit 20 would give", out["min_level"])
+	}
+}
+
+func TestValidateRejectsAnUncheckedBadDefault(t *testing.T) {
+	// A schema read back from jsonb is never re-Checked, so Validate is the
+	// last line of defence: it must not write a default no direct value could
+	// ever produce.
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: "yes"}}
+	out, err := schema.Validate(map[string]any{})
+	if err == nil {
+		t.Fatalf("out = %v, want a bad default to be an error rather than stored", out)
+	}
+	if !strings.Contains(err.Error(), "fields.repeatable") {
+		t.Fatalf("error = %q, want the value-level field path", err)
+	}
+	if !strings.Contains(err.Error(), "expected true or false") {
+		t.Fatalf("error = %q, want it to report why the default is not a bool", err)
+	}
+	if !strings.Contains(err.Error(), "default") {
+		t.Fatalf("error = %q, want it to say the offending value is the schema's default", err)
+	}
+}

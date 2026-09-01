@@ -147,11 +147,13 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want text/event-stream", got)
 	}
 
-	// Give the handler's own goroutine a moment to reach hub.Subscribe
-	// before publishing: the HTTP round trip above only proves headers
-	// were flushed, which happens before Subscribe.
-	time.Sleep(50 * time.Millisecond)
-
+	// No sleep needed here: handleEvents now calls hub.Subscribe before
+	// it writes or flushes any response header (events.go), so having
+	// already observed a 200 above is itself the guarantee that the
+	// subscription exists — an earlier version of this handler flushed
+	// headers first, which left a real gap a client could race and this
+	// test originally papered over with a fixed sleep instead of fixing
+	// the ordering.
 	hub.Publish(realtime.Event{ProjectID: other.ID, Kind: "noise"})
 	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "project.updated", Payload: `{"slug":"azeroth"}`})
 

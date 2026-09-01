@@ -79,6 +79,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 		return
 	}
 
+	// Subscribed before a single byte of the response is written: a
+	// client that has already received its 200 must never be able to
+	// observe an event published in the gap between "headers sent" and
+	// "subscription exists" as simply missing. An earlier version of
+	// this handler flushed headers first and relied on a test sleep to
+	// paper over the gap that left; the ordering below is what actually
+	// closes it — see this handler's own history for the review that
+	// found it.
+	sub := s.hub.Subscribe(scope.ProjectID)
+	defer s.hub.Unsubscribe(sub)
+
 	// Overrides requireCaller's Cache-Control: no-store with the value
 	// SSE itself needs (no-cache: do not let any intermediary treat this
 	// stream as a cacheable resource), and disables nginx-style response
@@ -91,9 +102,6 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-
-	sub := s.hub.Subscribe(scope.ProjectID)
-	defer s.hub.Unsubscribe(sub)
 
 	deadline := time.NewTimer(s.sseMaxLifetime)
 	defer deadline.Stop()

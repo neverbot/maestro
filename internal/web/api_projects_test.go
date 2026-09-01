@@ -9,8 +9,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/testutil"
 	"github.com/neverbot/maestro/internal/web"
 )
 
@@ -746,5 +749,58 @@ func TestTokenCallerCannotManageMembers(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+// TestProjectScopeLookupFailureIsInternalErrorNotForbidden pins the split
+// this task's own review demanded: a database failure while resolving a
+// session caller's membership (requireProject -> resolveProjectScope ->
+// projects.RoleOf) must surface as a 500 an operator can act on, not a
+// 403 that reads as "this caller was rejected" when nothing about them
+// was actually evaluated — the exact conflation Task 10's authenticate
+// already drew a hard line against for the credential-resolution step,
+// now drawn the same way for the membership-resolution step.
+//
+// Session authentication itself must still succeed here, which is why
+// this needs two separate *pgxpool.Pool values against the *same*
+// database rather than the single shared pool
+// TestDatabaseErrorDuringBearerAuthenticationIsInternalError (auth_test.go)
+// closes wholesale: Identity keeps a live pool so the session cookie
+// resolves normally, while Projects' own pool — opened separately, at
+// the same connection string testutil.NewPool already migrated — is
+// closed before the request, so only the RoleOf lookup fails.
+func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	ids := identity.New(pool, cfg)
+	projSvc := projects.New(pool)
+
+	ctx := context.Background()
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// A second pool at the same connection string, so closing it affects
+	// only the Projects service below, not Identity's own pool.
+	projPool, err := pgxpool.New(ctx, pool.Config().ConnConfig.ConnString())
+	if err != nil {
+		t.Fatalf("open second pool: %v", err)
+	}
+	brokenProjSvc := projects.New(projPool)
+
+	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: brokenProjSvc})
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	projPool.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/members", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a database failure resolving membership, not 403 (indistinguishable from an actual rejection); body = %s", rec.Code, rec.Body.String())
 	}
 }

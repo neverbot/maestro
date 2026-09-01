@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -275,10 +276,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 // about this caller) is transient — handleEvents tolerates exactly one
 // of those in a row, so a momentary blip does not close every open
 // stream on the instance at once during, say, a connection-pool hiccup.
-// "token no longer resolves", "session no longer valid" and "no longer
-// has access to this game" are not transient: they are the identity or
-// projects service answering the question definitively, and the first
-// one closes the stream.
+// "token no longer resolves", "session no longer valid", and a project
+// scope of errNotMember/errScopeViolation are not transient: they are
+// the identity or projects service answering the question definitively,
+// and any one of them closes the stream. resolveProjectScope
+// (api_projects.go) is what makes this distinction possible on the
+// project-scope side specifically: it reports RoleOf's own lookup
+// failure separately from ErrNotAMember, rather than folding both into
+// one "not a member" outcome the way an earlier version of that
+// function did — see its own doc comment for why that conflation was a
+// real bug here, not a simplification.
 //
 // r is the original request that admitted this stream: its Authorization
 // header or session cookie is read again here exactly as authenticate
@@ -328,15 +335,25 @@ func (s *Server) revalidateStreamAccess(r *http.Request, scope ProjectScope) (Pr
 	}
 
 	newScope, err := s.resolveProjectScope(ctx, caller, scope.ProjectID)
-	if err != nil {
-		// resolveProjectScope always reports errScopeViolation or
-		// errNotMember here, never a bare database error distinctly —
-		// that conflation predates this method (Task 12's RoleOf, folded
-		// into errNotMember for any lookup failure) and is out of scope
-		// to change here, so this branch is treated as definitive, not
-		// transient, even though a fraction of the time it is really a
-		// database blip wearing a membership error's name.
+	switch {
+	case errors.Is(err, errNotMember), errors.Is(err, errScopeViolation):
+		// A real, definitive rejection — resolveProjectScope's own doc
+		// comment names these two as the only outcomes that mean the
+		// caller was actually evaluated and refused, as opposed to the
+		// lookup itself failing. Close the stream.
 		return ProjectScope{}, "no longer has access to this game: " + err.Error(), false
+	case err != nil:
+		// The lookup failed — a database error, not a verdict about
+		// this caller. This used to be indistinguishable from the case
+		// above, which meant a transient database error closed a live
+		// stream with a reason claiming the caller had been removed
+		// from the game (and, during test teardown, a request context
+		// cancelled by the client disconnecting surfaced the same way —
+		// a log line that misreports why a stream closed is exactly
+		// what an operator would chase for an hour during a real
+		// incident). Reported as transient so the retry tolerance
+		// (sseRecheckOutcome) actually applies to it.
+		return ProjectScope{}, "project scope re-check failed: " + err.Error(), true
 	}
 	return newScope, "", false
 }

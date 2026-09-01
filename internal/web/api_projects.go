@@ -188,8 +188,21 @@ func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Calle
 		case errors.Is(err, errScopeViolation):
 			writeError(w, http.StatusForbidden, errCodeScopeViolation, "this token is bound to another game")
 			return
-		case err != nil:
+		case errors.Is(err, errNotMember):
 			writeError(w, http.StatusForbidden, errCodeForbidden, "you are not a member of this game")
+			return
+		case err != nil:
+			// Not a verdict about this caller: RoleOf's own lookup
+			// failed (a database error), not "no membership row found".
+			// Task 10's authenticate already drew this exact line once,
+			// for the same reason — a database failure must surface as
+			// a 500 an operator can act on, not as a 403 that reads as
+			// "this caller was rejected" when nothing about them was
+			// actually evaluated. See resolveProjectScope's own doc
+			// comment for the split.
+			slog.ErrorContext(r.Context(), "resolve project scope failed",
+				"project_id", projectID, "user_id", caller.UserID, "error", err)
+			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify game membership")
 			return
 		}
 		h(w, r, caller, scope)
@@ -197,12 +210,16 @@ func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Calle
 }
 
 // errScopeViolation and errNotMember are resolveProjectScope's two
-// failure modes, distinguished so a caller of resolveProjectScope can
+// *rejection* outcomes — a caller definitively refused, not a lookup
+// that failed — distinguished so a caller of resolveProjectScope can
 // tell "wrong game for this token" from "not a member of this game"
 // without resolveProjectScope itself knowing whether it is being called
 // from requireProject's HTTP-error path or handleEvents's log-and-close
 // path (events.go) — the two callers map the same two outcomes to very
-// different actions.
+// different actions. Neither is returned for a database error: see
+// resolveProjectScope's own doc comment for why that is a third,
+// separate outcome, wrapped and returned as-is rather than folded into
+// errNotMember.
 var (
 	errScopeViolation = errors.New("token is bound to another game")
 	errNotMember      = errors.New("not a member of this game")
@@ -222,10 +239,26 @@ var (
 // A token caller's ProjectID must equal projectID exactly (errScopeViolation
 // otherwise) — see Caller.ScopedProject's own doc comment for why an
 // admin is not exempt from a token's binding. A session caller's role is
-// looked up fresh from membership; no membership row is errNotMember. A
-// token caller's Role is always roles.Editor, never looked up — see this
-// function's former home in requireProject's own doc comment (still
-// above) for why that is deliberate, not a shortcut.
+// looked up fresh from membership: RoleOf's own ErrNotAMember becomes
+// this function's errNotMember (a real rejection — no membership row
+// exists), and any *other* error RoleOf returns — its own lookup
+// failing, not a verdict about this caller — is wrapped and returned
+// as-is, deliberately not folded into errNotMember. An earlier version
+// of this function did fold every RoleOf error into errNotMember, which
+// meant a database error during a heartbeat re-check (events.go) closed
+// a live stream with a reason claiming the caller had been removed from
+// the game, when nothing about the caller had actually been evaluated —
+// the exact conflation Task 10's authenticate already drew a hard line
+// against once, for the same reason (a database failure must surface as
+// a 500 an operator can act on, not as a 403 or a "revoked" log line
+// that reads as a verdict). errors.Is against errNotMember and
+// errScopeViolation is how a caller of this function tells "refused"
+// from "failed"; neither wraps the other, and a plain `err != nil` check
+// on the return value collapses them back together, which is exactly
+// the mistake this comment exists to prevent a future call site from
+// repeating. A token caller's Role is always roles.Editor, never looked
+// up — see this function's former home in requireProject's own doc
+// comment (still above) for why that is deliberate, not a shortcut.
 func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, projectID uuid.UUID) (ProjectScope, error) {
 	if scoped, ok := caller.ScopedProject(); ok {
 		if scoped != projectID {
@@ -235,8 +268,14 @@ func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, project
 	}
 
 	role, err := s.opts.Projects.RoleOf(ctx, caller.UserID, projectID)
-	if err != nil {
+	switch {
+	case errors.Is(err, projects.ErrNotAMember):
 		return ProjectScope{}, errNotMember
+	case err != nil:
+		// RoleOf's own error already carries "lookup membership: ..."
+		// context (projects.go) — returned as-is, not re-wrapped, so a
+		// caller logging it does not see that phrase twice.
+		return ProjectScope{}, err
 	}
 	return ProjectScope{ProjectID: projectID, Role: role, IsToken: false}, nil
 }

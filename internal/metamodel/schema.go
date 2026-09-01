@@ -21,6 +21,12 @@ const (
 )
 
 // Field is one declared field of an entity type or relation type.
+//
+// HasDefault is not part of the wire format. On the wire a default is
+// declared by the presence of the "default" key and by nothing else, so
+// there is exactly one source of truth for the fact; UnmarshalJSON sets
+// HasDefault from that presence and MarshalJSON writes the key back only
+// when HasDefault is set. See Field.UnmarshalJSON.
 type Field struct {
 	Key      string    `json:"key"`
 	Label    string    `json:"label,omitempty"`
@@ -33,16 +39,82 @@ type Field struct {
 	// a game may want to declare (repeatable: false, starting_credits: 0).
 	// A reflect-based "is Default the zero value" rule cannot tell "declared
 	// false" from "never declared" apart — that confusion is exactly what
-	// this field replaces. json.Marshal on an `any` field's omitempty tag
-	// only omits a nil interface, not a non-nil interface holding a zero
-	// concrete value, so HasDefault:true/Default:false already survives a
-	// jsonb round trip through Schema.JSON/ParseSchema unchanged; see
-	// TestSchemaRoundTripPreservesADeclaredZeroValuedDefault.
-	HasDefault bool     `json:"has_default,omitempty"`
-	Default    any      `json:"default,omitempty"`
+	// this field replaces.
+	HasDefault bool     `json:"-"`
+	Default    any      `json:"-"`
 	Options    []string `json:"options,omitempty"`
 	Min        *float64 `json:"min,omitempty"`
 	Max        *float64 `json:"max,omitempty"`
+}
+
+// fieldJSON is Field's wire shape. Default is a *json.RawMessage so the
+// decoder can tell "the key was absent" from "the key was present and held
+// false, 0 or an empty string" — the distinction a plain `any` destroys.
+type fieldJSON struct {
+	Key      string           `json:"key"`
+	Label    string           `json:"label,omitempty"`
+	Type     FieldType        `json:"type"`
+	Required bool             `json:"required,omitempty"`
+	Default  *json.RawMessage `json:"default,omitempty"`
+	Options  []string         `json:"options,omitempty"`
+	Min      *float64         `json:"min,omitempty"`
+	Max      *float64         `json:"max,omitempty"`
+}
+
+// UnmarshalJSON decodes a field, declaring a default when — and only when —
+// the "default" key is present and not null.
+//
+// This is the path every agent-authored schema takes: MCP hands Task 3 a
+// field_schema straight off the wire, so a default that is not inferred here
+// is a default that is silently dropped. An explicit null is not a default:
+// null is how this package spells "not set" everywhere else, and Validate
+// already treats a null value as an absent one.
+func (f *Field) UnmarshalJSON(raw []byte) error {
+	var w fieldJSON
+	if err := json.Unmarshal(raw, &w); err != nil {
+		return err
+	}
+	*f = Field{
+		Key:      w.Key,
+		Label:    w.Label,
+		Type:     w.Type,
+		Required: w.Required,
+		Options:  w.Options,
+		Min:      w.Min,
+		Max:      w.Max,
+	}
+	if w.Default != nil && string(*w.Default) != "null" {
+		if err := json.Unmarshal(*w.Default, &f.Default); err != nil {
+			return err
+		}
+		f.HasDefault = true
+	}
+	return nil
+}
+
+// MarshalJSON writes the "default" key only for a field that declares one,
+// so the value round trips back through UnmarshalJSON to the same
+// HasDefault. A field with HasDefault set and a nil Default cannot be
+// spelled on the wire; Check rejects it, since nil is not a value any field
+// type could hold.
+func (f Field) MarshalJSON() ([]byte, error) {
+	w := fieldJSON{
+		Key:      f.Key,
+		Label:    f.Label,
+		Type:     f.Type,
+		Required: f.Required,
+		Options:  f.Options,
+		Min:      f.Min,
+		Max:      f.Max,
+	}
+	if f.HasDefault && f.Default != nil {
+		encoded, err := json.Marshal(f.Default)
+		if err != nil {
+			return nil, err
+		}
+		w.Default = (*json.RawMessage)(&encoded)
+	}
+	return json.Marshal(w)
 }
 
 // Schema is the ordered list of fields a type declares.

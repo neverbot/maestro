@@ -285,6 +285,23 @@ func TestSchemaRoundTripPreservesADeclaredZeroValuedDefault(t *testing.T) {
 	// stored, read back and decoded before Validate ever sees it. The round
 	// trip, not the in-memory struct literal, is what must decide whether a
 	// declared false default survives.
+	//
+	// Both directions are covered, because only one of them is the path an
+	// agent's schema takes. Go -> JSON -> Go is below; JSON -> Go, an
+	// agent-shaped field_schema arriving over MCP and validated straight
+	// away, is first.
+	fromWire, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":false}]`))
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	wireOut, err := fromWire.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if v, present := wireOut["repeatable"]; !present || v != false {
+		t.Fatalf("out = %v, want the default declared in agent-shaped JSON to be applied", wireOut)
+	}
+
 	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
 	raw, err := schema.JSON()
 	if err != nil {
@@ -349,5 +366,95 @@ func TestParseSchemaAcceptsEmptyInputAndRejectsGarbage(t *testing.T) {
 	}
 	if _, err := ParseSchema([]byte(`{"not":"a list"}`)); err == nil {
 		t.Fatal("a schema that is not a list must fail to parse")
+	}
+}
+
+// --- H1: a default declared over JSON must be honoured -------------------
+
+func TestParseSchemaInfersHasDefaultFromThePresenceOfTheDefaultKey(t *testing.T) {
+	// This is the exact shape an agent sends over MCP: a "default" key and
+	// nothing else. There is no "has_default" sibling on the wire, so the
+	// presence of the key — not a second flag — is what declares a default.
+	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":false}]`))
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	if !back[0].HasDefault {
+		t.Fatalf("field = %#v, want HasDefault true because the JSON carries a default key", back[0])
+	}
+	out, err := back.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if v, present := out["repeatable"]; !present || v != false {
+		t.Fatalf("out = %v, want the declared false default applied", out)
+	}
+}
+
+func TestParseSchemaTreatsAnAbsentDefaultKeyAsNoDefault(t *testing.T) {
+	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool"}]`))
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	if back[0].HasDefault {
+		t.Fatalf("field = %#v, want HasDefault false when no default key is present", back[0])
+	}
+	out, err := back.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if _, present := out["repeatable"]; present {
+		t.Fatal("a field with no declared default must stay absent when omitted")
+	}
+}
+
+func TestParseSchemaTreatsAnExplicitNullDefaultAsNoDefault(t *testing.T) {
+	// null is how this package spells "not set" everywhere else: Validate
+	// treats a null value as an absent one. A null default is therefore no
+	// default, not a default of nil.
+	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","default":null}]`))
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	if back[0].HasDefault {
+		t.Fatalf("field = %#v, want HasDefault false for a null default", back[0])
+	}
+}
+
+func TestParseSchemaIgnoresHasDefaultOnTheWire(t *testing.T) {
+	// has_default is not an input key. Accepting it would give the wire two
+	// sources of truth for one fact, which is what caused this bug: the
+	// presence of "default" is the only declaration.
+	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","has_default":true}]`))
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	if back[0].HasDefault {
+		t.Fatalf("field = %#v, want has_default on the wire to be ignored", back[0])
+	}
+}
+
+func TestSchemaJSONOmitsHasDefaultAndSpellsTheDefaultOnce(t *testing.T) {
+	schema := Schema{{Key: "repeatable", Type: FieldBool, HasDefault: true, Default: false}}
+	raw, err := schema.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if strings.Contains(string(raw), "has_default") {
+		t.Fatalf("JSON = %s, want no has_default key on the wire", raw)
+	}
+	if !strings.Contains(string(raw), `"default":false`) {
+		t.Fatalf("JSON = %s, want the declared false default spelled out", raw)
+	}
+}
+
+func TestSchemaJSONOmitsTheDefaultKeyWhenNoDefaultIsDeclared(t *testing.T) {
+	schema := Schema{{Key: "repeatable", Type: FieldBool}}
+	raw, err := schema.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if strings.Contains(string(raw), "default") {
+		t.Fatalf("JSON = %s, want no default key when none is declared", raw)
 	}
 }

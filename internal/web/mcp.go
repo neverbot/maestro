@@ -2,12 +2,9 @@ package web
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"log/slog"
 	"net/http"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -24,7 +21,16 @@ type MCPDeps struct {
 	Projects *projects.Service
 }
 
-// WhoamiOutput is the shape returned by the whoami tool.
+// WhoamiOutput is the shape returned by the whoami tool. Its ProjectID
+// stays uuid.UUID, not a wire-shadow string: the tool this task registers
+// hand-writes its own OutputSchema (whoamiOutputSchema, below) rather
+// than letting the SDK infer one from this type by reflection, and the
+// SDK validates a tool's output against the *marshalled JSON*, not the
+// Go value (issue #447, and confirmed against this SDK directly during
+// this task's review — see this task's plan corrections for the
+// wire-shadow-type approach this replaced). uuid.UUID already marshals
+// to a JSON string; only the SDK's structural reflection ever thought
+// otherwise.
 type WhoamiOutput struct {
 	UserID      uuid.UUID  `json:"user_id"`
 	DisplayName string     `json:"display_name"`
@@ -34,22 +40,30 @@ type WhoamiOutput struct {
 	ProjectName string     `json:"project_name,omitempty"`
 }
 
-// GameOutput is the shape returned by the games.get tool and, wrapped in
-// GamesListOutput, by games.list.
+// GameOutput is the shape returned by the games.get tool and, nested in
+// GamesListOutput, by games.list. See WhoamiOutput's own doc comment for
+// why its ID field stays uuid.UUID.
 type GameOutput struct {
 	ID   uuid.UUID `json:"id"`
 	Slug string    `json:"slug"`
 	Name string    `json:"name"`
 }
 
-// GamesListOutput is games.list's result. A named wrapper, not a bare
-// slice, so the tool's structured output is a JSON object ({"games":
-// [...]}) rather than a bare array — consistent with every REST list
-// response in this package (handleListGames, handleListMembers,
-// handleListTokens) and easier for a schema-driven client to extend later
-// without a breaking shape change.
+// GamesListOutput is games.list's result: the item list plus the
+// pagination envelope every MCP list tool in this codebase returns —
+// established here even though this particular tool can only ever
+// return zero or one item (a token caller sees exactly the one game its
+// token is bound to; nothing about this tool queries a real, growable
+// list). NextCursor and Truncated exist so a future genuine list tool
+// (entities.list, search, ...) copies this shape instead of inventing
+// its own the first day it needs to bound a real result set — and so
+// that tool pushes its limit into the domain query itself rather than
+// fetching everything and slicing in Go, the discipline this envelope
+// exists to make the default rather than an afterthought.
 type GamesListOutput struct {
-	Games []GameOutput `json:"games"`
+	Items      []GameOutput `json:"items"`
+	NextCursor *string      `json:"next_cursor,omitempty"`
+	Truncated  bool         `json:"truncated"`
 }
 
 // CallerForToken resolves a bearer token to a Caller, for the MCP
@@ -57,15 +71,14 @@ type GamesListOutput struct {
 // instead — see that method's doc comment) and for tests that want a
 // Caller without going through HTTP at all.
 //
-// This mirrors resolveBearerCaller (auth.go) rather than the plan's
-// original draft, which called identity.UserByID a second time to learn
-// IsAdmin: ResolveAPIToken's own row already carries UserIsAdmin (see
-// APITokenSummary's doc comment in tokens.go), so a second round trip
-// here would reintroduce exactly the per-request lookup Task 9 removed
-// from the hot path. Keeping this in sync with resolveBearerCaller is
-// deliberate: a caller resolved from the same token by either function
-// must be identical, and there is now exactly one field mapping to keep
-// in sync instead of two.
+// This mirrors resolveBearerCaller (auth.go) rather than calling
+// identity.UserByID a second time to learn IsAdmin: ResolveAPIToken's own
+// row already carries UserIsAdmin (see APITokenSummary's doc comment in
+// tokens.go), so a second round trip here would reintroduce exactly the
+// per-request lookup Task 9 removed from the hot path. Keeping this in
+// sync with resolveBearerCaller is deliberate: a caller resolved from the
+// same token by either function must be identical, and there is now
+// exactly one field mapping to keep in sync instead of two.
 func CallerForToken(ctx context.Context, ids *identity.Service, token string) (Caller, error) {
 	summary, err := ids.ResolveAPIToken(ctx, token)
 	if err != nil {
@@ -76,10 +89,10 @@ func CallerForToken(ctx context.Context, ids *identity.Service, token string) (C
 
 // ErrScopeViolation is returned whenever an MCP tool call reaches outside
 // the caller's own project. It carries errCodeScopeViolation on the wire
-// (see mcpErrorFor) — the same code and the same message
-// requireProject's own scope check (api_projects.go) uses, so an agent
-// reading either surface's error sees one vocabulary.
-var ErrScopeViolation = errors.New("scope_violation: this token is bound to another game")
+// (mcpErrorFor unwraps it as an *MCPError) — the same code and the same
+// message requireProject's own scope check (api_projects.go) uses, so an
+// agent reading either surface's error sees one vocabulary.
+var ErrScopeViolation = NewMCPError(errCodeScopeViolation, "this token is bound to another game")
 
 // requireScope checks that caller may act on projectID. Built on
 // Caller.ScopedProject, not the raw ProjectID field, so "an instance
@@ -88,13 +101,6 @@ var ErrScopeViolation = errors.New("scope_violation: this token is bound to anot
 // ScopedProject's own doc comment in auth.go) — this task exists
 // specifically to test that invariant here too, for a token minted by an
 // admin, not to re-derive it.
-//
-// A session caller — ScopedProject reports "no project" for one — never
-// satisfies this check: it has no project of its own to compare against,
-// and mcpHandler refuses a session caller before any tool handler runs
-// anyway (see that method's doc comment), so this case is only reachable
-// from MCPGamesGet's and MCPGamesList's own direct-call tests, not from
-// the mounted transport.
 func requireScope(caller Caller, projectID uuid.UUID) error {
 	scoped, ok := caller.ScopedProject()
 	if !ok || scoped != projectID {
@@ -105,7 +111,9 @@ func requireScope(caller Caller, projectID uuid.UUID) error {
 
 // MCPWhoami implements the whoami tool: who the caller is, and the single
 // game a token caller is bound to (nil for a session caller, which has
-// none of its own).
+// none of its own — unreachable through the mounted transport, since
+// mcpHandler already closes /mcp to anything but a token caller, but
+// MCPWhoami is tested directly too).
 func MCPWhoami(ctx context.Context, deps MCPDeps, caller Caller) (WhoamiOutput, error) {
 	user, err := deps.Identity.UserByID(ctx, caller.UserID)
 	if err != nil {
@@ -133,6 +141,14 @@ func MCPWhoami(ctx context.Context, deps MCPDeps, caller Caller) (WhoamiOutput, 
 // owns by a different route, and including one reached by an instance
 // admin's token — before ever touching the Projects service; see
 // requireScope's own doc comment for why an admin gets no exemption.
+//
+// The wire registration (addScopedTool, below) never lets projectID here
+// be anything other than the caller's own resolved binding — an agent
+// cannot use this function's projectID parameter as a lookup key for an
+// arbitrary game the way the plan's original games.get shape would have
+// let it. requireScope's own check is kept regardless, as defence in
+// depth and because this function is tested directly, without going
+// through the wire wrapper, precisely to confirm that invariant here.
 func MCPGamesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID) (GameOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
 		return GameOutput{}, err
@@ -154,154 +170,123 @@ func MCPGamesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uui
 // and is refused with ErrScopeViolation — unreachable through the
 // mounted transport, since mcpHandler already closes /mcp to anything
 // but a token caller, but MCPGamesList is tested directly too.
-func MCPGamesList(ctx context.Context, deps MCPDeps, caller Caller) ([]GameOutput, error) {
+func MCPGamesList(ctx context.Context, deps MCPDeps, caller Caller) (GamesListOutput, error) {
 	projectID, ok := caller.ScopedProject()
 	if !ok {
-		return nil, ErrScopeViolation
+		return GamesListOutput{}, ErrScopeViolation
 	}
 	project, err := deps.Projects.ByID(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return GamesListOutput{}, err
 	}
-	return []GameOutput{{ID: project.ID, Slug: project.Slug, Name: project.Name}}, nil
+	return GamesListOutput{
+		Items:     []GameOutput{{ID: project.ID, Slug: project.Slug, Name: project.Name}},
+		Truncated: false,
+	}, nil
 }
 
-// mcpErrorResult builds the wire shape for a failed tool call: a single
-// JSON object with a stable, machine-readable "error" code and a human
-// "message" — the exact two fields writeError puts in a REST error body
-// (auth.go), so an agent parses one error shape regardless of which
-// surface answered it. Returning this as CallToolResult.Content with
-// IsError set, rather than simply returning a Go error from the tool
-// handler, is deliberate: ToolHandlerFor packs a plain error into
-// unstructured text (its own doc comment says so), which would hand the
-// agent prose with no stable code to switch on — exactly the failure
-// mode this task's brief warns about ("how an error's shape reaches the
-// agent, given the plan specifies stable machine-readable codes").
-func mcpErrorResult(code, message string) *mcp.CallToolResult {
-	body, err := json.Marshal(map[string]string{"error": code, "message": message})
-	if err != nil {
-		// Both arguments are plain strings; json.Marshal on a
-		// map[string]string cannot fail. This branch exists only so a
-		// future change to this function's inputs cannot ship a silently
-		// empty error body.
-		body = fmt.Appendf(nil, `{"error":%q,"message":"failed to encode the error"}`, errCodeInternal)
-	}
-	return &mcp.CallToolResult{
-		IsError: true,
-		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
-	}
+// ScopedArgs is embedded in every scoped tool's input type. project_id is
+// optional: omitted, the tool acts on the caller's own bound game exactly
+// as if it had not been asked; supplied, it must equal that binding or
+// the call fails with scope_violation before the tool's own handler ever
+// runs — it is never used to select which project to query. This gives
+// an agent juggling two tokens for two games a way to state which one it
+// meant to use and be told immediately when it guessed wrong (Nottario
+// requires an equivalent field for the same reason), without turning a
+// caller-supplied id into a lookup key the way this task's first draft
+// of games.get did — see addScopedTool's own doc comment for why that
+// shape was the actual risk a quality review flagged, not merely a
+// missing check.
+type ScopedArgs struct {
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
-// mcpErrorFor maps a domain error from an MCP tool implementation to a
-// stable wire code, the same way each REST handler's own switch over
-// errors.Is does for writeError. Anything unrecognised becomes
-// errCodeInternal and is logged here — an MCP tool handler has no
-// http.ResponseWriter-adjacent place to log from the way a REST handler
-// does, so this is that path's one logging point, and the agent still
-// only ever sees the generic code, never the underlying error text.
-func mcpErrorFor(ctx context.Context, err error) *mcp.CallToolResult {
-	switch {
-	case errors.Is(err, ErrScopeViolation):
-		return mcpErrorResult(errCodeScopeViolation, "this token is bound to another game")
-	case errors.Is(err, projects.ErrProjectNotFound):
-		return mcpErrorResult(errCodeNotFound, "no such game")
-	default:
-		slog.ErrorContext(ctx, "mcp tool call failed", "error", err)
-		return mcpErrorResult(errCodeInternal, "internal error")
-	}
+func (a ScopedArgs) requestedProjectID() *string { return a.ProjectID }
+
+// scopedInput is what addScopedTool requires of its In type parameter:
+// the ability to report the optional project_id confirmation ScopedArgs
+// carries. Embedding ScopedArgs satisfies this automatically, by Go's
+// usual method promotion.
+type scopedInput interface {
+	requestedProjectID() *string
 }
 
-// mcpUnauthenticated is returned by a tool handler that finds no Caller
-// on its context. mcpHandler already refuses any request reaching the
-// transport without a token caller (see its own doc comment), so this is
-// unreachable in production; it exists only so a tool handler never
-// trusts an absent Caller into a nil-pointer panic if that invariant is
-// ever loosened.
-func mcpUnauthenticated() *mcp.CallToolResult {
-	return mcpErrorResult(errCodeUnauthorized, "authentication required")
-}
+type whoamiInput struct{ ScopedArgs }
+type gamesListInput struct{ ScopedArgs }
+type gamesGetInput struct{ ScopedArgs }
 
-// gamesGetInput is games.get's argument shape: the one field an agent
-// supplies, the project id it wants to look up. It is deliberately named
-// project_id on the wire, not game_id: every REST and domain type in
-// this codebase (Caller.ProjectID, ProjectScope.ProjectID,
-// projects.Project.ID) calls this same value a project id, and "game" is
-// reserved for the human-facing vocabulary (game slugs in URLs, the
-// {game} path parameter) — see ProjectScope's own doc comment in
-// api_projects.go. The tool name still reads "games.get" because that is
-// the noun an agent reasons about; the identifier it passes is a
-// project id like everywhere else this task's own types are used.
+// addScopedTool registers a tool whose handler needs the caller's own
+// resolved project id, not a raw Caller: it resolves the caller once,
+// enforces game isolation once (both the token's own binding and, if the
+// agent supplied one, that its stated project_id agrees with it), maps a
+// domain error once, and suppresses structured output on every error
+// path once (see mcpErrorResult's own doc comment, and this task's plan
+// corrections, for why a fabricated success payload riding along with an
+// error result was a real defect a quality review caught here, not a
+// hypothetical one). This is the same "one place, not nine copies"
+// reasoning ProjectScope brings to the REST surface
+// (api_projects.go) — a metamodel tool that reaches for an entity or
+// relation by id registers through this and receives an
+// already-resolved, already-checked project id, never a bare Caller it
+// could forget to scope-check itself.
 //
-// ProjectID is a string, not a uuid.UUID, deliberately: uuid.UUID's
-// underlying type is [16]byte, and the SDK's schema inference
-// (jsonschema-go) reflects the Go type structurally rather than
-// consulting its MarshalText/MarshalJSON methods, so a uuid.UUID field
-// gets a generated schema of "array of 16 integers" while the value it
-// actually marshals to on the wire is a string — a real mismatch this
-// task's own end-to-end test caught: AddTool validates a tool's output
-// (and input) against its inferred schema before ever handing it to a
-// client, so a uuid.UUID-typed field here made every one of these tools
-// fail its own schema validation on every call, whoami included. Every
-// wire-facing MCP type in this file (this one and gameWire/whoamiWire
-// below) uses string ids for exactly this reason; the plain domain
-// functions above (MCPWhoami, MCPGamesGet, MCPGamesList) keep
-// uuid.UUID, matching the plan and the tests that call them directly —
-// only the boundary between the two is where the conversion happens.
-type gamesGetInput struct {
-	ProjectID string `json:"project_id"`
+// handler's signature deliberately does not take a Caller: if it needs
+// more than the resolved project id (whoami needs the caller's own user
+// id and admin flag, for instance), it reads CallerFrom(ctx) itself —
+// ctx still carries it, since addScopedTool already required a valid
+// token caller to reach this point — but the *scope* decision is never
+// its own to make; that already happened before handler was called.
+//
+// On success, handler's Out value is returned as-is; addScopedTool
+// registers the tool with the SDK's Out type parameter fixed to `any`
+// and passes the caller-visible output schema and structured value
+// through by hand (see newMCPServer's tool definitions, which set
+// mcp.Tool.OutputSchema explicitly) rather than letting AddTool infer
+// one from Out — the mechanism that lets a hand-written schema validate
+// correctly regardless of what Go type the domain function actually
+// returns.
+func addScopedTool[In scopedInput, Out any](srv *mcp.Server, deps MCPDeps, tool *mcp.Tool, handler func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in In) (Out, error)) {
+	mcp.AddTool(srv, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
+		caller, ok := CallerFrom(ctx)
+		if !ok {
+			return mcpUnauthenticated(), nil, nil
+		}
+		projectID, ok := caller.ScopedProject()
+		if !ok {
+			return mcpErrorResult(errCodeScopeViolation, "this caller has no game binding", nil), nil, nil
+		}
+		if requested := in.requestedProjectID(); requested != nil {
+			reqID, err := uuid.Parse(*requested)
+			if err != nil {
+				return mcpErrorResult(errCodeBadRequest, "project_id must be a valid uuid", nil), nil, nil
+			}
+			if reqID != projectID {
+				return mcpErrorResult(errCodeScopeViolation, "this token is bound to another game", nil), nil, nil
+			}
+		}
+		out, err := handler(ctx, deps, projectID, in)
+		if err != nil {
+			return mcpErrorFor(ctx, tool.Name, caller, err), nil, nil
+		}
+		return nil, out, nil
+	})
 }
 
-// gameWire is GameOutput's wire shape for the MCP transport — see
-// gamesGetInput's own doc comment for why string, not uuid.UUID.
-type gameWire struct {
-	ID   string `json:"id"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
-}
-
-func gameToWire(g GameOutput) gameWire {
-	return gameWire{ID: g.ID.String(), Slug: g.Slug, Name: g.Name}
-}
-
-// gamesListWire is GamesListOutput's wire shape.
-type gamesListWire struct {
-	Games []gameWire `json:"games"`
-}
-
-// whoamiWire is WhoamiOutput's wire shape — see gamesGetInput's own doc
-// comment for why string, not uuid.UUID. ProjectID stays a *string,
-// omitted entirely for a session caller, matching WhoamiOutput's own
-// omitempty pointer.
-type whoamiWire struct {
-	UserID      string  `json:"user_id"`
-	DisplayName string  `json:"display_name"`
-	IsAdmin     bool    `json:"is_admin"`
-	ProjectID   *string `json:"project_id,omitempty"`
-	ProjectSlug string  `json:"project_slug,omitempty"`
-	ProjectName string  `json:"project_name,omitempty"`
-}
-
-func whoamiToWire(w WhoamiOutput) whoamiWire {
-	out := whoamiWire{
-		UserID:      w.UserID.String(),
-		DisplayName: w.DisplayName,
-		IsAdmin:     w.IsAdmin,
-		ProjectSlug: w.ProjectSlug,
-		ProjectName: w.ProjectName,
-	}
-	if w.ProjectID != nil {
-		id := w.ProjectID.String()
-		out.ProjectID = &id
-	}
-	return out
+// readOnlyTool marks annotations every tool in this task carries: none
+// of whoami, games.list or games.get change anything, and calling any of
+// them again with the same arguments has no additional effect. Setting
+// this now, while there are three tools and the habit is free, is
+// cheaper than retrofitting it once a write tool exists and the
+// distinction actually matters to a client deciding whether a call is
+// safe to retry.
+func readOnlyTool() *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true}
 }
 
 // newMCPServer builds the mcp.Server that mcpHandler mounts: the three
-// tools this task adds, each a thin wrapper that reads the Caller
-// already resolved onto its context (by authenticate, the same
-// middleware every other surface in this package goes through) and
-// calls the plain, directly-tested MCPWhoami/MCPGamesList/MCPGamesGet
-// functions above.
+// tools this task adds, each registered through addScopedTool so game
+// isolation is enforced in exactly one place regardless of how many
+// tools this file eventually holds.
 //
 // Built once in NewServer, not per request: mcp.NewStreamableHTTPHandler
 // accepts a getServer function precisely so the same *mcp.Server instance
@@ -313,57 +298,34 @@ func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "maestro", Version: s.opts.Version}, nil)
 	deps := MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects}
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "whoami",
-		Description: "Report the calling identity: user, admin flag, and the single game this token is bound to.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, whoamiWire, error) {
-		caller, ok := CallerFrom(ctx)
-		if !ok {
-			return mcpUnauthenticated(), whoamiWire{}, nil
-		}
-		out, err := MCPWhoami(ctx, deps, caller)
-		if err != nil {
-			return mcpErrorFor(ctx, err), whoamiWire{}, nil
-		}
-		return nil, whoamiToWire(out), nil
+	addScopedTool(srv, deps, &mcp.Tool{
+		Name:         "whoami",
+		Description:  "Report the calling identity: user, admin flag, and the single game this token is bound to.",
+		OutputSchema: whoamiOutputSchema,
+		Annotations:  readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, _ uuid.UUID, _ whoamiInput) (WhoamiOutput, error) {
+		caller, _ := CallerFrom(ctx) // guaranteed present: addScopedTool already required it.
+		return MCPWhoami(ctx, deps, caller)
 	})
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "games.list",
-		Description: "List the games visible to the caller. A token caller always sees exactly the one game it is bound to.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, gamesListWire, error) {
-		caller, ok := CallerFrom(ctx)
-		if !ok {
-			return mcpUnauthenticated(), gamesListWire{}, nil
-		}
-		games, err := MCPGamesList(ctx, deps, caller)
-		if err != nil {
-			return mcpErrorFor(ctx, err), gamesListWire{}, nil
-		}
-		wire := make([]gameWire, len(games))
-		for i, g := range games {
-			wire[i] = gameToWire(g)
-		}
-		return nil, gamesListWire{Games: wire}, nil
+	addScopedTool(srv, deps, &mcp.Tool{
+		Name:         "games.list",
+		Description:  "List the games visible to the caller. A token caller always sees exactly the one game it is bound to.",
+		OutputSchema: gamesListOutputSchema,
+		Annotations:  readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, _ uuid.UUID, _ gamesListInput) (GamesListOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPGamesList(ctx, deps, caller)
 	})
 
-	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "games.get",
-		Description: "Look up one game by id. Refuses any game outside the caller's own scope, instance admins included.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in gamesGetInput) (*mcp.CallToolResult, gameWire, error) {
-		caller, ok := CallerFrom(ctx)
-		if !ok {
-			return mcpUnauthenticated(), gameWire{}, nil
-		}
-		projectID, err := uuid.Parse(in.ProjectID)
-		if err != nil {
-			return mcpErrorResult(errCodeBadRequest, "project_id must be a valid uuid"), gameWire{}, nil
-		}
-		out, err := MCPGamesGet(ctx, deps, caller, projectID)
-		if err != nil {
-			return mcpErrorFor(ctx, err), gameWire{}, nil
-		}
-		return nil, gameToWire(out), nil
+	addScopedTool(srv, deps, &mcp.Tool{
+		Name:         "games.get",
+		Description:  "Look up the caller's own game. Refuses any game outside the caller's own scope, instance admins included.",
+		OutputSchema: gameOutputSchema,
+		Annotations:  readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, _ gamesGetInput) (GameOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPGamesGet(ctx, deps, caller, projectID)
 	})
 
 	return srv
@@ -397,6 +359,19 @@ func (s *Server) newMCPServer() *mcp.Server {
 // revoked between two tool calls blocks the next call immediately; there
 // is no long-lived connection here for a revoked token to keep working
 // under.
+//
+// maxMCPRequestBodyBytes bounds the body this handler will let the SDK's
+// own transport read, the same decodeJSONBody discipline api_auth.go's
+// doc comment describes applied explicitly here rather than left to the
+// SDK's own internal default (StreamableHTTPOptions.MaxRequestBodyBytes,
+// currently 4MiB) to define on our behalf. It is deliberately far larger
+// than maxAuthRequestBodyBytes: a bulk upsert (the metamodel plan's
+// atomic/partial writes over many entities at once) needs real headroom,
+// not the 16KiB a login form needs — but it is still a fixed, named
+// bound an operator can find and change in one place, not an implicit
+// library default.
+const maxMCPRequestBodyBytes = 4 << 20 // 4 MiB
+
 func (s *Server) mcpHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		caller, ok := CallerFrom(r.Context())
@@ -406,6 +381,58 @@ func (s *Server) mcpHandler() http.Handler {
 			return
 		}
 		setNoStoreHeaders(w)
+		r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBodyBytes)
 		s.mcp.ServeHTTP(w, r)
 	})
+}
+
+// --- Hand-written output schemas ---
+//
+// Every schema below is written by hand rather than inferred by the SDK
+// from the Go output type. This is not a style preference: the SDK
+// validates against the *marshalled JSON* of a tool's output (see
+// WhoamiOutput's own doc comment), and its own reflection-based inference
+// gets that JSON shape wrong for any type whose marshalling comes from a
+// method (uuid.UUID's MarshalText, here) rather than its literal Go
+// structure — a mismatch that surfaces only when the tool is actually
+// called, never at registration, and that this task's own end-to-end
+// test caught the hard way (see this task's plan corrections). Writing
+// the schema by hand sidesteps the inference entirely; it is validated
+// against the JSON either way, so a hand-written "string" for a
+// uuid.UUID field is exactly as correct as the JSON it produces.
+
+func stringSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "string"} }
+func boolSchema() *jsonschema.Schema   { return &jsonschema.Schema{Type: "boolean"} }
+
+var gameOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"id", "slug", "name"},
+	Properties: map[string]*jsonschema.Schema{
+		"id":   stringSchema(),
+		"slug": stringSchema(),
+		"name": stringSchema(),
+	},
+}
+
+var gamesListOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"items", "truncated"},
+	Properties: map[string]*jsonschema.Schema{
+		"items":       {Type: "array", Items: gameOutputSchema},
+		"next_cursor": stringSchema(),
+		"truncated":   boolSchema(),
+	},
+}
+
+var whoamiOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"user_id", "display_name", "is_admin"},
+	Properties: map[string]*jsonschema.Schema{
+		"user_id":      stringSchema(),
+		"display_name": stringSchema(),
+		"is_admin":     boolSchema(),
+		"project_id":   stringSchema(),
+		"project_slug": stringSchema(),
+		"project_name": stringSchema(),
+	},
 }

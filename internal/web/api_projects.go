@@ -100,14 +100,33 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request, caller
 // ProjectScope is what requireProject resolves before a project-scoped
 // handler ever runs: the {game} path value turned into a real project
 // id, the caller's role within it, and whether the caller reached it by
-// token. A handler that takes a ProjectScope parameter cannot be written
-// without going through requireProject to get one — there is no other
-// way to construct it from outside this file — which is what closes the
-// hole the previous shape (a requireProjectAccess helper each handler
-// had to remember to call) left open: nothing stopped a new handler from
-// omitting that call entirely and still compiling, silently serving
-// whatever a caller-supplied path segment named instead of what
-// requireProject would have resolved and checked.
+// token.
+//
+// This is NOT enforced by the type system, and an earlier version of
+// this comment claimed it was — a quality review disproved that
+// directly, by writing a handler in this same package that parsed
+// r.PathValue("game") itself, called s.opts.Projects.ListMembers
+// straight from a non-member caller with no ProjectScope anywhere in
+// its signature, and registered it on the mux. It compiled and it
+// served the data. Every handler in this file lives in package web, and
+// nothing about an unexported struct stops a same-package function from
+// ignoring it entirely — Go has no visibility boundary narrower than the
+// package.
+//
+// What ProjectScope actually buys: it resolves {game} and the caller's
+// role exactly once per request (see requireProject's own doc comment
+// for the time-of-check window a second, per-handler RoleOf lookup used
+// to leave open), and it makes the guarded path the only *ergonomic*
+// one — a handler that wants scope.ProjectID or scope.Role has to take a
+// ProjectScope parameter to get it, and the only routine way to produce
+// one is requireProject. That is a convention with a pit of success, not
+// a guarantee. The actual enforcement is registerProjectRoute
+// (server.go) plus TestEveryGameScopedRouteGoesThroughRequireProject
+// (server_test.go), which records every pattern this server registers
+// and fails the build if a pattern containing "{game}" was wired up any
+// other way — a bypass like the reviewer's now has to dodge a route
+// registration convention *and* a test that inspects the whole routing
+// table, not just this type's shape.
 //
 // Role is always populated, token callers included — see requireProject's
 // own doc comment for why a token's role is always roles.Editor rather
@@ -151,6 +170,10 @@ type ProjectScope struct {
 // belong to someone who was at least an editor as of their last role
 // change — which is exactly the invariant "editor-equivalent, no live
 // lookup needed" depends on.
+//
+// Call this only through registerProjectRoute (server.go), never
+// s.mux.Handle directly — see ProjectScope's own doc comment for why
+// that distinction is checked by a test, not just a naming convention.
 func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Caller, ProjectScope)) func(http.ResponseWriter, *http.Request, Caller) {
 	return func(w http.ResponseWriter, r *http.Request, caller Caller) {
 		projectID, err := uuid.Parse(r.PathValue("game"))
@@ -234,7 +257,7 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 
-	err = s.opts.Projects.SetRole(r.Context(), targetID, scope.ProjectID, req.Role)
+	revoked, err := s.opts.Projects.SetRole(r.Context(), targetID, scope.ProjectID, req.Role)
 	switch {
 	case errors.Is(err, projects.ErrRoleInvalid):
 		writeError(w, http.StatusBadRequest, errCodeInvalidRole, "role must be one of "+roleList())
@@ -255,7 +278,12 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 		slog.ErrorContext(r.Context(), "change role failed", "project_id", scope.ProjectID, "target_user_id", targetID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not change the member's role")
 	default:
-		w.WriteHeader(http.StatusOK)
+		// Mirrors handleRemoveMember's own response shape: a demotion
+		// below editor revokes the target's tokens in this project
+		// (projects.SetRole, above) exactly the way removal already
+		// does, so the response mirrors it too instead of answering an
+		// empty 200 after silently killing their agents.
+		writeJSON(w, http.StatusOK, map[string]any{"revoked_tokens": revoked})
 	}
 }
 

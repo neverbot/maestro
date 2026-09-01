@@ -448,11 +448,21 @@ func (s *Service) ListMembers(ctx context.Context, projectID uuid.UUID) ([]Membe
 // test unchanged. What the lock earns here is failing fast with a typed
 // ErrLastOwner instead of the transaction aborting on a raw trigger
 // exception.
-func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role string) error {
+//
+// Returns the labels of every token this call revoked because the new
+// role dropped below editor (see the demotion branch below), never nil —
+// the same convention RemoveMember's return follows, for the same
+// reason: a quality review found the first version of this method's
+// HTTP handler answered a bare 200 after silently killing a demoted
+// member's agents, leaving the owner who demoted them with no way to
+// know which ones. A promotion, or a role change that never crosses the
+// editor threshold, always returns an empty (non-nil) slice.
+func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role string) ([]string, error) {
 	if !roles.Valid(role) {
-		return fmt.Errorf("%w: %q", ErrRoleInvalid, role)
+		return nil, fmt.Errorf("%w: %q", ErrRoleInvalid, role)
 	}
-	return s.withTx(ctx, func(q *dbq.Queries) error {
+	var revokedLabels []string
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
 		current, err := q.GetMembershipRole(ctx, dbq.GetMembershipRoleParams{UserID: userID, ProjectID: projectID})
 		isMember := true
 		if err != nil {
@@ -498,12 +508,21 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 		// or moving between editor and owner, never triggers this — both
 		// remain roles.AtLeast Editor.
 		if !roles.AtLeast(roles.Role(role), roles.Editor) {
-			if _, err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID}); err != nil {
+			labels, err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID})
+			if err != nil {
 				return fmt.Errorf("revoke demoted member's tokens: %w", err)
 			}
+			revokedLabels = labels
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	if revokedLabels == nil {
+		revokedLabels = []string{}
+	}
+	return revokedLabels, nil
 }
 
 // RemoveMember drops a user's membership in a project, and revokes every

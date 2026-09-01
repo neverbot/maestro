@@ -320,7 +320,7 @@ func TestViewerCannotCreateToken(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
 	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
+	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
@@ -352,7 +352,7 @@ func TestViewerCanRevokeToken(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
 	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
+	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	ownerCookie := loginAs(t, srv, "owner@studio.com")
@@ -501,10 +501,10 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
 	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@studio.com", DisplayName: "Other", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	if err := projSvc.SetRole(ctx, other.ID, project.ID, "viewer"); err != nil {
+	if _, err := projSvc.SetRole(ctx, other.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
@@ -530,6 +530,47 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("owner changing a role: status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestChangeRoleDemotionReportsRevokedTokenLabels mirrors
+// TestRemoveMemberReportsRevokedTokenLabels for the other path that kills
+// a member's agents: demoting them below editor. A bare 200 with an
+// empty body would leave the owner who just demoted someone with no way
+// to know which of that person's agents just stopped working.
+func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: editor.ID, Label: "nightly export"}); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	cookie := loginAs(t, srv, "owner@studio.com")
+	body := strings.NewReader(`{"role":"viewer"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.ID.String()+"/members/"+editor.ID.String(), body)
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		RevokedTokens []string `json:"revoked_tokens"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.RevokedTokens) != 1 || got.RevokedTokens[0] != "nightly export" {
+		t.Fatalf("revoked_tokens = %v, want [\"nightly export\"]", got.RevokedTokens)
 	}
 }
 
@@ -569,7 +610,7 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
 	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
+	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
@@ -625,7 +666,7 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
 	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: editor.ID, Label: "nightly export"}); err != nil {
@@ -669,10 +710,10 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
 	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	if err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
+	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 

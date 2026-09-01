@@ -163,7 +163,7 @@ func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
 	agent, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "agent@studio.com", DisplayName: "Agent", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err := projSvc.SetRole(ctx, agent.ID, project.ID, "editor"); err != nil {
+	if _, err := projSvc.SetRole(ctx, agent.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: agent.ID, Label: "agent token"})

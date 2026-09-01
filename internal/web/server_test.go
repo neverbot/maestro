@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/neverbot/maestro/internal/config"
@@ -98,4 +99,27 @@ func TestNewServerPanicsWithoutProjects(t *testing.T) {
 		}
 	}()
 	NewServer(Options{Identity: identity.New(nil, config.Config{})})
+}
+
+// TestEveryGameScopedRouteGoesThroughRequireProject is the actual
+// enforcement behind ProjectScope's guarantee, not the type system: Go
+// cannot stop a same-package handler from parsing r.PathValue("game")
+// itself and skipping requireProject entirely (a quality review proved
+// this by writing exactly such a handler and watching it compile and
+// serve real data to a non-member). What this test can do instead is
+// inspect the routing table this server actually built and fail if any
+// pattern containing "{game}" was not registered through
+// registerProjectRoute — turning "someone might forget" into a failing
+// test instead of a comment nobody re-reads.
+func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
+	s := NewServer(stubOptions("test"))
+
+	if len(s.projectScopedPatterns) == 0 {
+		t.Fatal("no project-scoped patterns were recorded — this test would pass vacuously")
+	}
+	for _, pattern := range s.registeredPatterns {
+		if strings.Contains(pattern, "{game}") && !s.projectScopedPatterns[pattern] {
+			t.Errorf("pattern %q contains {game} but was not registered through registerProjectRoute", pattern)
+		}
+	}
 }

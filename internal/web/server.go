@@ -62,6 +62,19 @@ type Server struct {
 	loginLimiter      *identity.Limiter
 	loginIPLimiter    *identity.Limiter
 	registerIPLimiter *identity.Limiter
+
+	// registeredPatterns and projectScopedPatterns exist for exactly one
+	// reason: TestEveryGameScopedRouteGoesThroughRequireProject
+	// (server_test.go). registeredPatterns records every pattern ever
+	// passed to route/routeFunc, in registration order;
+	// projectScopedPatterns records the subset registered through
+	// registerProjectRoute. The test walks the first list and fails if
+	// any pattern containing "{game}" is missing from the second — see
+	// ProjectScope's own doc comment (api_projects.go) for why this test,
+	// not the Go type system, is what actually enforces that every
+	// project-scoped route resolves its scope through requireProject.
+	registeredPatterns    []string
+	projectScopedPatterns map[string]bool
 }
 
 // NewServer builds the routing tree.
@@ -89,27 +102,55 @@ func NewServer(opts Options) *Server {
 		loginIPLimiter:    identity.NewLimiter(40, time.Minute),
 		registerIPLimiter: identity.NewLimiter(10, time.Minute),
 	}
-	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
-	s.mux.Handle("GET /version", requireCaller(s.handleVersion))
-	s.mux.Handle("GET /api/me", requireCaller(s.handleMe))
-	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
-	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
-	s.mux.HandleFunc("POST /api/auth/register", s.handleRegister)
-	s.mux.HandleFunc("GET /{$}", s.handleRoot)
-	s.mux.Handle("GET /api/games", requireCaller(s.handleListGames))
-	s.mux.Handle("POST /api/games", requireCaller(s.handleCreateGame))
-	s.mux.Handle("GET /api/games/{game}/members", requireCaller(s.requireProject(s.handleListMembers)))
-	s.mux.Handle("PATCH /api/games/{game}/members/{user}", requireCaller(s.requireProject(s.handleChangeRole)))
-	s.mux.Handle("DELETE /api/games/{game}/members/{user}", requireCaller(s.requireProject(s.handleRemoveMember)))
-	s.mux.Handle("POST /api/games/{game}/tokens", requireCaller(s.requireProject(s.handleCreateToken)))
-	s.mux.Handle("GET /api/games/{game}/tokens", requireCaller(s.requireProject(s.handleListTokens)))
-	s.mux.Handle("DELETE /api/games/{game}/tokens/{token}", requireCaller(s.requireProject(s.handleRevokeToken)))
+	s.routeFunc("GET /healthz", s.handleHealthz)
+	s.route("GET /version", requireCaller(s.handleVersion))
+	s.route("GET /api/me", requireCaller(s.handleMe))
+	s.routeFunc("POST /api/auth/login", s.handleLogin)
+	s.routeFunc("POST /api/auth/logout", s.handleLogout)
+	s.routeFunc("POST /api/auth/register", s.handleRegister)
+	s.routeFunc("GET /{$}", s.handleRoot)
+	s.route("GET /api/games", requireCaller(s.handleListGames))
+	s.route("POST /api/games", requireCaller(s.handleCreateGame))
+	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)
+	s.registerProjectRoute("PATCH /api/games/{game}/members/{user}", s.handleChangeRole)
+	s.registerProjectRoute("DELETE /api/games/{game}/members/{user}", s.handleRemoveMember)
+	s.registerProjectRoute("POST /api/games/{game}/tokens", s.handleCreateToken)
+	s.registerProjectRoute("GET /api/games/{game}/tokens", s.handleListTokens)
+	s.registerProjectRoute("DELETE /api/games/{game}/tokens/{token}", s.handleRevokeToken)
 	// Built once here, not per request in ServeHTTP: authenticate wraps
 	// s.mux in a closure, and there is no reason to allocate a fresh one
 	// for every single incoming request when the mux it wraps never
 	// changes after construction.
 	s.handler = s.authenticate(s.mux)
 	return s
+}
+
+// route registers pattern on the mux and records it in
+// s.registeredPatterns — see that field's own doc comment for why.
+func (s *Server) route(pattern string, h http.Handler) {
+	s.registeredPatterns = append(s.registeredPatterns, pattern)
+	s.mux.Handle(pattern, h)
+}
+
+// routeFunc is route for a plain handler function, matching
+// http.ServeMux.HandleFunc's own shape.
+func (s *Server) routeFunc(pattern string, h http.HandlerFunc) {
+	s.route(pattern, h)
+}
+
+// registerProjectRoute registers pattern through
+// requireCaller(s.requireProject(h)) and records pattern as
+// project-scoped, so TestEveryGameScopedRouteGoesThroughRequireProject
+// can confirm it. This is the only call in this file that is allowed to
+// wire up a route whose pattern contains "{game}" — see ProjectScope's
+// own doc comment (api_projects.go) for what that guarantees and, just
+// as importantly, what it does not.
+func (s *Server) registerProjectRoute(pattern string, h func(http.ResponseWriter, *http.Request, Caller, ProjectScope)) {
+	if s.projectScopedPatterns == nil {
+		s.projectScopedPatterns = map[string]bool{}
+	}
+	s.projectScopedPatterns[pattern] = true
+	s.route(pattern, requireCaller(s.requireProject(h)))
 }
 
 // ServeHTTP runs every request through authentication first. authenticate

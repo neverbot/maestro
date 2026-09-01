@@ -353,7 +353,7 @@ func TestListMembersReturnsRolesForEveryMember(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+	if _, err := svc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
@@ -394,10 +394,10 @@ func TestListMembersOrderingIsStableOnTies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := svc.SetRole(ctx, twinA.ID, project.ID, "viewer"); err != nil {
+	if _, err := svc.SetRole(ctx, twinA.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	if err := svc.SetRole(ctx, twinB.ID, project.ID, "viewer"); err != nil {
+	if _, err := svc.SetRole(ctx, twinB.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
@@ -448,7 +448,7 @@ func TestSetRoleCanPromoteAnotherMemberToOwner(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, viewer.ID, project.ID, "owner"); err != nil {
+	if _, err := svc.SetRole(ctx, viewer.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	role, err := svc.RoleOf(ctx, viewer.ID, project.ID)
@@ -460,7 +460,7 @@ func TestSetRoleCanPromoteAnotherMemberToOwner(t *testing.T) {
 	}
 
 	// With two owners now, demoting the original one must succeed.
-	if err := svc.SetRole(ctx, owner.ID, project.ID, "editor"); err != nil {
+	if _, err := svc.SetRole(ctx, owner.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole demote: %v", err)
 	}
 }
@@ -487,7 +487,7 @@ func TestSetRoleHasNoAuthorizationCheck(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, stranger.ID, project.ID, "owner"); err != nil {
+	if _, err := svc.SetRole(ctx, stranger.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	role, err := svc.RoleOf(ctx, stranger.ID, project.ID)
@@ -512,7 +512,7 @@ func TestSetRoleRejectsInvalidRole(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, other.ID, project.ID, "superadmin"); !errors.Is(err, projects.ErrRoleInvalid) {
+	if _, err := svc.SetRole(ctx, other.ID, project.ID, "superadmin"); !errors.Is(err, projects.ErrRoleInvalid) {
 		t.Fatalf("err = %v, want ErrRoleInvalid", err)
 	}
 }
@@ -529,7 +529,7 @@ func TestSetRoleCannotDemoteSoleOwner(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, owner.ID, project.ID, "editor"); !errors.Is(err, projects.ErrLastOwner) {
+	if _, err := svc.SetRole(ctx, owner.ID, project.ID, "editor"); !errors.Is(err, projects.ErrLastOwner) {
 		t.Fatalf("err = %v, want ErrLastOwner", err)
 	}
 
@@ -550,7 +550,7 @@ func TestSetRoleUnknownProjectReturnsErrProjectNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	user := newUser(t, ids, "fk-project@studio.com")
-	if err := svc.SetRole(ctx, user.ID, uuid.New(), "editor"); !errors.Is(err, projects.ErrProjectNotFound) {
+	if _, err := svc.SetRole(ctx, user.ID, uuid.New(), "editor"); !errors.Is(err, projects.ErrProjectNotFound) {
 		t.Fatalf("err = %v, want ErrProjectNotFound", err)
 	}
 }
@@ -567,7 +567,7 @@ func TestSetRoleUnknownUserReturnsErrUserNotFound(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, uuid.New(), project.ID, "editor"); !errors.Is(err, projects.ErrUserNotFound) {
+	if _, err := svc.SetRole(ctx, uuid.New(), project.ID, "editor"); !errors.Is(err, projects.ErrUserNotFound) {
 		t.Fatalf("err = %v, want ErrUserNotFound", err)
 	}
 }
@@ -610,7 +610,7 @@ func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, second.ID, project.ID, "owner"); err != nil {
+	if _, err := svc.SetRole(ctx, second.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	if _, err := svc.RemoveMember(ctx, owner.ID, project.ID); err != nil {
@@ -660,7 +660,7 @@ func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
+	if _, err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
@@ -703,10 +703,10 @@ func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create (le mans): %v", err)
 	}
-	if err := svc.SetRole(ctx, member.ID, azeroth.ID, "editor"); err != nil {
+	if _, err := svc.SetRole(ctx, member.ID, azeroth.ID, "editor"); err != nil {
 		t.Fatalf("SetRole (azeroth): %v", err)
 	}
-	if err := svc.SetRole(ctx, member.ID, leMans.ID, "editor"); err != nil {
+	if _, err := svc.SetRole(ctx, member.ID, leMans.ID, "editor"); err != nil {
 		t.Fatalf("SetRole (le mans): %v", err)
 	}
 	otherProjectToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
@@ -789,7 +789,7 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run %d: Create: %v", run, err)
 		}
-		if err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
+		if _, err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
 			t.Fatalf("run %d: SetRole: %v", run, err)
 		}
 
@@ -851,7 +851,7 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 		if err != nil {
 			t.Fatalf("run %d: Create: %v", run, err)
 		}
-		if err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
+		if _, err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
 			t.Fatalf("run %d: SetRole: %v", run, err)
 		}
 
@@ -859,7 +859,7 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 		var removeErr, demoteErr error
 		wg.Add(2)
 		go func() { defer wg.Done(); _, removeErr = svc.RemoveMember(ctx, ownerA.ID, project.ID) }()
-		go func() { defer wg.Done(); demoteErr = svc.SetRole(ctx, ownerB.ID, project.ID, "viewer") }()
+		go func() { defer wg.Done(); _, demoteErr = svc.SetRole(ctx, ownerB.ID, project.ID, "viewer") }()
 		wg.Wait()
 
 		succeeded, refused := 0, 0
@@ -909,7 +909,7 @@ func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
+	if _, err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole (editor): %v", err)
 	}
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
@@ -920,16 +920,25 @@ func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) 
 	}
 
 	// Demoting editor to editor (a no-op change) and re-promoting must
-	// not revoke anything: both stay AtLeast Editor.
-	if err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
+	// not revoke anything: both stay AtLeast Editor, and SetRole must
+	// report no revoked labels for either.
+	revoked, err := svc.SetRole(ctx, member.ID, project.ID, "editor")
+	if err != nil {
 		t.Fatalf("SetRole (editor again): %v", err)
+	}
+	if len(revoked) != 0 {
+		t.Fatalf("revoked = %v, want none for a same-tier role change", revoked)
 	}
 	if _, err := ids.ResolveAPIToken(ctx, token); err != nil {
 		t.Fatalf("token revoked by a same-tier role change: %v", err)
 	}
 
-	if err := svc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
+	revoked, err = svc.SetRole(ctx, member.ID, project.ID, "viewer")
+	if err != nil {
 		t.Fatalf("SetRole (viewer): %v", err)
+	}
+	if len(revoked) != 1 || revoked[0] != "demoted member's agent" {
+		t.Fatalf("revoked = %v, want [\"demoted member's agent\"]", revoked)
 	}
 	if _, err := ids.ResolveAPIToken(ctx, token); !errors.Is(err, identity.ErrTokenInvalid) {
 		t.Fatalf("err = %v, want ErrTokenInvalid: a demotion below editor must revoke the member's tokens", err)
@@ -985,7 +994,7 @@ func TestDeletingNonSoleOwnerUserSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
+	if _, err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 

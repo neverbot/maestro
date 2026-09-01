@@ -1,8 +1,10 @@
 package metamodel
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 )
 
 // Validate checks a value map against the schema and returns the normalised
@@ -106,6 +108,13 @@ func coerce(f Field, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("expected number, got %T", raw)
 		}
+		// NaN compares false against every bound, so without this it would
+		// slip past both Min and Max; the infinities pass whenever the
+		// matching bound is unset. Neither survives being written to jsonb,
+		// and the failure there carries no field path, so it is caught here.
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return nil, errors.New("must be a finite number")
+		}
 		if f.Min != nil && n < *f.Min {
 			return nil, fmt.Errorf("must be at least %v", *f.Min)
 		}
@@ -153,7 +162,16 @@ func coerce(f Field, raw any) (any, error) {
 	}
 }
 
-// toFloat accepts every numeric shape JSON decoding can produce.
+// toFloat widens every numeric shape that can reach the validator to
+// float64. That is more than encoding/json's default decode produces: a
+// decoder configured with UseNumber yields json.Number, which the MCP SDK is
+// free to do, and Go callers inside Maestro pass the small and unsigned
+// widths. Missing any of them would break every number field at once, and
+// widening is far cheaper than finding out which decoder is in play.
+//
+// Finiteness is deliberately not decided here: NaN and the infinities widen
+// cleanly, and coerce rejects them with a message that says what is actually
+// wrong rather than claiming the value is not a number.
 func toFloat(raw any) (float64, bool) {
 	switch n := raw.(type) {
 	case float64:
@@ -162,10 +180,27 @@ func toFloat(raw any) (float64, bool) {
 		return float64(n), true
 	case int:
 		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
 	case int32:
 		return float64(n), true
 	case int64:
 		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
 	default:
 		return 0, false
 	}

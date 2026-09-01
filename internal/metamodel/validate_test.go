@@ -1,7 +1,9 @@
 package metamodel
 
 import (
+	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 )
@@ -492,5 +494,82 @@ func TestValidateRejectsAnUncheckedBadDefault(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "default") {
 		t.Fatalf("error = %q, want it to say the offending value is the schema's default", err)
+	}
+}
+
+// --- M1/L1: numbers -------------------------------------------------------
+
+func TestValidateRejectsNonFiniteNumbers(t *testing.T) {
+	// NaN compares false against both a minimum and a maximum, so a bounded
+	// field would accept it; +Inf passes whenever there is no maximum. Either
+	// one reaches the storage layer as an opaque "json: unsupported value"
+	// panic-adjacent failure with no field path, long after the agent that
+	// sent it could act on the news.
+	for name, value := range map[string]float64{
+		"NaN":  math.NaN(),
+		"+Inf": math.Inf(1),
+		"-Inf": math.Inf(-1),
+	} {
+		schema := Schema{{Key: "score", Type: FieldNumber}}
+		_, err := schema.Validate(map[string]any{"score": value})
+		if err == nil {
+			t.Fatalf("%s was accepted; a number field must hold a finite number", name)
+		}
+		if !strings.Contains(err.Error(), "fields.score: must be a finite number") {
+			t.Fatalf("%s: error = %q, want the finite-number message at the field path", name, err)
+		}
+	}
+}
+
+func TestSchemaRejectsANonFiniteDefault(t *testing.T) {
+	schema := Schema{{Key: "score", Type: FieldNumber, HasDefault: true, Default: math.NaN()}}
+	err := schema.Check()
+	if err == nil {
+		t.Fatal("a NaN default must be rejected")
+	}
+	if !strings.Contains(err.Error(), "must be a finite number") {
+		t.Fatalf("error = %q, want the finite-number message", err)
+	}
+}
+
+func TestValidateAcceptsEveryNumericShapeADecoderCanProduce(t *testing.T) {
+	// json.Number is what Decoder.UseNumber produces, and the MCP SDK is free
+	// to decode that way; the small and unsigned integer widths are what Go
+	// callers inside Maestro will pass. Every one of them must land as the
+	// same float64 a plain decode would give.
+	schema := Schema{{Key: "score", Type: FieldNumber}}
+	for name, raw := range map[string]any{
+		"float64":     float64(7),
+		"float32":     float32(7),
+		"int":         int(7),
+		"int8":        int8(7),
+		"int16":       int16(7),
+		"int32":       int32(7),
+		"int64":       int64(7),
+		"uint":        uint(7),
+		"uint8":       uint8(7),
+		"uint16":      uint16(7),
+		"uint32":      uint32(7),
+		"uint64":      uint64(7),
+		"json.Number": json.Number("7"),
+	} {
+		out, err := schema.Validate(map[string]any{"score": raw})
+		if err != nil {
+			t.Fatalf("%s: Validate: %v", name, err)
+		}
+		if v, ok := out["score"].(float64); !ok || v != 7 {
+			t.Fatalf("%s: score = %#v, want float64(7)", name, out["score"])
+		}
+	}
+}
+
+func TestValidateRejectsAJSONNumberThatIsNotANumber(t *testing.T) {
+	schema := Schema{{Key: "score", Type: FieldNumber}}
+	_, err := schema.Validate(map[string]any{"score": json.Number("veinte")})
+	if err == nil {
+		t.Fatal("a json.Number holding a non-number must be an error")
+	}
+	if !strings.Contains(err.Error(), "expected number") {
+		t.Fatalf("error = %q, want the type message", err)
 	}
 }

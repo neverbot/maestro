@@ -18,7 +18,7 @@
 
 | Path | Responsibility |
 |---|---|
-| `internal/db/migrations/0003_metamodel.sql` | the four domain tables, indexes, search vector |
+| `internal/db/migrations/0004_metamodel.sql` | the four domain tables, indexes, search vector |
 | `internal/db/queries/metamodel.sql` | every domain SQL statement |
 | `internal/metamodel/schema.go` | field-schema types and their JSON encoding |
 | `internal/metamodel/validate.go` | the one validator: schema + values → normalised or errors |
@@ -36,14 +36,16 @@
 ### Task 1: The metamodel schema
 
 **Files:**
-- Create: `internal/db/migrations/0003_metamodel.sql`
+- Create: `internal/db/migrations/0004_metamodel.sql`
 - Test: `internal/db/metamodel_schema_test.go`
 
-Note: `0002_events.sql` is the Core plan's migration. If the Core landed without one, name this file `0002_metamodel.sql` and keep the rest identical.
+Note: the number depends on what the Core plan landed. It landed as
+`0004_metamodel.sql`, after `0001_identity.sql`, `0002_membership_last_owner_guard.sql`
+and `0003_api_token_hint.sql`; the rest of this task is identical whatever the number.
 
 - [ ] **Step 1: Write the migration**
 
-`internal/db/migrations/0003_metamodel.sql`:
+`internal/db/migrations/0004_metamodel.sql`:
 
 ```sql
 -- +goose Up
@@ -232,6 +234,86 @@ rather than load-bearing, and needs no edit there: those tasks resolve
 every parent by project-scoped key or by a project-scoped `...ByID`
 query, so no Go path ever hands the database a foreign id, and no test in
 them expects a Go error where the database would now raise one first.
+
+**Corrections made during review** (a second pass over the landed
+migration, after a reviewer verified the composite keys live and could
+not break them):
+
+4. `updated_by_token_id` was the one key the header comment's claim did
+   not actually cover. It referenced `api_tokens (id)` alone, and
+   `api_tokens` is project-scoped (`0001_identity.sql`), so a token owned
+   by game B was accepted as the last editor of a game-A row — proved
+   live. All four keys are now composite,
+   `(updated_by_token_id, project_id) -> api_tokens (id, project_id)`,
+   which required `api_tokens` to gain a `UNIQUE (id, project_id)`. That
+   `ALTER TABLE` sits at the top of `0004_metamodel.sql`'s Up, not in a
+   later migration: `0004` is where the referencing keys are created, so
+   a `0005` would order wrong, and `0004` has never been run by any
+   instance. `0004`'s Down drops the constraint again after the tables.
+   Each key keeps its `ON DELETE SET NULL`, but names its column —
+   `ON DELETE SET NULL (updated_by_token_id)`, Postgres 15+ — because a
+   bare `SET NULL` would try to null `project_id` too, which is
+   `NOT NULL`. `updated_by_user_id` needs none of this: `users` is
+   global, not project-scoped, so there is no outer scope to carry. The
+   header comment now says exactly that, and no more.
+5. The four tables gained `set_updated_at` triggers, matching Core's
+   tables. The cost of leaving them out was not a stale timestamp but
+   two mechanisms for one column — Core's rows from a trigger, the
+   metamodel's from every query remembering `updated_at = now()` — which
+   nothing tests and which fails silently the first time a query is
+   written without the clause. `set_updated_at()` already exists from
+   `0001`, whose Down drops it, so the Down side needs nothing. The
+   explicit `updated_at = now()` that Tasks 4-5 write is unaffected: the
+   trigger sets the same value, so no later task changes.
+6. `CREATE INDEX relations_project_idx ON relations (project_id, created_at)`.
+   `relations` had no index leading with `project_id`, so Task 5's
+   `ListRelations` with every optional filter null — the ordinary "show
+   me this game's edges" call, on the table expected to hold the most
+   rows — was a sequential scan across every game's relations plus a
+   sort. It also gives the `projects` delete cascade an index it lacked.
+   The reverse-traversal index the views spec asks for,
+   `relations (relation_type_id, target_id)`, is **deliberately not**
+   added here: no query in this plan walks an edge inwards, the views
+   spec is still being written and its final access shape (in
+   particular whether it wants `project_id` leading) is not settled, and
+   an index nothing reads is pure write cost. It belongs to the task
+   that introduces the query it serves.
+7. Four constraints that survived deletion with a green suite are now
+   pinned by tests in `internal/db/metamodel_schema_test.go`:
+   `TestCannotRecordAnotherProjectsToken` (all four tables, SQLSTATE
+   23503), `TestUpdatedAtTriggerFires` (all four tables),
+   `TestDuplicateRelationEdgeIsRejected` (SQLSTATE 23505 — load-bearing
+   for Task 5's `ON CONFLICT (relation_type_id, source_id, target_id)`,
+   which would otherwise fail at runtime rather than at test time), and
+   `TestDeletingAnEntityTypeWithInstancesIsRejected` (SQLSTATE 23503 —
+   nothing previously stopped the `RESTRICT` being flipped to `CASCADE`
+   and silently deleting a type's content). Each was proved red by
+   mutating the schema: reverting the token keys to single-column,
+   dropping the `entities` trigger, dropping the `UNIQUE` from
+   `relations_edge_key`, and flipping `RESTRICT` to `CASCADE`. Each
+   mutation failed exactly its own test.
+   `TestDeletingATokenClearsOnlyTheTokenColumn` additionally pins the
+   column-list `SET NULL` from correction 4.
+8. Query hygiene in the plan text itself. Task 7 states the rule that
+   every query over a metamodel table filters on the resolved project
+   id, but five queries written earlier in this plan broke it —
+   `CountEntitiesOfType`, `DeleteEntitiesOfType`,
+   `MarkEntitiesOfTypeInvalid`, `ListEntitiesOfType` and
+   `CountRelationsOfType` all filtered on a type id alone. Harmless
+   today, since type ids are globally unique primary keys, but Task 3's
+   and Task 5's implementers copy this text, and the convention has to
+   be right where it is copied from. All five now carry
+   `project_id = $1`, and their call sites in the plan pass it.
+9. `sqlc.yaml` gained a `tsvector` override, so `entities.search` no
+   longer generates as `interface{}`. Not `string` or `[]byte`, though:
+   pgx/v5 returns tsvector in binary format and refuses to scan it into
+   either (verified against Postgres 16 — `cannot scan tsvector (OID
+   3614) in binary format`). It does ship `pgtype.TSVector`, which is
+   what the column is mapped to, in both the nullable and non-nullable
+   forms; the type carries its own `Valid` flag, so no pointer is
+   needed. `internal/db/dbq/models.go` was regenerated in the same
+   commit. Task 3 is the first task to run `make sqlc`, and now inherits
+   a typed column instead of an untyped one.
 
 ---
 
@@ -780,18 +862,24 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 ORDER BY label;
 
 -- name: CountEntitiesOfType :one
-SELECT count(*) FROM entities WHERE entity_type_id = sqlc.arg('entity_type_id')::uuid;
+SELECT count(*) FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid;
 
 -- name: DeleteEntityType :execrows
 DELETE FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: DeleteEntitiesOfType :exec
-DELETE FROM entities WHERE entity_type_id = sqlc.arg('entity_type_id')::uuid;
+DELETE FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid;
 
 -- name: MarkEntitiesOfTypeInvalid :exec
 UPDATE entities SET invalid = sqlc.arg('invalid')::boolean
-WHERE entity_type_id = sqlc.arg('entity_type_id')::uuid AND id = ANY(sqlc.arg('ids')::uuid[]);
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+  AND id = ANY(sqlc.arg('ids')::uuid[]);
 ```
 
 Run: `make sqlc`
@@ -1119,7 +1207,9 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // entities is refused: silently deleting a game's content is never the right
 // reading of "remove this type".
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
-	count, err := s.q.CountEntitiesOfType(ctx, id)
+	count, err := s.q.CountEntitiesOfType(ctx, dbq.CountEntitiesOfTypeParams{
+		ProjectID: projectID, EntityTypeID: id,
+	})
 	if err != nil {
 		return fmt.Errorf("count entities: %w", err)
 	}
@@ -1135,7 +1225,9 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 
 	q := dbq.New(tx)
 	if cascade {
-		if err := q.DeleteEntitiesOfType(ctx, id); err != nil {
+		if err := q.DeleteEntitiesOfType(ctx, dbq.DeleteEntitiesOfTypeParams{
+			ProjectID: projectID, EntityTypeID: id,
+		}); err != nil {
 			return fmt.Errorf("delete entities: %w", err)
 		}
 	}
@@ -1170,7 +1262,9 @@ func (s *Service) revalidateEntitiesOfType(ctx context.Context, typ dbq.EntityTy
 		return err
 	}
 
-	rows, err := s.q.ListEntitiesOfType(ctx, typ.ID)
+	rows, err := s.q.ListEntitiesOfType(ctx, dbq.ListEntitiesOfTypeParams{
+		ProjectID: typ.ProjectID, EntityTypeID: typ.ID,
+	})
 	if err != nil {
 		return fmt.Errorf("list entities: %w", err)
 	}
@@ -1197,6 +1291,7 @@ func (s *Service) revalidateEntitiesOfType(ctx context.Context, typ dbq.EntityTy
 			continue
 		}
 		if err := s.q.MarkEntitiesOfTypeInvalid(ctx, dbq.MarkEntitiesOfTypeInvalidParams{
+			ProjectID:    typ.ProjectID,
 			EntityTypeID: typ.ID,
 			Ids:          batch.ids,
 			Invalid:      batch.flag,
@@ -1259,7 +1354,10 @@ SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: ListEntitiesOfType :many
-SELECT * FROM entities WHERE entity_type_id = sqlc.arg('entity_type_id')::uuid ORDER BY name;
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+ORDER BY name;
 
 -- name: ListEntitiesPage :many
 SELECT * FROM entities
@@ -1777,7 +1875,9 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg(
 SELECT * FROM relation_types WHERE project_id = sqlc.arg('project_id')::uuid ORDER BY label;
 
 -- name: CountRelationsOfType :one
-SELECT count(*) FROM relations WHERE relation_type_id = sqlc.arg('relation_type_id')::uuid;
+SELECT count(*) FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid;
 
 -- name: DeleteRelationType :execrows
 DELETE FROM relation_types
@@ -2135,7 +2235,9 @@ func (s *Service) ListRelationTypes(ctx context.Context, projectID uuid.UUID) ([
 // RemoveRelationType deletes a relation type, refusing while it is in use
 // unless the caller says cascade.
 func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
-	count, err := s.q.CountRelationsOfType(ctx, id)
+	count, err := s.q.CountRelationsOfType(ctx, dbq.CountRelationsOfTypeParams{
+		ProjectID: projectID, RelationTypeID: id,
+	})
 	if err != nil {
 		return fmt.Errorf("count relations: %w", err)
 	}
@@ -3526,8 +3628,13 @@ Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:
 - **MCP surface** — idempotent upserts keyed by `(project, type, key)`, batches
   in both modes, one-hop `related_to`, cursor pagination, slim responses,
   search, and the stable error codes: Tasks 4, 6, 7.
-- **Game isolation** — `requireScope` on every tool, tested for a plain token
-  and for an admin's token: Task 7, and the Core plan's Task 13.
+- **Game isolation** — enforced in SQL first: every key from these tables to a
+  project-scoped parent is composite and carries `project_id`, so the database
+  itself rejects a cross-game reference (Task 1, and its corrections block),
+  and every query over a metamodel table filters on the resolved project id
+  (Task 7's requirement, applied throughout). `requireScope` on every tool,
+  tested for a plain token and for an admin's token, is the second layer:
+  Task 7, and the Core plan's Task 13.
 - **Definition of done** — Task 9 seeds two hundred rows through the real
   surface and reads them back.
 

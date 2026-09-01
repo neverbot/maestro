@@ -2657,6 +2657,32 @@ git commit -m "feat: entity listing with cursor pagination, one-hop traversal an
 
 ### Task 7: The MCP tool surface
 
+**Requirement, before any query in this task is written:** every `:one`
+and `:many` sqlc query this task adds over a metamodel table
+(entity_types, entities, relation_types, relations, and anything else
+this table gains later) takes the resolved project id as a parameter and
+filters on it in the SQL itself — `WHERE project_id = $1 AND id = $2`,
+never `WHERE id = $1` alone. This includes a lookup that looks
+uniquely-keyed by an entity or relation-type id: a globally unique id
+does not make a cross-game read acceptable, and "this id is already
+unique, the project filter is redundant" is exactly the reasoning that
+would make it optional in practice. Core's Task 13 (`addScopedTool`,
+`internal/web/mcp.go`) hands every tool handler a resolved, already-
+checked project id — but it only checks the standardised `project_id`
+field on a tool's own input (`ScopedArgs`); it has no way to check a
+*differently named* id a tool carries and then uses as a lookup key, so
+a handler that takes an `entity_id` and queries `GetEntity(ctx, entityID)`
+without also passing the resolved project id would relocate the exact
+defect a Task 13 quality review found and fixed, under a name that
+review's fix does not cover. The query layer is where the resolved
+project id actually becomes enforcement, not the tool wrapper: a query
+that cannot be executed without a project id cannot be misused by a
+handler that forgot to pass one, whereas a handler that merely forgot to
+*check* one compiles and runs fine right up until it leaks another
+game's data. Every entity/relation/type table already carries
+`project_id` precisely so this is expressible in SQL; use it in every
+query this task writes, not only the ones that feel like they need it.
+
 **Files:**
 - Create: `internal/web/mcp_metamodel.go`
 - Modify: `internal/web/server.go`, `internal/web/mcp.go`

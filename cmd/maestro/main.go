@@ -154,20 +154,21 @@ func run(ctx context.Context, getenv func(string) string) error {
 	return nil
 }
 
-// startPruneLoop starts a background goroutine that calls
-// PruneExpiredSessions and PruneExpiredInvites every pruneInterval, until
-// ctx is done. Neither identity.Service method (Task 6, Task 7) had a
-// process-lifecycle owner before this: both are tested in isolation but
+// startPruneLoop starts a background goroutine that sweeps expired
+// sessions and invites once immediately, then again every pruneInterval,
+// until ctx is done. Neither identity.Service method (Task 6, Task 7) had
+// a process-lifecycle owner before this: both are tested in isolation but
 // were deliberately left uncalled, with a comment on each pointing here.
 //
-// A failed sweep is logged and never fatal: both prune queries are
-// idempotent (a row either matches "expired and unprocessed" or it does
-// not, no matter how many times the query runs), and a transient
-// database error on one tick is recovered by the next tick an hour
-// later, not by crashing a process that is otherwise serving traffic
-// correctly.
+// The immediate sweep before the ticker's first tick matters on its own:
+// time.NewTicker's first tick does not fire until a full pruneInterval
+// has elapsed, so without it a process restarted more often than that
+// (ordinary deploy churn, a crash loop, a rolling update) would never
+// prune at all across its whole lifetime — every restart resets the
+// ticker before it ever fires once.
 func startPruneLoop(ctx context.Context, ids *identity.Service) {
 	go func() {
+		pruneOnce(ctx, ids)
 		ticker := time.NewTicker(pruneInterval)
 		defer ticker.Stop()
 		for {
@@ -175,17 +176,30 @@ func startPruneLoop(ctx context.Context, ids *identity.Service) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if n, err := ids.PruneExpiredSessions(ctx); err != nil {
-					slog.Error("prune expired sessions", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned expired sessions", "count", n)
-				}
-				if n, err := ids.PruneExpiredInvites(ctx); err != nil {
-					slog.Error("prune expired invites", "error", err)
-				} else if n > 0 {
-					slog.Info("pruned expired invites", "count", n)
-				}
+				pruneOnce(ctx, ids)
 			}
 		}
 	}()
+}
+
+// pruneOnce runs a single sweep of PruneExpiredSessions and
+// PruneExpiredInvites. A failed sweep is logged and never fatal: both
+// prune queries are idempotent (a row either matches "expired and
+// unprocessed" or it does not, no matter how many times the query runs),
+// and a transient database error on one sweep is recovered by the next
+// one, not by crashing a process that is otherwise serving traffic
+// correctly. Split out from startPruneLoop so both the start-up sweep and
+// the ticked ones share one implementation, and so a test can call it
+// directly without waiting out a real ticker.
+func pruneOnce(ctx context.Context, ids *identity.Service) {
+	if n, err := ids.PruneExpiredSessions(ctx); err != nil {
+		slog.Error("prune expired sessions", "error", err)
+	} else if n > 0 {
+		slog.Info("pruned expired sessions", "count", n)
+	}
+	if n, err := ids.PruneExpiredInvites(ctx); err != nil {
+		slog.Error("prune expired invites", "error", err)
+	} else if n > 0 {
+		slog.Info("pruned expired invites", "count", n)
+	}
 }

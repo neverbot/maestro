@@ -371,15 +371,14 @@ func (s *Service) RevokeInvite(ctx context.Context, id uuid.UUID) error {
 }
 
 // PruneExpiredInvites deletes every unredeemed invite past its expires_at
-// and reports how many rows it removed. As with PruneExpiredSessions in
-// sessions.go, nothing in this task calls it: invites_expires_idx exists
-// for exactly this query, but wiring a periodic sweep is a
-// process-lifecycle concern that belongs with the rest of main's start-up
-// wiring, not with the identity service itself. Leaving it unwired here is
-// deliberate, not an oversight: an unpruned expired invite is dead weight
-// (RedeemInvite already treats it as invalid via GetLiveInvite's own
-// expires_at > now() filter), not a live security exposure. See the plan's
-// Task 16 note: this and PruneExpiredSessions both still want an owner.
+// and reports how many rows it removed. Called by cmd/maestro's
+// startPruneLoop, once at start-up and then once every pruneInterval for
+// the life of the process, the same way and for the same reason as its
+// sibling PruneExpiredSessions (sessions.go) — see that method's own doc
+// comment. invites_expires_idx exists for exactly this query. An
+// unpruned expired invite is dead weight, not a live security exposure:
+// RedeemInvite already treats it as invalid via GetLiveInvite's own
+// expires_at > now() filter regardless of whether this has run recently.
 func (s *Service) PruneExpiredInvites(ctx context.Context) (int64, error) {
 	n, err := s.q.DeleteExpiredInvites(ctx)
 	if err != nil {

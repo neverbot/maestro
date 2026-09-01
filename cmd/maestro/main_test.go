@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neverbot/maestro/internal/config"
+	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -266,6 +268,30 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 		_, _ = io.Copy(io.Discard, sseResp.Body)
 	}()
 
+	// Measure one login's real latency on this machine, right now, rather
+	// than assuming a fixed number: argon2's cost is deliberately
+	// noticeable (tens of milliseconds on a fast machine) but the actual
+	// figure moves with CPU speed and, more importantly, with whatever
+	// else is contending for it — a `go test ./...` run sharing the
+	// machine with every other package's own tests is measurably slower
+	// than this test running alone, which a fixed sleep tuned on a quiet
+	// machine cannot account for. warmupLatency calibrates the settle
+	// delay below to this run's own conditions instead.
+	warmupStart := time.Now()
+	warmupBody, err := json.Marshal(map[string]string{
+		"email":    "admin@studio.com",
+		"password": "password12345",
+	})
+	if err != nil {
+		t.Fatalf("marshal warm-up login body: %v", err)
+	}
+	warmupResp, err := http.Post(base+"/api/auth/login", "application/json", bytes.NewReader(warmupBody))
+	if err != nil {
+		t.Fatalf("warm-up login: %v", err)
+	}
+	_ = warmupResp.Body.Close()
+	warmupLatency := time.Since(warmupStart)
+
 	// Fire a burst of concurrent logins against the bootstrapped admin's
 	// own credentials and cancel the server's context essentially
 	// concurrently with launching them, so several are still mid-request
@@ -310,19 +336,23 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 			statuses[i] = resp.StatusCode
 		}(i)
 	}
-	// A single one of these logins measured ~80ms on this machine
-	// (argon2 dominates); waiting a fraction of that before cancelling
-	// gives every goroutine above time to dial, send its request and
-	// have the server start verifying its password — genuinely inside
-	// Authenticate, not merely queued to connect — before shutdown
-	// begins, without waiting long enough for any of them to finish
-	// first. Without this, cancel() fired essentially at t=0 mostly
-	// raced dialing itself: most goroutines had not yet reached the
-	// server when the listener closed, so the failures observed were
-	// "connection refused" on requests that never really started,
-	// not the pool-closed-under-an-active-handler bug this test exists
-	// to catch.
-	time.Sleep(25 * time.Millisecond)
+	// Waiting a fraction of the warm-up login's own latency before
+	// cancelling gives every goroutine above time to dial, send its
+	// request and have the server start verifying its password —
+	// genuinely inside Authenticate, not merely queued to connect —
+	// before shutdown begins, without waiting long enough for any of
+	// them to finish first. Without this, cancel() fired essentially at
+	// t=0 mostly raced dialing itself: most goroutines had not yet
+	// reached the server when the listener closed, so the failures
+	// observed were "connection refused" on requests that never really
+	// started, not the pool-closed-under-an-active-handler bug this test
+	// exists to catch. A floor of 10ms keeps this meaningful even if
+	// warmupLatency comes back implausibly small.
+	settle := warmupLatency / 3
+	if settle < 10*time.Millisecond {
+		settle = 10 * time.Millisecond
+	}
+	time.Sleep(settle)
 	cancel()
 	wg.Wait()
 
@@ -366,4 +396,87 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 	} else {
 		t.Logf("post-shutdown request failed as expected: %v", err)
 	}
+}
+
+// TestStartPruneLoopSweepsImmediatelyAtStartup pins the fix for the
+// defect a review of this task found: time.NewTicker's first tick does
+// not fire until a full pruneInterval has elapsed, so a naive
+// ticker-only loop never prunes anything on a process that restarts more
+// often than that — ordinary deploy churn, on most real deployments. It
+// creates one already-expired session and one already-expired unbound
+// invite directly (bypassing IssueSession/CreateInvite, both of which
+// refuse to mint something already expired), starts startPruneLoop, and
+// asserts both rows are gone well inside pruneInterval — proving the
+// start-up sweep actually ran rather than only the ticked ones this
+// package's own test suite would otherwise have to wait an hour to see.
+func TestStartPruneLoopSweepsImmediatelyAtStartup(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := config.Config{
+		RegistrationMode: config.RegistrationInviteOnly,
+		Argon2:           config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyLen: 32, SaltLen: 16},
+		SessionTTL:       24 * time.Hour,
+		InviteTTL:        24 * time.Hour,
+	}
+	ids := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email:       "prune-target@studio.com",
+		DisplayName: "Prune Target",
+		Password:    "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// A session already expired an hour ago: IssueSession refuses to
+	// mint one like this, so the row is inserted directly.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() - interval '1 hour')`,
+		[]byte("test-prune-session-hash"), user.ID,
+	); err != nil {
+		t.Fatalf("insert expired session: %v", err)
+	}
+
+	// An already-expired, unbound (no email, no project/role) invite,
+	// for the same reason.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO invites (token_hash, expires_at) VALUES ($1, now() - interval '1 hour')`,
+		[]byte("test-prune-invite-hash"),
+	); err != nil {
+		t.Fatalf("insert expired invite: %v", err)
+	}
+
+	countSessions := func() int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE token_hash = $1`, []byte("test-prune-session-hash")).Scan(&n); err != nil {
+			t.Fatalf("count sessions: %v", err)
+		}
+		return n
+	}
+	countInvites := func() int {
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM invites WHERE token_hash = $1`, []byte("test-prune-invite-hash")).Scan(&n); err != nil {
+			t.Fatalf("count invites: %v", err)
+		}
+		return n
+	}
+	if countSessions() != 1 || countInvites() != 1 {
+		t.Fatal("test setup did not actually insert the expired rows")
+	}
+
+	loopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startPruneLoop(loopCtx, ids)
+
+	// pruneInterval is an hour; this only has to outlast the immediate
+	// start-up sweep, not a real tick.
+	giveUp := time.Now().Add(5 * time.Second)
+	for time.Now().Before(giveUp) {
+		if countSessions() == 0 && countInvites() == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expired session/invite still present after 5s (sessions=%d, invites=%d); startPruneLoop did not sweep at start-up", countSessions(), countInvites())
 }

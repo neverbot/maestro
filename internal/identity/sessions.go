@@ -222,14 +222,16 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, newPassw
 }
 
 // PruneExpiredSessions deletes every session past its expires_at and
-// reports how many rows it removed. Nothing in this task calls it: it
-// exists for a future periodic job (a ticker in main, or an operator-run
-// maintenance command) to keep the sessions table from growing forever
-// with rows that GetSessionUser already treats as dead — an unpruned row
-// is disk bloat, not a live security exposure, so leaving this unwired is
-// deliberate rather than an oversight. Wiring that scheduler is out of
-// this task's scope — the HTTP and process-lifecycle layers arrive in
-// later tasks.
+// reports how many rows it removed. Called by cmd/maestro's
+// startPruneLoop, once at start-up and then once every pruneInterval for
+// the life of the process (see that function's own doc comment for the
+// interval and failure-handling decisions) — this method itself stays
+// pure database bookkeeping with no process-lifecycle opinion of its own.
+// An unpruned row is disk bloat, not a live security exposure:
+// GetSessionUser already treats it as dead regardless of whether this has
+// run recently, which is what makes calling it on a coarse interval
+// (rather than eagerly, inline with every session read) a correctness-
+// neutral choice.
 func (s *Service) PruneExpiredSessions(ctx context.Context) (int64, error) {
 	n, err := s.q.DeleteExpiredSessions(ctx)
 	if err != nil {

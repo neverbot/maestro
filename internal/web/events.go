@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -102,17 +103,27 @@ const sseHeartbeatInterval = 15 * time.Second
 // REST API, then trust the stream from here" — this handler does not,
 // and structurally cannot on its own, guarantee a gap-free feed.
 //
-// Every event this hub ever publishes for a game reaches every
-// subscriber of that game equally: Subscribe and Publish key on project
-// id only, never on scope.Role. A viewer and an owner watching the same
-// game see byte-identical events. That is fine for now because nothing
-// publishes into this hub yet, but it is a real constraint the first
-// publisher has to design around, not something this handler enforces
-// on their behalf: if a future event's payload carries something not
-// every role in the game should see, the publisher must either leave
-// that out of the payload entirely or publish a role-specific variant —
-// this hub has no concept of a payload's fields and cannot filter one
-// after the fact.
+// Subscribe is called with scope.Role, and the heartbeat re-check keeps
+// it current via Hub.UpdateRole whenever revalidateStreamAccess reports
+// a changed one — so a future publisher can restrict an event to
+// subscribers of at least some role (realtime.Event.MinRole) and have it
+// enforced here, at delivery, rather than needing every publish call
+// site to remember to fan out a role-specific payload itself. Nothing
+// sets MinRole yet — every event today reaches every subscriber of its
+// game regardless of role — but the mechanism exists now, while there is
+// exactly one Subscribe call site to get it right in, rather than being
+// retrofitted once nine publishers already exist that would each need to
+// remember it.
+//
+// Event.Seq (assigned by Hub.Publish, realtime/hub.go) is what turns the
+// hub's own silent-drop-on-a-full-buffer behaviour into a detectable
+// one: this handler compares each event's Seq against the last one it
+// wrote and, on a gap, emits a synthetic "resync" event before the real
+// one — the client's signal that its view may be stale and it should
+// refetch over the ordinary REST API rather than trust the stream blindly
+// from here. This does not, and cannot, recover what was dropped: there
+// is no replay log behind Seq, only a counter, so "resync" means "you
+// missed something, go get the truth," not "here is what you missed."
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, scope ProjectScope) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -128,7 +139,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	// paper over the gap that left; the ordering below is what actually
 	// closes it — see this handler's own history for the review that
 	// found it.
-	sub := s.hub.Subscribe(scope.ProjectID)
+	sub := s.hub.Subscribe(scope.ProjectID, scope.Role)
 	defer s.hub.Unsubscribe(sub)
 
 	// Overrides requireCaller's Cache-Control: no-store with the value
@@ -157,6 +168,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	// policy this implements.
 	var recheckFailed bool
 
+	// lastSeq is the Seq of the last event actually written to this
+	// connection; 0 means "none yet" (realtime.Hub.Publish assigns Seq
+	// starting at 1, so 0 is never a real value) and deliberately skips
+	// the gap check below for the first event this stream ever sees —
+	// that "gap" is just whatever was published before this subscriber
+	// connected, not a drop.
+	var lastSeq uint64
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -168,6 +187,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 			switch sseRecheckOutcome(reason, transient, recheckFailed) {
 			case sseRecheckOK:
 				recheckFailed = false
+				if newScope.Role != scope.Role {
+					s.hub.UpdateRole(sub, newScope.Role)
+				}
 				scope = newScope
 			case sseRecheckTolerate:
 				recheckFailed = true
@@ -185,7 +207,33 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 			if !open {
 				return
 			}
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, ev.Payload); err != nil {
+			if sseSawGap(lastSeq, ev.Seq) {
+				// A gap: at least one event between lastSeq and ev.Seq
+				// was dropped (subscriberBuffer overflow — the only way
+				// realtime.Hub itself silently loses an event once a
+				// subscription exists). "resync" carries no payload of
+				// its own; it is purely a signal for the client to
+				// refetch its state over the ordinary REST API before
+				// trusting anything the stream says from here.
+				if _, err := fmt.Fprint(w, "event: resync\ndata: {}\n\n"); err != nil {
+					return
+				}
+			}
+			lastSeq = ev.Seq
+			payload, err := json.Marshal(ev.Payload)
+			if err != nil {
+				// A malformed payload is the publisher's bug, not this
+				// stream's: dropping just this one event and continuing
+				// is what keeps one bad event from taking down an
+				// otherwise-healthy connection. json.Marshal escaping
+				// every control character is also what makes the wire
+				// frame below safe to build with fmt.Fprintf despite
+				// ev.Kind and payload both being arbitrary — see
+				// realtime.Event.Payload's own doc comment for the
+				// forged-event bug this closes.
+				slog.ErrorContext(r.Context(), "sse payload marshal failed; dropping event",
+					"project_id", scope.ProjectID, "kind", ev.Kind, "seq", ev.Seq, "error", err)
+			} else if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Seq, ev.Kind, payload); err != nil {
 				return
 			}
 			flusher.Flush()
@@ -322,4 +370,20 @@ func sseRecheckOutcome(reason string, transient, previouslyFailed bool) sseReche
 	default:
 		return sseRecheckClose
 	}
+}
+
+// sseSawGap reports whether seq, the Seq of the event handleEvents just
+// received, indicates at least one event was dropped since lastSeq, the
+// Seq of the last event it actually wrote to the connection. lastSeq ==
+// 0 means "no event written yet" (realtime.Hub.Publish assigns Seq
+// starting at 1 — see its own doc comment — so 0 is never a real value)
+// and is never a gap: whatever was published before this subscriber
+// connected is not a drop, just history it never subscribed to receive.
+// Factored out of the select loop, like sseRecheckOutcome, so the rule
+// can be pinned by a plain table test rather than a test that has to
+// actually overflow realtime.subscriberBuffer through TCP backpressure
+// to observe it — which depends on OS socket buffer sizes this package
+// has no control over and no test in it should depend on.
+func sseSawGap(lastSeq, seq uint64) bool {
+	return lastSeq != 0 && seq != lastSeq+1
 }

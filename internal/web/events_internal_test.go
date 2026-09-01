@@ -33,3 +33,32 @@ func TestSSERecheckOutcome(t *testing.T) {
 		})
 	}
 }
+
+// TestSSESawGap pins sseSawGap's contract directly, including the two
+// edges most likely to be gotten wrong: seq 0 is never a real value (see
+// realtime.Hub.Publish, which starts counting at 1) so lastSeq == 0 must
+// never report a gap regardless of seq, and a seq that goes backward
+// (out of order delivery, which should not happen but is not this
+// function's job to rule out structurally) still counts as a gap rather
+// than being silently accepted.
+func TestSSESawGap(t *testing.T) {
+	cases := []struct {
+		name         string
+		lastSeq, seq uint64
+		want         bool
+	}{
+		{"first event ever on this stream is never a gap", 0, 1, false},
+		{"first event ever, arbitrarily high seq, still not a gap", 0, 500, false},
+		{"consecutive events", 1, 2, false},
+		{"one event dropped", 1, 3, true},
+		{"many events dropped", 1, 100, true},
+		{"seq went backward", 5, 4, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sseSawGap(tc.lastSeq, tc.seq); got != tc.want {
+				t.Errorf("sseSawGap(%d, %d) = %v, want %v", tc.lastSeq, tc.seq, got, tc.want)
+			}
+		})
+	}
+}

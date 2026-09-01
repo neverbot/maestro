@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,11 +46,13 @@ func newTestServerWithHub(t *testing.T, maxLifetime, heartbeatInterval time.Dura
 }
 
 // readOneSSEFrame reads lines from r until it has collected one complete
-// "event: ...\ndata: ...\n\n" frame (skipping ": ping" heartbeat comment
-// lines, which carry no "event:"/"data:" pair) or a read fails.
-func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, data string) {
+// "id: ...\nevent: ...\ndata: ...\n\n" frame (skipping ": ping" heartbeat
+// comment lines, which carry none of the three) or a read fails. id is ""
+// for a frame that carried no id: line (the synthetic "resync" event
+// never has one — see handleEvents's own doc comment).
+func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, id, data string) {
 	t.Helper()
-	var gotKind, gotData string
+	var gotKind, gotID, gotData string
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
@@ -57,12 +60,14 @@ func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, data string) {
 		}
 		line = strings.TrimRight(line, "\n")
 		switch {
+		case strings.HasPrefix(line, "id: "):
+			gotID = strings.TrimPrefix(line, "id: ")
 		case strings.HasPrefix(line, "event: "):
 			gotKind = strings.TrimPrefix(line, "event: ")
 		case strings.HasPrefix(line, "data: "):
 			gotData = strings.TrimPrefix(line, "data: ")
 		case line == "" && gotKind != "":
-			return gotKind, gotData
+			return gotKind, gotID, gotData
 		}
 	}
 }
@@ -149,20 +154,26 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want text/event-stream", got)
 	}
 
-	// No sleep needed here: handleEvents now calls hub.Subscribe before
-	// it writes or flushes any response header (events.go), so having
-	// already observed a 200 above is itself the guarantee that the
-	// subscription exists — an earlier version of this handler flushed
-	// headers first, which left a real gap a client could race and this
-	// test originally papered over with a fixed sleep instead of fixing
-	// the ordering.
+	// Deterministic, not "probably fine because of the ordering": assert
+	// the subscription actually exists before publishing anything,
+	// rather than trusting that observing a 200 implies it (which is
+	// true — see handleEvents's own doc comment on why Subscribe now
+	// runs before headers are written — but a flake here is exactly what
+	// someone would "fix" later by putting the sleep back).
+	if got := hub.SubscriberCount(project.ID); got != 1 {
+		t.Fatalf("SubscriberCount(project) = %d immediately after the 200, want 1", got)
+	}
+
 	hub.Publish(realtime.Event{ProjectID: other.ID, Kind: "noise"})
-	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "project.updated", Payload: `{"slug":"azeroth"}`})
+	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "project.updated", Payload: map[string]string{"slug": "azeroth"}})
 
 	reader := bufio.NewReader(resp.Body)
-	kind, data := readOneSSEFrame(t, reader)
+	kind, id, data := readOneSSEFrame(t, reader)
 	if kind != "project.updated" {
 		t.Fatalf("Kind = %q, want project.updated (cross-game leak or missed the real event)", kind)
+	}
+	if id != "1" {
+		t.Fatalf("id = %q, want 1 (this project's first-ever published event)", id)
 	}
 	if data != `{"slug":"azeroth"}` {
 		t.Fatalf("data = %q", data)
@@ -424,5 +435,65 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 	}
 	if !expiry.Equal(afterAdmission) {
 		t.Fatalf("expiry moved from %v to %v after admission's own renewal — the heartbeat re-check slid the session", afterAdmission, expiry)
+	}
+}
+
+// TestEventsStreamMarshalsPayloadPreventingFrameForgery pins the wire
+// bug realtime.Event.Payload's own doc comment describes: a raw string
+// payload containing a newline used to end the "data:" line early and a
+// second newline to end the frame, letting whatever came after —
+// including a crafted "event:" line — be parsed by the client as a
+// second, forged event. json.Marshal escapes every control character
+// inside a string, so a payload built specifically to try this now
+// arrives as one harmless, single-line JSON string instead.
+func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
+	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := hub.SubscriberCount(project.ID); got != 1 {
+		t.Fatalf("SubscriberCount(project) = %d immediately after the 200, want 1", got)
+	}
+
+	// A payload that, written raw into "data: %s\n\n", would end that
+	// field after "malicious" and start a forged event.
+	forgedAttempt := "malicious\n\nevent: forged.admin.action\ndata: nothing to see here"
+	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "entity.updated", Payload: map[string]string{"note": forgedAttempt}})
+
+	reader := bufio.NewReader(resp.Body)
+	kind, _, data := readOneSSEFrame(t, reader)
+	if kind != "entity.updated" {
+		t.Fatalf("Kind = %q, want entity.updated (a forged event: line was parsed as its own frame)", kind)
+	}
+	var decoded struct {
+		Note string `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(data), &decoded); err != nil {
+		t.Fatalf("data %q did not decode as the single JSON object it should be: %v", data, err)
+	}
+	if decoded.Note != forgedAttempt {
+		t.Fatalf("decoded note = %q, want %q", decoded.Note, forgedAttempt)
 	}
 }

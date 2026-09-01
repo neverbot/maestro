@@ -13,7 +13,7 @@ func TestSubscriberReceivesItsProjectEvents(t *testing.T) {
 	hub := realtime.NewHub()
 	project := uuid.New()
 
-	sub := hub.Subscribe(project, "owner")
+	sub := hub.Subscribe(project, "owner", false)
 	defer hub.Unsubscribe(sub)
 
 	hub.Publish(realtime.Event{ProjectID: project, Kind: "project.updated", Payload: `{"slug":"azeroth"}`})
@@ -32,7 +32,7 @@ func TestSubscriberIgnoresOtherProjects(t *testing.T) {
 	hub := realtime.NewHub()
 	mine, theirs := uuid.New(), uuid.New()
 
-	sub := hub.Subscribe(mine, "owner")
+	sub := hub.Subscribe(mine, "owner", false)
 	defer hub.Unsubscribe(sub)
 
 	hub.Publish(realtime.Event{ProjectID: theirs, Kind: "project.updated"})
@@ -47,7 +47,7 @@ func TestSubscriberIgnoresOtherProjects(t *testing.T) {
 func TestPublishDoesNotBlockOnASlowSubscriber(t *testing.T) {
 	hub := realtime.NewHub()
 	project := uuid.New()
-	sub := hub.Subscribe(project, "owner")
+	sub := hub.Subscribe(project, "owner", false)
 	defer hub.Unsubscribe(sub)
 
 	// Fill the buffer and keep going: a stuck browser must not stall writers.
@@ -80,12 +80,12 @@ func TestPublishDoesNotBlockOnASlowSubscriber(t *testing.T) {
 func TestUnsubscribeManyDistinctProjectsLeavesHubUsable(t *testing.T) {
 	hub := realtime.NewHub()
 	for i := 0; i < 200; i++ {
-		sub := hub.Subscribe(uuid.New(), "owner")
+		sub := hub.Subscribe(uuid.New(), "owner", false)
 		hub.Unsubscribe(sub)
 	}
 
 	project := uuid.New()
-	sub := hub.Subscribe(project, "owner")
+	sub := hub.Subscribe(project, "owner", false)
 	defer hub.Unsubscribe(sub)
 	hub.Publish(realtime.Event{ProjectID: project, Kind: "still.works"})
 
@@ -106,12 +106,19 @@ func TestUnsubscribeManyDistinctProjectsLeavesHubUsable(t *testing.T) {
 // by a dropped event (a full buffer, the one mechanism this package
 // itself can silently lose an event to) without this hub keeping any
 // history of what it dropped.
-func TestPublishAssignsIncrementingPerProjectSequence(t *testing.T) {
+// TestPublishAssignsPerSubscriptionSequence pins Event.Seq's new
+// contract (moved off a per-project counter — see Hub's own doc comment
+// for why): it starts at 1 for a subscription's first received event,
+// increases by exactly 1 per event that subscription is gated in for,
+// and is tracked independently per subscription, not per project — two
+// subscribers of the very same project each see their own Seq start at
+// 1.
+func TestPublishAssignsPerSubscriptionSequence(t *testing.T) {
 	hub := realtime.NewHub()
 	a, b := uuid.New(), uuid.New()
-	subA := hub.Subscribe(a, "owner")
+	subA := hub.Subscribe(a, "owner", false)
 	defer hub.Unsubscribe(subA)
-	subB := hub.Subscribe(b, "owner")
+	subB := hub.Subscribe(b, "owner", false)
 	defer hub.Unsubscribe(subB)
 
 	hub.Publish(realtime.Event{ProjectID: a, Kind: "first"})
@@ -129,7 +136,113 @@ func TestPublishAssignsIncrementingPerProjectSequence(t *testing.T) {
 		t.Fatalf("second event for project a: Seq = %d, want 2", second.Seq)
 	}
 	if firstForB.Seq != 1 {
-		t.Fatalf("first event for project b: Seq = %d, want 1 (independent per project)", firstForB.Seq)
+		t.Fatalf("first event for project b: Seq = %d, want 1 (independent per project, and per subscription)", firstForB.Seq)
+	}
+}
+
+// TestPublishSequenceSkipsEventsFilteredOutForThisSubscription is the
+// regression test for the spurious-resync bug Hub's own doc comment
+// describes: a subscriber gated out of an event (by MinRole or
+// HumanOnly) must not see its own Seq advance for that event at all, or
+// a later, actually-received event would look exactly like a dropped
+// one to internal/web/events.go's gap detector. Two subscribers share a
+// project; one is gated out of the first event, and both then receive a
+// second, ungated event, which must arrive as Seq 1 for the gated-out
+// subscriber (its first-ever received event) and Seq 2 for the one that
+// received both.
+func TestPublishSequenceSkipsEventsFilteredOutForThisSubscription(t *testing.T) {
+	hub := realtime.NewHub()
+	project := uuid.New()
+	owner := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(owner)
+	viewer := hub.Subscribe(project, "viewer", false)
+	defer hub.Unsubscribe(viewer)
+
+	hub.Publish(realtime.Event{ProjectID: project, Kind: "owner-only", MinRole: "owner"})
+	hub.Publish(realtime.Event{ProjectID: project, Kind: "everyone"})
+
+	first := <-owner.C
+	second := <-owner.C
+	if first.Seq != 1 || first.Kind != "owner-only" {
+		t.Fatalf("owner's first event = %+v, want Seq 1, Kind owner-only", first)
+	}
+	if second.Seq != 2 || second.Kind != "everyone" {
+		t.Fatalf("owner's second event = %+v, want Seq 2, Kind everyone", second)
+	}
+
+	onlyEvent := <-viewer.C
+	if onlyEvent.Seq != 1 {
+		t.Fatalf("viewer's only event: Seq = %d, want 1 (the owner-only event must not have advanced its counter)", onlyEvent.Seq)
+	}
+	if onlyEvent.Kind != "everyone" {
+		t.Fatalf("viewer's only event: Kind = %q, want everyone", onlyEvent.Kind)
+	}
+}
+
+// TestPublishSequenceAdvancesOnADropEvenThoughNothingWasSent pins the
+// other half of the same contract: a subscriber whose buffer is full
+// still has its Seq advance for the event it just missed (Publish's own
+// doc comment: "increment first, attempt the send second, keep the
+// outcome of the send from influencing the counter either way"), so the
+// gap this leaves is exactly the size of what was actually dropped, not
+// silently absorbed the way a filtered event correctly is.
+func TestPublishSequenceAdvancesOnADropEvenThoughNothingWasSent(t *testing.T) {
+	hub := realtime.NewHub()
+	project := uuid.New()
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	// Fill the buffer, then publish one more that can only be dropped.
+	for i := 0; i < 64; i++ {
+		hub.Publish(realtime.Event{ProjectID: project, Kind: "filler"})
+	}
+	hub.Publish(realtime.Event{ProjectID: project, Kind: "dropped"})
+
+	// Drain one slot and publish a real, receivable event.
+	<-sub.C
+	hub.Publish(realtime.Event{ProjectID: project, Kind: "after-the-drop"})
+
+	// 63 fillers (the first was already drained above) plus
+	// after-the-drop are now buffered: draining all of them lands on
+	// after-the-drop last.
+	var last realtime.Event
+	for i := 0; i < 64; i++ {
+		last = <-sub.C
+	}
+	if last.Kind != "after-the-drop" {
+		t.Fatalf("last received event Kind = %q, want after-the-drop", last.Kind)
+	}
+	if last.Seq != 66 {
+		t.Fatalf("after-the-drop Seq = %d, want 66 (64 filler + 1 dropped + itself)", last.Seq)
+	}
+}
+
+// TestPublishFiltersByHumanOnly pins the other delivery gate Publish
+// checks alongside MinRole: a subscription admitted under a bearer
+// token (IsToken true) never receives an event marked HumanOnly, even
+// when its Role would otherwise meet the event's MinRole — the gap a
+// quality review found a token caller's own MinRole-only gating left
+// open (Event.HumanOnly's own doc comment).
+func TestPublishFiltersByHumanOnly(t *testing.T) {
+	hub := realtime.NewHub()
+	project := uuid.New()
+
+	human := hub.Subscribe(project, "editor", false)
+	defer hub.Unsubscribe(human)
+	token := hub.Subscribe(project, "editor", true)
+	defer hub.Unsubscribe(token)
+
+	hub.Publish(realtime.Event{ProjectID: project, Kind: "token.minted", MinRole: "editor", HumanOnly: true})
+	hub.Publish(realtime.Event{ProjectID: project, Kind: "game.deleted"})
+
+	first := <-human.C
+	if first.Kind != "token.minted" {
+		t.Fatalf("human subscriber's first Kind = %q, want token.minted", first.Kind)
+	}
+
+	onlyEvent := <-token.C
+	if onlyEvent.Kind != "game.deleted" {
+		t.Fatalf("token subscriber's only event Kind = %q, want game.deleted (token.minted should have been filtered by HumanOnly)", onlyEvent.Kind)
 	}
 }
 
@@ -141,9 +254,9 @@ func TestPublishFiltersByMinRole(t *testing.T) {
 	hub := realtime.NewHub()
 	project := uuid.New()
 
-	owner := hub.Subscribe(project, "owner")
+	owner := hub.Subscribe(project, "owner", false)
 	defer hub.Unsubscribe(owner)
-	viewer := hub.Subscribe(project, "viewer")
+	viewer := hub.Subscribe(project, "viewer", false)
 	defer hub.Unsubscribe(viewer)
 
 	hub.Publish(realtime.Event{ProjectID: project, Kind: "owner-only", MinRole: "owner"})
@@ -190,7 +303,7 @@ func TestPublishFiltersByMinRole(t *testing.T) {
 func TestUpdateRoleChangesFutureFiltering(t *testing.T) {
 	hub := realtime.NewHub()
 	project := uuid.New()
-	sub := hub.Subscribe(project, "viewer")
+	sub := hub.Subscribe(project, "viewer", false)
 	defer hub.Unsubscribe(sub)
 
 	hub.Publish(realtime.Event{ProjectID: project, Kind: "before-promotion", MinRole: "owner"})
@@ -223,9 +336,9 @@ func TestSubscriberCountReflectsActiveSubscriptions(t *testing.T) {
 		t.Fatalf("SubscriberCount(a) = %d before any Subscribe, want 0", got)
 	}
 
-	sub1 := hub.Subscribe(a, "owner")
-	sub2 := hub.Subscribe(a, "viewer")
-	subB := hub.Subscribe(b, "owner")
+	sub1 := hub.Subscribe(a, "owner", false)
+	sub2 := hub.Subscribe(a, "viewer", false)
+	subB := hub.Subscribe(b, "owner", false)
 	defer hub.Unsubscribe(subB)
 
 	if got := hub.SubscriberCount(a); got != 2 {

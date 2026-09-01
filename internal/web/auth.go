@@ -16,6 +16,9 @@ import (
 // SessionCookie is the name of the browser session cookie.
 const SessionCookie = "maestro_session"
 
+// uuidValue aliases uuid.UUID so handler signatures stay readable.
+type uuidValue = uuid.UUID
+
 // Error codes returned in the "error" field of every JSON error body this
 // package writes. Named here, not spelled inline at each call site, so a
 // future handler cannot introduce a second string for the same condition

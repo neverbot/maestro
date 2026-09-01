@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
@@ -25,6 +26,14 @@ type Server struct {
 	mux     *http.ServeMux
 	opts    Options
 	handler http.Handler
+
+	// loginLimiter and inviteLimiter guard the two unauthenticated
+	// endpoints that accept a secret to verify: a password and an invite
+	// token, respectively. They are two separate Limiter instances, not
+	// one shared by key prefix, so a burst of failed logins can never
+	// exhaust the budget invite redemption depends on, or vice versa.
+	loginLimiter  *identity.Limiter
+	inviteLimiter *identity.Limiter
 }
 
 // NewServer builds the routing tree.
@@ -45,10 +54,18 @@ func NewServer(opts Options) *Server {
 		panic("web: NewServer requires a non-nil Projects service")
 	}
 
-	s := &Server{mux: http.NewServeMux(), opts: opts}
+	s := &Server{
+		mux:           http.NewServeMux(),
+		opts:          opts,
+		loginLimiter:  identity.NewLimiter(10, time.Minute),
+		inviteLimiter: identity.NewLimiter(10, time.Minute),
+	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.Handle("GET /version", requireCaller(s.handleVersion))
 	s.mux.Handle("GET /api/me", requireCaller(s.handleMe))
+	s.mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogout)
+	s.mux.HandleFunc("POST /api/auth/register", s.handleRegister)
 	// Built once here, not per request in ServeHTTP: authenticate wraps
 	// s.mux in a closure, and there is no reason to allocate a fresh one
 	// for every single incoming request when the mux it wraps never

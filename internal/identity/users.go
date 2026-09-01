@@ -352,3 +352,16 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 	}
 	return nil
 }
+
+// UserByID loads one user. It exists for the authentication middleware
+// (Task 10): resolving a bearer token yields a user id and project binding
+// but not the account's IsAdmin flag or display name, and this is how that
+// gap is filled without the identity package ever handing out dbq.User
+// directly (see User's own doc comment).
+func (s *Service) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
+	dbUser, err := s.q.GetUserByID(ctx, id)
+	if err != nil {
+		return User{}, fmt.Errorf("lookup user: %w", err)
+	}
+	return userFrom(dbUser), nil
+}

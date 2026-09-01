@@ -30,7 +30,14 @@ type changePasswordRequest struct {
 // attacker who only ever had the cookie gains nothing here they did not
 // already have — and a designer who suspects their password leaked can
 // still use it to rotate their attacker straight out, everywhere,
-// including that attacker's own stolen tab.
+// including that attacker's own stolen tab. That designer's other
+// standing credentials are a separate concern this endpoint does not
+// reach: an API token minted before the rotation keeps working
+// afterwards (tokens have no expiry, only explicit revocation — Task 9),
+// so rotating a password is not, by itself, a way to be sure a thief who
+// minted one first is locked out. A designer who suspects their session
+// was compromised should also check that game's token list
+// (GET .../tokens) for anything they don't recognise.
 //
 // Human-only (requireHumanCaller): a bearer token authenticates an
 // agent scoped to one game's content, never a person with a password of
@@ -46,6 +53,46 @@ type changePasswordRequest struct {
 // coherent with the endpoint's own stated purpose (kick out every
 // *other* device, including a thief's) without punishing the one request
 // that just proved it knows the new password.
+//
+// Rate limiting is two limiters, not one, and the order they run in
+// matters — a Round 2 review found the original single-limiter design
+// could deny the exact remedy this endpoint exists to provide. That
+// design checked changePasswordLimiter.Allowed before ever verifying
+// anything: once ten wrong guesses had spent the budget, even a request
+// carrying the correct current password was refused with 429. Live, that
+// is the threat model's own premise turned into a weapon — a session
+// thief spends the budget with ten deliberately wrong guesses from the
+// hijacked session (cheap: no argon2 derivation happens if the entry gate
+// is what refuses the request) and holds the real owner's rotation
+// endpoint shut for as long as they keep spending it, with no password
+// reset anywhere in this product to fall back on. Fixed by verifying
+// first: ChangeOwnPassword always runs, regardless of any budget, so a
+// correct current password always succeeds. changePasswordLimiter (10
+// wrong guesses per minute) is now consulted only once a guess has
+// already turned out wrong, purely to decide whether *that* failure
+// reports 401 or 429 — it can delay how fast an attacker learns their
+// next guess failed, but it can never turn a caller who actually knows
+// the password away.
+//
+// Verifying unconditionally reopens a narrower problem the entry gate
+// used to close for free: nothing now bounds how many argon2
+// derivations a flood of requests against one account can force,
+// regardless of correctness. changePasswordFloodLimiter is the answer —
+// a second, much looser per-account budget (60/minute) that *does* gate
+// entry, before ChangeOwnPassword ever runs, the way the single limiter
+// used to. Its ceiling is set high enough that no legitimate use — a
+// designer mistyping their current password a few times, even a
+// scripted retry — should ever reach it; its job is bounding worst-case
+// CPU cost under a genuine flood, not shaping the experience of a real
+// caller the way changePasswordLimiter's tighter 401-vs-429 choice does.
+// It is recorded on every attempt, correct or not, since cost is what it
+// bounds, not correctness.
+//
+// Both limiters live in process memory (identity.Limiter's own doc
+// comment) — a multi-replica deployment has one independent budget per
+// process, not one shared across the instance, the same caveat that
+// applies to every other limiter this codebase has built (Task 6, Task
+// 11).
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, caller Caller) {
 	if !requireHumanCaller(w, caller) {
 		return
@@ -61,33 +108,46 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, ca
 	// yet verified), caller.UserID here already comes from a resolved,
 	// server-side session lookup (authenticate, auth.go) — trustworthy
 	// the same way handleCreateToken's scope.ProjectID is. That is what
-	// makes a single per-user budget sufficient: there is no "attacker
-	// picks their own key" concern to guard against with a second,
-	// IP-keyed limiter the way handleLogin's loginIPLimiter answers for
-	// an anonymous caller who could otherwise spread guesses across many
-	// email keys, because every guess against this endpoint already
-	// spends the one budget tied to the account being attacked,
+	// makes a per-account budget sufficient on its own: there is no
+	// "attacker picks their own key" concern to guard against with a
+	// second, IP-keyed limiter the way handleLogin's loginIPLimiter
+	// answers for an anonymous caller who could otherwise spread guesses
+	// across many email keys, because every guess against this endpoint
+	// already spends the budget tied to the account being attacked,
 	// regardless of which key an attacker might wish it used instead.
 	key := caller.UserID.String()
-	if !s.changePasswordLimiter.Allowed(key) {
+
+	// changePasswordFloodLimiter, not changePasswordLimiter, gates entry
+	// — see this function's own doc comment for why the two limiters
+	// exist and why only the looser one may ever refuse a request before
+	// its password is checked.
+	if !s.changePasswordFloodLimiter.Allowed(key) {
 		writeError(w, http.StatusTooManyRequests, errCodeRateLimited, "too many attempts, wait a minute")
 		return
 	}
+	s.changePasswordFloodLimiter.Record(key)
 
 	if err := s.opts.Identity.ChangeOwnPassword(r.Context(), caller.UserID, req.CurrentPassword, req.NewPassword); err != nil {
 		switch {
 		case errors.Is(err, identity.ErrInvalidCredentials):
-			// Only this branch records against the limiter: it is the
-			// only outcome that represents a guess at the account's real
-			// password. A weak new password (below) is a validation
-			// failure, not a guess, and recording it would let an
+			// The correctness-gated limiter: consulted only now, on a
+			// guess that has already turned out wrong, to decide whether
+			// this particular failure reports 401 (budget remains) or
+			// 429 (exhausted) — never to refuse a guess before it has
+			// been checked. A weak new password (below) is a validation
+			// failure, not a guess, and recording it here would let an
 			// attacker who cannot guess the current password burn a
 			// legitimate user's budget for free by repeatedly submitting
 			// a correct current password with a deliberately short new
-			// one — spending a budget the check above is supposed to
-			// protect, not be a vector for exhausting.
+			// one.
+			if !s.changePasswordLimiter.Allowed(key) {
+				writeError(w, http.StatusTooManyRequests, errCodeRateLimited, "too many attempts, wait a minute")
+				return
+			}
 			s.changePasswordLimiter.Record(key)
 			writeError(w, http.StatusUnauthorized, errCodeUnauthorized, "current password is wrong")
+		case errors.Is(err, identity.ErrPasswordUnchanged):
+			writeError(w, http.StatusUnprocessableEntity, "password_unchanged", "the new password must differ from the current one")
 		case errors.Is(err, identity.ErrPasswordInvalid):
 			writeError(w, http.StatusUnprocessableEntity, "password_invalid", "that password does not meet requirements")
 		default:

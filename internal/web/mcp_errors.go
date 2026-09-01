@@ -50,15 +50,6 @@ func NewMCPError(code, message string) *MCPError {
 	return &MCPError{Code: code, Message: message}
 }
 
-// WithDetails returns a copy of e carrying details, rather than mutating
-// e in place: several call sites (ErrScopeViolation, for one) are
-// shared package-level values reused across many requests, and a copy
-// keeps one caller's details from leaking onto another's error through
-// the same shared pointer.
-func (e *MCPError) WithDetails(details map[string]any) *MCPError {
-	return &MCPError{Code: e.Code, Message: e.Message, Details: details}
-}
-
 // mcpErrorResult builds the wire shape for a failed tool call: a single
 // JSON object with a stable "error" code, a human "message", and — when
 // the domain error carried one — a structured "details" object. This is

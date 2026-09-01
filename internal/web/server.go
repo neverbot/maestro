@@ -102,17 +102,28 @@ type Server struct {
 	loginIPLimiter    *identity.Limiter
 	registerIPLimiter *identity.Limiter
 
-	// changePasswordLimiter guards PATCH /api/me/password, keyed on the
-	// caller's own user id rather than an IP. Unlike every limiter above,
-	// this endpoint is only ever reached by an already-authenticated
-	// caller — caller.UserID comes from a resolved session, not an
-	// attacker-supplied claim — so there is no "attacker picks their own
-	// key" concern a second, IP-keyed budget would need to close (see
-	// handleChangePassword's own comment). One budget per account is
-	// enough: every guess against this endpoint already spends the
-	// budget tied to the one account being attacked, regardless of
-	// origin.
-	changePasswordLimiter *identity.Limiter
+	// changePasswordLimiter and changePasswordFloodLimiter both guard
+	// PATCH /api/me/password, keyed on the caller's own user id rather
+	// than an IP — unlike every limiter above, this endpoint is only
+	// ever reached by an already-authenticated caller, so there is no
+	// "attacker picks their own key" concern a second, IP-keyed budget
+	// would need to close. They serve different jobs, and — a Round 2
+	// review found — must run in a specific order: changePasswordLimiter
+	// (10/minute) is consulted only after a guess has already turned out
+	// wrong, to decide whether that particular failure reports 401 or
+	// 429; it must never gate entry before the password is checked,
+	// because a design that does refuses a *correct* password once an
+	// attacker with a stolen session (but not the password) has spent
+	// the budget with wrong guesses — denying the account owner the one
+	// remedy this endpoint exists to provide, with no password reset
+	// anywhere in this product to fall back on. changePasswordFloodLimiter
+	// (60/minute, deliberately looser) is what still gates entry, to
+	// bound the argon2 cost a flood of requests can force regardless of
+	// correctness, without being tight enough to plausibly deny a real
+	// caller. See handleChangePassword's own doc comment for the full
+	// reasoning and the order both limiters run in.
+	changePasswordLimiter      *identity.Limiter
+	changePasswordFloodLimiter *identity.Limiter
 
 	// registeredPatterns and projectScopedPatterns exist for exactly one
 	// reason: TestEveryGameScopedRouteGoesThroughRequireProject
@@ -177,16 +188,17 @@ func NewServer(opts Options) *Server {
 	}
 
 	s := &Server{
-		mux:                   http.NewServeMux(),
-		opts:                  opts,
-		loginLimiter:          identity.NewLimiter(10, time.Minute),
-		loginIPLimiter:        identity.NewLimiter(40, time.Minute),
-		registerIPLimiter:     identity.NewLimiter(10, time.Minute),
-		changePasswordLimiter: identity.NewLimiter(10, time.Minute),
-		hub:                   hub,
-		sseMaxLifetime:        sseMaxLifetime,
-		sseHeartbeatInterval:  sseHeartbeatIntervalOpt,
-		closing:               make(chan struct{}),
+		mux:                        http.NewServeMux(),
+		opts:                       opts,
+		loginLimiter:               identity.NewLimiter(10, time.Minute),
+		loginIPLimiter:             identity.NewLimiter(40, time.Minute),
+		registerIPLimiter:          identity.NewLimiter(10, time.Minute),
+		changePasswordLimiter:      identity.NewLimiter(10, time.Minute),
+		changePasswordFloodLimiter: identity.NewLimiter(60, time.Minute),
+		hub:                        hub,
+		sseMaxLifetime:             sseMaxLifetime,
+		sseHeartbeatInterval:       sseHeartbeatIntervalOpt,
+		closing:                    make(chan struct{}),
 	}
 	s.routeFunc("GET /healthz", s.handleHealthz)
 	s.route("GET /version", requireCaller(s.handleVersion))
@@ -217,7 +229,7 @@ func NewServer(opts Options) *Server {
 	s.route("GET /api/invites", requireCaller(s.handleListInstanceInvites))
 	s.route("DELETE /api/invites/{invite}", requireCaller(s.handleRevokeInstanceInvite))
 	s.route("PATCH /api/me/password", requireCaller(s.handleChangePassword))
-	s.route("PATCH /api/users/{user}/admin", requireCaller(s.handleSetAdmin))
+	s.route("PATCH /api/admins", requireCaller(s.handleSetAdmin))
 	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)
 	s.registerProjectRoute("PATCH /api/games/{game}/members/{user}", s.handleChangeRole)
 	s.registerProjectRoute("DELETE /api/games/{game}/members/{user}", s.handleRemoveMember)

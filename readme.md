@@ -114,20 +114,37 @@ curl -s -b cookies.txt -X PATCH http://localhost:8080/api/me/password \
   -d '{"current_password":"old-password","new_password":"a-new-password"}'
 ```
 
-There is no password reset by design, so this is the only way out for a
-designer who suspects their password leaked. An existing instance admin
-can also promote a colleague to admin — the bootstrap account created at
-first boot is no longer the only one that can ever mint an account-only
-invite:
+There is no password reset by design, so this is the only way to get an
+attacker who merely stole a session cookie off the account. It is not a
+way to be sure a thief is locked out entirely: an API token minted
+before the rotation keeps working afterwards (tokens have no expiry,
+only explicit revocation), so anyone rotating a password on suspicion
+should also check that game's token list (`GET
+/api/games/{game}/tokens`) for anything unrecognised. An existing
+instance admin can also promote a colleague to admin, by email — the
+bootstrap account created at first boot is no longer the only one that
+can ever mint an account-only invite:
 
 ```bash
-curl -s -b cookies.txt -X PATCH http://localhost:8080/api/users/<user-id>/admin \
+curl -s -b cookies.txt -X PATCH http://localhost:8080/api/admins \
   -H 'Content-Type: application/json' \
-  -d '{"is_admin":true}'
+  -d '{"email":"colleague@studio.com","is_admin":true}'
 ```
 
 An admin may demote another admin, or themselves, as long as at least
-one remains — the instance refuses to ever be left with zero.
+one remains — the instance refuses to ever be left with zero. If the
+one admin account becomes unreachable entirely (a forgotten password,
+with no reset flow), restarting the instance with
+`FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD` pointed at that account
+re-promotes it — access to the environment already implies database
+access, so this grants nothing new, it just turns a `psql` session into
+a documented restart.
+
+**Clicking an invite while already signed in.** A project-bound invite
+redeemed by a browser tab that is already logged in grants membership to
+that same account — it never creates a second one. An email bound to a
+different account than the one currently logged in is refused, the same
+as an unknown token.
 
 ## Roadmap
 

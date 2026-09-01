@@ -21,6 +21,39 @@ type ApiToken struct {
 	TokenHint  string
 }
 
+type Entity struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityTypeID     uuid.UUID
+	Key              string
+	Name             string
+	Fields           []byte
+	Invalid          bool
+	Version          int32
+	Search           interface{}
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+}
+
+type EntityType struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Key              string
+	Label            string
+	LabelPlural      string
+	Description      string
+	Color            string
+	Icon             string
+	FieldSchema      []byte
+	Version          int32
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+}
+
 type Invite struct {
 	ID         uuid.UUID
 	TokenHash  []byte
@@ -47,6 +80,36 @@ type Project struct {
 	Name      string
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+}
+
+type Relation struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	RelationTypeID   uuid.UUID
+	SourceID         uuid.UUID
+	TargetID         uuid.UUID
+	Fields           []byte
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+}
+
+type RelationType struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Key              string
+	Label            string
+	Description      string
+	SourceTypeIds    []uuid.UUID
+	TargetTypeIds    []uuid.UUID
+	SemanticRole     *string
+	FieldSchema      []byte
+	Version          int32
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
 }
 
 type Session struct {

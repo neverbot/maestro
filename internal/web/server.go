@@ -182,6 +182,21 @@ func NewServer(opts Options) *Server {
 	s.routeFunc("POST /api/auth/logout", s.handleLogout)
 	s.routeFunc("POST /api/auth/register", s.handleRegister)
 	s.routeFunc("GET /{$}", s.handleRoot)
+	s.routeFunc("GET /login", func(w http.ResponseWriter, r *http.Request) { s.serveAsset(w, r, "login.html") })
+	// The path variable here is deliberately {slug}, not {game}: the
+	// plan's own snippet for this route used {game}, but
+	// TestEveryGameScopedRouteGoesThroughRequireProject (server_test.go)
+	// fails the build on any registered pattern containing "{game}" that
+	// was not wired up through registerProjectRoute — its whole point is
+	// to catch a project-scoped handler that bypassed requireProject.
+	// This route resolves nothing server-side (Task 8's Round 2
+	// Correction 12 — it only ever serves the static SPA shell; the
+	// slug-to-id mapping happens client-side from GET /api/games), so it
+	// is correctly registered outside that convention, and a differently
+	// named path variable keeps the safety net from misreading it as a
+	// bypass.
+	s.routeFunc("GET /g/{slug}", func(w http.ResponseWriter, r *http.Request) { s.serveAsset(w, r, "game.html") })
+	s.route("GET /static/", http.StripPrefix("/static/", http.FileServerFS(assets)))
 	s.route("GET /api/games", requireCaller(s.handleListGames))
 	s.route("POST /api/games", requireCaller(s.handleCreateGame))
 	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)

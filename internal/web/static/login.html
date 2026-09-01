@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Sign in · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<h1>Maestro</h1>
+<noscript>
+  <p class="notice">Signing in needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<div id="login-view">
+  <p>Sign in to reach your games.</p>
+  <form id="login">
+    <input type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
+    <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+    <p class="error" id="login-error" role="alert"></p>
+  </form>
+</div>
+
+<div id="invite-view" hidden>
+  <p>You have been invited to Maestro. Create your account to continue.</p>
+  <form id="invite">
+    <input type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
+    <input type="text" name="display_name" placeholder="Your name" autocomplete="name" required>
+    <input type="password" name="password" placeholder="Choose a password (at least 12 characters)" autocomplete="new-password" minlength="12" required>
+    <button type="submit">Create account</button>
+    <p class="error" id="invite-error" role="alert"></p>
+  </form>
+</div>
+
+<script type="module" src="/static/app.js"></script>

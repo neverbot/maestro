@@ -160,6 +160,11 @@ func CallerFrom(ctx context.Context) (Caller, bool) {
 // page otherwise costs one identical, wasted session lookup per request.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPublicPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		ctx := r.Context()
 
 		if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
@@ -191,6 +196,39 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// isPublicPath reports whether path never needs a Caller at all, so
+// authenticate can skip its bearer/cookie resolution entirely rather than
+// merely leaving the result unused by a handler not wrapped in
+// requireCaller. Task 15's own note (its plan entry, and this package's
+// doc comment on authenticate above) is explicit about why this matters
+// for more than tidiness: a browser sends its session cookie on every
+// same-origin request regardless of whether the handler ever reads
+// CallerFrom, so a page pulling twenty embedded assets from GET
+// /static/... would otherwise cost twenty identical, wasted session
+// lookups — a real database round trip apiece. GET /login and GET
+// /g/{slug} (server.go) are included for the same reason: neither
+// resolves a Caller either (login.html and game.html decide everything
+// from the API responses their own script fetches after the page
+// loads), so there is nothing for a lookup here to buy either of them.
+//
+// GET /{$} (handleRoot) is deliberately NOT covered: it is the one
+// public-ish route whose entire response depends on whether a Caller is
+// present and, if so, who — "no caller" redirects to /login, exactly one
+// game redirects straight there, anything else serves the picker shell —
+// so it is the opposite of a route this function exists to fast-path.
+func isPublicPath(p string) bool {
+	if p == "/login" {
+		return true
+	}
+	if strings.HasPrefix(p, "/static/") {
+		return true
+	}
+	if strings.HasPrefix(p, "/g/") {
+		return true
+	}
+	return false
 }
 
 // resolveBearerCaller resolves a bearer token to a Caller. The bool result

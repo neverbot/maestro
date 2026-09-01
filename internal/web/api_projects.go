@@ -450,10 +450,3 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	s.serveAsset(w, r, "index.html")
 }
-
-// serveAsset writes an embedded static file. Task 14 replaces this with the
-// real embedded filesystem.
-func (s *Server) serveAsset(w http.ResponseWriter, _ *http.Request, name string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte("<!doctype html><title>Maestro</title><div id=app data-asset=\"" + name + "\"></div>"))
-}

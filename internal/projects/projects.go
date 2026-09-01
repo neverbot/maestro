@@ -82,16 +82,14 @@ var (
 	// data, and telling a non-member which project IDs are real would be
 	// exactly the kind of cross-game leak the isolation invariant exists
 	// to prevent. A caller that needs to tell "no such game" apart from
-	// "not your game" for a plain lookup — a 404 page, say — uses ByID or
-	// BySlugForUser instead, whose whole job is looking a project up
-	// (BySlugForUser included, despite its name: see its own doc comment
-	// for why it still collapses "no such slug" and "not yours" into one
-	// answer, for a different reason than RoleOf does).
+	// "not your game" for a plain lookup — a 404 page, say — uses ByID
+	// instead, whose whole job is looking a project up by id with no
+	// membership check (see its own doc comment for why an id, unlike a
+	// slug, is safe to look up that way).
 	ErrNotAMember = errors.New("user is not a member of this project")
 
-	// ErrProjectNotFound is returned by ByID and BySlugForUser for a
-	// project that does not exist (or, for BySlugForUser, is not the
-	// caller's to see — see that method's doc comment).
+	// ErrProjectNotFound is returned by ByID for a project that does not
+	// exist.
 	ErrProjectNotFound = errors.New("project not found")
 
 	// ErrUserNotFound is returned by SetRole when the target user does
@@ -351,51 +349,11 @@ func (s *Service) RoleOf(ctx context.Context, userID, projectID uuid.UUID) (stri
 	return role, nil
 }
 
-// bySlug resolves a project from its normalised URL slug, with no
-// authorization check at all. It is unexported: a raw slug lookup is an
-// enumeration oracle, because unlike a project id a slug is a human-chosen
-// game name ("azeroth") — letting any authenticated caller ask "does this
-// slug exist" leaks exactly the cross-game information RoleOf goes out of
-// its way not to (see ErrNotAMember's doc comment). BySlugForUser below is
-// the exported, authorization-checked equivalent; nothing outside this
-// package needs the raw form, and nothing in this plan calls it directly.
-func (s *Service) bySlug(ctx context.Context, slug string) (Project, error) {
-	slug, err := validateSlug(slug)
-	if err != nil {
-		return Project{}, err
-	}
-	project, err := s.q.GetProjectBySlug(ctx, slug)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Project{}, ErrProjectNotFound
-		}
-		return Project{}, fmt.Errorf("lookup project: %w", err)
-	}
-	return projectFrom(project), nil
-}
-
-// BySlugForUser resolves a project from its URL slug and checks in the
-// same call that userID is a member of it, returning ErrProjectNotFound
-// for both "no such slug" and "a real game you're just not in" — the same
-// non-distinction RoleOf already makes between a non-existent project and
-// one the caller has no standing in, applied here to slug lookups instead
-// of id lookups. This is the method a /g/{slug} route should call; see
-// bySlug's own doc comment for why that method stays unexported.
-func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UUID) (Project, error) {
-	project, err := s.bySlug(ctx, slug)
-	if err != nil {
-		return Project{}, err
-	}
-	if _, err := s.RoleOf(ctx, userID, project.ID); err != nil {
-		return Project{}, ErrProjectNotFound
-	}
-	return project, nil
-}
-
 // ByID resolves a project from its id, with no membership check: unlike a
-// slug, a UUID is not a human-chosen, guessable name, so a raw id lookup
-// is not the same enumeration oracle bySlug is — reaching this method
-// already requires holding a specific id from somewhere (a caller's own
+// human-chosen slug, a UUID is not a guessable name, so a raw id lookup
+// is not an enumeration oracle the way a hypothetical slug-keyed lookup
+// with no membership check would be — reaching this method already
+// requires holding a specific id from somewhere (a caller's own
 // ListForUser result, a token's bound project id), not guessing at one.
 func (s *Service) ByID(ctx context.Context, id uuid.UUID) (Project, error) {
 	project, err := s.q.GetProjectByID(ctx, id)

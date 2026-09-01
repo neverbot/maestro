@@ -218,14 +218,6 @@ func TestSlugIsNormalisedToLowerCase(t *testing.T) {
 	if project.Slug != "azeroth" {
 		t.Fatalf("slug = %q, want lower-cased azeroth", project.Slug)
 	}
-
-	found, err := svc.BySlugForUser(ctx, "AZEROTH", user.ID)
-	if err != nil {
-		t.Fatalf("BySlugForUser: %v", err)
-	}
-	if found.ID != project.ID {
-		t.Fatalf("BySlugForUser returned a different project")
-	}
 }
 
 func TestSlugShapeIsValidated(t *testing.T) {
@@ -279,64 +271,6 @@ func TestCreateRejectsInvalidName(t *testing.T) {
 		if _, err := svc.Create(ctx, c.slug, c.name, user.ID); !errors.Is(err, projects.ErrNameInvalid) {
 			t.Fatalf("name %q: err = %v, want ErrNameInvalid", c.name, err)
 		}
-	}
-}
-
-func TestBySlugForUserUnknownReturnsErrProjectNotFound(t *testing.T) {
-	pool := testutil.NewPool(t)
-	ids := identity.New(pool, testConfig())
-	svc := projects.New(pool)
-	ctx := context.Background()
-
-	user := newUser(t, ids, "slug-lookup@studio.com")
-
-	if _, err := svc.BySlugForUser(ctx, "no-such-project", user.ID); !errors.Is(err, projects.ErrProjectNotFound) {
-		t.Fatalf("err = %v, want ErrProjectNotFound", err)
-	}
-}
-
-// TestBySlugForUserHidesExistenceFromNonMembers asserts that a real,
-// existing game's slug looks exactly like an unknown one to a caller who
-// is not a member of it: both return ErrProjectNotFound, never
-// ErrNotAMember or any other signal that would let an authenticated user
-// probe which human-chosen slugs are already taken by games they cannot
-// see.
-func TestBySlugForUserHidesExistenceFromNonMembers(t *testing.T) {
-	pool := testutil.NewPool(t)
-	ids := identity.New(pool, testConfig())
-	svc := projects.New(pool)
-	ctx := context.Background()
-
-	owner := newUser(t, ids, "slug-owner@studio.com")
-	stranger := newUser(t, ids, "slug-stranger@studio.com")
-	if _, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	_, err := svc.BySlugForUser(ctx, "azeroth", stranger.ID)
-	if !errors.Is(err, projects.ErrProjectNotFound) {
-		t.Fatalf("err = %v, want ErrProjectNotFound", err)
-	}
-}
-
-func TestBySlugForUserSucceedsForMember(t *testing.T) {
-	pool := testutil.NewPool(t)
-	ids := identity.New(pool, testConfig())
-	svc := projects.New(pool)
-	ctx := context.Background()
-
-	owner := newUser(t, ids, "slug-member-owner@studio.com")
-	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	found, err := svc.BySlugForUser(ctx, "azeroth", owner.ID)
-	if err != nil {
-		t.Fatalf("BySlugForUser: %v", err)
-	}
-	if found.ID != project.ID {
-		t.Fatalf("found a different project")
 	}
 }
 

@@ -40,19 +40,6 @@ func TestLimiterAllowedDoesNotCharge(t *testing.T) {
 	}
 }
 
-func TestLimiterResetsRecordedAttempts(t *testing.T) {
-	l := NewLimiter(2, time.Minute)
-	l.Record("k")
-	l.Record("k")
-	if l.Allowed("k") {
-		t.Fatal("two recorded attempts against a budget of two should block the third")
-	}
-	l.Reset("k")
-	if !l.Allowed("k") {
-		t.Fatal("Reset should clear the recorded attempts")
-	}
-}
-
 func TestLimiterForgetsAfterWindow(t *testing.T) {
 	clock := newFakeClock()
 	l := NewLimiter(1, 10*time.Millisecond)
@@ -97,7 +84,7 @@ func TestLimiterSweepsStaleKeys(t *testing.T) {
 	}
 }
 
-// TestLimiterConcurrentAccess exercises Allowed, Record and Reset from many
+// TestLimiterConcurrentAccess exercises Allowed and Record from many
 // goroutines against both a key they all share and keys unique to each
 // goroutine, under -race. Nothing here asserts on counts: the point is
 // that the race detector finds no unsynchronized access to the map.
@@ -116,7 +103,6 @@ func TestLimiterConcurrentAccess(t *testing.T) {
 				l.Allowed(own)
 				l.Record(own)
 			}
-			l.Reset(own)
 		}(g)
 	}
 	wg.Wait()

@@ -111,19 +111,6 @@ func (l *Limiter) Record(key string) {
 	l.maybeSweepLocked(cutoff)
 }
 
-// Reset forgets every attempt recorded for a key. Callers use it to
-// forgive a run of prior failures once the caller no longer wants them
-// counted — for instance, an operator manually clearing a lockout. A
-// successful attempt does not need this: Allowed never charges, so there
-// is nothing a success needs refunded.
-func (l *Limiter) Reset(key string) {
-	key = normalizeKey(key)
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.attempts, key)
-}
-
 // storeLocked writes kept back for key, or removes the key entirely once
 // it has nothing left to remember. Callers must hold l.mu.
 func (l *Limiter) storeLocked(key string, kept []time.Time) {
@@ -148,7 +135,7 @@ func (l *Limiter) maybeSweepLocked(cutoff time.Time) {
 // sweepLocked drops every key whose most recent attempt predates cutoff.
 // Callers must hold l.mu. It exists so that a key which is only ever
 // touched once (see the package doc on Limiter) is eventually forgotten
-// even though nothing ever calls Allowed, Record or Reset for it again.
+// even though nothing ever calls Allowed or Record for it again.
 func (l *Limiter) sweepLocked(cutoff time.Time) {
 	for key, times := range l.attempts {
 		if len(times) == 0 || !times[len(times)-1].After(cutoff) {

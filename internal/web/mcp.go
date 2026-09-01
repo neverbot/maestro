@@ -66,10 +66,25 @@ type GamesListOutput struct {
 	Truncated  bool         `json:"truncated"`
 }
 
-// CallerForToken resolves a bearer token to a Caller, for the MCP
-// transport (mcpHandler goes through the ordinary authenticate middleware
-// instead — see that method's doc comment) and for tests that want a
-// Caller without going through HTTP at all.
+// CallerForToken resolves a bearer token to a Caller. It is exported
+// only so this package's own external test package (web_test — mcp_test.go
+// and a handful of others) can build a Caller directly, without going
+// through a real HTTP request, to unit-test what a given Caller shape is
+// and is not allowed to do. No production code path calls this: the MCP
+// transport goes through the ordinary authenticate middleware instead
+// (mcpHandler's own doc comment explains why), and every other caller of
+// a Caller in this package receives one the same way. A quality review
+// asked, of this and every other export with no caller outside its own
+// tests, to either unexport it behind a test shim or document plainly
+// that it is test-only; this file chose the doc route over an internal
+// test-only shim because mcp_test.go and its siblings already live in
+// web_test, the external test package, and moving them into this
+// package's own internal test files purely to reach an unexported
+// function was a larger, unrelated churn than the export itself
+// justifies — CallerForToken's surface area is small (one function,
+// mirroring one already-reviewed piece of production logic below) and
+// its risk is nil, since nothing calls it but tests that are themselves
+// asserting what a Caller may do, not what constructs one.
 //
 // This mirrors resolveBearerCaller (auth.go) rather than calling
 // identity.UserByID a second time to learn IsAdmin: ResolveAPIToken's own

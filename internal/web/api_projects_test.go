@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -152,6 +154,17 @@ func TestRootRedirectsToTheOnlyGame(t *testing.T) {
 	if got := rec.Header().Get("Location"); got != "/g/azeroth" {
 		t.Fatalf("Location = %q, want /g/azeroth", got)
 	}
+	// handleRoot bypasses requireCaller (it needs "no caller" to mean
+	// "redirect to /login", not a 401), so it is responsible for its own
+	// Cache-Control/Vary headers — see setNoStoreHeaders's own doc
+	// comment for why this is the most identity-dependent response in
+	// the product to be missing them.
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
+	}
+	if got := rec.Header().Get("Vary"); got != "Cookie, Authorization" {
+		t.Fatalf("Vary = %q, want Cookie, Authorization", got)
+	}
 }
 
 func TestRootShowsPickerWithTwoGames(t *testing.T) {
@@ -252,13 +265,18 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
 	}
 	var created struct {
-		Token string `json:"token"`
+		ID        string `json:"id"`
+		Token     string `json:"token"`
+		TokenHint string `json:"token_hint"`
 	}
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if !strings.HasPrefix(created.Token, "mst_") {
 		t.Fatalf("token = %q, want the mst_ prefix", created.Token)
+	}
+	if created.TokenHint == "" {
+		t.Fatal("token_hint was empty on creation")
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/tokens", nil)
@@ -267,6 +285,28 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 	srv.ServeHTTP(listRec, listReq)
 	if strings.Contains(listRec.Body.String(), created.Token) {
 		t.Fatal("the listing leaked the clear token value")
+	}
+	// A test that only checks the clear value is absent would pass
+	// against an empty list too — assert the created row is actually
+	// present, by id, so a handler that silently dropped the row (or
+	// never called ListAPITokens at all) would be caught.
+	var listed struct {
+		Tokens []struct {
+			ID string `json:"id"`
+		} `json:"tokens"`
+	}
+	if err := json.NewDecoder(listRec.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode listing: %v", err)
+	}
+	found := false
+	for _, tok := range listed.Tokens {
+		if tok.ID == created.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("listing = %s, want it to contain id %q", listRec.Body.String(), created.ID)
 	}
 }
 
@@ -301,6 +341,11 @@ func TestViewerCanRevokeToken(t *testing.T) {
 	// Revocation only ever removes access, so a viewer who can see a
 	// leaked token in the listing may kill it — unlike creation, which
 	// grants standing the viewer does not have.
+	//
+	// A bare assertion on the 204 status would pass even if the handler
+	// never called RevokeAPIToken at all — mint over HTTP, revoke over
+	// HTTP, then use the bearer value against a real route and require it
+	// to actually stop authenticating.
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -310,19 +355,75 @@ func TestViewerCanRevokeToken(t *testing.T) {
 	if err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	_, row, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
+	ownerCookie := loginAs(t, srv, "owner@studio.com")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/tokens", strings.NewReader(`{"label":"agent"}`))
+	createReq.AddCookie(ownerCookie)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	srv.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create token: status = %d, want 201: %s", createRec.Code, createRec.Body.String())
+	}
+	var created struct {
+		ID    string `json:"id"`
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+
+	viewerCookie := loginAs(t, srv, "viewer@studio.com")
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/tokens/"+created.ID, nil)
+	revokeReq.AddCookie(viewerCookie)
+	revokeRec := httptest.NewRecorder()
+	srv.ServeHTTP(revokeRec, revokeReq)
+	if revokeRec.Code != http.StatusNoContent {
+		t.Fatalf("revoke: status = %d, want 204: %s", revokeRec.Code, revokeRec.Body.String())
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+created.Token)
+	meRec := httptest.NewRecorder()
+	srv.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked token still authenticates: status = %d, want 401", meRec.Code)
+	}
+}
+
+// TestRevokingAnUnknownOrForeignTokenIsANoop pins handleRevokeToken's own
+// doc comment: revoking a token id that does not exist, or that belongs
+// to a different project than the one in the URL, is deliberately a
+// no-op 204, not a 404 — telling the two apart would let a member of one
+// game probe whether some other token id belongs to a different project.
+// This must never be "fixed" into a lookup-then-404.
+func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	azeroth, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	leMans, _ := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
+	foreignToken, foreignRow, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: leMans.ID, UserID: owner.ID, Label: "other game's agent"})
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
+	cookie := loginAs(t, srv, "owner@studio.com")
 
-	cookie := loginAs(t, srv, "viewer@studio.com")
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/tokens/"+row.ID.String(), nil)
-	req.AddCookie(cookie)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+	for name, tokenID := range map[string]string{"unknown": uuid.NewString(), "foreign": foreignRow.ID.String()} {
+		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.ID.String()+"/tokens/"+tokenID, nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("%s token id: status = %d, want 204: %s", name, rec.Code, rec.Body.String())
+		}
+	}
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body.String())
+	// The foreign token must still be live: azeroth's DELETE never
+	// touched a token that belongs to le-mans, even by id.
+	if _, err := ids.ResolveAPIToken(ctx, foreignToken); err != nil {
+		t.Fatalf("foreign token was revoked by another game's DELETE: %v", err)
 	}
 }
 
@@ -472,14 +573,25 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	// A non-owner member may remove themselves.
+	// A non-owner member may remove themselves. The response is 200 with
+	// the (here, empty) list of tokens the removal revoked, not a bare
+	// 204 — see handleRemoveMember's own doc comment.
 	viewerCookie := loginAs(t, srv, "viewer@studio.com")
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/members/"+viewer.ID.String(), nil)
 	req.AddCookie(viewerCookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("viewer removing self: status = %d, want 204", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("viewer removing self: status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var removed struct {
+		RevokedTokens []string `json:"revoked_tokens"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&removed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(removed.RevokedTokens) != 0 {
+		t.Fatalf("revoked_tokens = %v, want none (the viewer held no tokens)", removed.RevokedTokens)
 	}
 
 	// The sole remaining owner may not remove themselves.
@@ -499,6 +611,53 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	}
 	if body.Error != "last_owner" {
 		t.Fatalf("error = %q, want last_owner", body.Error)
+	}
+}
+
+// TestRemoveMemberReportsRevokedTokenLabels pins the point of the 200
+// response shape: an owner removing a member with live tokens in this
+// game must see which agents just stopped working, by label, not just a
+// bare success.
+func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: editor.ID, Label: "nightly export"}); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: editor.ID, Label: "seed agent"}); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	cookie := loginAs(t, srv, "owner@studio.com")
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/members/"+editor.ID.String(), nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		RevokedTokens []string `json:"revoked_tokens"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := map[string]bool{"nightly export": true, "seed agent": true}
+	if len(body.RevokedTokens) != len(want) {
+		t.Fatalf("revoked_tokens = %v, want exactly %v", body.RevokedTokens, want)
+	}
+	for _, label := range body.RevokedTokens {
+		if !want[label] {
+			t.Fatalf("unexpected revoked label %q", label)
+		}
 	}
 }
 

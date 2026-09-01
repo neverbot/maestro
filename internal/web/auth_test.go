@@ -171,7 +171,7 @@ func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	if err := projSvc.RemoveMember(ctx, agent.ID, project.ID); err != nil {
+	if _, err := projSvc.RemoveMember(ctx, agent.ID, project.ID); err != nil {
 		t.Fatalf("RemoveMember: %v", err)
 	}
 

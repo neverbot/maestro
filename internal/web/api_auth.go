@@ -38,16 +38,23 @@ type registerRequest struct {
 	InviteToken string `json:"invite_token"`
 }
 
-// decodeAuthBody enforces the two boundary checks every handler in this
-// file needs before it looks at the body at all: a declared
-// application/json content type (a browser form post, or a client that
-// forgot the header, gets a clear 415 instead of a JSON decode error that
-// reads like a malformed body), and the maxAuthRequestBodyBytes bound
-// (Task 10's note — see the constant's own doc comment). A body that
-// merely exceeds the bound is reported as 413, not the generic 400 an
-// actually-malformed body gets, since http.MaxBytesReader's own error
-// (*http.MaxBytesError) lets the two be told apart.
-func decodeAuthBody(w http.ResponseWriter, r *http.Request, v any) bool {
+// decodeJSONBody enforces the two boundary checks every handler that
+// accepts a JSON body needs before it looks at the body at all: a
+// declared application/json content type (a browser form post, or a
+// client that forgot the header, gets a clear 415 instead of a JSON
+// decode error that reads like a malformed body), and the
+// maxAuthRequestBodyBytes bound (Task 10's note — see the constant's own
+// doc comment, and identity.HashPassword's, for why service validation
+// alone is not enough: it only rejects an oversized value after decoding
+// it into memory). A body that merely exceeds the bound is reported as
+// 413, not the generic 400 an actually-malformed body gets, since
+// http.MaxBytesReader's own error (*http.MaxBytesError) lets the two be
+// told apart. Despite the name this file's own quality review gave it,
+// this is not auth-specific: every JSON-accepting handler in this
+// package uses it, api_projects.go and api_tokens.go included, so a
+// handler that reads r.Body directly is the exception that needs
+// justifying, not the rule.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
 		return false
@@ -68,7 +75,7 @@ func decodeAuthBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if !decodeAuthBody(w, r, &req) {
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	// Normalized the same way Authenticate normalizes its own lookup
@@ -162,7 +169,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
-	if !decodeAuthBody(w, r, &req) {
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 

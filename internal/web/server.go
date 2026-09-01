@@ -98,12 +98,12 @@ func NewServer(opts Options) *Server {
 	s.mux.HandleFunc("GET /{$}", s.handleRoot)
 	s.mux.Handle("GET /api/games", requireCaller(s.handleListGames))
 	s.mux.Handle("POST /api/games", requireCaller(s.handleCreateGame))
-	s.mux.Handle("GET /api/games/{game}/members", requireCaller(s.handleListMembers))
-	s.mux.Handle("PATCH /api/games/{game}/members/{user}", requireCaller(s.handleChangeRole))
-	s.mux.Handle("DELETE /api/games/{game}/members/{user}", requireCaller(s.handleRemoveMember))
-	s.mux.Handle("POST /api/games/{game}/tokens", requireCaller(s.handleCreateToken))
-	s.mux.Handle("GET /api/games/{game}/tokens", requireCaller(s.handleListTokens))
-	s.mux.Handle("DELETE /api/games/{game}/tokens/{token}", requireCaller(s.handleRevokeToken))
+	s.mux.Handle("GET /api/games/{game}/members", requireCaller(s.requireProject(s.handleListMembers)))
+	s.mux.Handle("PATCH /api/games/{game}/members/{user}", requireCaller(s.requireProject(s.handleChangeRole)))
+	s.mux.Handle("DELETE /api/games/{game}/members/{user}", requireCaller(s.requireProject(s.handleRemoveMember)))
+	s.mux.Handle("POST /api/games/{game}/tokens", requireCaller(s.requireProject(s.handleCreateToken)))
+	s.mux.Handle("GET /api/games/{game}/tokens", requireCaller(s.requireProject(s.handleListTokens)))
+	s.mux.Handle("DELETE /api/games/{game}/tokens/{token}", requireCaller(s.requireProject(s.handleRevokeToken)))
 	// Built once here, not per request in ServeHTTP: authenticate wraps
 	// s.mux in a closure, and there is no reason to allocate a fresh one
 	// for every single incoming request when the mux it wraps never

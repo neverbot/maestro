@@ -22,10 +22,26 @@ type uuidValue = uuid.UUID
 // Error codes returned in the "error" field of every JSON error body this
 // package writes. Named here, not spelled inline at each call site, so a
 // future handler cannot introduce a second string for the same condition
-// (e.g. "not_authenticated" alongside "unauthorized") purely by typo.
+// (e.g. "not_authenticated" alongside "unauthorized") purely by typo. A
+// quality review of Task 12 found api_projects.go and api_tokens.go had
+// grown eleven inline string literals across their handlers instead of
+// using this block, several of them ("forbidden", "not_found") repeated
+// verbatim at multiple call sites with no shared constant catching a
+// future typo between them; every one of those call sites now uses a
+// name from here.
 const (
-	errCodeUnauthorized = "unauthorized"
-	errCodeInternal     = "internal_error"
+	errCodeUnauthorized   = "unauthorized"
+	errCodeInternal       = "internal_error"
+	errCodeForbidden      = "forbidden"
+	errCodeNotFound       = "not_found"
+	errCodeBadRequest     = "bad_request"
+	errCodeScopeViolation = "scope_violation"
+	errCodeSlugTaken      = "slug_taken"
+	errCodeSlugInvalid    = "slug_invalid"
+	errCodeNameInvalid    = "name_invalid"
+	errCodeInvalidRole    = "invalid_role"
+	errCodeLastOwner      = "last_owner"
+	errCodeLabelInvalid   = "label_invalid"
 )
 
 // Caller is the authenticated principal of a request. It has exactly two
@@ -255,13 +271,26 @@ func (s *Server) resolveSessionCaller(ctx context.Context, token string) (Caller
 	return newSessionCaller(user.ID, user.IsAdmin), true, nil
 }
 
+// setNoStoreHeaders sets the two response headers every response whose
+// content depends on who is asking needs, regardless of which handler
+// produces it: Cache-Control forbids a shared cache or a browser
+// back-button restore from replaying a response computed for one
+// identity to another, and Vary tells any cache in front of this server
+// that the response depends on exactly the two headers authenticate
+// reads, not just the URL. requireCaller sets these for every handler it
+// wraps; handleRoot (server.go) is the one response in this package that
+// bypasses requireCaller entirely — it has to treat "no caller" as a
+// redirect to /login rather than a 401 — and calls this directly so it
+// does not ship as the most identity-dependent response in the product
+// with neither header.
+func setNoStoreHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Cookie, Authorization")
+}
+
 // requireCaller wraps a handler so anonymous requests get a 401, and adds
-// the response headers every authenticated response needs regardless of
-// which handler produces it: Cache-Control forbids storing a response
-// that was computed for one identity from being replayed to another (a
-// shared cache, a browser back-button restore), and Vary tells any cache
-// that sits in front of this server that the response depends on exactly
-// the two headers authenticate reads, not just the URL.
+// the response headers every authenticated response needs (see
+// setNoStoreHeaders).
 func requireCaller(h func(http.ResponseWriter, *http.Request, Caller)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		caller, ok := CallerFrom(r.Context())
@@ -270,8 +299,7 @@ func requireCaller(h func(http.ResponseWriter, *http.Request, Caller)) http.Hand
 			writeError(w, http.StatusUnauthorized, errCodeUnauthorized, "authentication required")
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Vary", "Cookie, Authorization")
+		setNoStoreHeaders(w)
 		h(w, r, caller)
 	}
 }

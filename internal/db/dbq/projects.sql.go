@@ -220,10 +220,11 @@ func (q *Queries) ListProjectsForUser(ctx context.Context, userID uuid.UUID) ([]
 	return items, nil
 }
 
-const revokeAPITokensForMember = `-- name: RevokeAPITokensForMember :exec
+const revokeAPITokensForMember = `-- name: RevokeAPITokensForMember :many
 UPDATE api_tokens SET revoked_at = now()
 WHERE user_id = $1::uuid AND project_id = $2::uuid
   AND revoked_at IS NULL
+RETURNING label
 `
 
 type RevokeAPITokensForMemberParams struct {
@@ -231,20 +232,42 @@ type RevokeAPITokensForMemberParams struct {
 	ProjectID uuid.UUID
 }
 
-// Called from RemoveMember, inside the same transaction as the
-// membership deletion: every live API token in this project created by
-// the removed member is revoked — not every token that member has ever
-// created across every project they belong to, only the ones scoped to
-// the project they just lost access to. This is SQL over api_tokens, not
-// a reason for this package to import identity: the query runs through
-// the same dbq.Queries handle UpsertMembership above already crosses in
-// the other direction (UpsertMembership is defined in identity.sql and
-// called from this package). Idempotent and already project-scoped for
-// the same reason identity's own RevokeAPIToken is (see that query's
-// comment): a member with no tokens, or already-revoked ones, is a
-// harmless no-op, so RemoveMember never needs to check what exists
+// Called from RemoveMember and, since the quality review that added the
+// "a token is editor-equivalent" rule, from SetRole too, both inside the
+// same transaction as the membership change: every live API token in
+// this project created by the member is revoked — not every token that
+// member has ever created across every project they belong to, only the
+// ones scoped to the project their standing just changed in. This is SQL
+// over api_tokens, not a reason for this package to import identity: the
+// query runs through the same dbq.Queries handle UpsertMembership above
+// already crosses in the other direction (UpsertMembership is defined in
+// identity.sql and called from this package). Idempotent and already
+// project-scoped for the same reason identity's own RevokeAPIToken is
+// (see that query's comment): a member with no tokens, or already-revoked
+// ones, is a harmless no-op, so neither caller needs to check what exists
 // before calling this.
-func (q *Queries) RevokeAPITokensForMember(ctx context.Context, arg RevokeAPITokensForMemberParams) error {
-	_, err := q.db.Exec(ctx, revokeAPITokensForMember, arg.UserID, arg.ProjectID)
-	return err
+//
+// RETURNING label, not :exec, so RemoveMember can hand its caller the
+// labels of whichever agents just lost access — a revoked token id means
+// nothing to the owner who removed the member; the label ("nightly
+// export", "seed agent") is what lets them recognise which of their
+// agents just stopped working.
+func (q *Queries) RevokeAPITokensForMember(ctx context.Context, arg RevokeAPITokensForMemberParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, revokeAPITokensForMember, arg.UserID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var label string
+		if err := rows.Scan(&label); err != nil {
+			return nil, err
+		}
+		items = append(items, label)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

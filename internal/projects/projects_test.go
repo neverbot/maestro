@@ -584,7 +584,7 @@ func TestRemoveMemberCannotRemoveSoleOwner(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.RemoveMember(ctx, owner.ID, project.ID); !errors.Is(err, projects.ErrLastOwner) {
+	if _, err := svc.RemoveMember(ctx, owner.ID, project.ID); !errors.Is(err, projects.ErrLastOwner) {
 		t.Fatalf("err = %v, want ErrLastOwner", err)
 	}
 
@@ -613,7 +613,7 @@ func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
 	if err := svc.SetRole(ctx, second.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	if err := svc.RemoveMember(ctx, owner.ID, project.ID); err != nil {
+	if _, err := svc.RemoveMember(ctx, owner.ID, project.ID); err != nil {
 		t.Fatalf("RemoveMember: %v", err)
 	}
 	if _, err := svc.RoleOf(ctx, owner.ID, project.ID); !errors.Is(err, projects.ErrNotAMember) {
@@ -634,8 +634,10 @@ func TestRemoveMemberOfNonMemberIsNoop(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if err := svc.RemoveMember(ctx, stranger.ID, project.ID); err != nil {
+	if revoked, err := svc.RemoveMember(ctx, stranger.ID, project.ID); err != nil {
 		t.Fatalf("RemoveMember of non-member: %v", err)
+	} else if len(revoked) != 0 {
+		t.Fatalf("revoked = %v, want none for a non-member", revoked)
 	}
 }
 
@@ -668,8 +670,12 @@ func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	if err := svc.RemoveMember(ctx, member.ID, project.ID); err != nil {
+	revoked, err := svc.RemoveMember(ctx, member.ID, project.ID)
+	if err != nil {
 		t.Fatalf("RemoveMember: %v", err)
+	}
+	if len(revoked) != 1 || revoked[0] != "member's agent" {
+		t.Fatalf("revoked = %v, want [\"member's agent\"]", revoked)
 	}
 
 	if _, err := ids.ResolveAPIToken(ctx, token); !errors.Is(err, identity.ErrTokenInvalid) {
@@ -710,7 +716,7 @@ func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	if err := svc.RemoveMember(ctx, member.ID, azeroth.ID); err != nil {
+	if _, err := svc.RemoveMember(ctx, member.ID, azeroth.ID); err != nil {
 		t.Fatalf("RemoveMember: %v", err)
 	}
 
@@ -790,8 +796,8 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make([]error, 2)
 		wg.Add(2)
-		go func() { defer wg.Done(); errs[0] = svc.RemoveMember(ctx, ownerA.ID, project.ID) }()
-		go func() { defer wg.Done(); errs[1] = svc.RemoveMember(ctx, ownerB.ID, project.ID) }()
+		go func() { defer wg.Done(); _, errs[0] = svc.RemoveMember(ctx, ownerA.ID, project.ID) }()
+		go func() { defer wg.Done(); _, errs[1] = svc.RemoveMember(ctx, ownerB.ID, project.ID) }()
 		wg.Wait()
 
 		succeeded, refused := 0, 0
@@ -818,6 +824,115 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 		if remainingOwners != 1 {
 			t.Fatalf("run %d: %d owners remain, want exactly 1", run, remainingOwners)
 		}
+	}
+}
+
+// TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner
+// is the mixed race neither TestConcurrentRemovalLeavesExactlyOneOwner
+// (both goroutines call RemoveMember) nor any SetRole test alone
+// exercises: one goroutine removing owner A while a second demotes owner
+// B to viewer, concurrently, against the same two-owner project.
+// CountOwnersForUpdate's row lock and migration 0002's constraint
+// trigger both apply identically regardless of which of the two methods
+// is doing the counting or the demoting, so the same invariant —
+// exactly one of the two must win, the project never ends up with zero
+// owners — has to hold across the mix, not just within either method on
+// its own.
+func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *testing.T) {
+	for run := 0; run < 5; run++ {
+		pool := testutil.NewPool(t)
+		ids := identity.New(pool, testConfig())
+		svc := projects.New(pool)
+		ctx := context.Background()
+
+		ownerA := newUser(t, ids, fmt.Sprintf("mixed-race-a-%d@studio.com", run))
+		ownerB := newUser(t, ids, fmt.Sprintf("mixed-race-b-%d@studio.com", run))
+		project, err := svc.Create(ctx, fmt.Sprintf("mixed-race-%d", run), "Mixed Race", ownerA.ID)
+		if err != nil {
+			t.Fatalf("run %d: Create: %v", run, err)
+		}
+		if err := svc.SetRole(ctx, ownerB.ID, project.ID, "owner"); err != nil {
+			t.Fatalf("run %d: SetRole: %v", run, err)
+		}
+
+		var wg sync.WaitGroup
+		var removeErr, demoteErr error
+		wg.Add(2)
+		go func() { defer wg.Done(); _, removeErr = svc.RemoveMember(ctx, ownerA.ID, project.ID) }()
+		go func() { defer wg.Done(); demoteErr = svc.SetRole(ctx, ownerB.ID, project.ID, "viewer") }()
+		wg.Wait()
+
+		succeeded, refused := 0, 0
+		for _, e := range []error{removeErr, demoteErr} {
+			switch {
+			case e == nil:
+				succeeded++
+			case errors.Is(e, projects.ErrLastOwner):
+				refused++
+			default:
+				t.Fatalf("run %d: unexpected error: %v", run, e)
+			}
+		}
+		if succeeded != 1 || refused != 1 {
+			t.Fatalf("run %d: succeeded=%d refused=%d, want exactly one of each (removeErr=%v demoteErr=%v)", run, succeeded, refused, removeErr, demoteErr)
+		}
+
+		remainingOwners := 0
+		for _, uid := range []uuid.UUID{ownerA.ID, ownerB.ID} {
+			if role, err := svc.RoleOf(ctx, uid, project.ID); err == nil && role == "owner" {
+				remainingOwners++
+			}
+		}
+		if remainingOwners != 1 {
+			t.Fatalf("run %d: %d owners remain, want exactly 1", run, remainingOwners)
+		}
+	}
+}
+
+// TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens pins the
+// design a quality review settled on for Task 12: a token is
+// editor-equivalent and carries no role of its own, so the only way to
+// keep it from ever exceeding its minter's current standing — without a
+// membership lookup on every authenticated request — is to revoke it the
+// moment that standing drops below editor. Demoting to editor or
+// promoting must never trigger this; only a demotion to viewer does,
+// since editor and owner both remain roles.AtLeast Editor.
+func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	svc := projects.New(pool)
+	ctx := context.Background()
+
+	owner := newUser(t, ids, "demote-owner@studio.com")
+	member := newUser(t, ids, "demote-member@studio.com")
+	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole (editor): %v", err)
+	}
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: project.ID, UserID: member.ID, Label: "demoted member's agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	// Demoting editor to editor (a no-op change) and re-promoting must
+	// not revoke anything: both stay AtLeast Editor.
+	if err := svc.SetRole(ctx, member.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole (editor again): %v", err)
+	}
+	if _, err := ids.ResolveAPIToken(ctx, token); err != nil {
+		t.Fatalf("token revoked by a same-tier role change: %v", err)
+	}
+
+	if err := svc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
+		t.Fatalf("SetRole (viewer): %v", err)
+	}
+	if _, err := ids.ResolveAPIToken(ctx, token); !errors.Is(err, identity.ErrTokenInvalid) {
+		t.Fatalf("err = %v, want ErrTokenInvalid: a demotion below editor must revoke the member's tokens", err)
 	}
 }
 

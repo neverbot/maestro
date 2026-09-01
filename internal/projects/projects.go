@@ -481,6 +481,27 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 			}
 			return fmt.Errorf("set role: %w", err)
 		}
+
+		// A token grants an agent editor-equivalent access for as long as
+		// it lives, independent of its minter's current standing (Task
+		// 12's quality review settled this explicitly: a token outlives
+		// the person who made it, so re-deriving its access from a live
+		// membership lookup on every request would contradict that
+		// design, not honour it — see ProjectScope's own doc comment in
+		// internal/web/api_projects.go). The invariant that makes that
+		// safe is that a token never exceeds its minter's *current*
+		// standing, and the only way to keep that true without a
+		// per-request lookup is to close it off the moment standing
+		// changes: demoting a member below editor revokes every token
+		// they minted in this project, the same way RemoveMember already
+		// revokes them outright when membership itself is lost. Promoting,
+		// or moving between editor and owner, never triggers this — both
+		// remain roles.AtLeast Editor.
+		if !roles.AtLeast(roles.Role(role), roles.Editor) {
+			if _, err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID}); err != nil {
+				return fmt.Errorf("revoke demoted member's tokens: %w", err)
+			}
+		}
 		return nil
 	})
 }
@@ -513,8 +534,15 @@ func (s *Service) SetRole(ctx context.Context, userID, projectID uuid.UUID, role
 // and reached through the same shared dbq.Queries handle UpsertMembership
 // elsewhere in this file already uses the other way — a query defined in
 // identity.sql, called from here.
-func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID) error {
-	return s.withTx(ctx, func(q *dbq.Queries) error {
+//
+// Returns the labels of every token this call revoked, never nil (see
+// this method's own tail for why) — a quality review pointed out that
+// answering with a bare success left an owner with no idea which of
+// their agents just stopped working: a revoked token id means nothing on
+// its own, but "nightly export" or "seed agent" does.
+func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID) ([]string, error) {
+	var revokedLabels []string
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
 		current, err := q.GetMembershipRole(ctx, dbq.GetMembershipRoleParams{UserID: userID, ProjectID: projectID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -534,9 +562,23 @@ func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID)
 		if err := q.DeleteMembership(ctx, dbq.DeleteMembershipParams{UserID: userID, ProjectID: projectID}); err != nil {
 			return fmt.Errorf("remove member: %w", err)
 		}
-		if err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID}); err != nil {
+		labels, err := q.RevokeAPITokensForMember(ctx, dbq.RevokeAPITokensForMemberParams{UserID: userID, ProjectID: projectID})
+		if err != nil {
 			return fmt.Errorf("revoke member's tokens: %w", err)
 		}
+		revokedLabels = labels
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Never nil: the caller (Task 12's handler) marshals this straight
+	// into a JSON response, and a removed member with no live tokens
+	// should answer with an empty array ("revoked_tokens": []), not JSON
+	// null — RevokeAPITokensForMember's own :many query returns a nil
+	// slice, not an empty one, when it matches zero rows.
+	if revokedLabels == nil {
+		revokedLabels = []string{}
+	}
+	return revokedLabels, nil
 }

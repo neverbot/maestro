@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -216,6 +218,12 @@ func TestRevokeAllSessionsLeavesOtherUsersAlone(t *testing.T) {
 	}
 }
 
+// TestExtendSessionPushesExpiryForward pins the value ExtendSession
+// writes: roughly now() + ttl. The session is backdated first so the
+// query's own one-minute slack (identity.sql's doc comment on
+// ExtendSession explains why it exists) does not treat it as already
+// fresh enough to skip — a session within a minute of now()+ttl already
+// is exactly the case this method is supposed to leave alone.
 func TestExtendSessionPushesExpiryForward(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
@@ -230,22 +238,119 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	token, firstExpiry, err := svc.IssueSession(ctx, user.ID)
+	token, _, err := svc.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
 	}
 
-	newExpiry := firstExpiry.Add(24 * time.Hour)
-	if err := svc.ExtendSession(ctx, token, newExpiry); err != nil {
+	tokenHash := sha256.Sum256([]byte(token))
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`,
+		time.Now().Add(-time.Hour), tokenHash[:]); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
+
+	ttl := 24 * time.Hour
+	before := time.Now()
+	n, err := svc.ExtendSession(ctx, token, ttl)
+	after := time.Now()
+	if err != nil {
 		t.Fatalf("ExtendSession: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("ExtendSession rows affected = %d, want 1", n)
 	}
 
 	_, gotExpiry, err := svc.UserForSession(ctx, token)
 	if err != nil {
 		t.Fatalf("UserForSession: %v", err)
 	}
-	if diff := gotExpiry.Sub(newExpiry); diff < -time.Second || diff > time.Second {
-		t.Fatalf("session expiry = %v, want close to %v", gotExpiry, newExpiry)
+	// The target is computed by Postgres' own now(), not the Go process',
+	// so the bracket needs a little slack for clock skew between the two
+	// — a real skew of a few milliseconds is expected; a bug that renews
+	// to the wrong offset (half the ttl, say) misses by hours and still
+	// fails this.
+	const clockSkewSlack = 2 * time.Second
+	wantMin, wantMax := before.Add(ttl-clockSkewSlack), after.Add(ttl+clockSkewSlack)
+	if gotExpiry.Before(wantMin) || gotExpiry.After(wantMax) {
+		t.Fatalf("session expiry = %v, want between %v and %v (now + ttl, bracketed around the call)", gotExpiry, wantMin, wantMax)
+	}
+}
+
+// TestConcurrentRenewalsProduceExactlyOneWrite pins the property
+// ExtendSession's doc comment (and identity.sql's) claims and an earlier
+// version of the guard did not actually deliver: several concurrent
+// renewal attempts against the same session collapse into a single
+// write, not one write per attempt. A quality review proved the earlier
+// version wrong by holding the row lock open with pg_sleep and by firing
+// fifteen concurrent requests at the real binary (three to six writes
+// each run, not one) — and found that a naive "read the final
+// expires_at" test would have stayed green throughout, because the
+// final value looks identical whether one write happened or six.
+//
+// This calls ExtendSession directly, concurrently, rather than driving
+// it through resolveSessionCaller over HTTP: going through the
+// middleware adds a second source of nondeterminism this test does not
+// want — UserForSession's own read (no row lock) can itself observe an
+// already-renewed expires_at and skip calling ExtendSession at all once
+// any one request's write has landed, which is a legitimate reason for
+// fewer than N attempts and not what this test is trying to pin. Calling
+// ExtendSession unconditionally, N times, concurrently, against one
+// already-stale session isolates the SQL guard's own concurrency
+// property from that Go-side decision.
+//
+// RowsAffected (this method's own return value, via :execrows — see its
+// doc comment) is summed across every goroutine rather than reading
+// expires_at afterward, so the assertion is a direct count of writes
+// Postgres reports, not an inference from a value that cannot tell one
+// write apart from several.
+func TestConcurrentRenewalsProduceExactlyOneWrite(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email:       "concurrent@studio.com",
+		DisplayName: "Concurrent",
+		Password:    "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	tokenHash := sha256.Sum256([]byte(token))
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`,
+		time.Now().Add(-time.Hour), tokenHash[:]); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
+
+	const attempts = 15
+	var wg sync.WaitGroup
+	var totalRowsAffected atomic.Int64
+	errs := make(chan error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n, err := svc.ExtendSession(ctx, token, 24*time.Hour)
+			if err != nil {
+				errs <- err
+				return
+			}
+			totalRowsAffected.Add(n)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("ExtendSession: %v", err)
+	}
+
+	if got := totalRowsAffected.Load(); got != 1 {
+		t.Fatalf("total rows affected across %d concurrent ExtendSession calls = %d, want exactly 1", attempts, got)
 	}
 }
 

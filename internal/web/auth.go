@@ -209,19 +209,18 @@ func (s *Server) resolveBearerCaller(ctx context.Context, token string) (Caller,
 // This is also where sliding sessions are implemented: UserForSession
 // returns the session's own expiry (Task 6) alongside the user precisely
 // so this method could act on it. A session more than halfway through its
-// SESSION_TTL lifetime is extended back out to a full SESSION_TTL from
-// now (capped at identity.maxSessionLifetime from the session's creation —
-// see ExtendSession's own doc comment), so a caller in continued use never
-// gets logged out mid-session; one that goes quiet simply expires on
-// schedule, and one in continuous use for months eventually stops being
-// renewed and expires at the cap. The halfway threshold is what keeps
-// this off the per-request write path — extending on literally every
-// authenticated request would write to the sessions table on the hottest
-// session-authenticated path in the product, the same mistake Task 9
-// fixed for token last_used_at via touchThrottle (tokens.go); a session
-// already past the threshold and used again before it next crosses it
-// costs no extra write, and ExtendSession's own WHERE clause is the
-// backstop that makes that true even if this Go-side check were wrong.
+// SESSION_TTL lifetime is a candidate for renewal (capped at
+// identity.maxSessionLifetime from the session's creation), so a caller
+// in continued use never gets logged out mid-session; one that goes
+// quiet simply expires on schedule, and one in continuous use for months
+// eventually stops being renewed and expires at the cap. The halfway
+// check here decides only whether to *attempt* a renewal, keeping that
+// decision off the per-request path for a session nowhere near expiry —
+// it does not, by itself, guarantee only one write when several requests
+// cross halfway together; ExtendSession's own WHERE clause is what
+// actually prevents that pile-up (see its doc comment in sessions.go for
+// why the earlier version of this comment overclaimed that and was
+// wrong).
 //
 // This lives in the authentication middleware, not in a REST handler
 // (Task 11's login/logout/registration endpoints), because resolving a
@@ -239,7 +238,7 @@ func (s *Server) resolveSessionCaller(ctx context.Context, token string) (Caller
 	}
 
 	if ttl := s.opts.Config.SessionTTL; ttl > 0 && time.Until(expiresAt) < ttl/2 {
-		if err := s.opts.Identity.ExtendSession(ctx, token, time.Now().Add(ttl)); err != nil {
+		if _, err := s.opts.Identity.ExtendSession(ctx, token, ttl); err != nil {
 			// Sliding renewal is a convenience, not part of the
 			// authentication decision: a failed extend must not turn an
 			// otherwise-valid, already-authenticated session into a hard

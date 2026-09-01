@@ -363,7 +363,11 @@ func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserForSession: %v", err)
 	}
-	wantMin, wantMax := before.Add(cfg.SessionTTL), after.Add(cfg.SessionTTL)
+	// clockSkewSlack allows for the target being computed by Postgres'
+	// own now(), not the Go process' — see sessions_test.go's identical
+	// constant for why a tight, zero-slack bracket flaked here.
+	const clockSkewSlack = 2 * time.Second
+	wantMin, wantMax := before.Add(cfg.SessionTTL-clockSkewSlack), after.Add(cfg.SessionTTL+clockSkewSlack)
 	if newExpiry.Before(wantMin) || newExpiry.After(wantMax) {
 		t.Fatalf("expiry = %v, want between %v and %v (now + SessionTTL, bracketed around the request)", newExpiry, wantMin, wantMax)
 	}

@@ -111,32 +111,46 @@ func (s *Service) UserForSession(ctx context.Context, token string) (User, time.
 	return user, row.SessionExpiresAt.Time, nil
 }
 
-// ExtendSession pushes a session's expiry forward to expiresAt, capped at
-// maxSessionLifetime from the session's own creation. Task 10's
+// ExtendSession pushes a session's expiry forward to roughly now() + ttl,
+// capped at maxSessionLifetime from the session's own creation. Task 10's
 // authentication middleware calls it from resolveSessionCaller, on a
 // session more than halfway through its lifetime, to slide the expiry
 // forward without logging the caller out mid-use; that halfway threshold
-// (not "every request") is what keeps this off the per-request write
-// path, the same way touchThrottle keeps ResolveAPIToken's last_used_at
-// write off it (tokens.go). It exists here, in the identity package
-// rather than at the HTTP layer, so that policy needs no schema or sqlc
-// change of its own to support it.
+// (not "every request") is what keeps the *decision to attempt* a
+// renewal off the per-request path, the same way touchThrottle keeps
+// ResolveAPIToken's last_used_at write off it (tokens.go). It exists
+// here, in the identity package rather than at the HTTP layer, so that
+// policy needs no schema or sqlc change of its own to support it.
 //
-// Both the concurrency guard (losing writers under two tabs crossing
-// halfway together become no-ops) and the maxSessionLifetime cap are
-// enforced by this query's own WHERE clause, not by anything in this Go
-// method — see identity.sql's doc comment on ExtendSession for the detail
-// that actually matters: this stays an UPDATE, never an upsert, so a
-// logout racing this call cannot resurrect a session it just deleted.
-func (s *Service) ExtendSession(ctx context.Context, token string, expiresAt time.Time) error {
+// The target expiry is computed by the query itself, from Postgres' own
+// now() and the ttl passed in — not by this method computing
+// time.Now().Add(ttl) and handing over an already-resolved timestamp.
+// That distinction is load-bearing, not stylistic: an earlier version
+// did the latter, and it did not make concurrent renewals collapse into
+// one write the way its comment claimed, because two concurrent requests
+// each compute their own, slightly later, target and each satisfies a
+// WHERE clause that only asked "is my target later than the current
+// value". See identity.sql's doc comment on ExtendSession for the actual
+// fix (a one-minute slack in the predicate) and for why this stays an
+// UPDATE, never an upsert, so a logout racing this call cannot resurrect
+// a session it just deleted.
+//
+// Returns the number of rows the UPDATE actually touched — 0 or 1, since
+// token_hash is the table's primary key. resolveSessionCaller does not
+// use this value; it exists so a test can count actual writes directly
+// (see TestConcurrentRenewalsProduceExactlyOneWrite) instead of
+// inferring them from the final expires_at, which looks identical
+// whether one write happened or several.
+func (s *Service) ExtendSession(ctx context.Context, token string, ttl time.Duration) (int64, error) {
 	sum := sha256.Sum256([]byte(token))
-	if err := s.q.ExtendSession(ctx, dbq.ExtendSessionParams{
+	n, err := s.q.ExtendSession(ctx, dbq.ExtendSessionParams{
 		TokenHash: sum[:],
-		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	}); err != nil {
-		return fmt.Errorf("extend session: %w", err)
+		Ttl:       pgtype.Interval{Microseconds: ttl.Microseconds(), Valid: true},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("extend session: %w", err)
 	}
-	return nil
+	return n, nil
 }
 
 // RevokeSession deletes one session, identified by its token. Deleting an

@@ -201,49 +201,70 @@ func (q *Queries) DeleteSessionsForUser(ctx context.Context, userID uuid.UUID) e
 	return err
 }
 
-const extendSession = `-- name: ExtendSession :exec
+const extendSession = `-- name: ExtendSession :execrows
 UPDATE sessions
-SET expires_at = LEAST($1::timestamptz, created_at + interval '90 days')
+SET expires_at = LEAST(created_at + interval '90 days', now() + $1::interval)
 WHERE token_hash = $2::bytea
-  AND expires_at < LEAST($1::timestamptz, created_at + interval '90 days')
+  AND expires_at < now() + $1::interval - interval '1 minute'
 `
 
 type ExtendSessionParams struct {
-	ExpiresAt pgtype.Timestamptz
+	Ttl       pgtype.Interval
 	TokenHash []byte
 }
 
 // Sliding renewal, called from web.resolveSessionCaller on a session past
-// the halfway point of its SESSION_TTL. Two things keep this safe and
-// bounded, both encoded in the WHERE clause rather than trusted to the Go
-// caller:
+// the halfway point of its SESSION_TTL. The target expiry is computed
+// here, in SQL, from the session's own row and Postgres' own now() — not
+// passed in from Go as an already-resolved timestamp. An earlier version
+// did the latter (now().Add(ttl) computed once per request in auth.go)
+// and its WHERE clause compared "is the new value later than the
+// current one" — which sounds like it should make concurrent renewals
+// collapse into one write, but does not: each request computes its own,
+// slightly later, wall-clock target, so a second writer blocking on the
+// row lock wakes up, re-evaluates against the now-committed row, finds
+// its own target still greater, and writes again. A quality review
+// proved this by holding the row lock open with pg_sleep and by firing
+// fifteen concurrent requests at the real binary — three to six writes
+// each time, not one.
 //
-// Concurrency: several tabs belonging to the same session crossing
-// halfway together all read the same expires_at and all attempt this
-// UPDATE. Requiring the new value to be strictly greater than the current
-// one means only the first writer's row lock does real work; every other
-// concurrent attempt re-evaluates the WHERE clause against the
-// now-committed row once it can proceed, finds expires_at no longer less
-// than the target, and matches zero rows — a no-op, not a second write
-// or a lock wait for nothing.
+// Two things fix that, both here instead of trusted to the Go caller:
+//
+// Concurrency: the target is now() + ttl computed by this statement, and
+// the WHERE clause requires the *current* expires_at to be more than a
+// minute short of that target before writing at all. A session already
+// renewed by another concurrent request seconds ago has an expires_at
+// within that one-minute slack of any request's now() + ttl, so it
+// matches nothing and writes nothing. This does not collapse N
+// concurrent requests into exactly one write in the general case — two
+// requests arriving more than a minute apart both legitimately renew,
+// which is the throttle working as intended, the same way
+// TouchAPIToken's five-minute window lets last_used_at move again after
+// it elapses — but it does mean requests that are actually concurrent
+// (the case this comment used to overclaim "a no-op" for) collapse to
+// one write, because they all fall inside the one-minute slack of each
+// other's target.
 //
 // Absolute lifetime: capping the new value at created_at + 90 days (see
 // identity.maxSessionLifetime in sessions.go, which this literal must
 // match) means a session in continuous use is renewed right up to that
-// cap and never again past it — the WHERE clause's "strictly greater"
-// check on the same capped expression is what makes renewal stop
-// exactly there instead of drifting forever. A stolen cookie exercised
-// once a fortnight is valid for at most 90 days, not indefinitely.
+// cap and never again past it.
 //
 // This stays an UPDATE, never an upsert: a logout (DeleteSession) landing
 // between the SELECT in UserForSession and this statement leaves no row
 // to match, and an UPDATE that matches nothing creates nothing — a
 // revoked session cannot be resurrected by a renewal that started before
 // the revocation. Do not change this to INSERT ... ON CONFLICT to "handle"
-// a missing row; a missing row here means "let it stay gone".
-func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) error {
-	_, err := q.db.Exec(ctx, extendSession, arg.ExpiresAt, arg.TokenHash)
-	return err
+// a missing row; a missing row here means "let it stay gone". This is
+// :execrows, not :exec, purely so a test can count actual writes instead
+// of inferring them from the final value, which looks identical whether
+// one write happened or six.
+func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, extendSession, arg.Ttl, arg.TokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getInviteByTokenHash = `-- name: GetInviteByTokenHash :one

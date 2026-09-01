@@ -20,9 +20,13 @@ type Role string
 // The three roles the memberships table's CHECK constraint accepts
 // (migration 0001: `role IN ('owner', 'editor', 'viewer')`) and that an
 // invite may grant. Keeping this list in sync with that constraint is
-// this package's entire reason to exist — see roles_test.go's
-// TestAllRolesAcceptedByDatabase, which is the test that actually
-// enforces it.
+// this package's entire reason to exist — see
+// internal/projects/projects_test.go's TestAllRolesAcceptedByDatabase,
+// which is the test that actually enforces it. It lives in that package,
+// not this one, because proving the database agrees needs a live pool
+// and a project to insert memberships against — dependencies this
+// package deliberately carries none of; roles_test.go in this package
+// covers Valid and AtLeast, the pure-Go half.
 const (
 	Owner  Role = "owner"
 	Editor Role = "editor"
@@ -39,18 +43,28 @@ var rank = map[Role]int{Viewer: 0, Editor: 1, Owner: 2}
 
 // AtLeast reports whether role meets or exceeds min in privilege — for
 // example AtLeast(role, Editor) is true for an editor or an owner, false
-// for a viewer. An unrecognised role (the zero value included) ranks below
-// every named role and so is never AtLeast anything, including Viewer.
-// This is the one place "editor or owner" gets to be a single question
-// instead of a chain of == comparisons repeated at every call site that
-// needs it — the same reasoning that motivated this package's own doc
-// comment for Valid.
+// for a viewer. Both role and min are looked up in rank, and this
+// returns false unless both are recognised: an unrecognised role (the
+// zero value included) ranks below everything, as expected, but an
+// unrecognised min must fail the same way rather than falling through to
+// Go's zero value for a missing map entry (0, the same rank as Viewer) —
+// that would have made a typo in the threshold itself
+// (AtLeast(Viewer, "auditer")) the most permissive possible check
+// instead of the most restrictive, exactly backwards for a function
+// whose entire job is gating access. This is the one place "editor or
+// owner" gets to be a single question instead of a chain of ==
+// comparisons repeated at every call site that needs it — the same
+// reasoning that motivated this package's own doc comment for Valid.
 func AtLeast(role Role, min Role) bool {
 	r, ok := rank[role]
 	if !ok {
 		return false
 	}
-	return r >= rank[min]
+	m, ok := rank[min]
+	if !ok {
+		return false
+	}
+	return r >= m
 }
 
 // Valid reports whether s names a recognised role. Every caller that

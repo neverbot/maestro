@@ -24,7 +24,7 @@ import (
 // injection point a real publisher, in production, arrives through from
 // a service this package does not own; here it lets a test stand in for
 // that publisher.
-func newTestServerWithHub(t *testing.T, maxLifetime time.Duration) (*web.Server, *identity.Service, *projects.Service, *realtime.Hub) {
+func newTestServerWithHub(t *testing.T, maxLifetime, heartbeatInterval time.Duration) (*web.Server, *identity.Service, *projects.Service, *realtime.Hub) {
 	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
@@ -32,12 +32,13 @@ func newTestServerWithHub(t *testing.T, maxLifetime time.Duration) (*web.Server,
 	projSvc := projects.New(pool)
 	hub := realtime.NewHub()
 	srv := web.NewServer(web.Options{
-		Version:        "test",
-		Config:         cfg,
-		Identity:       ids,
-		Projects:       projSvc,
-		Hub:            hub,
-		SSEMaxLifetime: maxLifetime,
+		Version:              "test",
+		Config:               cfg,
+		Identity:             ids,
+		Projects:             projSvc,
+		Hub:                  hub,
+		SSEMaxLifetime:       maxLifetime,
+		SSEHeartbeatInterval: heartbeatInterval,
 	})
 	return srv, ids, projSvc, hub
 }
@@ -66,7 +67,7 @@ func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, data string) {
 }
 
 func TestEventsStreamRequiresAuthentication(t *testing.T) {
-	srv, _, _, _ := newTestServerWithHub(t, time.Minute)
+	srv, _, _, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+uuid.New().String()+"/events", nil)
 	rec := httptest.NewRecorder()
@@ -78,7 +79,7 @@ func TestEventsStreamRequiresAuthentication(t *testing.T) {
 }
 
 func TestEventsStreamRequiresMembership(t *testing.T) {
-	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute)
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
@@ -110,7 +111,7 @@ func TestEventsStreamRequiresMembership(t *testing.T) {
 // internal/realtime's own tests cannot check — they never touch
 // scope.ProjectID or hub.Subscribe as this handler actually wires them.
 func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
-	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute)
+	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
@@ -174,7 +175,7 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 // stream stop trusting a caller whose access was revoked after the
 // handshake.
 func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
-	srv, ids, projSvc, _ := newTestServerWithHub(t, 100*time.Millisecond)
+	srv, ids, projSvc, _ := newTestServerWithHub(t, 100*time.Millisecond, time.Minute)
 	ctx := context.Background()
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
@@ -213,5 +214,128 @@ func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream did not close at SSEMaxLifetime")
+	}
+}
+
+// TestEventsStreamClosesOnTokenRevokedMidStream pins the heartbeat
+// re-check itself (handleEvents's own doc comment): a token that
+// resolved fine at admission but is revoked while the stream is open
+// gets the stream closed within one heartbeat interval, not left open
+// until SSEMaxLifetime. SSEHeartbeatInterval is shrunk to make this
+// observable without waiting out the real fifteen-second default;
+// SSEMaxLifetime is left long so the max-lifetime backstop (already
+// pinned by TestEventsStreamClosesAtMaxLifetime) cannot be mistaken for
+// what actually closed this stream.
+func TestEventsStreamClosesOnTokenRevokedMidStream(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, 20*time.Millisecond)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: tok.ID}); err != nil {
+		t.Fatalf("RevokeAPIToken: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			if _, err := resp.Body.Read(buf); err != nil {
+				close(done)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream stayed open after its token was revoked")
+	}
+}
+
+// TestEventsStreamClosesOnMembershipRemovedMidStream is
+// TestEventsStreamClosesOnTokenRevokedMidStream's session-caller
+// counterpart: a member removed from the game while their stream is
+// open (a session credential that is still perfectly valid — the removal
+// is a projects-layer change, not an identity-layer one) also gets cut
+// off by the same heartbeat re-check, via resolveProjectScope rather
+// than resolveSessionCaller.
+func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, 20*time.Millisecond)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@studio.com", DisplayName: "Member", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := projSvc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	cookie := loginAs(t, srv, "member@studio.com")
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	if _, err := projSvc.RemoveMember(ctx, member.ID, project.ID); err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			if _, err := resp.Body.Read(buf); err != nil {
+				close(done)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream stayed open after its member was removed from the game")
 	}
 }

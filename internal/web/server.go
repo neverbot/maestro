@@ -40,6 +40,16 @@ type Options struct {
 	// reconnect. See events.go's own doc comment for why a bound exists
 	// at all. Optional: zero gets defaultSSEMaxLifetime.
 	SSEMaxLifetime time.Duration
+
+	// SSEHeartbeatInterval overrides sseHeartbeatInterval (events.go) —
+	// how often an open stream both pings and re-validates the caller's
+	// access. It exists on Options, not only as a package constant,
+	// purely so a test can shrink it far enough to observe a revoked
+	// caller's stream actually close without waiting out the real
+	// fifteen-second default; nothing else in this codebase has a
+	// legitimate reason to run this off its default. Optional: zero (or
+	// negative) gets sseHeartbeatInterval.
+	SSEHeartbeatInterval time.Duration
 }
 
 // Server routes all four surfaces: web UI, REST API, MCP and SSE.
@@ -104,12 +114,14 @@ type Server struct {
 	registeredPatterns    []string
 	projectScopedPatterns map[string]bool
 
-	// hub and sseMaxLifetime back the SSE endpoint (events.go). See
-	// Options.Hub and Options.SSEMaxLifetime for what they do and why
-	// both are injectable rather than values this file keeps entirely
-	// to itself.
-	hub            *realtime.Hub
-	sseMaxLifetime time.Duration
+	// hub, sseMaxLifetime and sseHeartbeatInterval back the SSE endpoint
+	// (events.go). See Options.Hub, Options.SSEMaxLifetime and
+	// Options.SSEHeartbeatInterval for what they do and why all three
+	// are injectable rather than values this file keeps entirely to
+	// itself.
+	hub                  *realtime.Hub
+	sseMaxLifetime       time.Duration
+	sseHeartbeatInterval time.Duration
 }
 
 // NewServer builds the routing tree.
@@ -138,15 +150,20 @@ func NewServer(opts Options) *Server {
 	if sseMaxLifetime <= 0 {
 		sseMaxLifetime = defaultSSEMaxLifetime
 	}
+	sseHeartbeatIntervalOpt := opts.SSEHeartbeatInterval
+	if sseHeartbeatIntervalOpt <= 0 {
+		sseHeartbeatIntervalOpt = sseHeartbeatInterval
+	}
 
 	s := &Server{
-		mux:               http.NewServeMux(),
-		opts:              opts,
-		loginLimiter:      identity.NewLimiter(10, time.Minute),
-		loginIPLimiter:    identity.NewLimiter(40, time.Minute),
-		registerIPLimiter: identity.NewLimiter(10, time.Minute),
-		hub:               hub,
-		sseMaxLifetime:    sseMaxLifetime,
+		mux:                  http.NewServeMux(),
+		opts:                 opts,
+		loginLimiter:         identity.NewLimiter(10, time.Minute),
+		loginIPLimiter:       identity.NewLimiter(40, time.Minute),
+		registerIPLimiter:    identity.NewLimiter(10, time.Minute),
+		hub:                  hub,
+		sseMaxLifetime:       sseMaxLifetime,
+		sseHeartbeatInterval: sseHeartbeatIntervalOpt,
 	}
 	s.routeFunc("GET /healthz", s.handleHealthz)
 	s.route("GET /version", requireCaller(s.handleVersion))

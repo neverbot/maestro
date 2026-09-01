@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -182,22 +183,62 @@ func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Calle
 			return
 		}
 
-		if scoped, ok := caller.ScopedProject(); ok {
-			if scoped != projectID {
-				writeError(w, http.StatusForbidden, errCodeScopeViolation, "this token is bound to another game")
-				return
-			}
-			h(w, r, caller, ProjectScope{ProjectID: projectID, Role: string(roles.Editor), IsToken: true})
+		scope, err := s.resolveProjectScope(r.Context(), caller, projectID)
+		switch {
+		case errors.Is(err, errScopeViolation):
+			writeError(w, http.StatusForbidden, errCodeScopeViolation, "this token is bound to another game")
 			return
-		}
-
-		role, err := s.opts.Projects.RoleOf(r.Context(), caller.UserID, projectID)
-		if err != nil {
+		case err != nil:
 			writeError(w, http.StatusForbidden, errCodeForbidden, "you are not a member of this game")
 			return
 		}
-		h(w, r, caller, ProjectScope{ProjectID: projectID, Role: role, IsToken: false})
+		h(w, r, caller, scope)
 	}
+}
+
+// errScopeViolation and errNotMember are resolveProjectScope's two
+// failure modes, distinguished so a caller of resolveProjectScope can
+// tell "wrong game for this token" from "not a member of this game"
+// without resolveProjectScope itself knowing whether it is being called
+// from requireProject's HTTP-error path or handleEvents's log-and-close
+// path (events.go) — the two callers map the same two outcomes to very
+// different actions.
+var (
+	errScopeViolation = errors.New("token is bound to another game")
+	errNotMember      = errors.New("not a member of this game")
+)
+
+// resolveProjectScope resolves caller's standing in projectID: the
+// answer requireProject needs once, at admission, and — since Task 14 —
+// the exact same answer handleEvents (events.go) needs again on every
+// heartbeat tick, to notice a membership change on an otherwise-idle
+// long-lived connection without either caller re-deriving the token/
+// membership distinction itself. Factored out for that reuse, not
+// merely to shorten requireProject: a re-check that asked a
+// slightly-different question than the original admission check would
+// be exactly the kind of drift this project has been finding for
+// fourteen tasks running.
+//
+// A token caller's ProjectID must equal projectID exactly (errScopeViolation
+// otherwise) — see Caller.ScopedProject's own doc comment for why an
+// admin is not exempt from a token's binding. A session caller's role is
+// looked up fresh from membership; no membership row is errNotMember. A
+// token caller's Role is always roles.Editor, never looked up — see this
+// function's former home in requireProject's own doc comment (still
+// above) for why that is deliberate, not a shortcut.
+func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, projectID uuid.UUID) (ProjectScope, error) {
+	if scoped, ok := caller.ScopedProject(); ok {
+		if scoped != projectID {
+			return ProjectScope{}, errScopeViolation
+		}
+		return ProjectScope{ProjectID: projectID, Role: string(roles.Editor), IsToken: true}, nil
+	}
+
+	role, err := s.opts.Projects.RoleOf(ctx, caller.UserID, projectID)
+	if err != nil {
+		return ProjectScope{}, errNotMember
+	}
+	return ProjectScope{ProjectID: projectID, Role: role, IsToken: false}, nil
 }
 
 func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {

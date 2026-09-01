@@ -224,14 +224,10 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 // is accounts and credentials, not who is subscribed to which stream.
 func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUserRequest) (RedeemInviteResult, error) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	sum := sha256.Sum256([]byte(token))
 
-	invite, err := s.q.GetLiveInvite(ctx, sum[:])
+	invite, err := s.lookupLiveInviteForRedemption(ctx, token)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return RedeemInviteResult{}, s.resolveInviteMiss(ctx, sum[:])
-		}
-		return RedeemInviteResult{}, fmt.Errorf("lookup invite: %w", err)
+		return RedeemInviteResult{}, err
 	}
 	// invite.Email, like every other email this package stores, was
 	// lower-cased and trimmed by CreateInvite before it was written;
@@ -320,16 +316,18 @@ func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUser
 	return RedeemInviteResult{User: user, InviteID: invite.ID, ProjectID: invite.ProjectID}, nil
 }
 
-// RedeemInviteResult is what RedeemInvite reports on success: the account
-// it created (or reused — see RedeemInvite's own doc comment on why an
-// email match still runs through the normal creation path), the id of
-// the invite row it consumed, and, when the invite was project-bound,
-// that project's id. ProjectID is nil for an account-only invite — the
-// same nil-means-unbound convention InviteRequest.ProjectID and
-// InviteSummary.ProjectID already use — which is exactly what
-// handleRegister (api_auth.go) checks before publishing anything
-// project-scoped: no project id, nothing to publish beyond starting the
-// new session.
+// RedeemInviteResult is what RedeemInvite and RedeemInviteForExistingUser
+// both report on success: the account involved — created, for
+// RedeemInvite's anonymous path; reused, for RedeemInviteForExistingUser's
+// already-logged-in one — the id of the invite row consumed, and, when
+// the invite was project-bound, that project's id. ProjectID is nil for
+// an account-only invite — the same nil-means-unbound convention
+// InviteRequest.ProjectID and InviteSummary.ProjectID already use —
+// which is exactly what handleRegister (api_auth.go) checks before
+// publishing anything project-scoped: no project id, nothing to publish
+// beyond what each path does on its own (starting a new session, for
+// RedeemInvite; nothing further, for RedeemInviteForExistingUser, whose
+// caller already has one).
 type RedeemInviteResult struct {
 	User // embedded: every existing call site that only ever read the
 	// created account (user.ID, user.DisplayName, ...) keeps compiling
@@ -338,6 +336,122 @@ type RedeemInviteResult struct {
 	// ".User".
 	InviteID  uuid.UUID
 	ProjectID *uuid.UUID
+}
+
+// lookupLiveInviteForRedemption hashes token and resolves it to a live
+// invite row, or the appropriate error — ErrInviteInvalid or
+// ErrInviteExpired via resolveInviteMiss for a miss, a wrapped error for
+// a genuine lookup failure. Shared by RedeemInvite and
+// RedeemInviteForExistingUser, which differ only in what they do once
+// they have a live invite in hand (create-and-grant vs. grant-only), not
+// in how they find one.
+func (s *Service) lookupLiveInviteForRedemption(ctx context.Context, token string) (dbq.Invite, error) {
+	sum := sha256.Sum256([]byte(token))
+	invite, err := s.q.GetLiveInvite(ctx, sum[:])
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbq.Invite{}, s.resolveInviteMiss(ctx, sum[:])
+		}
+		return dbq.Invite{}, fmt.Errorf("lookup invite: %w", err)
+	}
+	return invite, nil
+}
+
+// RedeemInviteForExistingUser grants existingUserID membership via a
+// project-bound invite, without creating a new account. This is the path
+// RedeemInvite itself could never take: that method's insertUser call
+// always attempts to create a new user, so a request naming an email
+// that already has an account fails with ErrEmailTaken, mapped inside
+// RedeemInvite to the generic ErrInviteInvalid — the same response a
+// stale or unknown token gets. Before this method existed, that meant a
+// designer with an existing account could never be granted a second
+// game through the invite surface at all: clicking a project invite
+// while already signed in was indistinguishable, from this package's own
+// behaviour, from clicking a dead link. handleRegister (api_auth.go)
+// calls this instead of RedeemInvite specifically when the request
+// arrives from a live, human, session-authenticated caller — see that
+// handler's own doc comment for the routing decision.
+//
+// existingUserID must be the caller's OWN id, resolved server-side from
+// their session (CallerFrom, internal/web/auth.go) — never a value taken
+// from the request body. This method does not, and cannot, verify that
+// on its own: it trusts its caller completely, the same way
+// projects.SetRole trusts the HTTP layer to have already decided who is
+// allowed to act. Passing anything other than the caller's own id here
+// would turn redeeming an invite into a way to grant a game's membership
+// to somebody else — the invite's own clear token would no longer be
+// the credential that matters, whoever is logged in when it is redeemed
+// would be.
+//
+// An account-only invite (invite.ProjectID == nil) has nothing left to
+// grant an account that already exists, so it is refused with
+// ErrInviteInvalid — the same response an anonymous redeemer gets for a
+// dead link, not a distinct "you already have an account" message that
+// would tell a caller something about a token they merely guessed.
+//
+// A *bound* invite's email is checked against existingUserID's own
+// stored email, not against anything the request supplied: an invite
+// naming "designer@studio.com" still only grants membership to the
+// account that email belongs to, whether that account is being created
+// fresh (RedeemInvite) or already exists and is simply logged in
+// (here) — the binding means the same thing either way. An *unbound*
+// invite grants to whoever holds the link, logged in or not, matching
+// RedeemInvite's own behaviour for the anonymous case.
+//
+// Redeeming a second time for a member who already holds some role in
+// the project upserts the invited role over their existing one — the
+// same "an invite is a deferred SetRole" semantics Task 18 established
+// for a fresh grant, applied here to a promotion or lateral change
+// reached via an invite link instead of an owner's direct
+// PATCH .../members/{user} call.
+func (s *Service) RedeemInviteForExistingUser(ctx context.Context, token string, existingUserID uuid.UUID) (RedeemInviteResult, error) {
+	invite, err := s.lookupLiveInviteForRedemption(ctx, token)
+	if err != nil {
+		return RedeemInviteResult{}, err
+	}
+	if invite.ProjectID == nil {
+		return RedeemInviteResult{}, ErrInviteInvalid
+	}
+
+	existingUser, err := s.UserByID(ctx, existingUserID)
+	if err != nil {
+		return RedeemInviteResult{}, fmt.Errorf("lookup existing user: %w", err)
+	}
+	if invite.Email != nil && !strings.EqualFold(*invite.Email, existingUser.Email) {
+		return RedeemInviteResult{}, ErrInviteInvalid
+	}
+
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
+		n, merr := q.MarkInviteRedeemed(ctx, dbq.MarkInviteRedeemedParams{
+			ID:         invite.ID,
+			RedeemedBy: existingUserID,
+		})
+		if merr != nil {
+			return fmt.Errorf("mark invite redeemed: %w", merr)
+		}
+		if n == 0 {
+			// Lost the race to another redeemer, expired since the
+			// lookup above, or its project was deleted out from under
+			// it — see RedeemInvite's own doc comment for the identical
+			// mechanism and why every one of those collapses to the
+			// same ErrInviteInvalid.
+			return ErrInviteInvalid
+		}
+
+		role := *invite.Role // CreateInvite's own check guarantees Role is set whenever ProjectID is.
+		if err := q.UpsertMembership(ctx, dbq.UpsertMembershipParams{
+			UserID:    existingUserID,
+			ProjectID: *invite.ProjectID,
+			Role:      role,
+		}); err != nil {
+			return fmt.Errorf("grant membership: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return RedeemInviteResult{}, err
+	}
+	return RedeemInviteResult{User: existingUser, InviteID: invite.ID, ProjectID: invite.ProjectID}, nil
 }
 
 // resolveInviteMiss is called once GetLiveInvite has found no row for a

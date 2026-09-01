@@ -899,3 +899,235 @@ func TestCountInvitesForProjectIncludesRedeemed(t *testing.T) {
 		t.Fatalf("CountInvitesForProject = %d, want 2 (outstanding + redeemed, not the other project's)", n)
 	}
 }
+
+// TestRedeemInviteForExistingUserGrantsMembershipWithoutCreatingAnAccount
+// is this task's own acceptance test (Round 2): a designer who already
+// has an account can be granted a second game's membership through a
+// project-bound invite, without RedeemInviteForExistingUser creating a
+// second account or touching the existing one's password.
+func TestRedeemInviteForExistingUserGrantsMembershipWithoutCreatingAnAccount(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	existing, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "existing@studio.com", DisplayName: "Existing", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	projectID := createTestProject(ctx, t, pool, "second-game")
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &projectID, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	result, err := svc.RedeemInviteForExistingUser(ctx, token, existing.ID)
+	if err != nil {
+		t.Fatalf("RedeemInviteForExistingUser: %v", err)
+	}
+	if result.ID != existing.ID {
+		t.Fatalf("result.ID = %v, want the existing user's id %v", result.ID, existing.ID)
+	}
+	if result.ProjectID == nil || *result.ProjectID != projectID {
+		t.Fatalf("result.ProjectID = %v, want %v", result.ProjectID, projectID)
+	}
+
+	var role string
+	if err := pool.QueryRow(ctx, `SELECT role FROM memberships WHERE user_id = $1 AND project_id = $2`, existing.ID, projectID).Scan(&role); err != nil {
+		t.Fatalf("query membership: %v", err)
+	}
+	if role != "editor" {
+		t.Fatalf("role = %q, want editor", role)
+	}
+
+	// No second account was created.
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE email = $1`, "existing@studio.com").Scan(&count); err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("users with this email = %d, want 1 (no new account created)", count)
+	}
+	// The password is untouched.
+	if _, err := svc.Authenticate(ctx, "existing@studio.com", "password12345"); err != nil {
+		t.Fatalf("original password should still authenticate: %v", err)
+	}
+}
+
+// TestRedeemInviteForExistingUserPromotesAnExistingMember mirrors the
+// "an invite is a deferred SetRole" semantics Task 18 established: an
+// already-a-member existing user redeeming a higher-role invite upserts
+// to the new role rather than being refused.
+func TestRedeemInviteForExistingUserPromotesAnExistingMember(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	existing, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "already-member@studio.com", DisplayName: "Already Member", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	projectID := createTestProject(ctx, t, pool, "promote-game")
+	if _, err := pool.Exec(ctx, `INSERT INTO memberships (user_id, project_id, role) VALUES ($1, $2, 'viewer')`, existing.ID, projectID); err != nil {
+		t.Fatalf("seed viewer membership: %v", err)
+	}
+
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &projectID, Role: "owner"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if _, err := svc.RedeemInviteForExistingUser(ctx, token, existing.ID); err != nil {
+		t.Fatalf("RedeemInviteForExistingUser: %v", err)
+	}
+
+	var role string
+	if err := pool.QueryRow(ctx, `SELECT role FROM memberships WHERE user_id = $1 AND project_id = $2`, existing.ID, projectID).Scan(&role); err != nil {
+		t.Fatalf("query membership: %v", err)
+	}
+	if role != "owner" {
+		t.Fatalf("role = %q, want owner", role)
+	}
+}
+
+func TestRedeemInviteForExistingUserRejectsAccountOnlyInvite(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	existing, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "no-project@studio.com", DisplayName: "No Project", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if _, err := svc.RedeemInviteForExistingUser(ctx, token, existing.ID); !errors.Is(err, identity.ErrInviteInvalid) {
+		t.Fatalf("err = %v, want ErrInviteInvalid", err)
+	}
+}
+
+// TestRedeemInviteForExistingUserRejectsBoundInviteForAnotherEmail pins
+// the binding check: an invite naming one email must not grant
+// membership to whichever account happens to be logged in, only to the
+// account that email actually belongs to.
+func TestRedeemInviteForExistingUserRejectsBoundInviteForAnotherEmail(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	intended := "intended@studio.com"
+	bystander, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "bystander@studio.com", DisplayName: "Bystander", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser bystander: %v", err)
+	}
+	projectID := createTestProject(ctx, t, pool, "bound-game")
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: intended, ProjectID: &projectID, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if _, err := svc.RedeemInviteForExistingUser(ctx, token, bystander.ID); !errors.Is(err, identity.ErrInviteInvalid) {
+		t.Fatalf("err = %v, want ErrInviteInvalid", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM memberships WHERE user_id = $1 AND project_id = $2`, bystander.ID, projectID).Scan(&count); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if count != 0 {
+		t.Fatal("a bound invite for someone else's email must not grant the logged-in bystander membership")
+	}
+}
+
+func TestRedeemInviteForExistingUserAllowsBoundInviteForMatchingEmail(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	existing, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "matching@studio.com", DisplayName: "Matching", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	projectID := createTestProject(ctx, t, pool, "matching-game")
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{Email: "MATCHING@studio.com", ProjectID: &projectID, Role: "viewer"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if _, err := svc.RedeemInviteForExistingUser(ctx, token, existing.ID); err != nil {
+		t.Fatalf("RedeemInviteForExistingUser: %v", err)
+	}
+}
+
+func TestRedeemInviteForExistingUserUnknownTokenReturnsErrInviteInvalid(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	existing, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "solo@studio.com", DisplayName: "Solo", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	if _, err := svc.RedeemInviteForExistingUser(ctx, "not-a-real-token", existing.ID); !errors.Is(err, identity.ErrInviteInvalid) {
+		t.Fatalf("err = %v, want ErrInviteInvalid", err)
+	}
+}
+
+// TestRedeemInviteForExistingUserMarksInviteRedeemed pins that this path
+// consumes the invite exactly like the anonymous one — a project owner
+// watching GET .../invites sees it disappear from the outstanding list
+// either way.
+func TestRedeemInviteForExistingUserMarksInviteRedeemed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	existing, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "redeemer@studio.com", DisplayName: "Redeemer", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	projectID := createTestProject(ctx, t, pool, "redeem-marks-game")
+	token, _, err := svc.CreateInvite(ctx, identity.InviteRequest{ProjectID: &projectID, Role: "viewer"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	if _, err := svc.RedeemInviteForExistingUser(ctx, token, existing.ID); err != nil {
+		t.Fatalf("RedeemInviteForExistingUser: %v", err)
+	}
+
+	before, err := svc.ListOutstandingInvitesForProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvitesForProject: %v", err)
+	}
+	if len(before) != 0 {
+		t.Fatalf("outstanding invites after redemption = %d, want 0", len(before))
+	}
+
+	// And it cannot be redeemed a second time.
+	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "other-redeemer@studio.com", DisplayName: "Other Redeemer", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser other: %v", err)
+	}
+	if _, err := svc.RedeemInviteForExistingUser(ctx, token, other.ID); !errors.Is(err, identity.ErrInviteInvalid) {
+		t.Fatalf("second redemption err = %v, want ErrInviteInvalid", err)
+	}
+}

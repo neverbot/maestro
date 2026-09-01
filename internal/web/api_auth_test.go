@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -462,6 +464,163 @@ func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
 	}
+}
+
+// TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership
+// is this task's own Round 2 acceptance test: a designer who already has
+// an account, and is signed in, clicking a project invite link grants
+// membership to *that* account rather than attempting (and failing) to
+// create a brand-new one. Before this existed, RedeemInvite always tried
+// to create an account, so a pre-existing email hit ErrEmailTaken,
+// mapped to the generic "invite is not valid" — a designer's account
+// could never be granted a second game at all.
+func TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership(t *testing.T) {
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+	existing, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "existing@studio.com", DisplayName: "Existing", Password: "password12345"})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	cookie := loginAs(t, srv, "existing@studio.com")
+
+	// A fresh project existing is not already a member of, created by a
+	// different owner through the real HTTP surface (see
+	// createTestProjectForRegisterTest), so redeeming the invite below is
+	// a real, visible second membership rather than a lateral no-op on a
+	// game existing already owns.
+	ownerCookie := loginAsFreshOwner(t, srv, ids, "owner-of-second-game@studio.com")
+	secondProjectID := createTestProjectForRegisterTest(t, srv, ownerCookie, "clicked-invite-game")
+	inviteToken, _, err := ids.CreateInvite(ctx, identity.InviteRequest{ProjectID: &secondProjectID, Role: "editor"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"invite_token":"`+inviteToken+`"}`)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (granted to the existing account, nothing created); body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		UserID    string `json:"user_id"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.UserID != existing.ID.String() {
+		t.Fatalf("user_id = %q, want the existing account's id %q", body.UserID, existing.ID.String())
+	}
+
+	// No new session was issued — the same cookie must still work, and
+	// no second cookie appears in the response.
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == web.SessionCookie {
+			t.Fatal("granting membership to an existing, logged-in caller must not issue a new session cookie")
+		}
+	}
+	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.AddCookie(cookie)
+	meRec := httptest.NewRecorder()
+	srv.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("the original session must still work, /api/me = %d", meRec.Code)
+	}
+}
+
+// TestRegisterWithInviteTokenAndLiveSessionRejectsBoundInviteForAnotherEmail
+// pins the binding check end to end: an invite naming one address must
+// not grant membership to whichever account happens to be logged in when
+// the link is clicked.
+func TestRegisterWithInviteTokenAndLiveSessionRejectsBoundInviteForAnotherEmail(t *testing.T) {
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "bystander@studio.com", DisplayName: "Bystander", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	cookie := loginAs(t, srv, "bystander@studio.com")
+
+	ownerCookie := loginAsFreshOwner(t, srv, ids, "owner-of-bound-game@studio.com")
+	projectID := createTestProjectForRegisterTest(t, srv, ownerCookie, "bound-invite-game")
+	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{Email: "someone-else@studio.com", ProjectID: &projectID, Role: "viewer"})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"invite_token":"`+token+`"}`)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (invite_invalid); body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestRegisterWithInviteTokenAndLiveSessionRejectsAccountOnlyInvite pins
+// that an account-only invite has nothing to grant an account that
+// already exists.
+func TestRegisterWithInviteTokenAndLiveSessionRejectsAccountOnlyInvite(t *testing.T) {
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "already-has-account@studio.com", DisplayName: "Already", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	cookie := loginAs(t, srv, "already-has-account@studio.com")
+
+	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"invite_token":"`+token+`"}`)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (invite_invalid); body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// loginAsFreshOwner creates a brand-new account and logs it in, purely
+// so a test in this file can mint a project through the real HTTP
+// surface without that project's ownership colliding with the account
+// under test.
+func loginAsFreshOwner(t *testing.T, srv *web.Server, ids *identity.Service, email string) *http.Cookie {
+	t.Helper()
+	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{Email: email, DisplayName: "Owner", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser %s: %v", email, err)
+	}
+	return loginAs(t, srv, email)
+}
+
+// createTestProjectForRegisterTest creates a game as the given session
+// caller through the real HTTP surface and returns its id, so tests in
+// this file that need a project-bound invite do not have to reach into
+// internal/projects directly.
+func createTestProjectForRegisterTest(t *testing.T, srv *web.Server, cookie *http.Cookie, slug string) uuid.UUID {
+	t.Helper()
+	req := jsonRequest(http.MethodPost, "/api/games", `{"slug":"`+slug+`","name":"`+slug+`"}`)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create game status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode create game response: %v", err)
+	}
+	id, err := uuid.Parse(body.ID)
+	if err != nil {
+		t.Fatalf("parse project id: %v", err)
+	}
+	return id
 }
 
 func TestRegisterWithOffDomainUnboundInviteIsForbidden(t *testing.T) {

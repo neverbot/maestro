@@ -202,6 +202,54 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// An invite token wins over the instance mode: that is the point of a link.
 	if req.InviteToken != "" {
+		// A caller who is already signed in — clicking a project invite
+		// link in a tab where they never logged out — takes a different
+		// path than an anonymous one. identity.RedeemInvite always
+		// attempts to create a brand-new account; for an email that
+		// already has one, that fails with ErrEmailTaken, which
+		// RedeemInvite itself maps to the generic ErrInviteInvalid (the
+		// same response a dead link gets). Before this branch existed,
+		// that meant a designer with an existing account could never be
+		// granted membership in a second game through the invite
+		// surface at all — verified live, and the whole reason this
+		// branch exists (Task 21's Round 2 review).
+		//
+		// CallerFrom, not anything from the request body, decides which
+		// path runs, and the id passed to RedeemInviteForExistingUser is
+		// caller.UserID — resolved server-side from the session cookie
+		// by authenticate (auth.go), which already ran for this request
+		// even though handleRegister itself is not wrapped in
+		// requireCaller. Nothing here ever reads an id or an email out
+		// of req for this purpose: doing so would let redeeming an
+		// invite grant somebody else's account the membership instead
+		// of the caller's own. A bearer-token caller does not qualify —
+		// IsToken() — since an API token authenticates an agent scoped
+		// to one game's content, not a person who could plausibly be
+		// "already logged in" in the sense this branch means.
+		if caller, ok := CallerFrom(r.Context()); ok && !caller.IsToken() {
+			result, err := s.opts.Identity.RedeemInviteForExistingUser(r.Context(), req.InviteToken, caller.UserID)
+			if err != nil {
+				s.registerIPLimiter.Record(ip)
+				s.writeRegistrationError(w, r, err)
+				return
+			}
+			// Always project-bound here — RedeemInviteForExistingUser
+			// refuses an account-only invite outright (nothing left for
+			// it to grant an existing account) — but the nil check is
+			// kept for the same defensive-symmetry reason the anonymous
+			// branch below keeps its own.
+			if result.ProjectID != nil {
+				s.publish(*result.ProjectID, eventMemberUpdated, "", true, map[string]any{"user_id": result.ID})
+				s.publish(*result.ProjectID, eventInviteRedeemed, roles.Owner, true, map[string]any{"id": result.InviteID})
+			}
+			// No new session: the caller already has a live one, and
+			// starting a second would be a session this handler has no
+			// reason to mint. 200, not 201 — nothing was created, an
+			// existing account merely gained a membership.
+			writeJSON(w, http.StatusOK, map[string]any{"user_id": result.ID, "project_id": result.ProjectID})
+			return
+		}
+
 		result, err := s.opts.Identity.RedeemInvite(r.Context(), req.InviteToken, identity.CreateUserRequest{
 			Email:       req.Email,
 			DisplayName: req.DisplayName,
@@ -212,15 +260,16 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			s.writeRegistrationError(w, r, err)
 			return
 		}
-		// This handler has no Caller and no ProjectScope of its own — it
-		// runs before either exists, which is exactly why RedeemInvite
-		// itself was extended to report enough to publish here (see
-		// RedeemInviteResult's own doc comment, invites.go, and
-		// publish.go's own doc comment on eventInviteRedeemed for why
-		// this is the one call site in this package that publishes
-		// outside a project-scoped handler). ProjectID is nil for an
-		// account-only invite — nothing project-scoped to announce, so
-		// nothing is published beyond starting the new session below.
+		// This handler has no Caller and no ProjectScope of its own for
+		// the anonymous path — it runs before either exists, which is
+		// exactly why RedeemInvite itself was extended to report enough
+		// to publish here (see RedeemInviteResult's own doc comment,
+		// invites.go, and publish.go's own doc comment on
+		// eventInviteRedeemed for why this is a call site in this
+		// package that publishes outside a project-scoped handler).
+		// ProjectID is nil for an account-only invite — nothing
+		// project-scoped to announce, so nothing is published beyond
+		// starting the new session below.
 		if result.ProjectID != nil {
 			s.publish(*result.ProjectID, eventMemberUpdated, "", true, map[string]any{"user_id": result.ID})
 			s.publish(*result.ProjectID, eventInviteRedeemed, roles.Owner, true, map[string]any{"id": result.InviteID})

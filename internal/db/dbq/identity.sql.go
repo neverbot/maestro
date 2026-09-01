@@ -202,8 +202,10 @@ func (q *Queries) DeleteSessionsForUser(ctx context.Context, userID uuid.UUID) e
 }
 
 const extendSession = `-- name: ExtendSession :exec
-UPDATE sessions SET expires_at = $1::timestamptz
+UPDATE sessions
+SET expires_at = LEAST($1::timestamptz, created_at + interval '90 days')
 WHERE token_hash = $2::bytea
+  AND expires_at < LEAST($1::timestamptz, created_at + interval '90 days')
 `
 
 type ExtendSessionParams struct {
@@ -211,6 +213,34 @@ type ExtendSessionParams struct {
 	TokenHash []byte
 }
 
+// Sliding renewal, called from web.resolveSessionCaller on a session past
+// the halfway point of its SESSION_TTL. Two things keep this safe and
+// bounded, both encoded in the WHERE clause rather than trusted to the Go
+// caller:
+//
+// Concurrency: several tabs belonging to the same session crossing
+// halfway together all read the same expires_at and all attempt this
+// UPDATE. Requiring the new value to be strictly greater than the current
+// one means only the first writer's row lock does real work; every other
+// concurrent attempt re-evaluates the WHERE clause against the
+// now-committed row once it can proceed, finds expires_at no longer less
+// than the target, and matches zero rows — a no-op, not a second write
+// or a lock wait for nothing.
+//
+// Absolute lifetime: capping the new value at created_at + 90 days (see
+// identity.maxSessionLifetime in sessions.go, which this literal must
+// match) means a session in continuous use is renewed right up to that
+// cap and never again past it — the WHERE clause's "strictly greater"
+// check on the same capped expression is what makes renewal stop
+// exactly there instead of drifting forever. A stolen cookie exercised
+// once a fortnight is valid for at most 90 days, not indefinitely.
+//
+// This stays an UPDATE, never an upsert: a logout (DeleteSession) landing
+// between the SELECT in UserForSession and this statement leaves no row
+// to match, and an UPDATE that matches nothing creates nothing — a
+// revoked session cannot be resurrected by a renewal that started before
+// the revocation. Do not change this to INSERT ... ON CONFLICT to "handle"
+// a missing row; a missing row here means "let it stay gone".
 func (q *Queries) ExtendSession(ctx context.Context, arg ExtendSessionParams) error {
 	_, err := q.db.Exec(ctx, extendSession, arg.ExpiresAt, arg.TokenHash)
 	return err
@@ -248,13 +278,37 @@ func (q *Queries) GetInviteByTokenHash(ctx context.Context, tokenHash []byte) (I
 }
 
 const getLiveAPIToken = `-- name: GetLiveAPIToken :one
-SELECT id, token_hash, project_id, user_id, label, created_at, last_used_at, revoked_at, token_hint FROM api_tokens
-WHERE token_hash = $1::bytea AND revoked_at IS NULL
+SELECT t.id, t.token_hash, t.project_id, t.user_id, t.label, t.created_at, t.last_used_at, t.revoked_at, t.token_hint, u.is_admin AS user_is_admin FROM api_tokens t
+JOIN users u ON u.id = t.user_id
+WHERE t.token_hash = $1::bytea AND t.revoked_at IS NULL
 `
 
-func (q *Queries) GetLiveAPIToken(ctx context.Context, tokenHash []byte) (ApiToken, error) {
+type GetLiveAPITokenRow struct {
+	ID          uuid.UUID
+	TokenHash   []byte
+	ProjectID   uuid.UUID
+	UserID      uuid.UUID
+	Label       string
+	CreatedAt   pgtype.Timestamptz
+	LastUsedAt  pgtype.Timestamptz
+	RevokedAt   pgtype.Timestamptz
+	TokenHint   string
+	UserIsAdmin bool
+}
+
+// Joins users for is_admin so web.resolveBearerCaller can build a Caller
+// from one query instead of two. This is a deliberate exception to the
+// rest of this file keeping api_tokens and users apart (ListAPITokens
+// below joins only for a display label, never a fact the middleware would
+// trust) — see identity.APITokenSummary.UserIsAdmin's own doc comment for
+// why this one earns the join: it replaces a second round trip on the
+// hottest authenticated path in the product, the same class of cost
+// TouchAPIToken's throttle and ExtendSession's guard above exist to
+// control, and Task 9's original design (a lean, no-join lookup here) is
+// the one being traded away to get it.
+func (q *Queries) GetLiveAPIToken(ctx context.Context, tokenHash []byte) (GetLiveAPITokenRow, error) {
 	row := q.db.QueryRow(ctx, getLiveAPIToken, tokenHash)
-	var i ApiToken
+	var i GetLiveAPITokenRow
 	err := row.Scan(
 		&i.ID,
 		&i.TokenHash,
@@ -265,6 +319,7 @@ func (q *Queries) GetLiveAPIToken(ctx context.Context, tokenHash []byte) (ApiTok
 		&i.LastUsedAt,
 		&i.RevokedAt,
 		&i.TokenHint,
+		&i.UserIsAdmin,
 	)
 	return i, err
 }

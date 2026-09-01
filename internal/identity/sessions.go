@@ -35,6 +35,23 @@ var ErrNoSession = errors.New("no active session")
 // constant — see the tests.
 const randomTokenBytes = 32
 
+// maxSessionLifetime is the absolute cap on how long a session can live,
+// no matter how much sliding renewal (ExtendSession) extends it. Without
+// a ceiling, a session in continuous use never expires and a stolen
+// cookie exercised even once a fortnight stays valid forever — renewal
+// alone answers "should an active session survive its SESSION_TTL" but
+// says nothing about "for how long, ultimately", which is a separate
+// policy decision this instance makes explicitly rather than by omission.
+// 90 days is long enough that a designer who opens their laptop weekly is
+// never forced to log back in, and short enough that a credential nobody
+// has used in three months stops being a standing risk on its own.
+//
+// This constant exists for documentation and cross-reference only —
+// ExtendSession's own SQL (identity.sql) is what actually enforces the
+// cap, via a LEAST(..., created_at + interval '90 days') that must keep
+// matching the "90 days" here. Nothing in Go re-derives or re-checks it.
+const maxSessionLifetime = 90 * 24 * time.Hour
+
 // IssueSession mints a session token and stores only its hash. The token
 // itself is returned once, for the caller to set as an httpOnly cookie
 // value; nothing else in this package ever holds it again. The expiry that
@@ -94,7 +111,8 @@ func (s *Service) UserForSession(ctx context.Context, token string) (User, time.
 	return user, row.SessionExpiresAt.Time, nil
 }
 
-// ExtendSession pushes a session's expiry forward to expiresAt. Task 10's
+// ExtendSession pushes a session's expiry forward to expiresAt, capped at
+// maxSessionLifetime from the session's own creation. Task 10's
 // authentication middleware calls it from resolveSessionCaller, on a
 // session more than halfway through its lifetime, to slide the expiry
 // forward without logging the caller out mid-use; that halfway threshold
@@ -103,6 +121,13 @@ func (s *Service) UserForSession(ctx context.Context, token string) (User, time.
 // write off it (tokens.go). It exists here, in the identity package
 // rather than at the HTTP layer, so that policy needs no schema or sqlc
 // change of its own to support it.
+//
+// Both the concurrency guard (losing writers under two tabs crossing
+// halfway together become no-ops) and the maxSessionLifetime cap are
+// enforced by this query's own WHERE clause, not by anything in this Go
+// method — see identity.sql's doc comment on ExtendSession for the detail
+// that actually matters: this stays an UPDATE, never an upsert, so a
+// logout racing this call cannot resurrect a session it just deleted.
 func (s *Service) ExtendSession(ctx context.Context, token string, expiresAt time.Time) error {
 	sum := sha256.Sum256([]byte(token))
 	if err := s.q.ExtendSession(ctx, dbq.ExtendSessionParams{

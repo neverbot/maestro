@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,7 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
-	token, _, _ := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
+	token, tok, _ := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -65,6 +66,7 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 		UserID    string `json:"user_id"`
 		IsAdmin   bool   `json:"is_admin"`
 		ProjectID string `json:"project_id"`
+		TokenID   string `json:"token_id"`
 	}
 	if err := decodeJSON(rec, &body); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -74,6 +76,12 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 	}
 	if body.ProjectID != project.ID.String() {
 		t.Fatalf("project_id = %q, want %q", body.ProjectID, project.ID.String())
+	}
+	if body.TokenID != tok.ID.String() {
+		t.Fatalf("token_id = %q, want %q", body.TokenID, tok.ID.String())
+	}
+	if body.IsAdmin {
+		t.Fatalf("is_admin = true, want false for a non-admin user's token")
 	}
 }
 
@@ -300,30 +308,53 @@ func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 
 // TestSessionRenewsPastHalfwayThroughItsLifetime pins the sliding-session
 // policy resolveSessionCaller implements: a session used after crossing
-// the halfway point of its SESSION_TTL gets pushed back out to a full
-// SESSION_TTL from now, so a caller in continued use is never logged out
-// mid-session. A short SessionTTL makes "past halfway" reachable with a
-// short sleep instead of a mocked clock.
+// the halfway point of its SESSION_TTL gets pushed back out to exactly a
+// full SESSION_TTL from now, so a caller in continued use is never logged
+// out mid-session.
+//
+// This backdates sessions.expires_at directly with the pool, the same
+// technique TestExpiredSessionIsRejectedAndPruned and
+// TestResolveAPITokenThrottlesLastUsedAtWrites (internal/identity) use,
+// rather than sleeping inside a short TTL: a sleep leaves little margin
+// for user creation, an HTTP round trip and two queries before an
+// overshoot flips the session from "past halfway" to "expired", which
+// fails hard (a 401, not a soft miss) — the worst kind of flake to
+// debug. An injectable fake clock would be worse, not better: expiry is
+// enforced in SQL by expires_at > now(), so a Go-side clock would
+// desynchronise from the database and this would end up testing a
+// fiction instead of the real comparison ExtendSession and
+// UserForSession both make. Backdating the column keeps Postgres' own
+// now() as the only clock in play.
+//
+// The assertion brackets now()+SessionTTL around the request instead of
+// checking "extended by at least N": a renewal that landed at the wrong
+// offset (half the TTL, say, or the pre-cap value before LEAST applies)
+// would pass a loose lower bound but fails this bracket.
 func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.SessionTTL = 200 * time.Millisecond
 	ids := identity.New(pool, cfg)
 	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projects.New(pool)})
 	ctx := context.Background()
 
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
-	token, originalExpiry, err := ids.IssueSession(ctx, user.ID)
+	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
 	}
 
-	time.Sleep(120 * time.Millisecond) // past the 100ms halfway point of a 200ms TTL
+	pastHalfway := time.Now().Add(cfg.SessionTTL/2 - time.Minute)
+	tokenHash := sha256.Sum256([]byte(token))
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`, pastHalfway, tokenHash[:]); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
 
+	before := time.Now()
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
+	after := time.Now()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -332,11 +363,9 @@ func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserForSession: %v", err)
 	}
-	if !newExpiry.After(originalExpiry) {
-		t.Fatalf("expiry = %v, want later than the original %v: a session past halfway should renew", newExpiry, originalExpiry)
-	}
-	if extended := newExpiry.Sub(originalExpiry); extended < 80*time.Millisecond {
-		t.Fatalf("expiry moved forward by only %v, want close to a full %v renewal", extended, cfg.SessionTTL)
+	wantMin, wantMax := before.Add(cfg.SessionTTL), after.Add(cfg.SessionTTL)
+	if newExpiry.Before(wantMin) || newExpiry.After(wantMax) {
+		t.Fatalf("expiry = %v, want between %v and %v (now + SessionTTL, bracketed around the request)", newExpiry, wantMin, wantMax)
 	}
 }
 
@@ -369,5 +398,164 @@ func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
 	}
 	if !expiryAfter.Equal(originalExpiry) {
 		t.Fatalf("expiry changed from %v to %v for a fresh session well before halfway", originalExpiry, expiryAfter)
+	}
+}
+
+// TestAdminTokenReturnsProjectAndIsAdmin pins the admin half of the
+// invariant this task exists to protect: an admin's token is still
+// bound to exactly the project it was minted for, not exempted into an
+// unscoped caller. Before this test, no test in this package (or
+// package web's own internal tests before caller_test.go) ever created
+// an admin and asserted on IsAdmin — it was decoded and never checked.
+func TestAdminTokenReturnsProjectAndIsAdmin(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	ids := identity.New(pool, cfg)
+	projSvc := projects.New(pool)
+	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projSvc})
+	ctx := context.Background()
+
+	if err := ids.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := ids.Authenticate(ctx, cfg.FirstAdminEmail, cfg.FirstAdminPassword)
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if !admin.IsAdmin {
+		t.Fatal("bootstrapped user is not an admin")
+	}
+
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", admin.ID)
+	if err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: admin.ID, Label: "admin token"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		IsAdmin   bool   `json:"is_admin"`
+		ProjectID string `json:"project_id"`
+	}
+	if err := decodeJSON(rec, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.IsAdmin {
+		t.Fatal("is_admin = false, want true for an admin's token")
+	}
+	if body.ProjectID != project.ID.String() {
+		t.Fatalf("project_id = %q, want %q: an admin's token stays bound to its own project, not exempted", body.ProjectID, project.ID.String())
+	}
+}
+
+// TestBearerTakesPrecedenceOverCookieForADifferentUser is where the
+// bearer-over-cookie precedence decision (TestInvalidBearerDoesNotFallBackToCookie
+// above) actually matters: both credentials here are valid, for two
+// different users. Getting the precedence wrong would resolve the wrong
+// identity for a valid request — a privilege issue, not merely a 401.
+func TestBearerTakesPrecedenceOverCookieForADifferentUser(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	tokenUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "token-user@studio.com", DisplayName: "Token User", Password: "password12345"})
+	cookieUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cookie-user@studio.com", DisplayName: "Cookie User", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", tokenUser.ID)
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: tokenUser.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	sessionToken, _, err := ids.IssueSession(ctx, cookieUser.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: sessionToken})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		UserID string `json:"user_id"`
+	}
+	if err := decodeJSON(rec, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.UserID != tokenUser.ID.String() {
+		t.Fatalf("user_id = %q, want the bearer token's user %q, not the cookie's user %q", body.UserID, tokenUser.ID.String(), cookieUser.ID.String())
+	}
+}
+
+// TestDatabaseErrorDuringBearerAuthenticationIsInternalError and its
+// session counterpart below pin the 500 path in the tree rather than
+// leaving it proven only once by hand: closing the pool after minting a
+// live credential forces ResolveAPIToken/UserForSession to fail with a
+// genuine connection error, not ErrTokenInvalid/ErrNoSession, so
+// authenticate must answer 500, not 401 — the exact distinction
+// Correction 1 (this task's plan notes) exists to preserve. Nothing else
+// in this file exercises this path in CI; without it, that split could be
+// collapsed back without any test noticing.
+func TestDatabaseErrorDuringBearerAuthenticationIsInternalError(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	ids := identity.New(pool, cfg)
+	projSvc := projects.New(pool)
+	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projSvc})
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	pool.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a database failure, not 401 (indistinguishable from a bad credential); body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	ids := identity.New(pool, cfg)
+	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projects.New(pool)})
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	token, _, err := ids.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	pool.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a database failure, not 401; body = %s", rec.Code, rec.Body.String())
 	}
 }

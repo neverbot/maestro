@@ -353,11 +353,16 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 	return nil
 }
 
-// UserByID loads one user. It exists for the authentication middleware
-// (Task 10): resolving a bearer token yields a user id and project binding
-// but not the account's IsAdmin flag or display name, and this is how that
-// gap is filled without the identity package ever handing out dbq.User
-// directly (see User's own doc comment).
+// UserByID loads one user. It was originally added for Task 10's
+// authentication middleware, to fill the gap between a resolved bearer
+// token (a user id and project binding, no IsAdmin or display name) and
+// a full User — that call site is gone now (a Round 3 review had
+// GetLiveAPIToken join users directly instead, so the middleware never
+// needs this method: see identity.APITokenSummary.UserIsAdmin and
+// web.resolveBearerCaller). It stays exported for Task 13's `whoami` MCP
+// tool, which needs the same user-id-to-User lookup for a caller that
+// arrived with no display name of its own, without the identity package
+// ever handing out dbq.User directly (see User's own doc comment).
 func (s *Service) UserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	dbUser, err := s.q.GetUserByID(ctx, id)
 	if err != nil {

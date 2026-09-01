@@ -4,7 +4,7 @@
 of a game together: characters, places, missions, progression, story.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](license.md)
-![Status: design phase](https://img.shields.io/badge/status-design%20phase-orange)
+![Status: early development](https://img.shields.io/badge/status-early%20development-orange)
 
 Self-hosted. Open source. It holds the *design* of a game, never a
 running one: no live instances, no real players, no telemetry.

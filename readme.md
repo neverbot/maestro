@@ -9,9 +9,11 @@ of a game together: characters, places, missions, progression, story.**
 Self-hosted. Open source. It holds the *design* of a game, never a
 running one: no live instances, no real players, no telemetry.
 
-> **There is no code yet.** The design lives in
-> [`docs/superpowers/specs/`](docs/superpowers/specs/). Watch the repo
-> if you want to see it get built.
+> **Early days.** The server runs — accounts, games, agent tokens, the
+> MCP surface and live updates are in place — but the game-design domain
+> itself is not built yet, so there is nothing to model with. See
+> [Running it](#running-it) to start an instance, and
+> [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design.
 
 ## Maestro knows nothing about games
 
@@ -83,7 +85,7 @@ the linter, `sqlc diff`, and the test suite — the same one CI runs.
 
 ## Roadmap
 
-- [ ] **Core.** Server, Postgres, identity, MCP and REST surfaces.
+- [x] **Core.** Server, Postgres, identity, MCP and REST surfaces.
 - [ ] **Metamodel.** The four primitives, field schemas, validation.
 - [ ] **Markdown.** Versioned prose, linked to entities.
 - [ ] **Views.** The query language, saved views, layouts, coordinates.

@@ -147,9 +147,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, ca
 			s.changePasswordLimiter.Record(key)
 			writeError(w, http.StatusUnauthorized, errCodeUnauthorized, "current password is wrong")
 		case errors.Is(err, identity.ErrPasswordUnchanged):
-			writeError(w, http.StatusUnprocessableEntity, "password_unchanged", "the new password must differ from the current one")
+			writeError(w, http.StatusUnprocessableEntity, errCodePasswordUnchanged, "the new password must differ from the current one")
 		case errors.Is(err, identity.ErrPasswordInvalid):
-			writeError(w, http.StatusUnprocessableEntity, "password_invalid", "that password does not meet requirements")
+			writeError(w, http.StatusUnprocessableEntity, errCodePasswordInvalid, "that password does not meet requirements")
 		default:
 			slog.ErrorContext(r.Context(), "change password failed", "user_id", caller.UserID, "error", err)
 			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not change the password")

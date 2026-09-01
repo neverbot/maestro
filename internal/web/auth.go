@@ -29,22 +29,63 @@ type uuidValue = uuid.UUID
 // verbatim at multiple call sites with no shared constant catching a
 // future typo between them; every one of those call sites now uses a
 // name from here.
+//
+// Task 22's own review found that claim had quietly stopped being true:
+// api_auth.go alone had grown fourteen inline literals of its own (this
+// file's login, logout and registration handlers), never migrated when
+// this block was written for Task 12's files; api_password.go mixed
+// constants and literals inside one switch; and four of api_auth.go's
+// literals ("unauthorized", "internal_error", "bad_request",
+// "rate_limited") duplicated a constant that already existed here,
+// unused, the whole time. Every call site in this package now uses a
+// name from this block — see api_auth.go and api_password.go's diffs for
+// that migration — so this comment's claim is accurate again, not merely
+// aspirational.
 const (
-	errCodeUnauthorized   = "unauthorized"
-	errCodeInternal       = "internal_error"
-	errCodeForbidden      = "forbidden"
-	errCodeNotFound       = "not_found"
-	errCodeBadRequest     = "bad_request"
-	errCodeScopeViolation = "scope_violation"
-	errCodeSlugTaken      = "slug_taken"
-	errCodeSlugInvalid    = "slug_invalid"
-	errCodeNameInvalid    = "name_invalid"
-	errCodeInvalidRole    = "invalid_role"
-	errCodeLastOwner      = "last_owner"
-	errCodeLabelInvalid   = "label_invalid"
-	errCodeInviteInvalid  = "invite_request_invalid"
-	errCodeLastAdmin      = "last_admin"
-	errCodeRateLimited    = "rate_limited"
+	errCodeUnauthorized         = "unauthorized"
+	errCodeInternal             = "internal_error"
+	errCodeForbidden            = "forbidden"
+	errCodeNotFound             = "not_found"
+	errCodeBadRequest           = "bad_request"
+	errCodeScopeViolation       = "scope_violation"
+	errCodeSlugTaken            = "slug_taken"
+	errCodeSlugInvalid          = "slug_invalid"
+	errCodeNameInvalid          = "name_invalid"
+	errCodeInvalidRole          = "invalid_role"
+	errCodeLastOwner            = "last_owner"
+	errCodeLabelInvalid         = "label_invalid"
+	errCodeLastAdmin            = "last_admin"
+	errCodeRateLimited          = "rate_limited"
+	errCodeUnsupportedMediaType = "unsupported_media_type"
+	errCodeRequestTooLarge      = "request_too_large"
+
+	// errCodeInviteRequestInvalid maps identity.ErrInviteRequestInvalid —
+	// a malformed invite *creation* request (api_invites.go,
+	// writeCreateInviteError). Its value predates this constant's own
+	// current name: it was originally named errCodeInviteInvalid, which
+	// a Task 22 review flagged as actively misleading — the constant
+	// named for "invite invalid" was not the one that actually fired for
+	// identity.ErrInviteInvalid at redemption (writeRegistrationError
+	// used the literal "invite_invalid" instead, unconstant, the whole
+	// time this one existed). Renamed so its name matches the condition
+	// it maps, and errCodeInviteInvalid below now names the condition
+	// its own name promises.
+	errCodeInviteRequestInvalid = "invite_request_invalid"
+	// errCodeInviteInvalid maps identity.ErrInviteInvalid — an invite
+	// token that is unknown, already redeemed, or otherwise unusable at
+	// redemption time (writeRegistrationError, api_auth.go). Distinct
+	// from errCodeInviteRequestInvalid above: that one fires when an
+	// admin's own request to create an invite was malformed, before any
+	// token exists to redeem.
+	errCodeInviteInvalid      = "invite_invalid"
+	errCodeInviteRequired     = "invite_required"
+	errCodeInviteExpired      = "invite_expired"
+	errCodeEmailTaken         = "email_taken"
+	errCodeEmailNotAllowed    = "email_not_allowed"
+	errCodeEmailInvalid       = "email_invalid"
+	errCodeDisplayNameInvalid = "display_name_invalid"
+	errCodePasswordInvalid    = "password_invalid"
+	errCodePasswordUnchanged  = "password_unchanged"
 )
 
 // Caller is the authenticated principal of a request. It has exactly two
@@ -156,11 +197,11 @@ func CallerFrom(ctx context.Context) (Caller, bool) {
 // lifetime, a periodic re-check, or accepting the exposure), not something
 // this method can fix by trying harder per-request.
 //
-// A request under a public path prefix (none exist yet; Task 15's static
-// asset tree and Task 14's SSE handshake are the first candidates) should
-// be short-circuited before it reaches the cookie lookup below, not
-// merely left unauthenticated by requireCaller: every static asset on a
-// page otherwise costs one identical, wasted session lookup per request.
+// A request under a public path prefix — isPublicPath below, which now
+// covers /login, /api/config, /static/ and /g/ — is short-circuited
+// before it reaches the cookie lookup below, not merely left
+// unauthenticated by requireCaller: every static asset on a page
+// otherwise costs one identical, wasted session lookup per request.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isPublicPath(r.URL.Path) {

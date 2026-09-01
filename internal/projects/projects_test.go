@@ -70,13 +70,13 @@ func TestCreateProjectMakesCreatorOwner(t *testing.T) {
 	}
 }
 
-func TestCreateUnknownCreatorReturnsErrUserNotFound(t *testing.T) {
+func TestCreateUnknownCreatorReturnsErrMemberNotFound(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	if _, err := svc.Create(ctx, "azeroth", "Azeroth", uuid.New()); !errors.Is(err, projects.ErrUserNotFound) {
-		t.Fatalf("err = %v, want ErrUserNotFound", err)
+	if _, err := svc.Create(ctx, "azeroth", "Azeroth", uuid.New()); !errors.Is(err, projects.ErrMemberNotFound) {
+		t.Fatalf("err = %v, want ErrMemberNotFound", err)
 	}
 }
 
@@ -489,7 +489,7 @@ func TestSetRoleUnknownProjectReturnsErrProjectNotFound(t *testing.T) {
 	}
 }
 
-func TestSetRoleUnknownUserReturnsErrUserNotFound(t *testing.T) {
+func TestSetRoleUnknownUserReturnsErrMemberNotFound(t *testing.T) {
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -501,8 +501,8 @@ func TestSetRoleUnknownUserReturnsErrUserNotFound(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if _, err := svc.SetRole(ctx, uuid.New(), project.ID, "editor"); !errors.Is(err, projects.ErrUserNotFound) {
-		t.Fatalf("err = %v, want ErrUserNotFound", err)
+	if _, err := svc.SetRole(ctx, uuid.New(), project.ID, "editor"); !errors.Is(err, projects.ErrMemberNotFound) {
+		t.Fatalf("err = %v, want ErrMemberNotFound", err)
 	}
 }
 

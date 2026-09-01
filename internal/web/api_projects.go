@@ -341,14 +341,13 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 	switch {
 	case errors.Is(err, projects.ErrRoleInvalid):
 		writeError(w, http.StatusBadRequest, errCodeInvalidRole, "role must be one of "+roleList())
-	case errors.Is(err, projects.ErrUserNotFound):
+	case errors.Is(err, projects.ErrMemberNotFound):
 		writeError(w, http.StatusNotFound, errCodeNotFound, "no such member")
 	case errors.Is(err, projects.ErrProjectNotFound):
-		// Unreachable today (nothing in this plan deletes a project yet),
-		// but requireProject's own RoleOf lookup and this SetRole call are
-		// two separate round trips, so a project deleted in between is a
-		// real race the moment game deletion lands — mapped now so that
-		// day this is a 404, not a 500 nobody mapped in time.
+		// requireProject's own RoleOf lookup and this SetRole call are
+		// two separate round trips, so a game deleted in between (Task
+		// 17's handleDeleteGame) is a real race: mapped to 404, not the
+		// 500 an unmapped constraint-violation error would fall into.
 		writeError(w, http.StatusNotFound, errCodeNotFound, "no such game")
 	case errors.Is(err, projects.ErrLastOwner):
 		// See handleRemoveMember's doc comment: this is the same guard,
@@ -495,6 +494,20 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 
 	project, err := s.opts.Projects.ByID(r.Context(), scope.ProjectID)
 	if err != nil {
+		// projects.ErrProjectNotFound is reachable here: requireProject's
+		// own membership lookup and this ByID call are two separate round
+		// trips, so a game already deleted by a concurrent request (or by
+		// this same caller retrying a request whose first response never
+		// arrived) lands here as a real race, not a hypothetical one — the
+		// exact shape handleChangeRole's own ErrProjectNotFound comment,
+		// above in this file, predicted the moment this handler existed.
+		// A Task 22 review found that prediction had come true unmapped:
+		// this branch fell into the generic 500 below for a caller who
+		// had done nothing wrong beyond losing a race.
+		if errors.Is(err, projects.ErrProjectNotFound) {
+			writeError(w, http.StatusNotFound, errCodeNotFound, "no such game")
+			return
+		}
 		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
 		return

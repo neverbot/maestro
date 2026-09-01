@@ -80,7 +80,6 @@ jobs:
         run: |
           docker run -d --name maestro-smoke --network host \
             -e DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" \
-            -e SESSION_KEY="ci-smoke-test-session-key-not-a-real-secret" \
             -e FIRST_ADMIN_EMAIL="admin@example.com" \
             -e FIRST_ADMIN_PASSWORD="ci-smoke-test-password" \
             -e REGISTRATION_MODE="invite_only" \

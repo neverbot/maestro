@@ -24,11 +24,6 @@ const (
 // validRegistrationModes lists every accepted RegistrationMode.
 var validRegistrationModes = []RegistrationMode{RegistrationInviteOnly, RegistrationDomainOpen}
 
-// placeholderSessionKey is the example value shipped in compose.yml. It is
-// exactly 32 bytes and would otherwise pass validation, so it is rejected by
-// name to stop it from ever running an instance in production.
-const placeholderSessionKey = "change-me-change-me-change-me-32ch"
-
 // defaultSessionTTL is how long a login lasts when SESSION_TTL is unset.
 const defaultSessionTTL = 720 * time.Hour
 
@@ -59,7 +54,6 @@ type Argon2Params struct {
 type Config struct {
 	Addr                string
 	DatabaseURL         string
-	SessionKey          string
 	SessionTTL          time.Duration
 	InviteTTL           time.Duration
 	FirstAdminEmail     string
@@ -96,12 +90,11 @@ type Config struct {
 }
 
 // LogValue redacts secrets so a stray slog.Any("config", cfg) never leaks
-// SessionKey or FirstAdminPassword; this repository, and its logs, are public.
+// FirstAdminPassword; this repository, and its logs, are public.
 func (c Config) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("addr", c.Addr),
 		slog.String("database_url", c.DatabaseURL),
-		slog.String("session_key", "REDACTED"),
 		slog.String("first_admin_email", c.FirstAdminEmail),
 		slog.String("first_admin_password", "REDACTED"),
 		slog.Any("allowed_email_domains", c.AllowedEmailDomains),
@@ -114,6 +107,24 @@ func (c Config) LogValue() slog.Value {
 
 // Load reads configuration through the given lookup function, so tests can
 // supply an environment without touching the real one.
+//
+// SESSION_KEY, once required and validated here (a minimum length, and a
+// named rejection of the placeholder value compose.yml shipped), was
+// removed by a Task 22 review: nothing outside this package ever read
+// Config.SessionKey. Sessions in this product are random tokens stored
+// in a table (internal/identity/sessions.go, IssueSession/UserForSession)
+// — nothing signs or encrypts anything with a key, so there was never a
+// mechanism SESSION_KEY could have been wired into. The readme told
+// operators to generate a real value with `openssl rand -base64 32`
+// before deploying anywhere but a laptop, in language that implied
+// rotating it invalidated sessions; it did nothing, ever. A control that
+// exists only as its own validation — required, length-checked, and
+// rejecting its own placeholder by name, with zero downstream effect —
+// is worse than no control at all: it is validation theater that reads
+// as a real security boundary to an operator who has no reason to go
+// looking for the one that isn't there, and it cost every deployment a
+// secret to generate, store and rotate for a value nothing consulted.
+// Deleting it is strictly safer than leaving it inert.
 func Load(getenv func(string) string) (Config, error) {
 	sessionTTL, err := parsePositiveDuration("SESSION_TTL", getenv("SESSION_TTL"), defaultSessionTTL, 0)
 	if err != nil {
@@ -131,7 +142,6 @@ func Load(getenv func(string) string) (Config, error) {
 	cfg := Config{
 		Addr:               orDefault(getenv("MAESTRO_ADDR"), ":8080"),
 		DatabaseURL:        getenv("DATABASE_URL"),
-		SessionKey:         getenv("SESSION_KEY"),
 		SessionTTL:         sessionTTL,
 		InviteTTL:          inviteTTL,
 		FirstAdminEmail:    strings.ToLower(strings.TrimSpace(getenv("FIRST_ADMIN_EMAIL"))),
@@ -155,12 +165,6 @@ func Load(getenv func(string) string) (Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
-	}
-	if len(cfg.SessionKey) < 32 {
-		return Config{}, errors.New("SESSION_KEY must be at least 32 bytes")
-	}
-	if cfg.SessionKey == placeholderSessionKey {
-		return Config{}, errors.New("SESSION_KEY must not be the placeholder value; generate one with `openssl rand -base64 32`")
 	}
 	switch cfg.RegistrationMode {
 	case RegistrationInviteOnly, RegistrationDomainOpen:

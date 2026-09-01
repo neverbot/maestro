@@ -92,12 +92,29 @@ var (
 	// exist.
 	ErrProjectNotFound = errors.New("project not found")
 
-	// ErrUserNotFound is returned by SetRole when the target user does
-	// not exist — a foreign-key violation on memberships_user_id_fkey,
-	// mapped the same way ErrSlugTaken maps projects_slug_key: by
-	// constraint name, so Task 12's handler can report a 404 instead of
-	// leaking a raw SQLSTATE.
-	ErrUserNotFound = errors.New("user not found")
+	// ErrMemberNotFound is returned by Create and SetRole when the user
+	// named as creator or as SetRole's target does not exist — a
+	// foreign-key violation on memberships_user_id_fkey, mapped the same
+	// way ErrSlugTaken maps projects_slug_key: by constraint name, so
+	// Task 12's handler can report a 404 instead of leaking a raw
+	// SQLSTATE.
+	//
+	// Named ErrMemberNotFound, not ErrUserNotFound, since Task 22: this
+	// package and internal/identity each used to define their own
+	// sentinel named ErrUserNotFound, with identical text ("user not
+	// found") but distinct identity — errors.Is compares by pointer, not
+	// text, so a
+	// handler that accidentally checked the wrong package's sentinel
+	// would compile cleanly and simply never match, silently falling
+	// through to a 500 for a condition that had a real 404 mapping. No
+	// call site was actually doing that when this was found, but the
+	// two names being identical made it possible to introduce by a
+	// plausible-looking import alone; this package's sentinel now names
+	// what it actually reports — a project's membership target, not
+	// identity's own account lookups — so the two can no longer collide
+	// on name even though the underlying condition ("no such user") is
+	// the same in spirit.
+	ErrMemberNotFound = errors.New("user not found")
 
 	ErrSlugTaken   = errors.New("slug already in use")
 	ErrSlugInvalid = errors.New("slug does not meet requirements")
@@ -258,7 +275,7 @@ func mapMembershipInsertError(err error) error {
 	case "memberships_project_id_fkey":
 		return ErrProjectNotFound
 	case "memberships_user_id_fkey":
-		return ErrUserNotFound
+		return ErrMemberNotFound
 	default:
 		return nil
 	}

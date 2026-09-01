@@ -147,6 +147,57 @@ func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
 	}
 }
 
+// TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized pins Task
+// 22's fix to handleLogin: it used to check `err != nil` with no regard
+// to what Authenticate actually returned, so a genuine database failure
+// (Authenticate's own fmt.Errorf("lookup user: %w", err), reached when
+// GetUserByEmail fails for any reason other than pgx.ErrNoRows) was
+// reported to the caller as "email or password is wrong" — the exact
+// conflation the authentication middleware's own doc comment
+// (auth.go, resolveSessionCaller/resolveBearerCaller) explains is wrong,
+// and which api_password.go's handleChangePassword already avoided by
+// matching identity.ErrInvalidCredentials explicitly. Left unfixed, a
+// database blip told every caller their password was wrong, logged
+// nothing an operator could act on, and spent both rate-limit budgets on
+// a guess that was never actually evaluated — so the outage would go on
+// locking people out for a further minute after the database itself had
+// already recovered.
+//
+// Closing the pool after minting a real account forces Authenticate's
+// GetUserByEmail to fail with a genuine connection error, not
+// pgx.ErrNoRows, the same technique
+// TestDatabaseErrorDuringSessionAuthenticationIsInternalError already
+// uses for the authentication middleware (auth_test.go).
+func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	ids := identity.New(pool, cfg)
+	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projects.New(pool)})
+
+	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{
+		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	pool.Close()
+
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a database failure, not 401 (indistinguishable from a wrong password); body = %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := decodeJSON(rec, &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "internal_error" {
+		t.Fatalf("error = %q, want internal_error", body["error"])
+	}
+}
+
 func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {
 	// Rejected before either rate limiter is ever touched: an empty
 	// normalized key would otherwise give every anonymous probe a single

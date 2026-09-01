@@ -107,15 +107,17 @@ const sseHeartbeatInterval = 15 * time.Second
 //
 // Subscribe is called with scope.Role, and the heartbeat re-check keeps
 // it current via Hub.UpdateRole whenever revalidateStreamAccess reports
-// a changed one — so a future publisher can restrict an event to
-// subscribers of at least some role (realtime.Event.MinRole) and have it
-// enforced here, at delivery, rather than needing every publish call
-// site to remember to fan out a role-specific payload itself. Nothing
-// sets MinRole yet — every event today reaches every subscriber of its
-// game regardless of role — but the mechanism exists now, while there is
-// exactly one Subscribe call site to get it right in, rather than being
-// retrofitted once nine publishers already exist that would each need to
-// remember it.
+// a changed one — so a publisher can restrict an event to subscribers of
+// at least some role (realtime.Event.MinRole) and have it enforced here,
+// at delivery, rather than needing every publish call site to remember
+// to fan out a role-specific payload itself. This is no longer
+// theoretical: publish.go's own publishers (Task 20) do set MinRole —
+// member, token and invite events are gated at roles.Editor or
+// roles.Owner, not left at every subscriber's own game regardless of
+// role — because the mechanism existed here from the one Subscribe call
+// site that needed to get it right, rather than being retrofitted once
+// several publishers already existed that would each need to remember
+// it.
 //
 // Event.Seq (assigned by Hub.Publish, realtime/hub.go) is what turns the
 // hub's own silent-drop-on-a-full-buffer behaviour into a detectable

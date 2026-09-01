@@ -6,14 +6,6 @@ services:
         VERSION: dev
     environment:
       DATABASE_URL: postgres://maestro:maestro@db:5432/maestro?sslmode=disable
-      # This is a local-dev-only value, not the literal placeholder
-      # config.Load rejects by name (that one exists purely so the
-      # rejected string can be documented and typo-matched). It is still
-      # not a secret worth keeping: generate a real value with
-      # `openssl rand -base64 32` and set it out-of-band (an env file
-      # kept out of version control, or your orchestrator's own secret
-      # store) before this ever runs anywhere but a laptop.
-      SESSION_KEY: local-dev-only-session-key-do-not-deploy-this-value
       FIRST_ADMIN_EMAIL: admin@example.com
       FIRST_ADMIN_PASSWORD: change-me-please
       REGISTRATION_MODE: invite_only

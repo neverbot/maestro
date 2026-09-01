@@ -57,7 +57,7 @@ type registerRequest struct {
 // justifying, not the rule.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
+		writeError(w, http.StatusUnsupportedMediaType, errCodeUnsupportedMediaType, "Content-Type must be application/json")
 		return false
 	}
 
@@ -65,10 +65,10 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large", "request body too large")
+			writeError(w, http.StatusRequestEntityTooLarge, errCodeRequestTooLarge, "request body too large")
 			return false
 		}
-		writeError(w, http.StatusBadRequest, "bad_request", "malformed JSON body")
+		writeError(w, http.StatusBadRequest, errCodeBadRequest, "malformed JSON body")
 		return false
 	}
 	return true
@@ -88,7 +88,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// would otherwise give every anonymous, credential-less probe a
 		// single shared "" bucket to spend against, for no benefit — the
 		// request is malformed regardless of what the limiter says.
-		writeError(w, http.StatusBadRequest, "bad_request", "email is required")
+		writeError(w, http.StatusBadRequest, errCodeBadRequest, "email is required")
 		return
 	}
 	ip := s.clientIP(r)
@@ -108,15 +108,39 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// leak whether the password was right even though the request was
 	// rate-limited).
 	if !s.loginLimiter.Allowed(email) || !s.loginIPLimiter.Allowed(ip) {
-		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, wait a minute")
+		writeError(w, http.StatusTooManyRequests, errCodeRateLimited, "too many attempts, wait a minute")
 		return
 	}
 
 	user, err := s.opts.Identity.Authenticate(r.Context(), req.Email, req.Password)
 	if err != nil {
-		s.loginLimiter.Record(email)
-		s.loginIPLimiter.Record(ip)
-		writeError(w, http.StatusUnauthorized, "unauthorized", "email or password is wrong")
+		switch {
+		case errors.Is(err, identity.ErrInvalidCredentials):
+			// The only outcome that should ever charge either rate
+			// limiter or report 401 — matched on the same sentinel
+			// Authenticate distinguishes a wrong email/password pair
+			// with, the way api_password.go's handleChangePassword
+			// already does. A bare `err != nil` here used to treat a
+			// database failure identically to a wrong password: every
+			// caller was told "your password is wrong" during an
+			// outage, nothing was logged for an operator to act on, and
+			// both limiter budgets were spent on a guess that was never
+			// actually checked — so an outage locked people out for a
+			// further minute after it had already recovered.
+			s.loginLimiter.Record(email)
+			s.loginIPLimiter.Record(ip)
+			writeError(w, http.StatusUnauthorized, errCodeUnauthorized, "email or password is wrong")
+		default:
+			// A wrapped, non-sentinel error — almost certainly
+			// Authenticate's own database failure
+			// (fmt.Errorf("lookup user: %w", err)). Neither limiter is
+			// charged, since no credential guess was actually evaluated;
+			// the client gets a fixed, generic message, and the operator
+			// gets the real error, since otherwise nothing anywhere
+			// would record that this happened at all.
+			slog.ErrorContext(r.Context(), "authenticate failed", "error", err)
+			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not log in")
+		}
 		return
 	}
 	// No Reset call here: Allowed never charges the budget, so a
@@ -128,7 +152,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	token, expiresAt, err := s.opts.Identity.IssueSession(r.Context(), user.ID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "issue session failed", "user_id", user.ID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "could not start a session")
+		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not start a session")
 		return
 	}
 	s.setSessionCookie(w, r, token, expiresAt)
@@ -160,7 +184,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(SessionCookie); err == nil {
 		if err := s.opts.Identity.RevokeSession(r.Context(), cookie.Value); err != nil {
 			slog.ErrorContext(r.Context(), "revoke session failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal_error", "could not log out")
+			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not log out")
 			return
 		}
 	}
@@ -196,7 +220,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// token itself is never the limiter key).
 	ip := s.clientIP(r)
 	if !s.registerIPLimiter.Allowed(ip) {
-		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many attempts, wait a minute")
+		writeError(w, http.StatusTooManyRequests, errCodeRateLimited, "too many attempts, wait a minute")
 		return
 	}
 
@@ -279,7 +303,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.opts.Config.RegistrationMode != config.RegistrationDomainOpen {
-		writeError(w, http.StatusForbidden, "invite_required", "this instance only admits invited users")
+		writeError(w, http.StatusForbidden, errCodeInviteRequired, "this instance only admits invited users")
 		return
 	}
 	user, err := s.opts.Identity.CreateUser(r.Context(), identity.CreateUserRequest{
@@ -305,19 +329,19 @@ func (s *Server) writeRegistrationError(w http.ResponseWriter, r *http.Request, 
 		// token could use, and saves a designer clicking a stale Slack
 		// link from filing a support request over what is actually a
 		// routine expiry.
-		writeError(w, http.StatusForbidden, "invite_expired", "this invite has expired")
+		writeError(w, http.StatusForbidden, errCodeInviteExpired, "this invite has expired")
 	case errors.Is(err, identity.ErrInviteInvalid):
-		writeError(w, http.StatusForbidden, "invite_invalid", "this invite is not usable")
+		writeError(w, http.StatusForbidden, errCodeInviteInvalid, "this invite is not usable")
 	case errors.Is(err, identity.ErrEmailTaken):
-		writeError(w, http.StatusConflict, "email_taken", "that email already has an account")
+		writeError(w, http.StatusConflict, errCodeEmailTaken, "that email already has an account")
 	case errors.Is(err, identity.ErrEmailNotAllowed):
-		writeError(w, http.StatusForbidden, "email_not_allowed", "that email domain cannot register here")
+		writeError(w, http.StatusForbidden, errCodeEmailNotAllowed, "that email domain cannot register here")
 	case errors.Is(err, identity.ErrEmailInvalid):
-		writeError(w, http.StatusUnprocessableEntity, "email_invalid", "that email is not a valid address")
+		writeError(w, http.StatusUnprocessableEntity, errCodeEmailInvalid, "that email is not a valid address")
 	case errors.Is(err, identity.ErrDisplayNameInvalid):
-		writeError(w, http.StatusUnprocessableEntity, "display_name_invalid", "that display name is not valid")
+		writeError(w, http.StatusUnprocessableEntity, errCodeDisplayNameInvalid, "that display name is not valid")
 	case errors.Is(err, identity.ErrPasswordInvalid):
-		writeError(w, http.StatusUnprocessableEntity, "password_invalid", "that password does not meet requirements")
+		writeError(w, http.StatusUnprocessableEntity, errCodePasswordInvalid, "that password does not meet requirements")
 	default:
 		// A wrapped, non-sentinel error — almost certainly a genuine
 		// database failure (CreateUser's or RedeemInvite's own
@@ -326,7 +350,7 @@ func (s *Server) writeRegistrationError(w http.ResponseWriter, r *http.Request, 
 		// error server-side, since otherwise nothing anywhere records
 		// that this happened at all.
 		slog.ErrorContext(r.Context(), "registration failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "could not complete registration")
+		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not complete registration")
 	}
 }
 
@@ -334,7 +358,7 @@ func (s *Server) startSessionFor(w http.ResponseWriter, r *http.Request, userID 
 	token, expiresAt, err := s.opts.Identity.IssueSession(r.Context(), userID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "issue session failed", "user_id", userID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "could not start a session")
+		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not start a session")
 		return
 	}
 	s.setSessionCookie(w, r, token, expiresAt)

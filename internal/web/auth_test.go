@@ -22,7 +22,6 @@ func decodeJSON(rec *httptest.ResponseRecorder, v any) error {
 
 func testConfig() config.Config {
 	return config.Config{
-		SessionKey: "0123456789abcdef0123456789abcdef",
 		SessionTTL: 24 * time.Hour,
 		InviteTTL:  24 * time.Hour,
 		Argon2:     config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyLen: 32, SaltLen: 16},

@@ -74,9 +74,7 @@ docker compose up --build
 Starts Maestro and Postgres together (`compose.yml`). On first boot it
 migrates the schema and, if `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
 are set, creates that account as an instance admin — log in with it at
-`http://localhost:8080`. `compose.yml`'s own `SESSION_KEY` is a
-local-dev-only placeholder; generate a real one with
-`openssl rand -base64 32` before running this anywhere but a laptop.
+`http://localhost:8080`.
 
 For local development without a container: `make build && make run`
 (binary in `bin/maestro`, same environment variables as the compose
@@ -132,13 +130,23 @@ curl -s -b cookies.txt -X PATCH http://localhost:8080/api/admins \
 ```
 
 An admin may demote another admin, or themselves, as long as at least
-one remains — the instance refuses to ever be left with zero. If the
-one admin account becomes unreachable entirely (a forgotten password,
-with no reset flow), restarting the instance with
-`FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD` pointed at that account
-re-promotes it — access to the environment already implies database
-access, so this grants nothing new, it just turns a `psql` session into
-a documented restart.
+one remains — the instance refuses to ever be left with zero. There is
+no password reset flow anywhere else in this product, so a forgotten or
+leaked admin password is recovered the same way a lost admin flag is:
+restart the instance with `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
+pointed at that account. This both re-promotes the account if it lost
+the flag and resets its password to the configured value — but only if
+the stored password does not already match, so an instance that leaves
+these two variables set permanently (`compose.yml` does, for local
+development) does not silently log its admin out of every device on
+every ordinary restart. Access to the process environment already
+implies database access, so this grants nothing new; it just turns a
+break-glass `psql` session into a documented restart. Because of that,
+`FIRST_ADMIN_PASSWORD` should be unset again once a recovery is
+confirmed — leaving it configured indefinitely means anyone who later
+learns that value can always reset the account's password back to it on
+the next restart, the same property any standing break-glass credential
+has.
 
 **Clicking an invite while already signed in.** A project-bound invite
 redeemed by a browser tab that is already logged in grants membership to

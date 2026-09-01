@@ -371,8 +371,7 @@ var bootstrapRaceHook func()
 // admin account is simply unreachable (a forgotten password, with no
 // reset flow anywhere in this product by design). It now also
 // re-promotes: if a user with FIRST_ADMIN_EMAIL already exists and is not
-// currently an admin, this sets the flag, without touching their password
-// or anything else about the account (see repromoteConfiguredAdmin
+// currently an admin, this sets the flag (see repromoteConfiguredAdmin
 // below). This is deliberately narrower than "create the account if it's
 // missing" — a FIRST_ADMIN_EMAIL that matches nobody is left alone, not
 // used to conjure a brand-new admin account on every boot of an instance
@@ -381,6 +380,23 @@ var bootstrapRaceHook func()
 // not a new capability: an operator who can set process environment
 // variables already has equivalent access to the database directly, so
 // this only turns a break-glass `psql UPDATE` into a documented restart.
+//
+// Task 22 found that "restores the flag only" was not actually a
+// working recovery path at all: the flag survives a password rotation
+// untouched, so the one scenario this exists to fix — a forgotten or
+// leaked admin password, with no reset flow anywhere else in this
+// product — left repromoteConfiguredAdmin returning immediately (the
+// account was already an admin) without the account ever regaining a
+// usable password. Verified live by restarting a real instance after
+// rotating the configured admin's password: login with the configured
+// password kept failing with 401 after the restart. Fixed by also
+// resetting the password hash through ChangePassword — which revokes
+// every session for the account in the same transaction as the hash
+// update, so a stale or stolen session cannot survive a recovery reset
+// any more than an ordinary password change survives one (see
+// ChangePassword's own doc comment, sessions.go) — but only when the
+// stored hash does not already verify against FIRST_ADMIN_PASSWORD (see
+// repromoteConfiguredAdmin below for why that check matters).
 //
 // The count-then-insert below is not atomic, so two replicas booting
 // simultaneously against an empty database can both pass the count check
@@ -398,7 +414,13 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 		return fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
-		return s.repromoteConfiguredAdmin(ctx)
+		if err := s.repromoteConfiguredAdmin(ctx); err != nil {
+			if errors.Is(err, ErrPasswordInvalid) {
+				return fmt.Errorf("FIRST_ADMIN_PASSWORD is invalid: %w", err)
+			}
+			return err
+		}
+		return nil
 	}
 
 	_, err = s.createUser(ctx, CreateUserRequest{
@@ -427,15 +449,41 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 }
 
 // repromoteConfiguredAdmin is BootstrapFirstAdmin's recovery path for a
-// non-empty instance: if s.cfg.FirstAdminEmail names an existing user who
-// is not currently an admin, it sets IsAdmin true and nothing else. A
-// FIRST_ADMIN_EMAIL matching no existing account is left alone — see
-// BootstrapFirstAdmin's own doc comment for why this never creates an
-// account here, only promotes one that already exists. It runs on every
-// boot once FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD are set, regardless of
-// whether anything actually needs fixing; the common case (the
-// configured admin already holds the flag) costs one extra indexed
-// lookup by email and nothing else.
+// non-empty instance: if s.cfg.FirstAdminEmail names an existing user, it
+// (a) sets IsAdmin true if it is not already, and (b) resets the
+// account's password to FirstAdminPassword if the stored hash does not
+// already verify against it. A FIRST_ADMIN_EMAIL matching no existing
+// account is left alone — see BootstrapFirstAdmin's own doc comment for
+// why this never creates an account here, only recovers one that already
+// exists.
+//
+// The password step verifies before it ever writes, rather than
+// resetting unconditionally on every boot. Task 22's own review weighed
+// this against the plan brief's other honest option (never touch the
+// password, and document that a forgotten one is unrecoverable) and
+// chose to implement the reset — access to the process environment
+// already implies database access, so this grants an attacker nothing
+// new, and an instance that can never recover its only admin is a trap.
+// But resetting unconditionally would have made every ordinary restart
+// of an instance that keeps FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD set
+// permanently (compose.yml does exactly this for local development) log
+// that admin out of every session and force a fresh hash, for a
+// password that was never actually wrong — a real, recurring cost for
+// zero benefit in the common case. Verifying first keeps that case a
+// no-op (one extra argon2 verification per boot, not a write) while
+// still catching the one case this exists for: the stored hash no
+// longer matches, because the account's real password was rotated,
+// forgotten, or never matched the configured value in the first place.
+//
+// This runs on every boot once FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD
+// are set, regardless of whether anything actually needs fixing. An
+// operator relying on this recovery path in production should unset
+// FIRST_ADMIN_PASSWORD once the account is confirmed recovered — leaving
+// it configured indefinitely means anyone who later learns that value
+// (or the environment it lives in) can always reset that account's
+// password back to it on the next restart, which is the same property
+// every break-glass credential has and is why one is normally rotated
+// out of standing configuration once it has done its job.
 func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 	dbUser, err := s.q.GetUserByEmail(ctx, s.cfg.FirstAdminEmail)
 	if err != nil {
@@ -444,11 +492,26 @@ func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
 		}
 		return fmt.Errorf("lookup configured admin: %w", err)
 	}
-	if dbUser.IsAdmin {
+
+	if !dbUser.IsAdmin {
+		if err := s.SetAdmin(ctx, dbUser.ID, true); err != nil {
+			return fmt.Errorf("re-promote configured admin: %w", err)
+		}
+	}
+
+	matches, verr := s.verify(s.cfg.FirstAdminPassword, dbUser.PasswordHash)
+	if verr != nil {
+		// A stored hash that fails to parse is treated the same way
+		// Authenticate treats it: as a mismatch, not a fatal error — the
+		// safest read of "cannot tell" here is "reset it", the same
+		// direction Authenticate's own sentinel-hash path already leans.
+		matches = false
+	}
+	if matches {
 		return nil
 	}
-	if err := s.SetAdmin(ctx, dbUser.ID, true); err != nil {
-		return fmt.Errorf("re-promote configured admin: %w", err)
+	if err := s.ChangePassword(ctx, dbUser.ID, s.cfg.FirstAdminPassword); err != nil {
+		return fmt.Errorf("reset configured admin password: %w", err)
 	}
 	return nil
 }

@@ -7,9 +7,7 @@ import (
 )
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
-	env := map[string]string{
-		"SESSION_KEY": "0123456789abcdef0123456789abcdef",
-	}
+	env := map[string]string{}
 	_, err := Load(func(k string) string { return env[k] })
 	if err == nil {
 		t.Fatal("expected an error when DATABASE_URL is unset")
@@ -22,7 +20,6 @@ func TestLoadRequiresDatabaseURL(t *testing.T) {
 func TestLoadDefaults(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	if err != nil {
@@ -51,7 +48,6 @@ func TestLoadDefaults(t *testing.T) {
 func TestLoadParsesTrustedProxyCount(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":        "postgres://localhost/maestro",
-		"SESSION_KEY":         "0123456789abcdef0123456789abcdef",
 		"TRUSTED_PROXY_COUNT": "1",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -66,7 +62,6 @@ func TestLoadParsesTrustedProxyCount(t *testing.T) {
 func TestLoadRejectsInvalidTrustedProxyCount(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":        "postgres://localhost/maestro",
-		"SESSION_KEY":         "0123456789abcdef0123456789abcdef",
 		"TRUSTED_PROXY_COUNT": "not-a-number",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -79,7 +74,6 @@ func TestLoadRejectsInvalidTrustedProxyCount(t *testing.T) {
 func TestLoadRejectsNegativeTrustedProxyCount(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":        "postgres://localhost/maestro",
-		"SESSION_KEY":         "0123456789abcdef0123456789abcdef",
 		"TRUSTED_PROXY_COUNT": "-1",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -92,7 +86,6 @@ func TestLoadRejectsNegativeTrustedProxyCount(t *testing.T) {
 func TestLoadParsesSessionTTL(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 		"SESSION_TTL":  "168h",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -107,7 +100,6 @@ func TestLoadParsesSessionTTL(t *testing.T) {
 func TestLoadRejectsInvalidSessionTTL(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 		"SESSION_TTL":  "not-a-duration",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -121,7 +113,6 @@ func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
 	for _, raw := range []string{"0h", "-1h"} {
 		env := map[string]string{
 			"DATABASE_URL": "postgres://localhost/maestro",
-			"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 			"SESSION_TTL":  raw,
 		}
 		cfg, err := Load(func(k string) string { return env[k] })
@@ -135,7 +126,6 @@ func TestLoadRejectsNonPositiveSessionTTL(t *testing.T) {
 func TestLoadParsesInviteTTL(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 		"INVITE_TTL":   "48h",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -150,7 +140,6 @@ func TestLoadParsesInviteTTL(t *testing.T) {
 func TestLoadRejectsInvalidInviteTTL(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 		"INVITE_TTL":   "not-a-duration",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -164,7 +153,6 @@ func TestLoadRejectsNonPositiveInviteTTL(t *testing.T) {
 	for _, raw := range []string{"0h", "-1h"} {
 		env := map[string]string{
 			"DATABASE_URL": "postgres://localhost/maestro",
-			"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 			"INVITE_TTL":   raw,
 		}
 		cfg, err := Load(func(k string) string { return env[k] })
@@ -178,7 +166,6 @@ func TestLoadRejectsNonPositiveInviteTTL(t *testing.T) {
 func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 		"INVITE_TTL":   "4320h", // 180 days, above the 90-day maximum
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -191,7 +178,6 @@ func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
 func TestLoadParsesDomainsAndMode(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":          "postgres://localhost/maestro",
-		"SESSION_KEY":           "0123456789abcdef0123456789abcdef",
 		"ALLOWED_EMAIL_DOMAINS": "Studio.com, example.org ",
 		"REGISTRATION_MODE":     "domain_open",
 	}
@@ -216,7 +202,6 @@ func TestLoadParsesDomainsAndMode(t *testing.T) {
 func TestLoadRejectsUnknownRegistrationMode(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":      "postgres://localhost/maestro",
-		"SESSION_KEY":       "0123456789abcdef0123456789abcdef",
 		"REGISTRATION_MODE": "open_bar",
 	}
 	if _, err := Load(func(k string) string { return env[k] }); err == nil {
@@ -227,7 +212,6 @@ func TestLoadRejectsUnknownRegistrationMode(t *testing.T) {
 func TestLoadRejectsDomainOpenWithoutDomains(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":      "postgres://localhost/maestro",
-		"SESSION_KEY":       "0123456789abcdef0123456789abcdef",
 		"REGISTRATION_MODE": "domain_open",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
@@ -242,7 +226,6 @@ func TestLoadRejectsInvalidDomainEntry(t *testing.T) {
 	for _, entry := range cases {
 		env := map[string]string{
 			"DATABASE_URL":          "postgres://localhost/maestro",
-			"SESSION_KEY":           "0123456789abcdef0123456789abcdef",
 			"ALLOWED_EMAIL_DOMAINS": entry,
 		}
 		if _, err := Load(func(k string) string { return env[k] }); err == nil {
@@ -251,34 +234,9 @@ func TestLoadRejectsInvalidDomainEntry(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsShortSessionKey(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "tooshort10",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "SESSION_KEY") {
-		t.Fatalf("error = %q, want it to mention SESSION_KEY", err)
-	}
-}
-
-func TestLoadRejectsPlaceholderSessionKey(t *testing.T) {
-	env := map[string]string{
-		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "change-me-change-me-change-me-32ch",
-	}
-	cfg, err := Load(func(k string) string { return env[k] })
-	err = mustErr(t, cfg, err)
-	if !strings.Contains(err.Error(), "SESSION_KEY") {
-		t.Fatalf("error = %q, want it to mention SESSION_KEY", err)
-	}
-}
-
 func TestLoadRejectsInvalidAddr(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://localhost/maestro",
-		"SESSION_KEY":  "0123456789abcdef0123456789abcdef",
 		"MAESTRO_ADDR": "8080",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })

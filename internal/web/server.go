@@ -25,15 +25,16 @@ type Options struct {
 	Projects *projects.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the
-	// SSE endpoint (events.go) reads from. Nothing publishes yet — see
-	// events.go's own doc comment — but the metamodel plan's entity.*
-	// and relation.* events will, from services this package does not
-	// own, which is why this is a field on Options instead of a value
-	// NewServer keeps entirely to itself: whoever builds those services
-	// needs the same *realtime.Hub instance the SSE handler is reading
-	// from, not a second, disconnected one. Optional: a nil Hub gets a
-	// fresh realtime.NewHub(), same as every other build did before this
-	// field existed.
+	// SSE endpoint (events.go) reads from. publish.go's own handlers
+	// (Task 20) are this hub's first real publishers — game, membership,
+	// token and invite mutations all reach it today — and the metamodel
+	// plan's entity.* and relation.* events will too, from services this
+	// package does not own, which is why this is a field on Options
+	// instead of a value NewServer keeps entirely to itself: whoever
+	// builds those services needs the same *realtime.Hub instance the
+	// SSE handler is reading from, not a second, disconnected one.
+	// Optional: a nil Hub gets a fresh realtime.NewHub(), same as every
+	// other build did before this field existed.
 	Hub *realtime.Hub
 
 	// SSEMaxLifetime bounds how long GET /api/games/{game}/events keeps
@@ -329,12 +330,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // channel this closes and returns promptly once it does, the same way
 // it already reacts to r.Context().Done() or its own deadline.
 //
-// This is deliberately not wired into anything yet: Task 16 owns
-// process lifecycle and graceful shutdown (cmd/maestro/main.go's own
-// doc comment says so explicitly — no signal handling exists there
-// today), so Close exists here as the lever that task needs, not as a
-// shutdown sequence this package should not be gluing together on its
-// own ahead of the rest of that task.
+// Wired into cmd/maestro/main.go's signal-handling shutdown goroutine
+// (Task 16): it calls Close before srv.Shutdown, exactly as this doc
+// comment describes, so every open SSE stream gets a chance to close
+// cleanly before the ordinary HTTP shutdown starts waiting on it as a
+// normal in-flight request. This package still does not glue the rest
+// of that sequence together on its own — main.go owns process lifecycle,
+// this method only owns the lever.
 //
 // Safe to call more than once (sync.Once); a second call is a no-op.
 func (s *Server) Close() {
@@ -355,12 +357,23 @@ func (s *Server) Close() {
 // this server writes rather than left to the one page a quality review
 // happened to check by hand — a query parameter on any other page (a
 // return path, say) deserves the same treatment an invite token got.
+//
+// frame-ancestors 'none' is a fourth directive on the same policy, added
+// by a Task 22 review: default-src governs what a page loads, not
+// whether the page itself may be loaded inside another site's frame, so
+// every page this server serves — the login form included — was
+// embeddable cross-origin until this was added, which is exactly the
+// precondition a clickjacking attack over the login form needs. 'none'
+// rather than 'self': nothing in this product embeds one of its own
+// pages inside another of its own pages either, so there is no
+// same-origin framing use to preserve.
+//
 // Wraps the whole handler chain, outermost, so it applies uniformly
 // including to a 404 or a panic recovery, not only to routes that
 // happen to reach a specific handler.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)

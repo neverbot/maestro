@@ -91,7 +91,6 @@ func startRunningServer(t *testing.T) (base string, cancel context.CancelFunc, d
 	env := map[string]string{
 		"DATABASE_URL":         dbURL,
 		"MAESTRO_ADDR":         addr,
-		"SESSION_KEY":          "0123456789abcdef0123456789abcdef",
 		"FIRST_ADMIN_EMAIL":    "admin@studio.com",
 		"FIRST_ADMIN_PASSWORD": "password12345",
 		"REGISTRATION_MODE":    "invite_only",

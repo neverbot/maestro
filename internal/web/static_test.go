@@ -111,7 +111,10 @@ func TestStaticDoesNotServeHTMLShellsAgain(t *testing.T) {
 // (server.go): it wraps the whole handler chain, outermost, specifically
 // so these three headers show up on every response this server writes —
 // a healthcheck included — not only on routes that happen to reach a
-// specific handler.
+// specific handler. The CSP value includes frame-ancestors 'none'
+// (Task 22): default-src does not back-fill it, so every page this
+// server serves — the login form included — was embeddable cross-origin
+// until it was added.
 func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -119,7 +122,7 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 
 	want := map[string]string{
-		"Content-Security-Policy": "default-src 'self'",
+		"Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
 		"X-Content-Type-Options":  "nosniff",
 		"Referrer-Policy":         "no-referrer",
 	}

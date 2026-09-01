@@ -136,7 +136,7 @@ func writeCreatedInvite(w http.ResponseWriter, token string, summary identity.In
 func writeCreateInviteError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, identity.ErrInviteRequestInvalid):
-		writeError(w, http.StatusUnprocessableEntity, errCodeInviteInvalid, err.Error())
+		writeError(w, http.StatusUnprocessableEntity, errCodeInviteRequestInvalid, err.Error())
 	default:
 		slog.ErrorContext(r.Context(), "create invite failed", "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not create the invite")

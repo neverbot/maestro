@@ -96,11 +96,27 @@ func (s *Server) handleSetAdmin(w http.ResponseWriter, r *http.Request, caller C
 		case errors.Is(err, identity.ErrLastAdmin):
 			writeError(w, http.StatusConflict, errCodeLastAdmin, "the instance must keep at least one admin — promote someone else first")
 		default:
-			slog.ErrorContext(r.Context(), "set admin failed", "error", err)
+			// Named both parties explicitly (Task 22): the previous
+			// version of this log line carried only the raw error, with
+			// neither the acting admin nor the target email — the most
+			// privilege-sensitive mutation in the product was also the
+			// least attributable one, unlike handleDeleteGame and every
+			// other consequential mutation in this file, which already
+			// log the acting caller.
+			slog.ErrorContext(r.Context(), "set admin failed",
+				"actor_user_id", caller.UserID, "target_email", req.Email, "is_admin", *req.IsAdmin, "error", err)
 			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not update admin status")
 		}
 		return
 	}
+
+	// Success is logged too, for the same reason: this endpoint's failure
+	// path already named both parties, but a promotion or demotion that
+	// *succeeds* is the more common case an operator or a future
+	// incident review would actually need to reconstruct — "who granted
+	// admin to whom, and when" — and nothing recorded that before.
+	slog.InfoContext(r.Context(), "admin status changed",
+		"actor_user_id", caller.UserID, "target_email", req.Email, "is_admin", *req.IsAdmin)
 
 	// No SSE event: every kind publish.go defines is keyed on a project
 	// id (realtime.Hub is keyed by project, hub.go's own subs map), and

@@ -391,6 +391,95 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	}
 }
 
+// TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatch
+// pins Task 22's fix to the admin-recovery path: Task 21's own
+// repromoteConfiguredAdmin restored the flag but explicitly left the
+// password untouched, which meant a rotated (or forgotten) admin password
+// could never actually be recovered by restarting with
+// FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD — the flag was already true, so
+// the old function returned immediately without even looking at the
+// password. This pins the new behaviour: when the configured admin's
+// stored hash does not verify against FIRST_ADMIN_PASSWORD, this boot
+// resets it, and every prior session for that account is gone.
+func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatch(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+
+	// The admin rotates their own password away from the configured
+	// value — the exact scenario the plan's critical review verified
+	// live left an instance permanently unrecoverable.
+	if err := svc.ChangeOwnPassword(ctx, admin.ID, "password12345", "a-rotated-password"); err != nil {
+		t.Fatalf("ChangeOwnPassword: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	// Simulate a restart with the same, now-stale, configuration.
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("second BootstrapFirstAdmin: %v", err)
+	}
+
+	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); err != nil {
+		t.Fatalf("configured password should authenticate again after recovery: %v", err)
+	}
+	if _, err := svc.Authenticate(ctx, "admin@studio.com", "a-rotated-password"); !errors.Is(err, identity.ErrInvalidCredentials) {
+		t.Fatalf("rotated password should no longer authenticate, err = %v", err)
+	}
+	if _, _, err := svc.UserForSession(ctx, token); !errors.Is(err, identity.ErrNoSession) {
+		t.Fatalf("session minted before the reset should be revoked, err = %v", err)
+	}
+}
+
+// TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect pins
+// the common case on the other side of the fix above: an instance that
+// keeps FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD set permanently (as
+// compose.yml does for local development) must not have every ordinary
+// restart silently log its admin out of every device — the reset only
+// ever fires on an actual mismatch.
+func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	// Restart with the exact same, already-correct configuration.
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("second BootstrapFirstAdmin: %v", err)
+	}
+
+	if _, _, err := svc.UserForSession(ctx, token); err != nil {
+		t.Fatalf("a session predating a no-op restart must survive it: %v", err)
+	}
+}
+
 // TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance pins
 // the other half of the same decision: a FIRST_ADMIN_EMAIL that matches
 // no existing account on a non-empty instance is left alone, not used to

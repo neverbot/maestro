@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -167,11 +170,16 @@ func TestListAPITokensIsScopedToOneProjectAndOmitsTheHash(t *testing.T) {
 	}
 }
 
-// TestResolveAPITokenThrottlesLastUsedAtWrites guards the conditional
-// write TouchAPIToken's own query comment describes: an unconditional
-// UPDATE on every authenticated request would take a row lock on the hot
-// path for no observable benefit, so the write only happens when the
-// stored last_used_at is missing or more than five minutes stale. This
+// TestResolveAPITokenThrottlesLastUsedAtWrites pins the *effect* of the
+// throttle — the column doesn't move on an immediate re-resolve, and does
+// move once the window has passed — which is what TouchAPIToken's SQL
+// WHERE clause (identity.sql) guarantees on its own. It does NOT, by
+// itself, prove the Go-side pre-check in ResolveAPIToken exists: removing
+// that pre-check and always issuing TouchAPIToken leaves this test green,
+// because the SQL predicate still blocks the write it doesn't need to
+// make. See TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindow
+// AndTwoOutsideIt below for the test that pins the Go-side check
+// specifically, by counting round trips rather than reading a value. This
 // reads the column directly with the pool rather than trusting the value
 // ResolveAPIToken itself returns (which reflects the row as read before
 // the touch, not after it) so it observes exactly what a refactor that
@@ -228,6 +236,103 @@ func TestResolveAPITokenThrottlesLastUsedAtWrites(t *testing.T) {
 	}
 	if third := lastUsedAt(); !third.After(first) {
 		t.Fatalf("last_used_at did not advance once the throttle window had passed: %v -> %v", first, third)
+	}
+}
+
+// statementCounter is a pgx.QueryTracer that counts statements (Query,
+// QueryRow, and Exec calls) issued through the connection it is attached
+// to. It exists only for
+// TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt,
+// below, to count round trips directly rather than infer them from a
+// value that a value-only test cannot tell apart from "the SQL predicate
+// alone did the job".
+type statementCounter struct {
+	n atomic.Int64
+}
+
+func (c *statementCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	c.n.Add(1)
+	return ctx
+}
+
+func (c *statementCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (c *statementCounter) reset()       { c.n.Store(0) }
+func (c *statementCounter) count() int64 { return c.n.Load() }
+
+// TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt
+// is the test TestResolveAPITokenThrottlesLastUsedAtWrites cannot be: that
+// test observes last_used_at's value, which TouchAPIToken's own SQL WHERE
+// clause already guarantees on its own — deleting the Go-side pre-check in
+// ResolveAPIToken (the one Round 2 Correction 10 added, in tokens.go)
+// leaves that test green, because the query still gets issued and still
+// updates nothing. The only observable difference the Go-side check makes
+// is how many statements go out over the wire: one (GetLiveAPIToken only)
+// when the pre-check decides TouchAPIToken isn't worth calling, two
+// (GetLiveAPIToken and TouchAPIToken, the latter still a no-op via its own
+// WHERE clause) when it wasn't there to decide that, or was there and
+// decided wrong. Counting round trips with a pgx.QueryTracer is the only
+// way to see that distinction from outside the package.
+//
+// This attaches the tracer to a second pool built from testutil's own
+// pool config (same database, same connection string), rather than the
+// pool CreateAPIToken and the backdating UPDATE below use directly, so
+// only the statements ResolveAPIToken itself issues are counted — setup
+// and the deliberate backdate are excluded on purpose, not by luck.
+func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	projSvc := projects.New(pool)
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
+	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	// A freshly minted token has no last_used_at at all (NULL), so its very
+	// first resolve always touches regardless of the Go-side pre-check —
+	// that branch is "missing", not "stale", and both trigger a write. This
+	// warm-up resolve, through the untraced pool, gets last_used_at off
+	// NULL and onto a fresh timestamp before the counting below starts, so
+	// the counted "inside window" resolve is actually exercising the
+	// pre-check's stale-vs-fresh comparison, not its missing-value branch.
+	if _, err := ids.ResolveAPIToken(ctx, token); err != nil {
+		t.Fatalf("warm-up ResolveAPIToken: %v", err)
+	}
+
+	tracer := &statementCounter{}
+	tracedCfg := pool.Config()
+	tracedCfg.ConnConfig.Tracer = tracer
+	tracedPool, err := pgxpool.NewWithConfig(ctx, tracedCfg)
+	if err != nil {
+		t.Fatalf("open traced pool: %v", err)
+	}
+	t.Cleanup(tracedPool.Close)
+	tracedIDs := identity.New(tracedPool, testConfig())
+
+	tracer.reset()
+	if _, err := tracedIDs.ResolveAPIToken(ctx, token); err != nil {
+		t.Fatalf("ResolveAPIToken (inside window): %v", err)
+	}
+	if got := tracer.count(); got != 1 {
+		t.Fatalf("issued %d statements inside the throttle window, want 1 (GetLiveAPIToken only — the Go-side pre-check should have skipped TouchAPIToken entirely)", got)
+	}
+
+	// Backdate directly through the untraced pool, so this write is not
+	// itself counted.
+	if _, err := pool.Exec(ctx, `UPDATE api_tokens SET last_used_at = $1 WHERE id = $2`, time.Now().Add(-6*time.Minute), tok.ID); err != nil {
+		t.Fatalf("backdate last_used_at: %v", err)
+	}
+
+	tracer.reset()
+	if _, err := tracedIDs.ResolveAPIToken(ctx, token); err != nil {
+		t.Fatalf("ResolveAPIToken (outside window): %v", err)
+	}
+	if got := tracer.count(); got != 2 {
+		t.Fatalf("issued %d statements outside the throttle window, want 2 (GetLiveAPIToken, then TouchAPIToken)", got)
 	}
 }
 

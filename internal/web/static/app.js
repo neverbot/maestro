@@ -33,19 +33,42 @@ function recallGame() {
 
 // safeReturnPath reads ?return= off the current URL — set by fetchGames
 // below when a 401 interrupts an otherwise-authenticated page — and hands
-// back only a value that is unambiguously a path on this same origin: it
-// must start with exactly one leading slash, never two ("//evil.example"
-// is parsed by a browser as a scheme-relative URL to a different host,
-// not a path) and never contain a scheme of its own. Anything else,
-// including a missing parameter, falls back to "/". This is the one place
-// user-supplied text becomes a navigation target rather than DOM text, so
-// it gets its own guard rather than trusting the query string.
+// back only a same-origin path. This is the one place user-supplied text
+// becomes a navigation target rather than DOM text, so it gets its own
+// guard rather than trusting the query string.
+//
+// A pattern match on the raw string is not that guard: a review proved a
+// leading-slash-count check bypassable three ways a browser's own URL
+// parser disagrees with a naive regex about — "/\evil.example" and
+// "/\/evil.example" (a browser's URL parser treats a backslash as a
+// path separator on a special scheme, same as a second forward slash),
+// and a raw control character such as a newline between two slashes
+// (which the parser strips before it ever looks at the string). Every
+// one of those still resolves to a different host once actually parsed,
+// which a character-counting regex has no way to know without
+// re-implementing the parser's own stripping and normalization rules by
+// hand — and the next variant it doesn't happen to enumerate would pass
+// silently. Resolving raw through the URL constructor and comparing the
+// *result's* origin to this page's own does that parsing correctly by
+// construction, is robust to encoded/backslash/control-character variants
+// alike, and is what this function does instead: only a resolved URL
+// whose origin matches is accepted, and only its parsed path (never the
+// raw string) is handed to the caller.
 function safeReturnPath() {
   const raw = new URLSearchParams(window.location.search).get("return");
-  if (raw && /^\/(?!\/)/.test(raw)) {
-    return raw;
+  if (!raw) {
+    return "/";
   }
-  return "/";
+  let target;
+  try {
+    target = new URL(raw, window.location.origin);
+  } catch {
+    return "/";
+  }
+  if (target.origin !== window.location.origin) {
+    return "/";
+  }
+  return target.pathname + target.search + target.hash;
 }
 
 // fallbackMessage covers the two cases a server response can't supply its
@@ -164,6 +187,19 @@ function renderHeader() {
 const loginForm = document.getElementById("login");
 const inviteForm = document.getElementById("invite");
 
+// Module-scope, not declared inside the block below: the invite form's
+// own submit handler (further down this file) is a separate top-level
+// `if` block and needs to read the same value the block below captures
+// on load — a `const` declared inside that block would go out of scope
+// the moment it ends, which is exactly the bug a review caught here: the
+// submit handler re-read window.location.hash instead, which
+// history.replaceState had already cleared by then, so it always sent an
+// empty invite_token. inviteToken is the one true reading of the token
+// this page ever takes; everything downstream uses this variable, never
+// the URL, which by the time a form is even submitted has already been
+// scrubbed.
+let inviteToken = "";
+
 if (loginForm || inviteForm) {
   // login.html only: figure out which of the two forms to show, and with
   // what copy, before either is usable.
@@ -178,7 +214,7 @@ if (loginForm || inviteForm) {
   // no-referrer <meta> on this page is a second, independent layer for
   // anything this page still sends elsewhere.
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const inviteToken = (hashParams.get("invite") ?? "").trim();
+  inviteToken = (hashParams.get("invite") ?? "").trim();
   if (window.location.hash) {
     history.replaceState(null, "", window.location.pathname + window.location.search);
   }
@@ -287,17 +323,18 @@ if (inviteForm) {
     const data = new FormData(inviteForm);
     // The token was already read out of the URL fragment and scrubbed
     // above; it is closed over here rather than re-read from the URL,
-    // which by this point history.replaceState has already cleared. An
-    // empty token (the self-service "Create an account" path) is exactly
-    // what tells POST /api/auth/register to take its domain_open branch
-    // instead of trying to redeem an invite (internal/web/api_auth.go).
-    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    // which by this point history.replaceState has already cleared it —
+    // re-reading here would always see an empty fragment and silently
+    // send an empty invite_token on every redemption. An empty token
+    // (the self-service "Create an account" path) is exactly what tells
+    // POST /api/auth/register to take its domain_open branch instead of
+    // trying to redeem an invite (internal/web/api_auth.go).
     setFormBusy(inviteForm, true, "Creating your account…");
     const result = await postJSON("/api/auth/register", {
       email: data.get("email"),
       display_name: data.get("display_name"),
       password: data.get("password"),
-      invite_token: hashParams.get("invite") ?? "",
+      invite_token: inviteToken,
     });
     if (result.ok) {
       window.location.href = safeReturnPath();

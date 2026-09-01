@@ -248,7 +248,7 @@ func connectMCP(t *testing.T, baseURL, token string) *mcp.ClientSession {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	t.Cleanup(func() { session.Close() })
+	t.Cleanup(func() { _ = session.Close() })
 	return session
 }
 
@@ -302,7 +302,7 @@ func TestMCPRejectsAnUnauthenticatedRequestOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /mcp: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
@@ -354,7 +354,7 @@ func TestMCPRejectsARevokedTokenOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /mcp: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for a revoked token", resp.StatusCode)

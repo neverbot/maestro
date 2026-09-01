@@ -197,7 +197,7 @@ func VerifyPassword(password, encoded string) (bool, error) {
 		return false, err
 	}
 
-	got := argon2.IDKey([]byte(password), h.salt, h.timeCost, h.memory, h.threads, uint32(len(h.key)))
+	got := argon2.IDKey([]byte(password), h.salt, h.timeCost, h.memory, h.threads, uint32(len(h.key))) //nolint:gosec // G115: h.key's length is bounded by Argon2Params.KeyLen (already uint32), never near overflow.
 	// subtle.ConstantTimeCompare, not bytes.Equal: bytes.Equal returns as
 	// soon as it finds a differing byte, so its running time leaks how many
 	// leading bytes of the derived key matched the stored one. Nothing in
@@ -224,5 +224,5 @@ func NeedsRehash(encoded string, p config.Argon2Params) (bool, error) {
 	return h.memory != p.Memory ||
 		h.timeCost != p.Time ||
 		h.threads != p.Threads ||
-		uint32(len(h.key)) != p.KeyLen, nil
+		uint32(len(h.key)) != p.KeyLen, nil //nolint:gosec // G115: same bounded length as VerifyPassword above.
 }

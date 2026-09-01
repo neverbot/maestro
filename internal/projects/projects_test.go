@@ -273,7 +273,7 @@ func TestCreateRejectsInvalidName(t *testing.T) {
 		{"name-empty", ""},
 		{"name-too-long", strings.Repeat("a", 201)},
 		{"name-control-char", "line one\nline two"},
-		{"name-bidi-override", "evil‮reversed"},
+		{"name-bidi-override", "evil\u202ereversed"},
 	}
 	for _, c := range cases {
 		if _, err := svc.Create(ctx, c.slug, c.name, user.ID); !errors.Is(err, projects.ErrNameInvalid) {

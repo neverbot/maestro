@@ -57,6 +57,10 @@ var reservedSlugs = map[string]bool{
 // (the family behind "Trojan Source"-style spoofing). unicode.IsControl
 // does not flag these — they are format characters (category Cf), not
 // controls — so validateName checks for them separately.
+// G116 (gosec) fires on this file at the package clause, not this line —
+// see the exclusion for this exact path in .golangci.yml, with the same
+// reasoning: these bidi control characters are the data this check
+// exists to reject, not a source-spoofing risk in this file itself.
 var bidiOverrides = map[rune]bool{
 	'‪': true, '‫': true, '‬': true, '‭': true, '‮': true, // LRE RLE PDF LRO RLO
 	'⁦': true, '⁧': true, '⁨': true, '⁩': true, // LRI RLI FSI PDI

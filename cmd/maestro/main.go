@@ -3,9 +3,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/neverbot/maestro/internal/config"
@@ -16,33 +19,62 @@ import (
 	"github.com/neverbot/maestro/internal/web"
 )
 
+// pruneInterval is how often the process sweeps expired sessions and
+// invites out of the database. Neither table is queried by expiry alone
+// on any hot path — GetSessionUser and GetLiveInvite already filter on
+// expires_at themselves, so a stale row is inert, never wrong — so this
+// exists purely to keep both tables from growing without bound on a
+// long-lived instance, not to satisfy any correctness requirement. An
+// hour is frequent enough that the tables never accumulate more than a
+// day's worth of build-up between operator restarts, and infrequent
+// enough that it never competes for connections with real traffic on
+// the shared pool.
+const pruneInterval = time.Hour
+
+// shutdownTimeout bounds how long a graceful shutdown waits for in-flight
+// requests to finish before giving up. It is deliberately longer than
+// sseHeartbeatInterval's 15s re-check window (internal/web/events.go) so
+// an open SSE stream that receives Server.Close's signal has time to
+// observe it and return before this deadline forces the connection
+// closed instead.
+const shutdownTimeout = 15 * time.Second
+
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, os.Getenv); err != nil {
 		slog.Error("maestro stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-// run wires the process's database pool and domain services and starts the
-// HTTP server. It exists as a minimal fix for web.NewServer's construction
-// guard (Task 10): a Server built with a nil Identity or Projects service
-// used to serve /healthz successfully right up until the first request
-// carrying any credential, which panicked. This gives it real services
-// instead of leaving that gap open.
+// run wires the full process lifecycle: load config, open the database,
+// migrate, bootstrap the first admin, serve, sweep expired rows
+// periodically, and shut down cleanly once ctx is done. main wires ctx to
+// SIGINT/SIGTERM; run takes it as a parameter, and getenv rather than
+// reading os.Getenv directly, purely so main_test.go can drive a full
+// start-stop cycle against a real listener with a context it controls
+// (a plain context.WithCancel) instead of sending the test binary's own
+// process a real signal.
 //
-// It is deliberately not the full process lifecycle: no signal-driven
-// graceful shutdown, no first-admin bootstrap call, and no periodic sweep
-// for identity.Service.PruneExpiredSessions / PruneExpiredInvites. All
-// three are Task 16's job ("Wire everything into main, then Docker, CI
-// and the quality gate" — its own plan section already claims the prune
-// sweep by name); this only had to stop the panic, not finish main.
-func run() error {
-	cfg, err := config.Load(os.Getenv)
+// Migration failure and start-up ordering: db.Migrate runs to completion
+// (or fails) before srv.ListenAndServe is ever called, so there is no
+// window in which this process accepts a connection — /healthz included —
+// while migrations are incomplete or failed; a caller either finds a
+// fully migrated instance or finds nothing listening at all. goose (the
+// migration runner db.Migrate wraps) runs each migration file in its own
+// transaction by default, so a failure partway through one file rolls
+// back that file's own statements and leaves every previously applied
+// migration exactly as it was; run() reports the error and exits
+// nonzero without starting the server, and the next start-up attempt
+// resumes from the same first still-unapplied migration rather than
+// re-running anything that already succeeded.
+func run(ctx context.Context, getenv func(string) string) error {
+	cfg, err := config.Load(getenv)
 	if err != nil {
 		return err
 	}
-
-	ctx := context.Background()
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -54,17 +86,85 @@ func run() error {
 		return err
 	}
 
-	srv := web.NewServer(web.Options{
+	ids := identity.New(pool, cfg)
+	if err := ids.BootstrapFirstAdmin(ctx); err != nil {
+		return err
+	}
+
+	// webServer is kept as its own *web.Server, not only as srv.Handler
+	// below, so the shutdown goroutine can call its Close() — see
+	// web.Server.Close's own doc comment for why http.Server.Shutdown
+	// alone is not enough once an SSE stream is in the mix.
+	webServer := web.NewServer(web.Options{
 		Version:  version.Version,
 		Config:   cfg,
-		Identity: identity.New(pool, cfg),
+		Identity: ids,
 		Projects: projects.New(pool),
 	})
-	httpServer := &http.Server{
+	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           srv,
+		Handler:           webServer,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	startPruneLoop(ctx, ids)
+
+	go func() { //nolint:gosec // G118: ctx is already Done by the time this reaches shutdownCtx below; a fresh context.Background() is required, not a bug.
+		<-ctx.Done()
+		slog.Info("maestro shutting down")
+		// Close every open SSE stream first: it only signals them and
+		// returns immediately (it does not wait), so calling it before
+		// Shutdown gives each stream the rest of this goroutine's own
+		// work — building shutdownCtx below — as a head start to notice
+		// and return before Shutdown starts waiting on them as ordinary
+		// active handlers.
+		webServer.Close()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("graceful shutdown did not finish cleanly", "error", err)
+		}
+	}()
+
 	slog.Info("maestro listening", "addr", cfg.Addr, "version", version.Version)
-	return httpServer.ListenAndServe()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// startPruneLoop starts a background goroutine that calls
+// PruneExpiredSessions and PruneExpiredInvites every pruneInterval, until
+// ctx is done. Neither identity.Service method (Task 6, Task 7) had a
+// process-lifecycle owner before this: both are tested in isolation but
+// were deliberately left uncalled, with a comment on each pointing here.
+//
+// A failed sweep is logged and never fatal: both prune queries are
+// idempotent (a row either matches "expired and unprocessed" or it does
+// not, no matter how many times the query runs), and a transient
+// database error on one tick is recovered by the next tick an hour
+// later, not by crashing a process that is otherwise serving traffic
+// correctly.
+func startPruneLoop(ctx context.Context, ids *identity.Service) {
+	go func() {
+		ticker := time.NewTicker(pruneInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := ids.PruneExpiredSessions(ctx); err != nil {
+					slog.Error("prune expired sessions", "error", err)
+				} else if n > 0 {
+					slog.Info("pruned expired sessions", "count", n)
+				}
+				if n, err := ids.PruneExpiredInvites(ctx); err != nil {
+					slog.Error("prune expired invites", "error", err)
+				} else if n > 0 {
+					slog.Info("pruned expired invites", "count", n)
+				}
+			}
+		}
+	}()
 }

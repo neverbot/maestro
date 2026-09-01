@@ -55,9 +55,16 @@ func admin(t *testing.T, adminURL string) *pgxpool.Pool {
 	return adminPool
 }
 
-// NewPool creates a uniquely named database, migrates it, and drops it when
-// the test finishes. It skips the test when TEST_DATABASE_URL is unset.
-func NewPool(t *testing.T) *pgxpool.Pool {
+// newDatabase creates a uniquely named, empty (unmigrated) database and
+// registers its drop on test cleanup, returning its connection URL. It
+// skips the test when TEST_DATABASE_URL is unset. Both NewPool and
+// NewDatabaseURL share this rather than duplicating the create/cleanup
+// logic; they differ only in what they do with the resulting URL — NewPool
+// connects and migrates it itself, NewDatabaseURL hands the bare URL back
+// so a caller that needs to exercise its own connect-and-migrate path (as
+// cmd/maestro's own start-up sequence does) can do so against a database
+// this package still owns the lifecycle of.
+func newDatabase(t *testing.T) (testURL, name string) {
 	t.Helper()
 
 	adminURL := os.Getenv("TEST_DATABASE_URL")
@@ -70,7 +77,7 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	name := "maestro_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	name = "maestro_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	ident := pgx.Identifier{name}.Sanitize()
 
 	if _, err := adminDB.Exec(ctx, "CREATE DATABASE "+ident); err != nil {
@@ -90,10 +97,36 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 		}
 	})
 
-	testURL, err := replaceDBName(adminURL, name)
+	var err error
+	testURL, err = replaceDBName(adminURL, name)
 	if err != nil {
 		t.Fatalf("build test database URL: %v", err)
 	}
+	return testURL, name
+}
+
+// NewDatabaseURL creates a uniquely named, empty (unmigrated) database and
+// returns its connection URL, dropping it when the test finishes. Unlike
+// NewPool, it does not connect or migrate — it exists for a caller that
+// runs its own connect-and-migrate sequence against the URL, such as
+// cmd/maestro's main_test.go exercising db.NewPool and db.Migrate through
+// run() exactly as the real binary does. It skips the test when
+// TEST_DATABASE_URL is unset.
+func NewDatabaseURL(t *testing.T) string {
+	t.Helper()
+	testURL, _ := newDatabase(t)
+	return testURL
+}
+
+// NewPool creates a uniquely named database, migrates it, and drops it when
+// the test finishes. It skips the test when TEST_DATABASE_URL is unset.
+func NewPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+
+	testURL, name := newDatabase(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	// ctx is cancelled when NewPool returns, but the pool it configures
 	// outlives that: harmless today since pgxpool is lazy (MaxConns is set

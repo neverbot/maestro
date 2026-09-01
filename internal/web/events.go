@@ -432,6 +432,6 @@ const sseLifetimeJitterFraction = 0.10
 // safe for concurrent use by every open stream calling this at once.
 func jitteredSSEMaxLifetime(base time.Duration) time.Duration {
 	spread := float64(base) * sseLifetimeJitterFraction
-	offset := (rand.Float64()*2 - 1) * spread
+	offset := (rand.Float64()*2 - 1) * spread //nolint:gosec // G404: timing jitter for connection churn, not a security-sensitive value.
 	return base + time.Duration(offset)
 }

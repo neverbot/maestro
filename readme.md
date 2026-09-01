@@ -104,6 +104,31 @@ someone straight into that game instead, at a role, from
 `POST /api/games/{game}/invites` with `{"email":"...","role":"editor"}`,
 the same way.
 
+**Changing a password, and a second admin.** Anyone signed in can rotate
+their own password — it requires the current one, and it logs every
+*other* session out (not the one that made the request):
+
+```bash
+curl -s -b cookies.txt -X PATCH http://localhost:8080/api/me/password \
+  -H 'Content-Type: application/json' \
+  -d '{"current_password":"old-password","new_password":"a-new-password"}'
+```
+
+There is no password reset by design, so this is the only way out for a
+designer who suspects their password leaked. An existing instance admin
+can also promote a colleague to admin — the bootstrap account created at
+first boot is no longer the only one that can ever mint an account-only
+invite:
+
+```bash
+curl -s -b cookies.txt -X PATCH http://localhost:8080/api/users/<user-id>/admin \
+  -H 'Content-Type: application/json' \
+  -d '{"is_admin":true}'
+```
+
+An admin may demote another admin, or themselves, as long as at least
+one remains — the instance refuses to ever be left with zero.
+
 ## Roadmap
 
 - [x] **Core.** Server, Postgres, identity, MCP and REST surfaces.

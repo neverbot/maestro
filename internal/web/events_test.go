@@ -3,6 +3,7 @@ package web_test
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -337,5 +338,91 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stream stayed open after its member was removed from the game")
+	}
+}
+
+// TestEventsStreamReCheckDoesNotSlideSessionExpiry is the point of
+// resolveSessionCallerReadOnly (auth.go): the heartbeat re-check asks
+// "is this session still valid" every 20ms here, and none of those asks
+// may themselves count as the kind of activity that slides the session's
+// expiry forward — an open browser tab is not a person present. The
+// session is backdated past its renewal halfway point first, exactly the
+// condition TestSessionRenewsPastHalfwayThroughItsLifetime
+// (auth_test.go) proves *does* trigger a renewal on an ordinary request,
+// so a regression that routed the re-check through resolveSessionCaller
+// instead of the read-only variant would fail this test by renewing.
+func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	ids := identity.New(pool, cfg)
+	projSvc := projects.New(pool)
+	hub := realtime.NewHub()
+	srv := web.NewServer(web.Options{
+		Version:              "test",
+		Config:               cfg,
+		Identity:             ids,
+		Projects:             projSvc,
+		Hub:                  hub,
+		SSEMaxLifetime:       time.Minute,
+		SSEHeartbeatInterval: 20 * time.Millisecond,
+	})
+	ctx := context.Background()
+
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, _, err := ids.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+	pastHalfway := time.Now().Add(cfg.SessionTTL/2 - time.Minute)
+	tokenHash := sha256.Sum256([]byte(token))
+	if _, err := pool.Exec(ctx, `UPDATE sessions SET expires_at = $1 WHERE token_hash = $2`, pastHalfway, tokenHash[:]); err != nil {
+		t.Fatalf("backdate expires_at: %v", err)
+	}
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(&http.Cookie{Name: web.SessionCookie, Value: token})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	// Admission itself goes through the ordinary, sliding
+	// resolveSessionCaller (auth.go's authenticate middleware runs
+	// before handleEvents ever does) — exactly like any other
+	// authenticated request, it renews this past-halfway session once,
+	// before the 200 above is even received. That renewal is expected
+	// and is not what this test is checking; it establishes the
+	// baseline the heartbeat re-check must not move further.
+	_, afterAdmission, err := ids.UserForSession(ctx, token)
+	if err != nil {
+		t.Fatalf("UserForSession: %v", err)
+	}
+	if afterAdmission.Equal(pastHalfway) {
+		t.Fatal("admission itself did not renew the session — the precondition this test depends on did not hold")
+	}
+
+	// Let several heartbeat ticks (each a read-only re-check) pass.
+	time.Sleep(150 * time.Millisecond)
+
+	_, expiry, err := ids.UserForSession(ctx, token)
+	if err != nil {
+		t.Fatalf("UserForSession: %v", err)
+	}
+	if !expiry.Equal(afterAdmission) {
+		t.Fatalf("expiry moved from %v to %v after admission's own renewal — the heartbeat re-check slid the session", afterAdmission, expiry)
 	}
 }

@@ -223,6 +223,28 @@ func (s *Server) resolveBearerCaller(ctx context.Context, token string) (Caller,
 	return newTokenCaller(summary.UserID, summary.UserIsAdmin, summary.ID, summary.ProjectID), true, nil
 }
 
+// resolveBearerCallerReadOnly is resolveBearerCaller's read-only
+// counterpart: same (Caller, bool, error) contract, built on
+// identity.CheckAPIToken instead of ResolveAPIToken, so it never records
+// use. It exists for exactly one caller — the SSE heartbeat re-check
+// (internal/web/events.go) — which must re-ask "is this token still
+// live" every few seconds without that asking itself counting as
+// activity; see CheckAPIToken's own doc comment (tokens.go) for why that
+// distinction matters. Every other bearer-authenticated code path in
+// this package still goes through resolveBearerCaller: a request that
+// only asks whether a credential works is what "activity" means for
+// last_used_at everywhere except this one re-check.
+func (s *Server) resolveBearerCallerReadOnly(ctx context.Context, token string) (Caller, bool, error) {
+	summary, err := s.opts.Identity.CheckAPIToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, identity.ErrTokenInvalid) {
+			return Caller{}, false, nil
+		}
+		return Caller{}, false, err
+	}
+	return newTokenCaller(summary.UserID, summary.UserIsAdmin, summary.ID, summary.ProjectID), true, nil
+}
+
 // resolveSessionCaller resolves a session cookie value to a Caller. Same
 // (found, error) contract as resolveBearerCaller: an absent or expired
 // session is (false, nil); a database error is (false, err).
@@ -270,6 +292,30 @@ func (s *Server) resolveSessionCaller(ctx context.Context, token string) (Caller
 		}
 	}
 
+	return newSessionCaller(user.ID, user.IsAdmin), true, nil
+}
+
+// resolveSessionCallerReadOnly is resolveSessionCaller's read-only
+// counterpart: it resolves the session exactly the same way
+// (UserForSession) but never calls ExtendSession, so calling it cannot
+// slide a session's expiry forward. It exists for exactly one caller —
+// the SSE heartbeat re-check (internal/web/events.go) — which re-asks
+// "is this session still valid" every few seconds purely to notice a
+// logout, password change, or removal from the game; without this
+// distinction, that re-check would itself be activity, and a forgotten
+// open browser tab would keep a session alive for up to
+// identity.maxSessionLifetime with nobody actually present. An open
+// stream is not activity — only a request that does something with the
+// session counts. Every other session-authenticated code path still goes
+// through resolveSessionCaller, sliding renewal included.
+func (s *Server) resolveSessionCallerReadOnly(ctx context.Context, token string) (Caller, bool, error) {
+	user, _, err := s.opts.Identity.UserForSession(ctx, token)
+	if err != nil {
+		if errors.Is(err, identity.ErrNoSession) {
+			return Caller{}, false, nil
+		}
+		return Caller{}, false, err
+	}
 	return newSessionCaller(user.ID, user.IsAdmin), true, nil
 }
 

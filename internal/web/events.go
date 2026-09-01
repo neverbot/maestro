@@ -51,12 +51,18 @@ const sseHeartbeatInterval = 15 * time.Second
 // life of the connection: every sseHeartbeatInterval tick,
 // revalidateStreamAccess re-asks the exact question requireProject asked
 // at admission — is this credential still live, and is its holder still
-// a member of this game — using the same two resolvers authenticate
-// itself uses (resolveBearerCaller / resolveSessionCaller) and the same
-// resolveProjectScope requireProject calls (api_projects.go). A stream
-// whose caller logged out, changed their password, had their token
-// revoked, or was removed from this game gets closed within one
-// heartbeat interval of that happening, not up to sseMaxLifetime later.
+// a member of this game — using the read-only counterparts of the two
+// resolvers authenticate itself uses (resolveBearerCallerReadOnly /
+// resolveSessionCallerReadOnly, not resolveBearerCaller /
+// resolveSessionCaller: see those methods' own doc comments in auth.go
+// for why an idle re-check must not record use or slide a session) and
+// the same resolveProjectScope requireProject calls (api_projects.go).
+// A stream whose caller logged out, changed their password, had their
+// token revoked, or was removed from this game gets closed within one
+// heartbeat interval of that happening, not up to sseMaxLifetime later
+// — tolerating exactly one transient (database-error) failure of that
+// re-check before closing, so a passing blip is not treated as a
+// revocation; see revalidateStreamAccess's own doc comment.
 //
 // This re-check, on the heartbeat tick, was chosen over the
 // alternative a review of this task proposed: closing subscriptions
@@ -143,6 +149,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	heartbeat := time.NewTicker(s.sseHeartbeatInterval)
 	defer heartbeat.Stop()
 
+	// recheckFailed tracks whether the *previous* heartbeat's
+	// revalidateStreamAccess call failed transiently (a database error,
+	// not a definitive "no longer has access"). One transient failure in
+	// a row is tolerated — a blip is not a revocation — but two in a row
+	// closes the stream: see sseRecheckOutcome's own doc comment for the
+	// policy this implements.
+	var recheckFailed bool
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -150,7 +164,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 		case <-deadline.C:
 			return
 		case <-heartbeat.C:
-			if reason := s.revalidateStreamAccess(r, scope); reason != "" {
+			newScope, reason, transient := s.revalidateStreamAccess(r, scope)
+			switch sseRecheckOutcome(reason, transient, recheckFailed) {
+			case sseRecheckOK:
+				recheckFailed = false
+				scope = newScope
+			case sseRecheckTolerate:
+				recheckFailed = true
+				slog.WarnContext(r.Context(), "sse re-check failed transiently; tolerating one failure",
+					"project_id", scope.ProjectID, "reason", reason)
+			default:
 				slog.InfoContext(r.Context(), "sse stream closed", "project_id", scope.ProjectID, "reason", reason)
 				return
 			}
@@ -173,47 +196,130 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 // revalidateStreamAccess re-answers the question requireProject answered
 // once at this stream's admission: does the credential this request
 // carried still resolve to a live caller, and is that caller still a
-// member of scope.ProjectID. It returns "" when access still checks out,
-// or a short human-readable reason when it does not — logged by
-// handleEvents, not returned as an error, because every outcome here
-// ends the same way (close the stream) and the only thing worth telling
-// an operator is why.
+// member of scope.ProjectID. On success it returns the freshly-resolved
+// ProjectScope and an empty reason; on failure it returns the zero
+// ProjectScope, a short human-readable reason (logged by handleEvents,
+// not returned as an error — every failure here ends the same way, close
+// the stream, and the only thing worth telling an operator is why), and
+// whether the failure is transient.
+//
+// The returned ProjectScope is not a formality: handleEvents assigns it
+// back over its own scope variable on success, specifically so a role
+// change picked up here (a demotion, most importantly) is not detected
+// and then thrown away — Hub's role-scoped delivery (realtime/hub.go)
+// reads Subscription.Role, which handleEvents keeps in sync with this
+// return value via Hub.UpdateRole. A version of this method that
+// returned only a reason would make that resync impossible without a
+// second, redundant lookup.
+//
+// transient distinguishes two failure shapes that must be handled
+// differently: a database error while re-resolving the credential or
+// membership (identity or projects genuinely unreachable, not a verdict
+// about this caller) is transient — handleEvents tolerates exactly one
+// of those in a row, so a momentary blip does not close every open
+// stream on the instance at once during, say, a connection-pool hiccup.
+// "token no longer resolves", "session no longer valid" and "no longer
+// has access to this game" are not transient: they are the identity or
+// projects service answering the question definitively, and the first
+// one closes the stream.
 //
 // r is the original request that admitted this stream: its Authorization
 // header or session cookie is read again here exactly as authenticate
 // (auth.go) read it the first time, rather than trusting the Caller this
 // stream was handed at admission — a Caller is a value copied out of
 // that first resolution and cannot itself go stale to reflect a
-// revocation; only asking the identity service again can.
-func (s *Server) revalidateStreamAccess(r *http.Request, scope ProjectScope) string {
+// revocation; only asking the identity service again can. It reads
+// through resolveBearerCallerReadOnly / resolveSessionCallerReadOnly
+// (auth.go), not resolveBearerCaller / resolveSessionCaller: the
+// ordinary pair records use (a token's last_used_at, a session's sliding
+// renewal), and an idle heartbeat re-check asking "are you still there"
+// four times a minute must not itself count as the caller being there —
+// see those methods' own doc comments for what that would otherwise do
+// to a forgotten open browser tab.
+//
+// The final `else` branch (no Authorization header and no session
+// cookie) is unreachable in practice — admission itself required one of
+// the two to produce the Caller this stream was handed — and is kept
+// anyway as defence in depth: a future change to admission that made
+// that no longer strictly true would fail closed here rather than
+// falling through to a nil caller.
+func (s *Server) revalidateStreamAccess(r *http.Request, scope ProjectScope) (ProjectScope, string, bool) {
 	ctx := r.Context()
 
 	var caller Caller
 	if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
 		token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
-		resolved, ok, err := s.resolveBearerCaller(ctx, token)
+		resolved, ok, err := s.resolveBearerCallerReadOnly(ctx, token)
 		switch {
 		case err != nil:
-			return "token re-check failed: " + err.Error()
+			return ProjectScope{}, "token re-check failed: " + err.Error(), true
 		case !ok:
-			return "token no longer resolves"
+			return ProjectScope{}, "token no longer resolves", false
 		}
 		caller = resolved
 	} else if cookie, err := r.Cookie(SessionCookie); err == nil {
-		resolved, ok, err := s.resolveSessionCaller(ctx, cookie.Value)
+		resolved, ok, err := s.resolveSessionCallerReadOnly(ctx, cookie.Value)
 		switch {
 		case err != nil:
-			return "session re-check failed: " + err.Error()
+			return ProjectScope{}, "session re-check failed: " + err.Error(), true
 		case !ok:
-			return "session no longer valid"
+			return ProjectScope{}, "session no longer valid", false
 		}
 		caller = resolved
 	} else {
-		return "no credential present"
+		return ProjectScope{}, "no credential present", false
 	}
 
-	if _, err := s.resolveProjectScope(ctx, caller, scope.ProjectID); err != nil {
-		return "no longer has access to this game: " + err.Error()
+	newScope, err := s.resolveProjectScope(ctx, caller, scope.ProjectID)
+	if err != nil {
+		// resolveProjectScope always reports errScopeViolation or
+		// errNotMember here, never a bare database error distinctly —
+		// that conflation predates this method (Task 12's RoleOf, folded
+		// into errNotMember for any lookup failure) and is out of scope
+		// to change here, so this branch is treated as definitive, not
+		// transient, even though a fraction of the time it is really a
+		// database blip wearing a membership error's name.
+		return ProjectScope{}, "no longer has access to this game: " + err.Error(), false
 	}
-	return ""
+	return newScope, "", false
+}
+
+// sseRecheckAction is what handleEvents's heartbeat case does with one
+// revalidateStreamAccess result.
+type sseRecheckAction int
+
+const (
+	// sseRecheckOK means access still checks out: adopt the freshly
+	// resolved ProjectScope and clear any pending transient-failure
+	// tolerance.
+	sseRecheckOK sseRecheckAction = iota
+	// sseRecheckTolerate means this tick's re-check failed transiently
+	// and the previous tick did not, so the stream stays open — one
+	// failure in a row is tolerated, not treated as a revocation.
+	sseRecheckTolerate
+	// sseRecheckClose means either a definitive "no longer has access"
+	// (any reason, first time) or a second transient failure in a row:
+	// close the stream.
+	sseRecheckClose
+)
+
+// sseRecheckOutcome decides what handleEvents's heartbeat case does with
+// one revalidateStreamAccess result, given whether the previous tick's
+// own re-check already failed transiently. Factored out of the select
+// loop so the retry policy — tolerate exactly one transient failure in a
+// row, never a non-transient one, and never two transient failures in a
+// row — can be pinned by a plain table test (TestSSERecheckOutcome) with
+// no real identity/projects service, no live connection, and no way to
+// inject a database failure into a real *pgxpool.Pool: the alternative
+// was an integration test that could not deterministically produce a
+// "transient" outcome at all.
+func sseRecheckOutcome(reason string, transient, previouslyFailed bool) sseRecheckAction {
+	switch {
+	case reason == "":
+		return sseRecheckOK
+	case transient && !previouslyFailed:
+		return sseRecheckTolerate
+	default:
+		return sseRecheckClose
+	}
 }

@@ -166,6 +166,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 			caller, ok, err := s.resolveBearerCaller(ctx, token)
 			if err != nil {
+				slog.ErrorContext(ctx, "resolve bearer caller failed", "error", err)
 				writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify the token")
 				return
 			}
@@ -179,6 +180,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		if cookie, err := r.Cookie(SessionCookie); err == nil {
 			caller, ok, err := s.resolveSessionCaller(ctx, cookie.Value)
 			if err != nil {
+				slog.ErrorContext(ctx, "resolve session caller failed", "error", err)
 				writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify the session")
 				return
 			}

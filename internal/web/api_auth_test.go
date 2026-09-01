@@ -196,6 +196,26 @@ func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 	if body["error"] != "internal_error" {
 		t.Fatalf("error = %q, want internal_error", body["error"])
 	}
+
+	// The other half of the bug, and the half that outlives the outage:
+	// neither limiter may be charged for an attempt that was never
+	// evaluated. loginLimiter allows 10 per normalized email per minute
+	// (server.go), so eleven more failed attempts through the same dead
+	// pool would cross that budget and start answering 429 — a lockout
+	// that would persist for a further minute after the database itself
+	// recovered, for a caller whose password was correct all along.
+	// Every one of them must still be a 500.
+	for i := range 11 {
+		retry := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
+		retryRec := httptest.NewRecorder()
+		srv.ServeHTTP(retryRec, retry)
+		if retryRec.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d during the outage = 429: a database failure charged a rate limiter for an attempt that was never evaluated", i+2)
+		}
+		if retryRec.Code != http.StatusInternalServerError {
+			t.Fatalf("attempt %d during the outage = %d, want 500; body = %s", i+2, retryRec.Code, retryRec.Body.String())
+		}
+	}
 }
 
 func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {

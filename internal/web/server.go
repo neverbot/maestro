@@ -4,6 +4,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -419,7 +420,14 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 		slog.Error("encode json response", "error", err)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":"internal_error","message":"failed to encode response"}`))
+		// Built from errCodeInternal rather than spelled out, the same
+		// way mcpErrorResult's own encode-failure fallback does
+		// (mcp_errors.go): auth.go's error-code block claims every call
+		// site in this package uses a name from it, and a literal here
+		// — the one place a response body is assembled without going
+		// through writeError — was the last thing making that claim
+		// false.
+		_, _ = w.Write(fmt.Appendf(nil, `{"error":%q,"message":"failed to encode response"}`, errCodeInternal))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")

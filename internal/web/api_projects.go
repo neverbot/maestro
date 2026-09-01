@@ -420,13 +420,30 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 // and its irreversibility (every membership, token and bound invite
 // scoped to it disappears with it — see projects.Delete's own doc
 // comment) is a different order of consequence than one person's own
-// membership row. Maps projects.ErrLastOwner the same 409 way
-// handleChangeRole and handleRemoveMember already do, defensively: a
-// project always has at least one owner by construction (Create grants
-// one atomically, and the last-owner guard refuses to let it drop to
-// zero any other way), so this branch is unreachable today — but it
-// costs nothing to keep mapped, and a future refactor that makes it
-// reachable gets a 409 instead of silently falling through to a 500.
+// membership row.
+//
+// No projects.ErrLastOwner mapping here, deliberately: nothing on this
+// path can produce it. A project always has at least one owner by
+// construction, and projects.Delete does not call SetRole or
+// RemoveMember — it is a single DELETE that removes the project row
+// itself, which is exactly the case migration 0002's trigger carries an
+// escape hatch for (see that migration's own comment). If that escape
+// hatch ever regressed, the raw pgx constraint-violation error would
+// fall into the generic error branch below as a 500, not this one — a
+// review found an ErrLastOwner branch here before this comment existed,
+// mapping an outcome nothing on this path could produce, which is worse
+// than no branch: it reads as "this is handled" when it is not.
+// TestDeleteProjectCascadesMembershipsAndTokens (projects_test.go) is
+// the actual regression guard for the escape hatch — see its own
+// comment.
+//
+// Requires the caller to echo the game's slug as ?confirm=<slug>,
+// refused with 400 otherwise. Not a confirmation dialog relocated to
+// the API — a client that wants a dialog still builds one — but a real
+// safety property: it is structurally impossible to delete the wrong
+// game because an id was mis-pasted, since the request also has to name
+// the game correctly. The lookup this needs doubles as what the
+// deletion log line (below) reports the game by, rather than a bare id.
 //
 // A 204 with no body, not a report of what was revoked the way
 // handleRemoveMember and handleChangeRole answer: those endpoints leave
@@ -434,13 +451,17 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 // agents just stopped working" is something the owner needs to act on.
 // Here the whole game is gone, tokens included — there is nothing left
 // to point an owner at, and no membership list left to render a toast
-// against. An agent still holding a token for this game learns nothing
-// about deletion specifically: its next call fails authentication
-// exactly the way a plain revocation already would (see
-// projects.Delete's cascade), so it cannot distinguish "my token was
-// revoked" from "the whole game is gone" — which is correct, since
-// nothing about a token's own scope entitles its holder to know which
-// happened.
+// against. That information is not worthless, though, just aimed
+// elsewhere: this is the one operation with no recovery and no residue,
+// so the success path logs the project id, its slug and the acting user
+// — the record an operator asked "where did this game go and who did
+// it" would otherwise have nothing to find. An agent still holding a
+// token for this game learns nothing about deletion specifically: its
+// next call fails authentication exactly the way a plain revocation
+// already would (see projects.Delete's cascade), so it cannot
+// distinguish "my token was revoked" from "the whole game is gone" —
+// which is correct, since nothing about a token's own scope entitles
+// its holder to know which happened.
 //
 // Reaching this handler at all already required requireProject to
 // confirm the caller is a member with a resolved role, so nothing here
@@ -455,15 +476,25 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may delete a game")
 		return
 	}
-	switch err := s.opts.Projects.Delete(r.Context(), scope.ProjectID); {
-	case errors.Is(err, projects.ErrLastOwner):
-		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one owner — promote someone else first")
-	case err != nil:
+
+	project, err := s.opts.Projects.ByID(r.Context(), scope.ProjectID)
+	if err != nil {
 		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
-	default:
-		w.WriteHeader(http.StatusNoContent)
+		return
 	}
+	if confirm := r.URL.Query().Get("confirm"); confirm == "" || confirm != project.Slug {
+		writeError(w, http.StatusBadRequest, errCodeBadRequest, "confirm must equal the game's slug")
+		return
+	}
+
+	if err := s.opts.Projects.Delete(r.Context(), scope.ProjectID); err != nil {
+		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
+		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
+		return
+	}
+	slog.InfoContext(r.Context(), "game deleted", "project_id", scope.ProjectID, "slug", project.Slug, "user_id", caller.UserID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleRoot implements the single-game shortcut: one visible game goes

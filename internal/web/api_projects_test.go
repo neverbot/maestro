@@ -806,9 +806,10 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 }
 
 // TestOwnerCanDeleteGame confirms the owner-only game-deletion route
-// answers 204 and no body — see handleDeleteGame's own doc comment for
-// why nothing is reported back, unlike handleRemoveMember and
-// handleChangeRole.
+// answers 204 and no body when the caller echoes the game's slug as
+// ?confirm — see handleDeleteGame's own doc comment for why nothing is
+// reported back, unlike handleRemoveMember and handleChangeRole, and
+// for why ?confirm is required at all.
 func TestOwnerCanDeleteGame(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
@@ -817,7 +818,7 @@ func TestOwnerCanDeleteGame(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -827,6 +828,45 @@ func TestOwnerCanDeleteGame(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rec.Body.String())
+	}
+}
+
+// TestDeleteGameRequiresMatchingConfirmSlug pins the safety property
+// handleDeleteGame's own doc comment describes: deleting the wrong game
+// because an id was mis-pasted is structurally impossible, because the
+// request also has to name the game correctly. A missing ?confirm and a
+// mismatched one are both refused with 400, and neither refusal deletes
+// anything.
+func TestDeleteGameRequiresMatchingConfirmSlug(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"missing", "/api/games/" + project.ID.String()},
+		{"mismatched", "/api/games/" + project.ID.String() + "?confirm=notazeroth"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodDelete, c.url, nil)
+			req.AddCookie(cookie)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+
+	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
+		t.Fatalf("RoleOf after refused deletes: %v, want the game to still exist", err)
 	}
 }
 
@@ -889,7 +929,9 @@ func TestTokenCallerCannotDeleteGame(t *testing.T) {
 // no standing in the game at all gets the same 403 requireProject
 // already answers every other project-scoped route with, not a 404 that
 // would tell a non-member the id is real, and not a 403 with different
-// wording that would tell them the opposite.
+// wording that would tell them the opposite. Pinned against a real game
+// AND a fabricated id, comparing both status and body: a status-only
+// comparison would miss a leak hiding in the message text alone.
 func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
@@ -910,6 +952,18 @@ func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
 		t.Fatalf("RoleOf after refused delete: %v, want the game to still exist", err)
 	}
+
+	fakeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+uuid.New().String(), nil)
+	fakeReq.AddCookie(cookie)
+	fakeRec := httptest.NewRecorder()
+	srv.ServeHTTP(fakeRec, fakeReq)
+
+	if fakeRec.Code != rec.Code {
+		t.Fatalf("fabricated id status = %d, real game status = %d, want equal (no leak)", fakeRec.Code, rec.Code)
+	}
+	if fakeRec.Body.String() != rec.Body.String() {
+		t.Fatalf("fabricated id body = %q, real game body = %q, want equal (no leak)", fakeRec.Body.String(), rec.Body.String())
+	}
 }
 
 // TestDeletingGameRevokesItsTokens confirms an agent holding a token for
@@ -927,7 +981,7 @@ func TestDeletingGameRevokesItsTokens(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -964,7 +1018,7 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	first := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	first := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
 	first.AddCookie(cookie)
 	firstRec := httptest.NewRecorder()
 	srv.ServeHTTP(firstRec, first)
@@ -972,6 +1026,11 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 		t.Fatalf("first delete status = %d, want 204: %s", firstRec.Code, firstRec.Body.String())
 	}
 
+	// The second request needs no ?confirm of its own: requireProject
+	// refuses it before handleDeleteGame ever reads the query string (see
+	// the comment above), so an absent confirm here still proves the
+	// same 403 this test is pinning, not a false pass from the 400
+	// TestDeleteGameRequiresMatchingConfirmSlug already covers.
 	second := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
 	second.AddCookie(cookie)
 	secondRec := httptest.NewRecorder()

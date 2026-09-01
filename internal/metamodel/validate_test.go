@@ -92,11 +92,37 @@ func TestValidateRejectsWrongType(t *testing.T) {
 }
 
 func TestValidateEnforcesRange(t *testing.T) {
-	if _, err := questSchema().Validate(map[string]any{"min_level": float64(999)}); err == nil {
-		t.Fatal("a number above max must be an error")
+	// Each case asserts the exact message, not merely that something failed.
+	// min_level is bounded on both sides, so "some error" is satisfied by a
+	// validator that swapped the two comparisons, or that dropped one of
+	// them and rejected the value for the other reason.
+	for name, tc := range map[string]struct {
+		value any
+		want  string
+	}{
+		"far above max":      {float64(999), "fields.min_level: must be at most 70"},
+		"just above max":     {float64(70.5), "fields.min_level: must be at most 70"},
+		"far below min":      {float64(0), "fields.min_level: must be at least 1"},
+		"fractionally below": {float64(0.5), "fields.min_level: must be at least 1"},
+		"negative below min": {float64(-3), "fields.min_level: must be at least 1"},
+	} {
+		_, err := questSchema().Validate(map[string]any{"min_level": tc.value})
+		if err == nil {
+			t.Fatalf("%s: %v was accepted", name, tc.value)
+		}
+		if err.Error() != "schema_violation: "+tc.want {
+			t.Fatalf("%s: error = %q, want %q", name, err, tc.want)
+		}
 	}
-	if _, err := questSchema().Validate(map[string]any{"min_level": float64(0)}); err == nil {
-		t.Fatal("a number below min must be an error")
+}
+
+func TestValidateAcceptsTheBoundsThemselves(t *testing.T) {
+	// The bounds are inclusive; an off-by-one in either comparison shows up
+	// here rather than in production content.
+	for _, v := range []float64{1, 35, 70} {
+		if _, err := questSchema().Validate(map[string]any{"min_level": v}); err != nil {
+			t.Fatalf("min_level %v: Validate: %v", v, err)
+		}
 	}
 }
 
@@ -105,12 +131,76 @@ func TestValidateEnforcesEnumOptions(t *testing.T) {
 	if err == nil {
 		t.Fatal("a value outside the enum options must be an error")
 	}
+	want := `schema_violation: fields.difficulty: "impossible" is not one of [trivial normal elite]`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+func TestValidateRejectsANonTextValueInAnEnumField(t *testing.T) {
+	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "difficulty": 3})
+	if err == nil {
+		t.Fatal("a number in an enum field must be an error")
+	}
+	if !strings.Contains(err.Error(), "fields.difficulty: expected one of [trivial normal elite], got int") {
+		t.Fatalf("error = %q, want the enum type message naming the options", err)
+	}
+}
+
+// L5: enum matching compares exact bytes. Neither case nor Unicode
+// normalisation is folded, and that is the intended behaviour: an option is
+// a token a game declared, and Maestro does not second-guess a game's
+// vocabulary by deciding that two spellings are the same word. Agents get
+// the exact string back in the error message, so the fix is mechanical.
+func TestValidateMatchesEnumOptionsByExactBytes(t *testing.T) {
+	schema := Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"normal", "élite"}}}
+
+	if _, err := schema.Validate(map[string]any{"difficulty": "Normal"}); err == nil {
+		t.Fatal(`"Normal" was accepted for the option "normal"; enum matching does not fold case`)
+	} else if !strings.Contains(err.Error(), `"Normal" is not one of`) {
+		t.Fatalf("error = %q, want it to quote the value as sent", err)
+	}
+
+	// "élite" spelled NFD: e + U+0301, the same word to a reader and a
+	// different string to the matcher.
+	nfd := "e\u0301lite"
+	if _, err := schema.Validate(map[string]any{"difficulty": nfd}); err == nil {
+		t.Fatal("an NFD spelling was accepted for an NFC option; enum matching does not normalise")
+	}
+	if _, err := schema.Validate(map[string]any{"difficulty": "élite"}); err != nil {
+		t.Fatalf("the exact NFC option must be accepted: %v", err)
+	}
 }
 
 func TestValidateChecksListElements(t *testing.T) {
 	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": []any{"ok", 3}})
 	if err == nil {
 		t.Fatal("a non-text element in a list<text> must be an error")
+	}
+	want := "schema_violation: fields.tags: element 1 is int, expected text"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q; the index and the offending type both matter to whoever fixes it", err, want)
+	}
+}
+
+func TestValidateRejectsANonListInAListField(t *testing.T) {
+	_, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": "starter"})
+	if err == nil {
+		t.Fatal("a bare string in a list<text> field must be an error")
+	}
+	if !strings.Contains(err.Error(), "fields.tags: expected a list of text, got string") {
+		t.Fatalf("error = %q, want the list type message", err)
+	}
+}
+
+func TestValidateKeepsAWellFormedListAsStrings(t *testing.T) {
+	out, err := questSchema().Validate(map[string]any{"min_level": float64(5), "tags": []any{"starter", "kill"}})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	list, ok := out["tags"].([]any)
+	if !ok || len(list) != 2 || list[0] != "starter" || list[1] != "kill" {
+		t.Fatalf("tags = %#v, want the two strings in order", out["tags"])
 	}
 }
 
@@ -768,6 +858,79 @@ func TestValidateReportsUnknownFieldsBeforeFieldProblemsInSchemaOrder(t *testing
 	want := "schema_violation: fields.nonsense: unknown field for this type; " +
 		"fields.min_level: is required; " +
 		`fields.difficulty: "impossible" is not one of [trivial normal elite]`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+// --- text and bool: the coercions with no negative test until now ---------
+
+func TestValidateRejectsANonTextValueInATextField(t *testing.T) {
+	// Stringifying whatever arrives is the most dangerous coercion this
+	// package could make: a map, a number or a bool would each be stored as
+	// plausible-looking prose and nothing downstream would ever know. Each
+	// case names the type it sent, so a validator that formatted the value
+	// instead of rejecting it fails here.
+	for _, ft := range []FieldType{FieldText, FieldLongText} {
+		schema := Schema{{Key: "summary", Type: ft}}
+		for name, tc := range map[string]struct {
+			value any
+			want  string
+		}{
+			"a number":  {float64(3), "fields.summary: expected text, got float64"},
+			"an int":    {3, "fields.summary: expected text, got int"},
+			"a bool":    {true, "fields.summary: expected text, got bool"},
+			"a list":    {[]any{"a"}, "fields.summary: expected text, got []interface {}"},
+			"an object": {map[string]any{"a": 1}, "fields.summary: expected text, got map[string]interface {}"},
+		} {
+			out, err := schema.Validate(map[string]any{"summary": tc.value})
+			if err == nil {
+				t.Fatalf("%s: %s was accepted and stored as %#v", ft, name, out["summary"])
+			}
+			if err.Error() != "schema_violation: "+tc.want {
+				t.Fatalf("%s/%s: error = %q, want %q", ft, name, err, tc.want)
+			}
+		}
+	}
+}
+
+func TestValidateKeepsTextExactly(t *testing.T) {
+	schema := Schema{{Key: "summary", Type: FieldText}}
+	out, err := schema.Validate(map[string]any{"summary": "  Kill twelve boars.  "})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if out["summary"] != "  Kill twelve boars.  " {
+		t.Fatalf("summary = %q, want the string stored verbatim, untrimmed", out["summary"])
+	}
+}
+
+func TestValidateRejectsANonBoolValueInABoolField(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value any
+		want  string
+	}{
+		"the string true": {"true", "fields.repeatable: expected true or false, got string"},
+		"one":             {float64(1), "fields.repeatable: expected true or false, got float64"},
+		"zero":            {0, "fields.repeatable: expected true or false, got int"},
+	} {
+		schema := Schema{{Key: "repeatable", Type: FieldBool}}
+		out, err := schema.Validate(map[string]any{"repeatable": tc.value})
+		if err == nil {
+			t.Fatalf("%s was accepted and stored as %#v", name, out["repeatable"])
+		}
+		if err.Error() != "schema_violation: "+tc.want {
+			t.Fatalf("%s: error = %q, want %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestValidateRejectsAnUnknownFieldWithTheExactMessage(t *testing.T) {
+	_, err := questSchema().Validate(map[string]any{"min_level": float64(1), "min_lvl": float64(3)})
+	if err == nil {
+		t.Fatal("an unknown field must be an error")
+	}
+	want := "schema_violation: fields.min_lvl: unknown field for this type"
 	if err.Error() != want {
 		t.Fatalf("error = %q, want %q", err, want)
 	}

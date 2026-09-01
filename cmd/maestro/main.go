@@ -109,7 +109,18 @@ func run(ctx context.Context, getenv func(string) string) error {
 
 	startPruneLoop(ctx, ids)
 
+	// shutdownDone closes once the goroutine below has finished calling
+	// srv.Shutdown, not merely started it — see the comment on the
+	// <-shutdownDone wait at the bottom of this function for why run
+	// blocks on it before returning: srv.ListenAndServe returns the
+	// instant Shutdown is *called* (with http.ErrServerClosed), long
+	// before Shutdown's own wait for active handlers to finish is done,
+	// so returning from run as soon as ListenAndServe unblocks would run
+	// this function's deferred pool.Close() out from under every request
+	// Shutdown is still draining.
+	shutdownDone := make(chan struct{})
 	go func() { //nolint:gosec // G118: ctx is already Done by the time this reaches shutdownCtx below; a fresh context.Background() is required, not a bug.
+		defer close(shutdownDone)
 		<-ctx.Done()
 		slog.Info("maestro shutting down")
 		// Close every open SSE stream first: it only signals them and
@@ -130,6 +141,16 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	// Block until Shutdown has actually finished waiting out every active
+	// handler (or its own shutdownTimeout has forced them closed), not
+	// only until it was called. Without this, ListenAndServe's return on
+	// Shutdown's mere invocation would let this function return and run
+	// its deferred pool.Close() while Shutdown is still draining
+	// in-flight requests still using that same pool — the exact defect a
+	// concurrent-request test against a real container caught: every
+	// in-flight request came back empty instead of completing, because
+	// the pool closed underneath them mid-drain.
+	<-shutdownDone
 	return nil
 }
 

@@ -52,10 +52,11 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, calle
 		// Published with the same fields apiTokenResponse exposes to
 		// handleListTokens — never the clear value, which appears in
 		// this handler's own response below and nowhere else, ever — at
-		// MinRole roles.Editor; see eventTokenMinted's own doc comment
-		// (publish.go) for why that is tighter than the REST listing
-		// endpoint it otherwise mirrors.
-		s.publish(scope.ProjectID, eventTokenMinted, roles.Editor, map[string]any{
+		// MinRole roles.Editor and HumanOnly true; see eventTokenMinted's
+		// own doc comment (publish.go) for why both gates are needed (a
+		// token caller's own Role is always Editor, so MinRole alone
+		// would not have excluded it).
+		s.publish(scope.ProjectID, eventTokenMinted, roles.Editor, true, map[string]any{
 			"id": row.ID, "label": row.Label, "token_hint": row.TokenHint,
 		})
 		// The clear value appears here and nowhere else, ever.
@@ -156,6 +157,6 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, calle
 	// apart from this event alone either, which is fine, since a client
 	// reacts to token.revoked by dropping a row matching this id from
 	// its own list, a no-op if it never had one.
-	s.publish(scope.ProjectID, eventTokenRevoked, roles.Editor, map[string]any{"id": tokenID})
+	s.publish(scope.ProjectID, eventTokenRevoked, roles.Editor, true, map[string]any{"id": tokenID})
 	w.WriteHeader(http.StatusNoContent)
 }

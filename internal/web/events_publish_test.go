@@ -3,6 +3,7 @@ package web_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,13 +44,48 @@ func openStream(t *testing.T, ts *httptest.Server, projectID, cookie string) *bu
 	return reader
 }
 
+// openTokenStream is openStream's bearer-token counterpart: the same
+// real socket, past the same initial comment frame, authenticated as an
+// API token rather than a browser session — the one subscriber shape
+// TestChangeRolePublishesMemberUpdated and its siblings never exercised,
+// which is exactly the gap that let a token subscriber receive another
+// agent's token.minted event before this task's second review round.
+func openTokenStream(t *testing.T, ts *httptest.Server, projectID, token string) *bufio.Reader {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+projectID+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	reader := bufio.NewReader(resp.Body)
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("read connect frame: %v", err)
+	}
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("read connect frame: %v", err)
+	}
+	return reader
+}
+
 // TestChangeRolePublishesMemberUpdated pins that a real PATCH
 // /api/games/{game}/members/{user} request — not a direct
 // projects.SetRole call, which the hub never sees, since this task's
 // whole point is that the HTTP mutation path is what publishes — reaches
-// every subscriber of the game regardless of role: MinRole is empty on
-// eventMemberUpdated (publish.go) because handleListMembers, the REST
-// endpoint this event mirrors, is open to a viewer already.
+// every human subscriber of the game regardless of role: MinRole is
+// empty on eventMemberUpdated (publish.go) because handleListMembers,
+// the REST endpoint this event mirrors, is open to a viewer already.
+// The payload names only the member, never their new role — an
+// invalidation, not a patch; see eventMemberUpdated's own doc comment
+// for the concurrent-reordering hazard that forces a client to refetch
+// instead of trusting a role carried on the wire.
 func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
@@ -92,8 +128,8 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 	if kind != "member.updated" {
 		t.Fatalf("Kind = %q, want member.updated", kind)
 	}
-	if !strings.Contains(data, member.ID.String()) || !strings.Contains(data, `"role":"editor"`) {
-		t.Fatalf("data = %q, want it to name the member and their new role", data)
+	if data != `{"user_id":"`+member.ID.String()+`"}` {
+		t.Fatalf("data = %q, want only user_id — no role field (an invalidation, not a patch)", data)
 	}
 }
 
@@ -362,5 +398,168 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	}
 	if kind != "marker" {
 		t.Fatalf("editor Kind = %q, want marker", kind)
+	}
+}
+
+// TestTokenCallerStreamNeverReceivesHumanOnlyEvents is the regression
+// test for the first critical this task's second review round found: an
+// agent's own token subscribing to its game used to receive
+// member.updated and token.minted — including another agent's
+// token_hint — over a stream its own credential could not have read the
+// equivalent REST listing through (handleListMembers and
+// handleListTokens are both gated by requireHumanCaller). It mints a
+// token, opens a stream with that same token, triggers a member update
+// and a second token mint (both HumanOnly), and confirms the token
+// stream's first actually-received event is the ungated game.deleted
+// that follows — not delayed, filtered.
+func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@studio.com", DisplayName: "Other", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := projSvc.SetRole(ctx, other.ID, project.ID, "viewer"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	agentToken, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	ownerCookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	t.Cleanup(func() { ts.Close() })
+
+	tokenReader := openTokenStream(t, ts, project.ID.String(), agentToken)
+
+	// Trigger a member.updated (HumanOnly) via a real PATCH request.
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.ID.String()+"/members/"+other.ID.String(),
+		strings.NewReader(`{"role":"editor"}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(ownerCookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH members status = %d, want 200", resp.StatusCode)
+	}
+
+	// Trigger a token.minted (HumanOnly, and MinRole editor which the
+	// token subscriber's own Role would otherwise satisfy).
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/tokens", strings.NewReader(`{"label":"second agent"}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(ownerCookie)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST tokens status = %d, want 201", resp.StatusCode)
+	}
+
+	// Delete the game: eventGameDeleted is not HumanOnly, so this must
+	// be the first thing the token stream actually receives.
+	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(ownerCookie)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE game status = %d, want 204", resp.StatusCode)
+	}
+
+	kind, _, _ := readOneSSEFrame(t, tokenReader)
+	if kind == "member.updated" || kind == "token.minted" {
+		t.Fatalf("token stream received %q; HumanOnly events must never reach a token subscriber", kind)
+	}
+	if kind != "game.deleted" {
+		t.Fatalf("token stream's first received event Kind = %q, want game.deleted", kind)
+	}
+}
+
+// TestRevokeProjectInvitePublishesInviteRevoked is
+// TestCreateProjectInvitePublishesInviteCreatedOwnerOnly's revoke
+// counterpart — eventInviteRevoked had no test at all before this task's
+// second review round.
+func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ownerCookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	t.Cleanup(func() { ts.Close() })
+
+	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/invites",
+		strings.NewReader(`{"email":"third@studio.com","role":"viewer"}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(ownerCookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", resp.StatusCode)
+	}
+	// Drain the invite.created frame this create just published.
+	if kind, _, _ := readOneSSEFrame(t, ownerReader); kind != "invite.created" {
+		t.Fatalf("Kind = %q, want invite.created", kind)
+	}
+
+	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"/invites/"+created.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(ownerCookie)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	}
+
+	kind, _, data := readOneSSEFrame(t, ownerReader)
+	if kind != "invite.revoked" {
+		t.Fatalf("Kind = %q, want invite.revoked", kind)
+	}
+	if !strings.Contains(data, created.ID) {
+		t.Fatalf("data = %q, want it to name the revoked invite", data)
 	}
 }

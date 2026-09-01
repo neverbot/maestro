@@ -312,9 +312,10 @@ func (s *Server) handleCreateProjectInvite(w http.ResponseWriter, r *http.Reques
 	// Never the clear token: the same reasoning apiTokenResponse's own
 	// doc comment gives for a minted token event, applied to an invite —
 	// a shown-once secret has no business leaving this one response.
-	// MinRole roles.Owner matches handleListProjectInvites exactly; see
-	// eventInviteCreated's own doc comment (publish.go).
-	s.publish(projectID, eventInviteCreated, roles.Owner, map[string]any{
+	// MinRole roles.Owner and HumanOnly true both match
+	// handleListProjectInvites exactly; see eventInviteCreated's own doc
+	// comment (publish.go).
+	s.publish(projectID, eventInviteCreated, roles.Owner, true, map[string]any{
 		"id": summary.ID, "role": req.Role, "email": summary.Email,
 	})
 	writeCreatedInvite(w, token, summary)
@@ -375,6 +376,6 @@ func (s *Server) handleRevokeProjectInvite(w http.ResponseWriter, r *http.Reques
 	// handler's own doc comment above): the two are indistinguishable
 	// from this event alone, which is fine, since a client just drops a
 	// row matching this id.
-	s.publish(scope.ProjectID, eventInviteRevoked, roles.Owner, map[string]any{"id": inviteID})
+	s.publish(scope.ProjectID, eventInviteRevoked, roles.Owner, true, map[string]any{"id": inviteID})
 	w.WriteHeader(http.StatusNoContent)
 }

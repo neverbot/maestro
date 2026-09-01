@@ -360,12 +360,13 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 	default:
 		// Published after SetRole has already returned successfully —
 		// see publish.go's own doc comment on eventMemberUpdated for why
-		// that is the same moment as "committed", and for why this event
-		// carries the target's new role at every role, not just above
-		// viewer.
-		s.publish(scope.ProjectID, eventMemberUpdated, "", map[string]any{
-			"user_id": targetID, "role": req.Role,
-		})
+		// that is the same moment as "committed", why this carries only
+		// the target's identity and not their new role (a concurrent
+		// second role change could publish out of commit order, so a
+		// role field on the wire could go stale with no gap to catch
+		// it), and why HumanOnly true here matches handleListMembers'
+		// own requireHumanCaller gate.
+		s.publish(scope.ProjectID, eventMemberUpdated, "", true, map[string]any{"user_id": targetID})
 		// Mirrors handleRemoveMember's own response shape: a demotion
 		// below editor revokes the target's tokens in this project
 		// (projects.SetRole, above) exactly the way removal already
@@ -418,7 +419,7 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 		slog.ErrorContext(r.Context(), "remove member failed", "project_id", scope.ProjectID, "target_user_id", targetID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not remove the member")
 	default:
-		s.publish(scope.ProjectID, eventMemberRemoved, "", map[string]any{"user_id": targetID})
+		s.publish(scope.ProjectID, eventMemberRemoved, "", true, map[string]any{"user_id": targetID})
 		writeJSON(w, http.StatusOK, map[string]any{"revoked_tokens": revoked})
 	}
 }
@@ -538,7 +539,7 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 	// subscriber's membership disappeared (the cascade deletes it along
 	// with the project) and close their stream anyway, up to
 	// sseHeartbeatInterval later — this publish just gets there first.
-	s.publish(scope.ProjectID, eventGameDeleted, "", nil)
+	s.publish(scope.ProjectID, eventGameDeleted, "", false, nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

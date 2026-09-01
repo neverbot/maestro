@@ -43,6 +43,50 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.InviteTTL != 14*24*time.Hour {
 		t.Fatalf("InviteTTL = %v, want 336h", cfg.InviteTTL)
 	}
+	if cfg.TrustedProxyCount != 0 {
+		t.Fatalf("TrustedProxyCount = %d, want 0 (a directly exposed instance by default)", cfg.TrustedProxyCount)
+	}
+}
+
+func TestLoadParsesTrustedProxyCount(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":        "postgres://localhost/maestro",
+		"SESSION_KEY":         "0123456789abcdef0123456789abcdef",
+		"TRUSTED_PROXY_COUNT": "1",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TrustedProxyCount != 1 {
+		t.Fatalf("TrustedProxyCount = %d, want 1", cfg.TrustedProxyCount)
+	}
+}
+
+func TestLoadRejectsInvalidTrustedProxyCount(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":        "postgres://localhost/maestro",
+		"SESSION_KEY":         "0123456789abcdef0123456789abcdef",
+		"TRUSTED_PROXY_COUNT": "not-a-number",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT") {
+		t.Fatalf("error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
+	}
+}
+
+func TestLoadRejectsNegativeTrustedProxyCount(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL":        "postgres://localhost/maestro",
+		"SESSION_KEY":         "0123456789abcdef0123456789abcdef",
+		"TRUSTED_PROXY_COUNT": "-1",
+	}
+	cfg, err := Load(func(k string) string { return env[k] })
+	err = mustErr(t, cfg, err)
+	if !strings.Contains(err.Error(), "TRUSTED_PROXY_COUNT") {
+		t.Fatalf("error = %q, want it to mention TRUSTED_PROXY_COUNT", err)
+	}
 }
 
 func TestLoadParsesSessionTTL(t *testing.T) {

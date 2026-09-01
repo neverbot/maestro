@@ -151,8 +151,40 @@ type preparedUser struct {
 
 // prepareUser validates req and hashes its password, without touching the
 // database. See preparedUser's doc comment for why this is split out from
-// insertUser.
+// insertUser. It applies the instance's ALLOWED_EMAIL_DOMAINS allowlist;
+// prepareUserForInvite below is the invite-redemption variant that does
+// not.
 func (s *Service) prepareUser(req CreateUserRequest) (preparedUser, error) {
+	return s.prepareUserChecked(req, true)
+}
+
+// prepareUserForInvite is prepareUser's invite-redemption counterpart: it
+// skips the ALLOWED_EMAIL_DOMAINS check prepareUser otherwise applies.
+//
+// Redeeming an invite is not open self-registration — reaching it at all
+// already requires holding a token an admin chose to hand out — so the
+// domain allowlist has nothing left to protect there that the invite
+// itself doesn't already decide. Concretely: a *bound* invite (one
+// CreateInvite attached a specific email to) already ran EmailAllowed once,
+// at creation time, against that exact address (see CreateInvite's own
+// check in invites.go, which is unchanged and still enforced there); an
+// *unbound* invite carries no email of its own; whatever address its
+// redeemer supplies was never checked by anything upstream, and this
+// product's premise is that an admin hands such a link to one specific
+// person they intend to admit — commonly an outside contractor, which is
+// the expected use of an unbound invite, not an edge case to police again
+// here. Rejecting that redemption with ErrEmailNotAllowed made "an invite
+// wins over the instance's registration mode" true in name only: the
+// domain gate the invite was supposed to override still applied to it.
+func (s *Service) prepareUserForInvite(req CreateUserRequest) (preparedUser, error) {
+	return s.prepareUserChecked(req, false)
+}
+
+// prepareUserChecked is the shared implementation behind prepareUser and
+// prepareUserForInvite; checkDomain selects whether EmailAllowed is
+// consulted. See the two exported-within-package wrappers' doc comments
+// for which one to call and why they differ.
+func (s *Service) prepareUserChecked(req CreateUserRequest, checkDomain bool) (preparedUser, error) {
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	displayName := strings.TrimSpace(req.DisplayName)
 	password := req.Password
@@ -166,7 +198,7 @@ func (s *Service) prepareUser(req CreateUserRequest) (preparedUser, error) {
 	if n := utf8.RuneCountInString(displayName); n < minDisplayNameRunes || n > maxDisplayNameRunes {
 		return preparedUser{}, fmt.Errorf("%w: must be between %d and %d characters", ErrDisplayNameInvalid, minDisplayNameRunes, maxDisplayNameRunes)
 	}
-	if !s.cfg.EmailAllowed(email) {
+	if checkDomain && !s.cfg.EmailAllowed(email) {
 		return preparedUser{}, ErrEmailNotAllowed
 	}
 	// Bound the byte length before counting runes: password is fed to

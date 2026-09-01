@@ -50,19 +50,20 @@ func newTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Serv
 // service are built from it — e.g. to switch REGISTRATION_MODE to
 // domain_open for a specific test without affecting every other test's
 // default invite_only config.
-func newTestServerWithConfig(t *testing.T, adjust func(*config.Config)) *web.Server {
+func newTestServerWithConfig(t *testing.T, adjust func(*config.Config)) (*web.Server, *identity.Service, *projects.Service) {
 	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	adjust(&cfg)
 	ids := identity.New(pool, cfg)
 	projSvc := projects.New(pool)
-	return web.NewServer(web.Options{
+	srv := web.NewServer(web.Options{
 		Version:  "test",
 		Config:   cfg,
 		Identity: ids,
 		Projects: projSvc,
 	})
+	return srv, ids, projSvc
 }
 
 func TestBearerTokenIdentifiesCaller(t *testing.T) {

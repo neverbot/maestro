@@ -202,6 +202,11 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 // of attempts against one client is the HTTP layer's job (Task 11's
 // invite-redemption rate limiter); this method's job is only to make sure
 // the response itself carries no signal either way.
+//
+// This does not apply the instance's ALLOWED_EMAIL_DOMAINS allowlist (it
+// calls prepareUserForInvite, not prepareUser — Task 11's correction):
+// holding the token is the authorization here, not the redeemer's email
+// domain. See prepareUserForInvite's own doc comment in users.go.
 func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUserRequest) (User, error) {
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 	sum := sha256.Sum256([]byte(token))
@@ -229,7 +234,14 @@ func (s *Service) RedeemInvite(ctx context.Context, token string, req CreateUser
 	// connection for the full derivation and lengthen how long the
 	// invite row's lock (see this method's own doc comment above) is
 	// held, for every client racing to redeem a stale or shared link.
-	prepared, err := s.prepareUser(req)
+	//
+	// prepareUserForInvite, not prepareUser: redemption does not apply
+	// the instance's ALLOWED_EMAIL_DOMAINS allowlist. The invite itself
+	// is the authorization to admit whoever holds it — see that method's
+	// own doc comment in users.go for why an off-domain redeemer (an
+	// outside contractor an admin deliberately invited) is the expected
+	// use, not a case this layer should police a second time.
+	prepared, err := s.prepareUserForInvite(req)
 	if err != nil {
 		return User{}, err
 	}

@@ -313,6 +313,39 @@ func TestCreateInviteRejectsDisallowedDomain(t *testing.T) {
 	}
 }
 
+// TestRedeemUnboundInviteAllowsOffDomainEmail pins Task 11's second review
+// pass, item 5: on an instance with a configured allowlist, an *unbound*
+// invite (no email attached at creation — see CreateInvite's own doc
+// comment) must still be redeemable with an address outside that
+// allowlist. Holding the token is the authorization; ALLOWED_EMAIL_DOMAINS
+// governs open self-registration (CreateUser), not who an admin chooses to
+// hand a link to. Before this fix, RedeemInvite ran the same EmailAllowed
+// check CreateUser does and rejected exactly this redemption with
+// ErrEmailNotAllowed, silently defeating "an invite wins over the
+// instance's registration mode" for the one case that phrase exists to
+// describe — an admin inviting an outside contractor.
+func TestRedeemUnboundInviteAllowsOffDomainEmail(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.AllowedEmailDomains = []string{"studio.com"}
+	svc := identity.New(pool, cfg)
+
+	token, _, err := svc.CreateInvite(context.Background(), identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	user, err := svc.RedeemInvite(context.Background(), token, identity.CreateUserRequest{
+		Email: "contractor@elsewhere.com", DisplayName: "Contractor", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("RedeemInvite: %v (an unbound invite must not apply ALLOWED_EMAIL_DOMAINS)", err)
+	}
+	if user.Email != "contractor@elsewhere.com" {
+		t.Fatalf("Email = %q, want contractor@elsewhere.com", user.Email)
+	}
+}
+
 // TestCreateInviteUsesConfiguredDefaultTTL and TestCreateInviteHonoursExpiresIn
 // cover InviteTTL becoming configurable (config.InviteTTL / INVITE_TTL)
 // instead of the hardcoded 14-day constant it used to be, and the optional

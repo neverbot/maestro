@@ -14,6 +14,29 @@ import (
 	"github.com/neverbot/maestro/internal/web"
 )
 
+// jsonRequest builds a request carrying the application/json Content-Type
+// every handler in api_auth.go now requires (Task 11's second review
+// pass); the handful of tests that specifically exercise the
+// Content-Type gate build their own request instead of using this helper.
+func jsonRequest(method, path, body string) *http.Request {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// domainOpenConfig adjusts a test config to RegistrationDomainOpen with a
+// real, non-empty allowlist. config.Load itself refuses domain_open with
+// an empty ALLOWED_EMAIL_DOMAINS, and — independently of that — an empty
+// list makes Config.EmailAllowed permit everything, which would silently
+// disable every domain_open test's actual subject (Task 11's second
+// review pass, item 7: the earlier version of these tests built a
+// configuration Load would reject and never exercised the domain gate at
+// all).
+func domainOpenConfig(cfg *config.Config) {
+	cfg.RegistrationMode = config.RegistrationDomainOpen
+	cfg.AllowedEmailDomains = []string{"studio.com"}
+}
+
 func TestLoginSetsSessionCookieAndLogoutClearsIt(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
@@ -21,9 +44,7 @@ func TestLoginSetsSessionCookieAndLogoutClearsIt(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	body := strings.NewReader(`{"email":"designer@studio.com","password":"password12345"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
-	req.Header.Set("Content-Type", "application/json")
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -88,8 +109,7 @@ func TestLoginWithWrongPasswordIsUnauthorized(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	body := strings.NewReader(`{"email":"designer@studio.com","password":"nope"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"nope"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -107,11 +127,11 @@ func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	wrongPassword := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@studio.com","password":"wrongwrongwrong"}`))
+	wrongPassword := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"wrongwrongwrong"}`)
 	wrongPasswordRec := httptest.NewRecorder()
 	srv.ServeHTTP(wrongPasswordRec, wrongPassword)
 
-	unknownEmail := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"nobody@studio.com","password":"wrongwrongwrong"}`))
+	unknownEmail := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"nobody@studio.com","password":"wrongwrongwrong"}`)
 	unknownEmailRec := httptest.NewRecorder()
 	srv.ServeHTTP(unknownEmailRec, unknownEmail)
 
@@ -123,6 +143,19 @@ func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
 	}
 }
 
+func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {
+	// Rejected before either rate limiter is ever touched: an empty
+	// normalized key would otherwise give every anonymous probe a single
+	// shared "" bucket to spend against.
+	srv, _, _ := newTestServer(t)
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"   ","password":"password12345"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
@@ -131,7 +164,7 @@ func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 	}
 
 	attempt := func(email string) int {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"`+email+`","password":"nope"}`))
+		req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"`+email+`","password":"nope"}`)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		return rec.Code
@@ -162,7 +195,7 @@ func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@studio.com", DisplayName: "Other", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"other@studio.com","password":"password12345"}`))
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"other@studio.com","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -189,14 +222,14 @@ func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
 	// Exhaust target@studio.com's own 10/min budget (all from the same
 	// default httptest source IP).
 	for i := 0; i < 10; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"target@studio.com","password":"nope"}`))
+		req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"target@studio.com","password":"nope"}`)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("attempt %d against target = %d, want 401", i, rec.Code)
 		}
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"target@studio.com","password":"password12345"}`))
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"target@studio.com","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusTooManyRequests {
@@ -205,7 +238,7 @@ func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
 
 	// A colleague logging in correctly from the same source IP is
 	// unaffected: only 10 of the IP's 40/min budget has been spent.
-	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"colleague@studio.com","password":"password12345"}`))
+	req = jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"colleague@studio.com","password":"password12345"}`)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -232,7 +265,7 @@ func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
 	blocked := false
 	for i := 0; i < 45; i++ {
 		email := emails[i%len(emails)]
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"`+email+`","password":"nope"}`))
+		req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"`+email+`","password":"nope"}`)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		switch rec.Code {
@@ -252,7 +285,7 @@ func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
 	// from the same now-exhausted IP, must still be refused — not
 	// silently let through because the guard only ever intended to
 	// throttle wrong passwords.
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"victim@studio.com","password":"password12345"}`))
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"victim@studio.com","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusTooManyRequests {
@@ -268,7 +301,7 @@ func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
 	}
 
 	for i := 0; i < 20; i++ {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@studio.com","password":"password12345"}`))
+		req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -279,8 +312,7 @@ func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
 
 func TestRegisterIsRejectedInInviteOnlyMode(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	body := strings.NewReader(`{"email":"new@studio.com","display_name":"New","password":"password12345"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -290,11 +322,8 @@ func TestRegisterIsRejectedInInviteOnlyMode(t *testing.T) {
 }
 
 func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
-	srv := newTestServerWithConfig(t, func(cfg *config.Config) {
-		cfg.RegistrationMode = config.RegistrationDomainOpen
-	})
-	body := strings.NewReader(`{"email":"new@studio.com","display_name":"New","password":"password12345"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -313,20 +342,38 @@ func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
 	}
 }
 
+func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
+	// The counterpart to TestRegisterSucceedsInDomainOpenMode: with a real
+	// allowlist in place (see domainOpenConfig's own doc comment on why
+	// the earlier version of these tests never actually exercised this),
+	// an address outside it must be refused, not silently admitted.
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@outside.com","display_name":"New","password":"password12345"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	if err := decodeJSON(rec, &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "email_not_allowed" {
+		t.Fatalf("error code = %q, want email_not_allowed", payload["error"])
+	}
+}
+
 func TestRegisterWithTakenEmailInDomainOpenModeIsConflict(t *testing.T) {
-	srv := newTestServerWithConfig(t, func(cfg *config.Config) {
-		cfg.RegistrationMode = config.RegistrationDomainOpen
-	})
-	body := strings.NewReader(`{"email":"new@studio.com","display_name":"New","password":"password12345"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("first register = %d, want 201", rec.Code)
 	}
 
-	body2 := strings.NewReader(`{"email":"new@studio.com","display_name":"Again","password":"password12345"}`)
-	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/register", body2)
+	req2 := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"Again","password":"password12345"}`)
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusConflict {
@@ -335,15 +382,46 @@ func TestRegisterWithTakenEmailInDomainOpenModeIsConflict(t *testing.T) {
 }
 
 func TestRegisterWithInvalidEmailIsUnprocessable(t *testing.T) {
-	srv := newTestServerWithConfig(t, func(cfg *config.Config) {
-		cfg.RegistrationMode = config.RegistrationDomainOpen
-	})
-	body := strings.NewReader(`{"email":"a","display_name":"New","password":"password12345"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"a","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRegisterWithEmptyDisplayNameIsUnprocessable(t *testing.T) {
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"","password":"password12345"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	if err := decodeJSON(rec, &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "display_name_invalid" {
+		t.Fatalf("error code = %q, want display_name_invalid", payload["error"])
+	}
+}
+
+func TestRegisterWithShortPasswordIsUnprocessable(t *testing.T) {
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"New","password":"short"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload map[string]string
+	if err := decodeJSON(rec, &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "password_invalid" {
+		t.Fatalf("error code = %q, want password_invalid", payload["error"])
 	}
 }
 
@@ -355,8 +433,49 @@ func TestRegisterWithInviteTokenWinsOverInviteOnlyMode(t *testing.T) {
 		t.Fatalf("CreateInvite: %v", err)
 	}
 
-	body := strings.NewReader(`{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"` + token + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
+	// The invite branch is checked before the mode branch regardless of
+	// which mode is configured: domain_open must not change which branch
+	// runs, only what happens when no token is given at all.
+	srv, ids, _ := newTestServerWithConfig(t, domainOpenConfig)
+	ctx := context.Background()
+	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRegisterWithOffDomainInviteSucceeds(t *testing.T) {
+	// An unbound invite redeemed with an off-domain email must succeed
+	// even on an instance with a configured allowlist: the admin's
+	// decision to hand out the link is the authorization an outside
+	// contractor needs, not the ALLOWED_EMAIL_DOMAINS check that governs
+	// open self-registration. Task 11's second review pass, item 5.
+	srv, ids, _ := newTestServerWithConfig(t, domainOpenConfig)
+	ctx := context.Background()
+	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.com","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -367,8 +486,7 @@ func TestRegisterWithInviteTokenWinsOverInviteOnlyMode(t *testing.T) {
 
 func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	body := strings.NewReader(`{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"not-a-real-token"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"not-a-real-token"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -393,8 +511,7 @@ func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	body := strings.NewReader(`{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"` + token + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -410,12 +527,47 @@ func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
 	}
 }
 
+func TestDoubleRedemptionOverHTTPFailsTheSecondTime(t *testing.T) {
+	// The single most likely real-world failure per Task 11's second
+	// review pass: an invite link pasted into a shared channel gets
+	// clicked twice. The second attempt — whether from the same person
+	// double-submitting or a second person who found the same link —
+	// must fail cleanly rather than create a second account or silently
+	// re-authenticate.
+	srv, ids, _ := newTestServer(t)
+	ctx := context.Background()
+	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	first := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
+	firstRec := httptest.NewRecorder()
+	srv.ServeHTTP(firstRec, first)
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf("first redemption = %d, want 201; body = %s", firstRec.Code, firstRec.Body.String())
+	}
+
+	second := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited Again","password":"password12345","invite_token":"`+token+`"}`)
+	secondRec := httptest.NewRecorder()
+	srv.ServeHTTP(secondRec, second)
+	if secondRec.Code != http.StatusForbidden {
+		t.Fatalf("second redemption = %d, want 403; body = %s", secondRec.Code, secondRec.Body.String())
+	}
+	var payload map[string]string
+	if err := decodeJSON(secondRec, &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload["error"] != "invite_invalid" {
+		t.Fatalf("error code = %q, want invite_invalid", payload["error"])
+	}
+}
+
 func TestInviteRedemptionIsRateLimitedByIPNotByToken(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 
 	attempt := func(remoteAddr string) int {
-		body := strings.NewReader(`{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"guess-` + remoteAddr + `"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+		req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"guess-`+remoteAddr+`"}`)
 		req.RemoteAddr = remoteAddr + ":12345"
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -440,25 +592,194 @@ func TestInviteRedemptionIsRateLimitedByIPNotByToken(t *testing.T) {
 	}
 }
 
-func TestOversizedRegisterBodyIsRejected(t *testing.T) {
+func TestRegisterInDomainOpenModeIsRateLimitedByIP(t *testing.T) {
+	// Item 2 of Task 11's second review pass: the self-service
+	// (domain_open) branch reaches identity.CreateUser — a full argon2
+	// derivation, plus an account-existence oracle via 201/409/403/422 —
+	// completely unthrottled before this fix, since registerIPLimiter
+	// only ever guarded the invite branch. It now guards the endpoint as
+	// a whole, so ten failing self-service attempts from one IP exhaust
+	// the same budget invite redemption does.
+	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
+
+	attempt := func(email string) int {
+		req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"`+email+`","display_name":"New","password":"short"}`)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	for i := 0; i < 10; i++ {
+		if code := attempt("probe@studio.com"); code != http.StatusUnprocessableEntity {
+			t.Fatalf("attempt %d = %d, want 422 (invalid password)", i, code)
+		}
+	}
+	if code := attempt("probe@studio.com"); code != http.StatusTooManyRequests {
+		t.Fatalf("attempt after budget exhausted = %d, want 429", code)
+	}
+}
+
+func TestOversizedRegisterBodyIsRejectedWith413(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	huge := strings.Repeat("a", 1<<20) // 1 MiB, far past the 16KiB bound.
-	body := strings.NewReader(`{"email":"new@studio.com","display_name":"New","password":"` + huge + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@studio.com","display_name":"New","password":"`+huge+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for an oversized body", rec.Code)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 for an oversized body", rec.Code)
 	}
 }
 
 func TestLoginRejectsMalformedJSON(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{not json`))
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{not json`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestLoginRejectsNonJSONContentType(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`email=x&password=y`))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+func TestLoginRejectsMissingContentType(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"a@b.com","password":"password12345"}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+func TestClientIPIgnoresXForwardedForByDefault(t *testing.T) {
+	// TrustedProxyCount defaults to zero (a directly exposed instance):
+	// X-Forwarded-For must be ignored entirely, so every request sharing
+	// the real RemoteAddr shares one rate-limit bucket regardless of
+	// what a caller claims in the header. Task 11's second review pass,
+	// item 1.
+	srv, _, _ := newTestServer(t)
+
+	attempt := func(forwardedFor string) int {
+		req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"guess-`+forwardedFor+`"}`)
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+		req.RemoteAddr = "192.0.2.9:4242"
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	for i := 0; i < 10; i++ {
+		// A different claimed X-Forwarded-For on every attempt; with the
+		// header ignored, this must not grant a fresh budget each time.
+		if code := attempt("203.0.113." + string(rune('0'+i))); code != http.StatusForbidden {
+			t.Fatalf("attempt %d = %d, want 403 (invalid invite)", i, code)
+		}
+	}
+	if code := attempt("203.0.113.99"); code != http.StatusTooManyRequests {
+		t.Fatalf("attempt after budget exhausted = %d, want 429 (X-Forwarded-For must not grant a fresh budget)", code)
+	}
+}
+
+func TestClientIPHonorsXForwardedForBehindTrustedProxy(t *testing.T) {
+	// With TRUSTED_PROXY_COUNT=1, the rightmost X-Forwarded-For entry is
+	// the real client — even though every request here shares the same
+	// RemoteAddr (the proxy itself), distinct claimed clients must get
+	// independent budgets. Task 11's second review pass, item 1.
+	srv, _, _ := newTestServerWithConfig(t, func(cfg *config.Config) {
+		cfg.TrustedProxyCount = 1
+	})
+
+	attempt := func(forwardedFor string) int {
+		req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"guess"}`)
+		req.Header.Set("X-Forwarded-For", forwardedFor)
+		req.RemoteAddr = "10.0.0.1:9999" // the trusted proxy's own address, identical on every request
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	for i := 0; i < 10; i++ {
+		if code := attempt("203.0.113.5"); code != http.StatusForbidden {
+			t.Fatalf("attempt %d against 203.0.113.5 = %d, want 403", i, code)
+		}
+	}
+	if code := attempt("203.0.113.5"); code != http.StatusTooManyRequests {
+		t.Fatalf("attempt after 203.0.113.5's budget exhausted = %d, want 429", code)
+	}
+
+	// A distinct claimed client, still through the same proxy RemoteAddr,
+	// has its own untouched budget.
+	if code := attempt("198.51.100.9"); code != http.StatusForbidden {
+		t.Fatalf("a distinct claimed client = %d, want 403 (its own budget must be untouched)", code)
+	}
+}
+
+func TestSessionCookieNotSecureOverForwardedProtoWithoutTrustedProxy(t *testing.T) {
+	// The counterpart to the clientIP tests above, for the other header
+	// this instance only trusts once TrustedProxyCount says a proxy is
+	// really there: with the default of zero, a claimed
+	// X-Forwarded-Proto: https from a plain HTTP connection must not
+	// mark the session cookie Secure — the cookie would otherwise still
+	// be sent by the browser over a later plaintext connection. Task 11's
+	// second review pass, item 6.
+	srv, ids, _ := newTestServer(t)
+	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == web.SessionCookie && c.Secure {
+			t.Fatal("session cookie is Secure from an untrusted X-Forwarded-Proto claim")
+		}
+	}
+}
+
+func TestSessionCookieSecureOverForwardedProtoBehindTrustedProxy(t *testing.T) {
+	srv, ids, _ := newTestServerWithConfig(t, func(cfg *config.Config) {
+		cfg.TrustedProxyCount = 1
+	})
+	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
+	req.Header.Set("X-Forwarded-Proto", "https")
+	req.Header.Set("X-Forwarded-For", "203.0.113.5")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	found := false
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == web.SessionCookie {
+			found = true
+			if !c.Secure {
+				t.Fatal("session cookie is not Secure despite a trusted X-Forwarded-Proto: https")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("login did not set a session cookie")
 	}
 }
 
@@ -467,7 +788,7 @@ func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
 	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@studio.com","password":"password12345"}`))
+	req := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"designer@studio.com","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if strings.Contains(rec.Body.String(), "argon2") {

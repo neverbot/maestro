@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,6 +67,32 @@ type Config struct {
 	AllowedEmailDomains []string
 	RegistrationMode    RegistrationMode
 	Argon2              Argon2Params
+
+	// TrustedProxyCount is the number of reverse proxies this instance
+	// trusts to sit directly in front of it and to correctly append (never
+	// pass through unchanged, never let a client's own value survive) an
+	// entry to X-Forwarded-For, and to set X-Forwarded-Proto, on every
+	// request. It defaults to zero: a directly exposed instance, where
+	// RemoteAddr is the real client and neither header is consulted at
+	// all — the same posture web.clientIP and web.setSessionCookie held
+	// before this field existed.
+	//
+	// Getting this wrong is a real failure mode in both directions, not
+	// just an inconvenience. Too low (in particular, left at zero behind
+	// an actual proxy) does not merely fail to identify the client: every
+	// request's RemoteAddr is then the proxy's own address, so a per-IP
+	// rate limiter keyed on it collapses into one global bucket shared by
+	// every caller on the instance — ten requests from anyone exhausts it
+	// for everyone until the window rolls, which is worse than having no
+	// limiter at all. Too high, or nonzero on an instance with no proxy in
+	// front of it, lets a direct caller forge whichever X-Forwarded-For
+	// entry this instance ends up trusting as "the client", defeating the
+	// per-IP budget from the other direction. Set it to the actual number
+	// of hops between the public internet and this process (usually 1)
+	// only once a reverse proxy is confirmed to be there and to behave
+	// this way; the default of zero is the only safe value for an
+	// instance reachable directly.
+	TrustedProxyCount int
 }
 
 // LogValue redacts secrets so a stray slog.Any("config", cfg) never leaks
@@ -81,6 +108,7 @@ func (c Config) LogValue() slog.Value {
 		slog.String("registration_mode", string(c.RegistrationMode)),
 		slog.Duration("session_ttl", c.SessionTTL),
 		slog.Duration("invite_ttl", c.InviteTTL),
+		slog.Int("trusted_proxy_count", c.TrustedProxyCount),
 	)
 }
 
@@ -95,6 +123,10 @@ func Load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	trustedProxyCount, err := parseNonNegativeInt("TRUSTED_PROXY_COUNT", getenv("TRUSTED_PROXY_COUNT"), 0)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
 		Addr:               orDefault(getenv("MAESTRO_ADDR"), ":8080"),
@@ -105,6 +137,7 @@ func Load(getenv func(string) string) (Config, error) {
 		FirstAdminEmail:    strings.ToLower(strings.TrimSpace(getenv("FIRST_ADMIN_EMAIL"))),
 		FirstAdminPassword: getenv("FIRST_ADMIN_PASSWORD"),
 		RegistrationMode:   RegistrationMode(orDefault(getenv("REGISTRATION_MODE"), string(RegistrationInviteOnly))),
+		TrustedProxyCount:  trustedProxyCount,
 		Argon2: Argon2Params{
 			Time:    3,
 			Memory:  64 * 1024,
@@ -196,6 +229,25 @@ func parsePositiveDuration(name, raw string, def, maxD time.Duration) (time.Dura
 		return 0, fmt.Errorf("%s %q exceeds the maximum of %s", name, raw, maxD)
 	}
 	return d, nil
+}
+
+// parseNonNegativeInt parses an integer-valued environment variable named
+// name, defaulting to def when raw is empty and rejecting a negative
+// value: TRUSTED_PROXY_COUNT is a hop count, and a negative one has no
+// meaning worth silently coercing to zero and hiding a typo in an
+// operator's environment.
+func parseNonNegativeInt(name, raw string, def int) (int, error) {
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s %q is not a valid integer: %w", name, raw, err)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("%s must not be negative, got %q", name, raw)
+	}
+	return n, nil
 }
 
 func orDefault(v, fallback string) string {

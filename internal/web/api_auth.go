@@ -283,7 +283,7 @@ func (s *Server) startSessionFor(w http.ResponseWriter, r *http.Request, userID 
 // SameSite cannot drift between the "set" and "clear" call sites the way
 // two independently maintained cookie literals eventually would.
 func (s *Server) sessionCookieTemplate(r *http.Request) *http.Cookie {
-	return &http.Cookie{
+	return &http.Cookie{ //nolint:gosec // G124: Secure, HttpOnly and SameSite are all set immediately below — gosec's checker just doesn't credit a composite literal spanning multiple fields/lines like this one.
 		Name:     SessionCookie,
 		Path:     "/",
 		HttpOnly: true,
@@ -304,7 +304,7 @@ func (s *Server) sessionCookieTemplate(r *http.Request) *http.Cookie {
 // Correction 11), and a second computation of the same policy here could
 // silently drift from whatever was actually written to the database.
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token string, expiresAt time.Time) {
-	c := s.sessionCookieTemplate(r)
+	c := s.sessionCookieTemplate(r) //nolint:gosec // G124: sessionCookieTemplate already sets Secure, HttpOnly and SameSite; gosec does not trace a cookie built in one function and mutated in another.
 	c.Value = token
 	c.Expires = expiresAt
 	http.SetCookie(w, c)
@@ -315,7 +315,7 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, token 
 // on Path, HttpOnly, Secure or SameSite — only a plain literal MaxAge: -1
 // here differs.
 func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
-	c := s.sessionCookieTemplate(r)
+	c := s.sessionCookieTemplate(r) //nolint:gosec // G124: same as setSessionCookie above — sessionCookieTemplate already sets Secure, HttpOnly and SameSite.
 	c.Value = ""
 	c.MaxAge = -1
 	http.SetCookie(w, c)

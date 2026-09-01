@@ -57,13 +57,20 @@ var reservedSlugs = map[string]bool{
 // (the family behind "Trojan Source"-style spoofing). unicode.IsControl
 // does not flag these — they are format characters (category Cf), not
 // controls — so validateName checks for them separately.
-// G116 (gosec) fires on this file at the package clause, not this line —
-// see the exclusion for this exact path in .golangci.yml, with the same
-// reasoning: these bidi control characters are the data this check
-// exists to reject, not a source-spoofing risk in this file itself.
+//
+// Written as \uXXXX escapes rather than the literal runes: gosec's G116
+// scans source bytes for these characters wherever they appear, including
+// as data inside a map literal like this one, and previously flagged this
+// whole file at its package clause for containing exactly the characters
+// this map exists to reject. Escaping them is invisible to Go (the map's
+// keys are identical runes either way — see the "name-bidi-override" case
+// in TestCreateRejectsInvalidName) but removes the finding outright,
+// which keeps this file under gosec's ordinary scrutiny instead of
+// needing a standing path-based exclusion in .golangci.yml the way a
+// literal-character version of this map would.
 var bidiOverrides = map[rune]bool{
-	'‪': true, '‫': true, '‬': true, '‭': true, '‮': true, // LRE RLE PDF LRO RLO
-	'⁦': true, '⁧': true, '⁨': true, '⁩': true, // LRI RLI FSI PDI
+	'\u202A': true, '\u202B': true, '\u202C': true, '\u202D': true, '\u202E': true, // LRE RLE PDF LRO RLO
+	'\u2066': true, '\u2067': true, '\u2068': true, '\u2069': true, // LRI RLI FSI PDI
 }
 
 // Errors returned by the projects service.

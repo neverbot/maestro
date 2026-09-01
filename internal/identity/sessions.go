@@ -49,9 +49,10 @@ const randomTokenBytes = 32
 // This constant exists for documentation and cross-reference only —
 // ExtendSession's own SQL (identity.sql) is what actually enforces the
 // cap, via a LEAST(..., created_at + interval '90 days') that must keep
-// matching the "90 days" here. Nothing in Go re-derives or re-checks it.
-//
-//nolint:unused // documentation-only cross-reference to the SQL-enforced cap, see above.
+// matching the "90 days" here. Nothing in Go re-derives or re-checks it
+// at runtime; TestMaxSessionLifetimeMatchesExtendSessionSQL
+// (sessions_internal_test.go) is what keeps the two from drifting apart
+// silently.
 const maxSessionLifetime = 90 * 24 * time.Hour
 
 // IssueSession mints a session token and stores only its hash. The token

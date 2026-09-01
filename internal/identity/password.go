@@ -197,7 +197,7 @@ func VerifyPassword(password, encoded string) (bool, error) {
 		return false, err
 	}
 
-	got := argon2.IDKey([]byte(password), h.salt, h.timeCost, h.memory, h.threads, uint32(len(h.key))) //nolint:gosec // G115: h.key's length is bounded by Argon2Params.KeyLen (already uint32), never near overflow.
+	got := argon2.IDKey([]byte(password), h.salt, h.timeCost, h.memory, h.threads, uint32(len(h.key))) //nolint:gosec // G115: parseEncodedHash already bounds len(h.key) to maxDecodedKeyLen (256), far below uint32's range — not Argon2Params.KeyLen, which this decoded key's length need not match at all (that mismatch is exactly what NeedsRehash below exists to detect).
 	// subtle.ConstantTimeCompare, not bytes.Equal: bytes.Equal returns as
 	// soon as it finds a differing byte, so its running time leaks how many
 	// leading bytes of the derived key matched the stored one. Nothing in
@@ -224,5 +224,5 @@ func NeedsRehash(encoded string, p config.Argon2Params) (bool, error) {
 	return h.memory != p.Memory ||
 		h.timeCost != p.Time ||
 		h.threads != p.Threads ||
-		uint32(len(h.key)) != p.KeyLen, nil //nolint:gosec // G115: same bounded length as VerifyPassword above.
+		uint32(len(h.key)) != p.KeyLen, nil //nolint:gosec // G115: len(h.key) is bounded to maxDecodedKeyLen (256) by parseEncodedHash, the same guarantee VerifyPassword's conversion above relies on — not by p.KeyLen, which this line's whole job is to compare it against and which can legitimately differ (that is what makes a rehash necessary).
 }

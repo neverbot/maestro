@@ -18,34 +18,13 @@ linters:
       # path built from testing.T (internal/web/static_appjs_browser_test.go),
       # and a bare http.Cookie built to assert on in a table test
       # (internal/web/static_internal_test.go) rather than ever being
-      # sent to a browser. Production code keeps gosec at full strength;
-      # see the targeted //nolint:gosec comments in internal/identity,
-      # internal/projects and internal/web for the handful of real
-      # findings there that turned out to be false positives on
-      # inspection, each with its own reasoning attached at the site.
+      # sent to a browser. Every gosec finding in non-test code that
+      # turned out to be a false positive on inspection is suppressed at
+      # its own line with a //nolint:gosec comment carrying the reasoning
+      # (internal/identity/password.go, internal/web/api_auth.go), not
+      # excluded here — a path-wide exclusion for a single-line finding
+      # would silently cover every future line in that file too, gosec
+      # included among them.
       - path: _test\.go
         linters:
           - gosec
-
-      # internal/projects/projects.go: G116 (Trojan Source) fires on this
-      # file's package clause because bidiOverrides (below) legitimately
-      # holds the bidi control runes this file's own validateName rejects
-      # — it is the detector's data, not a spoofing risk in this source
-      # file. See the comment above bidiOverrides for the full reasoning.
-      - path: internal/projects/projects\.go
-        linters:
-          - gosec
-        text: "G116"
-
-      # internal/web/api_auth.go: G124 (cookie hardening) fires on every
-      # *http.Cookie built through sessionCookieTemplate, which is exactly
-      # the helper that sets Secure, HttpOnly and SameSite in one place so
-      # setSessionCookie and clearSessionCookie cannot drift on them (see
-      # that function's own doc comment) — gosec's checker does not trace
-      # a cookie built in one function and returned to another, so it
-      # flags the pattern this file uses specifically to avoid duplicating
-      # those three fields at every call site.
-      - path: internal/web/api_auth\.go
-        linters:
-          - gosec
-        text: "G124"

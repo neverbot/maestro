@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 	"time"
@@ -155,7 +156,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	deadline := time.NewTimer(s.sseMaxLifetime)
+	// jitteredSSEMaxLifetime, not s.sseMaxLifetime directly: see that
+	// function's own doc comment for why a fixed bound would synchronize
+	// every stream connected around the same moment (most visibly, every
+	// browser reconnecting right after a deploy) into reconnecting in
+	// lockstep forever after.
+	deadline := time.NewTimer(jitteredSSEMaxLifetime(s.sseMaxLifetime))
 	defer deadline.Stop()
 	heartbeat := time.NewTicker(s.sseHeartbeatInterval)
 	defer heartbeat.Stop()
@@ -179,6 +185,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.closing:
+			slog.InfoContext(r.Context(), "sse stream closed", "project_id", scope.ProjectID, "reason", "server shutting down")
 			return
 		case <-deadline.C:
 			return
@@ -386,4 +395,26 @@ func sseRecheckOutcome(reason string, transient, previouslyFailed bool) sseReche
 // has no control over and no test in it should depend on.
 func sseSawGap(lastSeq, seq uint64) bool {
 	return lastSeq != 0 && seq != lastSeq+1
+}
+
+// sseLifetimeJitterFraction is how much random variance
+// jitteredSSEMaxLifetime applies to a stream's bounded lifetime, as a
+// fraction of it. Without this, every browser that connects around the
+// same wall-clock moment — most visibly, every browser on the product
+// reconnecting within seconds of a deploy — would also hit its own
+// bounded-lifetime cutoff at the same moment, forever: each reconnect
+// would land the whole cohort back in lockstep for the next cutoff too,
+// turning one deploy into a permanent synchronized reconnect storm
+// instead of a one-time blip.
+const sseLifetimeJitterFraction = 0.10
+
+// jitteredSSEMaxLifetime returns base varied by up to
+// ±sseLifetimeJitterFraction, spreading a cohort of streams that all
+// started around the same time across a window of cutoffs instead of one
+// shared instant. math/rand/v2's global source needs no seeding and is
+// safe for concurrent use by every open stream calling this at once.
+func jitteredSSEMaxLifetime(base time.Duration) time.Duration {
+	spread := float64(base) * sseLifetimeJitterFraction
+	offset := (rand.Float64()*2 - 1) * spread
+	return base + time.Duration(offset)
 }

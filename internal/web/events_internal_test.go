@@ -1,6 +1,9 @@
 package web
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestSSERecheckOutcome pins sseRecheckOutcome's retry policy directly,
 // with no real identity/projects service, no live connection, and no
@@ -60,5 +63,33 @@ func TestSSESawGap(t *testing.T) {
 				t.Errorf("sseSawGap(%d, %d) = %v, want %v", tc.lastSeq, tc.seq, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestJitteredSSEMaxLifetime pins jitteredSSEMaxLifetime's bound
+// directly: every result stays within ±sseLifetimeJitterFraction of
+// base, and — since a jitter implementation that always rounds the same
+// direction would defeat its own purpose — both a below-base and an
+// above-base result actually occur across enough samples.
+func TestJitteredSSEMaxLifetime(t *testing.T) {
+	const base = 5 * time.Minute
+	spread := time.Duration(float64(base) * sseLifetimeJitterFraction)
+	lo, hi := base-spread, base+spread
+
+	var sawBelow, sawAbove bool
+	for i := 0; i < 200; i++ {
+		got := jitteredSSEMaxLifetime(base)
+		if got < lo || got > hi {
+			t.Fatalf("jitteredSSEMaxLifetime(%v) = %v, want within [%v, %v]", base, got, lo, hi)
+		}
+		switch {
+		case got < base:
+			sawBelow = true
+		case got > base:
+			sawAbove = true
+		}
+	}
+	if !sawBelow || !sawAbove {
+		t.Fatalf("200 samples never varied in both directions (below=%v, above=%v) — jitter looks one-sided or absent", sawBelow, sawAbove)
 	}
 }

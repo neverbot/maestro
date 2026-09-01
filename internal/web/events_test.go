@@ -497,3 +497,60 @@ func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
 		t.Fatalf("decoded note = %q, want %q", decoded.Note, forgedAttempt)
 	}
 }
+
+// TestEventsStreamClosesOnServerClose pins the shutdown lever itself
+// (Server.Close, server.go): an open stream ends promptly once Close is
+// called, well before its own bounded lifetime would otherwise end it —
+// this is what lets a future graceful-shutdown sequence (Task 16) call
+// Close before or alongside http.Server.Shutdown instead of Shutdown
+// waiting on every open stream for up to its own lifetime.
+func TestEventsStreamClosesOnServerClose(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	srv.Close()
+
+	done := make(chan struct{})
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			if _, err := resp.Body.Read(buf); err != nil {
+				close(done)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream stayed open after Server.Close")
+	}
+
+	// Close is safe to call more than once.
+	srv.Close()
+}

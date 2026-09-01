@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -122,6 +123,14 @@ type Server struct {
 	hub                  *realtime.Hub
 	sseMaxLifetime       time.Duration
 	sseHeartbeatInterval time.Duration
+
+	// closing and closeOnce back Close, below: the lever a graceful
+	// shutdown needs to end every open SSE stream instead of either
+	// waiting on them or cutting them off mid-frame. See Close's own doc
+	// comment for why this exists on Server rather than being left for
+	// Task 16 to invent when it wires up http.Server.Shutdown.
+	closing   chan struct{}
+	closeOnce sync.Once
 }
 
 // NewServer builds the routing tree.
@@ -164,6 +173,7 @@ func NewServer(opts Options) *Server {
 		hub:                  hub,
 		sseMaxLifetime:       sseMaxLifetime,
 		sseHeartbeatInterval: sseHeartbeatIntervalOpt,
+		closing:              make(chan struct{}),
 	}
 	s.routeFunc("GET /healthz", s.handleHealthz)
 	s.route("GET /version", requireCaller(s.handleVersion))
@@ -251,6 +261,34 @@ func (s *Server) registerProjectRoute(pattern string, h func(http.ResponseWriter
 // else about it is sensitive.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
+}
+
+// Close signals every open SSE stream (internal/web/events.go's
+// handleEvents, the one long-lived handler in this package) to end, and
+// returns immediately — it does not wait for them to actually stop.
+//
+// It exists because http.Server.Shutdown, on its own, is not enough for
+// a handler like this one: Shutdown waits for active handlers to return
+// but never cancels their request contexts itself, so a stream with no
+// bounded lifetime would keep Shutdown waiting indefinitely, and even
+// this stream's own bounded sseMaxLifetime could still leave Shutdown
+// waiting minutes past every ordinary request having finished — or, if
+// whatever wraps Shutdown in a timeout fires first, every open stream
+// gets cut off mid-frame instead of a chance to close cleanly. Call
+// Close once, before or alongside Shutdown; handleEvents selects on the
+// channel this closes and returns promptly once it does, the same way
+// it already reacts to r.Context().Done() or its own deadline.
+//
+// This is deliberately not wired into anything yet: Task 16 owns
+// process lifecycle and graceful shutdown (cmd/maestro/main.go's own
+// doc comment says so explicitly — no signal handling exists there
+// today), so Close exists here as the lever that task needs, not as a
+// shutdown sequence this package should not be gluing together on its
+// own ahead of the rest of that task.
+//
+// Safe to call more than once (sync.Once); a second call is a no-op.
+func (s *Server) Close() {
+	s.closeOnce.Do(func() { close(s.closing) })
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

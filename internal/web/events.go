@@ -155,6 +155,18 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, _ Caller, 
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	// A comment line, the same shape as the heartbeat's own ": ping\n\n"
+	// below (a comment fires no "message" event on an EventSource client,
+	// so this changes nothing about what a consumer receives as data) —
+	// written once, immediately, so a client — or a person watching raw
+	// bytes with curl -N — can tell "connected, waiting for events" from
+	// "stalled" the instant the connection opens, rather than only
+	// finding out up to sseHeartbeatInterval (15s) later on the first
+	// heartbeat, or never, if this stream happens to sit idle with no
+	// events published to it at all.
+	if _, err := fmt.Fprint(w, ": connected\n\n"); err != nil {
+		return
+	}
 	flusher.Flush()
 
 	// jitteredSSEMaxLifetime, not s.sseMaxLifetime directly: see that

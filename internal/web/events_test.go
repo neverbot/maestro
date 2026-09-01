@@ -180,6 +180,64 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 	}
 }
 
+// TestEventsStreamSendsAnInitialConnectFrame pins the fix for a defect a
+// review of this task found: with no event published and the heartbeat
+// up to sseHeartbeatInterval away, a client had no way to tell "connected
+// and waiting" from "stalled" until either one arrived. handleEvents now
+// writes a ": connected\n\n" comment line immediately after the response
+// headers, before entering its select loop — a comment, the same shape
+// as the heartbeat's own ": ping\n\n", so it fires no "message" event on
+// a real EventSource client and changes nothing about the data such a
+// client receives; this test reads the raw bytes directly (not through
+// readOneSSEFrame, which is built to skip past exactly this kind of
+// comment line) specifically to assert the frame is there.
+func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	streamCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %v", err)
+	}
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	line1, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read first line: %v", err)
+	}
+	if line1 != ": connected\n" {
+		t.Fatalf("first line = %q, want %q", line1, ": connected\n")
+	}
+	line2, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read second line: %v", err)
+	}
+	if line2 != "\n" {
+		t.Fatalf("second line = %q, want a blank line terminating the comment frame", line2)
+	}
+}
+
 // TestEventsStreamClosesAtMaxLifetime pins the bounded-lifetime design
 // decision itself (see handleEvents's own doc comment): with no event
 // ever published, the stream still ends once SSEMaxLifetime elapses,

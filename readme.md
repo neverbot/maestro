@@ -63,6 +63,24 @@ learn the metamodel from a skill bundle carrying worked examples per
 genre, so an agent arrives knowing how to declare types and seed a few
 hundred entities without being told twice.
 
+## Running it
+
+```bash
+docker compose up --build
+```
+
+Starts Maestro and Postgres together (`compose.yml`). On first boot it
+migrates the schema and, if `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
+are set, creates that account as an instance admin — log in with it at
+`http://localhost:8080`. `compose.yml`'s own `SESSION_KEY` is a
+local-dev-only placeholder; generate a real one with
+`openssl rand -base64 32` before running this anywhere but a laptop.
+
+For local development without a container: `make build && make run`
+(binary in `bin/maestro`, same environment variables as the compose
+service). `make check` runs the full commit gate — formatting, `go vet`,
+the linter, `sqlc diff`, and the test suite — the same one CI runs.
+
 ## Roadmap
 
 - [ ] **Core.** Server, Postgres, identity, MCP and REST surfaces.

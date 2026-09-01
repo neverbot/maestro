@@ -120,3 +120,42 @@ func TestMigrateUpDownUp(t *testing.T) {
 		t.Fatalf("table users was not recreated after re-up")
 	}
 }
+
+// TestMigrateRefusesToServeAgainstANewerSchema pins checkNoSchemaDrift:
+// a database whose goose_db_version bookkeeping already names a version
+// higher than any migration this binary's embedded migrations/ directory
+// knows about (the shape a rollback, or an old replica in a rolling
+// deploy, actually produces) must make Migrate fail loudly, not succeed
+// having quietly done nothing. Before this test existed, Up() alone
+// returned nil in exactly this case — goose only ever walks forward
+// through the sources it recognizes, so a version row it has never heard
+// of is invisible to it, not an error.
+func TestMigrateRefusesToServeAgainstANewerSchema(t *testing.T) {
+	t.Parallel()
+	pool := newTestDatabase(t)
+	ctx := context.Background()
+
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Simulate a migration this binary has never heard of already having
+	// been applied by some other (newer) binary against this same
+	// database — goose's own bookkeeping table, not a real migration
+	// file, is all that has to say so.
+	const futureVersion = 99999999
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO goose_db_version (version_id, is_applied) VALUES ($1, true)`,
+		futureVersion,
+	); err != nil {
+		t.Fatalf("insert future goose_db_version row: %v", err)
+	}
+
+	err := Migrate(ctx, pool)
+	if err == nil {
+		t.Fatal("Migrate succeeded against a database ahead of this binary's known migrations, want an error")
+	}
+	if !strings.Contains(err.Error(), "ahead of") {
+		t.Fatalf("err = %v, want it to explain the schema is ahead of this binary", err)
+	}
+}

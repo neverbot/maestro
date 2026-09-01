@@ -358,6 +358,14 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 		slog.ErrorContext(r.Context(), "change role failed", "project_id", scope.ProjectID, "target_user_id", targetID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not change the member's role")
 	default:
+		// Published after SetRole has already returned successfully —
+		// see publish.go's own doc comment on eventMemberUpdated for why
+		// that is the same moment as "committed", and for why this event
+		// carries the target's new role at every role, not just above
+		// viewer.
+		s.publish(scope.ProjectID, eventMemberUpdated, "", map[string]any{
+			"user_id": targetID, "role": req.Role,
+		})
 		// Mirrors handleRemoveMember's own response shape: a demotion
 		// below editor revokes the target's tokens in this project
 		// (projects.SetRole, above) exactly the way removal already
@@ -410,6 +418,7 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 		slog.ErrorContext(r.Context(), "remove member failed", "project_id", scope.ProjectID, "target_user_id", targetID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not remove the member")
 	default:
+		s.publish(scope.ProjectID, eventMemberRemoved, "", map[string]any{"user_id": targetID})
 		writeJSON(w, http.StatusOK, map[string]any{"revoked_tokens": revoked})
 	}
 }
@@ -520,6 +529,16 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 	slog.InfoContext(r.Context(), "game deleted",
 		"project_id", scope.ProjectID, "slug", project.Slug, "user_id", caller.UserID,
 		"tokens_destroyed", tokensDestroyed, "invites_destroyed", invitesDestroyed)
+	// Published after projects.Delete has already returned successfully
+	// — see eventGameDeleted's own doc comment (publish.go) for why every
+	// subscriber gets this regardless of role, and why the payload
+	// carries nothing beyond the signal itself. This also races the
+	// heartbeat re-check every open stream on this project already runs
+	// (events.go): that re-check would eventually notice every
+	// subscriber's membership disappeared (the cascade deletes it along
+	// with the project) and close their stream anyway, up to
+	// sseHeartbeatInterval later — this publish just gets there first.
+	s.publish(scope.ProjectID, eventGameDeleted, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

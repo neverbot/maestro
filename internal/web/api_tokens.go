@@ -49,6 +49,15 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, calle
 		slog.ErrorContext(r.Context(), "create api token failed", "project_id", scope.ProjectID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not create the token")
 	default:
+		// Published with the same fields apiTokenResponse exposes to
+		// handleListTokens — never the clear value, which appears in
+		// this handler's own response below and nowhere else, ever — at
+		// MinRole roles.Editor; see eventTokenMinted's own doc comment
+		// (publish.go) for why that is tighter than the REST listing
+		// endpoint it otherwise mirrors.
+		s.publish(scope.ProjectID, eventTokenMinted, roles.Editor, map[string]any{
+			"id": row.ID, "label": row.Label, "token_hint": row.TokenHint,
+		})
 		// The clear value appears here and nowhere else, ever.
 		// token_hint is returned here too, not just from the listing: an
 		// operator who copies the clear value into an agent's config
@@ -141,5 +150,12 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, calle
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not revoke the token")
 		return
 	}
+	// Published even for the no-op case (an unknown or foreign token id
+	// — this handler's own doc comment above explains why that answers
+	// the same 204 as a real revoke): a subscriber cannot tell the two
+	// apart from this event alone either, which is fine, since a client
+	// reacts to token.revoked by dropping a row matching this id from
+	// its own list, a no-op if it never had one.
+	s.publish(scope.ProjectID, eventTokenRevoked, roles.Editor, map[string]any{"id": tokenID})
 	w.WriteHeader(http.StatusNoContent)
 }

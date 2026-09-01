@@ -13,6 +13,7 @@ import (
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/realtime"
 )
 
 // Options carries everything the server needs from the outside.
@@ -21,6 +22,24 @@ type Options struct {
 	Config   config.Config
 	Identity *identity.Service
 	Projects *projects.Service
+
+	// Hub is the realtime fan-out this instance publishes into and the
+	// SSE endpoint (events.go) reads from. Nothing publishes yet — see
+	// events.go's own doc comment — but the metamodel plan's entity.*
+	// and relation.* events will, from services this package does not
+	// own, which is why this is a field on Options instead of a value
+	// NewServer keeps entirely to itself: whoever builds those services
+	// needs the same *realtime.Hub instance the SSE handler is reading
+	// from, not a second, disconnected one. Optional: a nil Hub gets a
+	// fresh realtime.NewHub(), same as every other build did before this
+	// field existed.
+	Hub *realtime.Hub
+
+	// SSEMaxLifetime bounds how long GET /api/games/{game}/events keeps
+	// one connection open before closing it and forcing the client to
+	// reconnect. See events.go's own doc comment for why a bound exists
+	// at all. Optional: zero gets defaultSSEMaxLifetime.
+	SSEMaxLifetime time.Duration
 }
 
 // Server routes all four surfaces: web UI, REST API, MCP and SSE.
@@ -84,6 +103,13 @@ type Server struct {
 	// project-scoped route resolves its scope through requireProject.
 	registeredPatterns    []string
 	projectScopedPatterns map[string]bool
+
+	// hub and sseMaxLifetime back the SSE endpoint (events.go). See
+	// Options.Hub and Options.SSEMaxLifetime for what they do and why
+	// both are injectable rather than values this file keeps entirely
+	// to itself.
+	hub            *realtime.Hub
+	sseMaxLifetime time.Duration
 }
 
 // NewServer builds the routing tree.
@@ -104,12 +130,23 @@ func NewServer(opts Options) *Server {
 		panic("web: NewServer requires a non-nil Projects service")
 	}
 
+	hub := opts.Hub
+	if hub == nil {
+		hub = realtime.NewHub()
+	}
+	sseMaxLifetime := opts.SSEMaxLifetime
+	if sseMaxLifetime <= 0 {
+		sseMaxLifetime = defaultSSEMaxLifetime
+	}
+
 	s := &Server{
 		mux:               http.NewServeMux(),
 		opts:              opts,
 		loginLimiter:      identity.NewLimiter(10, time.Minute),
 		loginIPLimiter:    identity.NewLimiter(40, time.Minute),
 		registerIPLimiter: identity.NewLimiter(10, time.Minute),
+		hub:               hub,
+		sseMaxLifetime:    sseMaxLifetime,
 	}
 	s.routeFunc("GET /healthz", s.handleHealthz)
 	s.route("GET /version", requireCaller(s.handleVersion))
@@ -126,6 +163,7 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("POST /api/games/{game}/tokens", s.handleCreateToken)
 	s.registerProjectRoute("GET /api/games/{game}/tokens", s.handleListTokens)
 	s.registerProjectRoute("DELETE /api/games/{game}/tokens/{token}", s.handleRevokeToken)
+	s.registerProjectRoute("GET /api/games/{game}/events", s.handleEvents)
 
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call

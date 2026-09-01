@@ -1,0 +1,215 @@
+package web_test
+
+import (
+	"bufio"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/testutil"
+	"github.com/neverbot/maestro/internal/web"
+)
+
+// newTestServerWithHub wires a server the same way newTestServer does
+// (auth_test.go), except the caller keeps its own reference to the
+// *realtime.Hub the server publishes from — Options.Hub is exactly the
+// injection point a real publisher, in production, arrives through from
+// a service this package does not own; here it lets a test stand in for
+// that publisher.
+func newTestServerWithHub(t *testing.T, maxLifetime time.Duration) (*web.Server, *identity.Service, *projects.Service, *realtime.Hub) {
+	t.Helper()
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	ids := identity.New(pool, cfg)
+	projSvc := projects.New(pool)
+	hub := realtime.NewHub()
+	srv := web.NewServer(web.Options{
+		Version:        "test",
+		Config:         cfg,
+		Identity:       ids,
+		Projects:       projSvc,
+		Hub:            hub,
+		SSEMaxLifetime: maxLifetime,
+	})
+	return srv, ids, projSvc, hub
+}
+
+// readOneSSEFrame reads lines from r until it has collected one complete
+// "event: ...\ndata: ...\n\n" frame (skipping ": ping" heartbeat comment
+// lines, which carry no "event:"/"data:" pair) or a read fails.
+func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, data string) {
+	t.Helper()
+	var gotKind, gotData string
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE stream: %v", err)
+		}
+		line = strings.TrimRight(line, "\n")
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			gotKind = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			gotData = strings.TrimPrefix(line, "data: ")
+		case line == "" && gotKind != "":
+			return gotKind, gotData
+		}
+	}
+}
+
+func TestEventsStreamRequiresAuthentication(t *testing.T) {
+	srv, _, _, _ := newTestServerWithHub(t, time.Minute)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+uuid.New().String()+"/events", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEventsStreamRequiresMembership(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345"}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "stranger@studio.com")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/events", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestEventsStreamDeliversPublishedEvent drives the endpoint over a real
+// listening socket (httptest.NewServer, not ServeHTTP against a
+// Recorder): a Recorder runs the handler to completion synchronously, so
+// a handler that blocks in its streaming loop would just hang the test
+// rather than exercising it. It also asserts an event published for a
+// different game never reaches this subscriber, which is the one thing
+// internal/realtime's own tests cannot check — they never touch
+// scope.ProjectID or hub.Subscribe as this handler actually wires them.
+func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
+	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	streamCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequestWithContext: %v", err)
+	}
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", got)
+	}
+
+	// Give the handler's own goroutine a moment to reach hub.Subscribe
+	// before publishing: the HTTP round trip above only proves headers
+	// were flushed, which happens before Subscribe.
+	time.Sleep(50 * time.Millisecond)
+
+	hub.Publish(realtime.Event{ProjectID: other.ID, Kind: "noise"})
+	hub.Publish(realtime.Event{ProjectID: project.ID, Kind: "project.updated", Payload: `{"slug":"azeroth"}`})
+
+	reader := bufio.NewReader(resp.Body)
+	kind, data := readOneSSEFrame(t, reader)
+	if kind != "project.updated" {
+		t.Fatalf("Kind = %q, want project.updated (cross-game leak or missed the real event)", kind)
+	}
+	if data != `{"slug":"azeroth"}` {
+		t.Fatalf("data = %q", data)
+	}
+}
+
+// TestEventsStreamClosesAtMaxLifetime pins the bounded-lifetime design
+// decision itself (see handleEvents's own doc comment): with no event
+// ever published, the stream still ends once SSEMaxLifetime elapses,
+// which is the only mechanism this design has for making an already-open
+// stream stop trusting a caller whose access was revoked after the
+// handshake.
+func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
+	srv, ids, projSvc, _ := newTestServerWithHub(t, 100*time.Millisecond)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@studio.com")
+
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	defer resp.Body.Close()
+
+	done := make(chan struct{})
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			if _, err := resp.Body.Read(buf); err != nil {
+				close(done)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stream did not close at SSEMaxLifetime")
+	}
+}

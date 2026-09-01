@@ -613,16 +613,13 @@ func (s *Service) RemoveMember(ctx context.Context, userID, projectID uuid.UUID)
 	return revokedLabels, nil
 }
 
-// Delete removes a project outright. Every membership, API token and
-// bound invite scoped to it disappears in the same statement, through
-// the ON DELETE CASCADE foreign keys migration 0001 already declares on
-// each — see this task's own plan section for why that is enough on its
-// own, with no hand-rolled transaction here. Migration 0002's last-owner
-// trigger has an explicit escape hatch for exactly this statement (see
-// its own comment): deleting a project cascades to its memberships,
-// including its last owner's, and the trigger does not fire for a
-// membership whose project is already gone — so this never trips the
-// very guard the rest of this package enforces everywhere else.
+// Delete removes a project outright, with no hand-rolled transaction of
+// its own — see DeleteProject's own comment (projects.sql) for why a
+// single DELETE is enough on its own: every membership, API token and
+// bound invite scoped to the project cascades away with it, and
+// migration 0002's last-owner trigger has an escape hatch built for
+// exactly this statement, so it never trips on the project's own last
+// owner being cascaded away with everything else.
 //
 // A concurrent second call for the same id — the caller's own handler
 // has already confirmed standing on this project by the time either

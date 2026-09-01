@@ -1076,6 +1076,12 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 // foreign keys migration 0001 already declares, and migration 0002's
 // last-owner trigger has an escape hatch built for exactly this
 // statement (see Service.Delete's own doc comment).
+//
+// This is also the escape hatch's own regression guard: project here has
+// exactly one member, its owner, so if that escape hatch ever stopped
+// recognising this statement, the trigger would raise on the cascaded
+// membership delete and svc.Delete below would fail loudly with a raw
+// constraint-violation error instead of quietly returning nil.
 func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())

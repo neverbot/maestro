@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,19 +27,45 @@ var ErrUserNotFound = errors.New("user not found")
 // The stakes are higher here than for a project's last owner. A project
 // with zero owners can still be reasoned about — it is merely stuck
 // until an operator intervenes some other way — but an instance with
-// zero admins can never recover through this codebase's own surfaces:
-// POST /api/invites, GET/DELETE /api/invites and SetAdmin itself
-// (api_admin.go's requireAdminCaller) are all gated on Caller.IsAdmin,
-// and BootstrapFirstAdmin (users.go) only ever runs once, against an
-// empty users table, at first boot. Once the count reaches zero there is
-// no REST call, no MCP tool and no scheduled job anywhere in this
-// codebase that can ever set it non-zero again — the exact "unique and
-// stranded if lost" defect this task exists to close. That is why this
-// guard is unconditional rather than a default an operator can talk
-// their way past: there is no supported recovery path this plan wants to
-// lean on so soon after Task 18 built the invite surface specifically to
-// avoid needing psql for the analogous problem.
+// zero admins can never recover through any REST call, MCP tool or
+// scheduled job while the process keeps running: POST /api/invites,
+// GET/DELETE /api/invites and this surface itself are all gated on
+// Caller.IsAdmin, and nothing else sets it. The one recovery path this
+// codebase does provide is a restart: BootstrapFirstAdmin (users.go) now
+// re-promotes the account named by FIRST_ADMIN_EMAIL when it already
+// exists without the flag, not only when the instance is empty — see
+// that function's own doc comment. That still requires an operator with
+// access to the process environment, which is already equivalent to
+// database access, so this guard is not defeated by it; it only turns a
+// break-glass `psql` session into a documented restart, which is why the
+// guard below stays unconditional rather than a default an operator can
+// talk their way past inside a running process.
 var ErrLastAdmin = errors.New("instance must keep at least one admin")
+
+// SetAdminByEmail resolves email to a user id and applies SetAdmin. This
+// is the production entry point handleSetAdmin (internal/web/api_admin.go)
+// calls: an admin identifies who to promote or demote by email, the same
+// selector POST /api/invites already uses to identify who an
+// account-only invite is for (createInstanceInviteRequest.Email). This
+// codebase's admin surface already established that vocabulary, so this
+// method reuses it rather than requiring a user-listing endpoint whose
+// only consumer would be this one call site — see this task's own plan
+// section (Decision 2) for the tradeoff against a listing endpoint.
+//
+// An unknown email reports ErrUserNotFound, the same sentinel SetAdmin
+// itself returns for an unknown id — there is only one "no such user"
+// outcome from this surface, however the caller identified the target.
+func (s *Service) SetAdminByEmail(ctx context.Context, email string, isAdmin bool) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	dbUser, err := s.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("lookup user by email: %w", err)
+	}
+	return s.SetAdmin(ctx, dbUser.ID, isAdmin)
+}
 
 // SetAdmin promotes or demotes targetUserID's instance-admin flag.
 // Authorization is the HTTP layer's job (requireAdminCaller,

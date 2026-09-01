@@ -3,6 +3,7 @@ package identity_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -150,58 +151,296 @@ func TestSetAdminUnknownUserReturnsErrUserNotFound(t *testing.T) {
 // (TestConcurrentRemovalLeavesExactlyOneOwner, projects_test.go),
 // applied to the instance-wide admin invariant: two goroutines racing to
 // demote the instance's last two admins must never both succeed.
+//
+// Looped 25 times, each round against a fresh pair of admins: a Round 2
+// review pointed out that a single round of this exact test can pass
+// without the two goroutines' SetAdmin calls ever actually overlapping
+// inside CountAdminsForUpdate's own FOR UPDATE window — go test's
+// scheduler offers no guarantee the two goroutines are even both
+// running before one finishes — so one green run was never strong
+// evidence the lock was doing anything. Looping gives the race many
+// independent chances to occur; the assertion inside each round is
+// exactly as strict as the single-round version was.
 func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	admin1, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "race1@studio.com", DisplayName: "Race One", Password: "password12345",
+	// CountAdminsForUpdate locks (and counts) every admin row in the
+	// whole table, not a set scoped to this test — so the "exactly two
+	// admins" precondition each round needs has to be true instance-wide,
+	// not just among the two ids this round races. A first version of
+	// this loop created two brand-new admins every round on top of
+	// whichever single admin survived the previous round's race,
+	// reaching 3 live admins by round 1 — at which point neither
+	// concurrent demotion could ever observe count<=1, so both
+	// succeeded, and the test failed for a reason that had nothing to do
+	// with the lock. Fixed by carrying the previous round's survivor
+	// forward as this round's first racer and only ever minting one new
+	// admin per round: exactly two admins exist, instance-wide, at the
+	// start of every round's race.
+	firstAdmin, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "race-seed@studio.com", DisplayName: "Race Seed", Password: "password12345",
 	})
 	if err != nil {
-		t.Fatalf("CreateUser admin1: %v", err)
+		t.Fatalf("CreateUser seed admin: %v", err)
 	}
-	if err := svc.SetAdmin(ctx, admin1.ID, true); err != nil {
-		t.Fatalf("SetAdmin admin1: %v", err)
+	if err := svc.SetAdmin(ctx, firstAdmin.ID, true); err != nil {
+		t.Fatalf("SetAdmin seed admin: %v", err)
 	}
-	admin2, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "race2@studio.com", DisplayName: "Race Two", Password: "password12345",
-	})
-	if err != nil {
-		t.Fatalf("CreateUser admin2: %v", err)
-	}
-	if err := svc.SetAdmin(ctx, admin2.ID, true); err != nil {
-		t.Fatalf("SetAdmin admin2: %v", err)
-	}
+	survivor := firstAdmin.ID
 
-	var wg sync.WaitGroup
-	var successes atomic.Int64
-	for _, id := range []uuid.UUID{admin1.ID, admin2.ID} {
-		wg.Add(1)
-		go func(id uuid.UUID) {
-			defer wg.Done()
-			if err := svc.SetAdmin(ctx, id, false); err == nil {
-				successes.Add(1)
-			}
-		}(id)
-	}
-	wg.Wait()
-
-	if got := successes.Load(); got != 1 {
-		t.Fatalf("successful concurrent demotions = %d, want exactly 1", got)
-	}
-
-	rows := 0
-	for _, id := range []uuid.UUID{admin1.ID, admin2.ID} {
-		u, err := svc.UserByID(ctx, id)
+	const rounds = 25
+	for round := 0; round < rounds; round++ {
+		challenger, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+			Email:       fmt.Sprintf("race-challenger-%d@studio.com", round),
+			DisplayName: "Race Challenger", Password: "password12345",
+		})
 		if err != nil {
-			t.Fatalf("UserByID: %v", err)
+			t.Fatalf("round %d: CreateUser challenger: %v", round, err)
 		}
-		if u.IsAdmin {
-			rows++
+		if err := svc.SetAdmin(ctx, challenger.ID, true); err != nil {
+			t.Fatalf("round %d: SetAdmin challenger: %v", round, err)
 		}
+
+		var wg sync.WaitGroup
+		var successes atomic.Int64
+		var mu sync.Mutex
+		var nextSurvivor uuid.UUID
+		for _, id := range []uuid.UUID{survivor, challenger.ID} {
+			wg.Add(1)
+			go func(id uuid.UUID) {
+				defer wg.Done()
+				if err := svc.SetAdmin(ctx, id, false); err != nil {
+					// Refused (ErrLastAdmin, in the passing case): id is
+					// still an admin, so it carries into next round.
+					mu.Lock()
+					nextSurvivor = id
+					mu.Unlock()
+					return
+				}
+				successes.Add(1)
+			}(id)
+		}
+		wg.Wait()
+
+		if got := successes.Load(); got != 1 {
+			t.Fatalf("round %d: successful concurrent demotions = %d, want exactly 1", round, got)
+		}
+
+		rows := 0
+		for _, id := range []uuid.UUID{survivor, challenger.ID} {
+			u, err := svc.UserByID(ctx, id)
+			if err != nil {
+				t.Fatalf("round %d: UserByID: %v", round, err)
+			}
+			if u.IsAdmin {
+				rows++
+			}
+		}
+		if rows != 1 {
+			t.Fatalf("round %d: remaining admins among the two = %d, want exactly 1", round, rows)
+		}
+		survivor = nextSurvivor
 	}
-	if rows != 1 {
-		t.Fatalf("remaining admins among the two = %d, want exactly 1", rows)
+}
+
+func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "byemail@studio.com", DisplayName: "By Email", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Mixed case and surrounding whitespace, to pin the same
+	// normalization every other email-keyed lookup in this package
+	// applies.
+	if err := svc.SetAdminByEmail(ctx, "  ByEmail@Studio.com  ", true); err != nil {
+		t.Fatalf("SetAdminByEmail(true): %v", err)
+	}
+	got, err := svc.UserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if !got.IsAdmin {
+		t.Fatal("user should be admin after SetAdminByEmail(true)")
+	}
+
+	second, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "second-admin@studio.com", DisplayName: "Second", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser second: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, second.ID, true); err != nil {
+		t.Fatalf("SetAdmin second: %v", err)
+	}
+
+	if err := svc.SetAdminByEmail(ctx, "byemail@studio.com", false); err != nil {
+		t.Fatalf("SetAdminByEmail(false): %v", err)
+	}
+	got, err = svc.UserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if got.IsAdmin {
+		t.Fatal("user should no longer be admin after SetAdminByEmail(false)")
+	}
+}
+
+func TestSetAdminByEmailUnknownEmailReturnsErrUserNotFound(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	if err := svc.SetAdminByEmail(ctx, "nobody@studio.com", true); !errors.Is(err, identity.ErrUserNotFound) {
+		t.Fatalf("err = %v, want ErrUserNotFound", err)
+	}
+}
+
+func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "only-by-email@studio.com", DisplayName: "Only", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, user.ID, true); err != nil {
+		t.Fatalf("SetAdmin(true): %v", err)
+	}
+
+	if err := svc.SetAdminByEmail(ctx, "only-by-email@studio.com", false); !errors.Is(err, identity.ErrLastAdmin) {
+		t.Fatalf("err = %v, want ErrLastAdmin", err)
+	}
+}
+
+// TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted pins this
+// task's own recovery path: a non-empty instance whose configured
+// FIRST_ADMIN_EMAIL account has since lost the flag (demoted by another
+// admin, or however it happened) gets it back on the next boot, without
+// BootstrapFirstAdmin creating a second account or touching the
+// account's password.
+func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if !admin.IsAdmin {
+		t.Fatal("bootstrap admin should be an admin immediately after bootstrapping")
+	}
+
+	// A second admin exists so demoting the first is not itself refused
+	// by ErrLastAdmin — this test is about the boot-time recovery path,
+	// not the demotion guard.
+	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "other@studio.com", DisplayName: "Other", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser other: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, other.ID, true); err != nil {
+		t.Fatalf("SetAdmin other: %v", err)
+	}
+	if err := svc.SetAdmin(ctx, admin.ID, false); err != nil {
+		t.Fatalf("demote configured admin: %v", err)
+	}
+	demoted, err := svc.UserByID(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if demoted.IsAdmin {
+		t.Fatal("precondition failed: configured admin should be demoted before the recovery boot")
+	}
+
+	// Simulate a restart: BootstrapFirstAdmin runs again against a
+	// non-empty instance whose configured admin has lost the flag.
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("second BootstrapFirstAdmin: %v", err)
+	}
+
+	recovered, err := svc.UserByID(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if !recovered.IsAdmin {
+		t.Fatal("BootstrapFirstAdmin should re-promote the configured admin email on a later boot")
+	}
+	// The password must be untouched — re-promotion only ever sets the
+	// flag.
+	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); err != nil {
+		t.Fatalf("configured admin's original password should still authenticate: %v", err)
+	}
+}
+
+// TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance pins
+// the other half of the same decision: a FIRST_ADMIN_EMAIL that matches
+// no existing account on a non-empty instance is left alone, not used to
+// conjure a brand-new admin account on every boot.
+func TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "nobody-yet@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if _, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "someone@studio.com", DisplayName: "Someone", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("BootstrapFirstAdmin: %v", err)
+	}
+
+	if _, err := svc.Authenticate(ctx, "nobody-yet@studio.com", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
+		t.Fatalf("BootstrapFirstAdmin must not create an account on a non-empty instance, err = %v", err)
+	}
+}
+
+// TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag
+// pins the common case: nothing changes, and nothing errors, when the
+// configured admin already has the flag.
+func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *testing.T) {
+	pool := testutil.NewPool(t)
+	cfg := testConfig()
+	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminPassword = "password12345"
+	svc := identity.New(pool, cfg)
+	ctx := context.Background()
+
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("first BootstrapFirstAdmin: %v", err)
+	}
+	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
+		t.Fatalf("second BootstrapFirstAdmin: %v", err)
+	}
+
+	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	if !admin.IsAdmin {
+		t.Fatal("configured admin should still be an admin")
 	}
 }

@@ -42,6 +42,15 @@ var (
 	ErrPasswordInvalid    = errors.New("password does not meet requirements")
 	ErrEmailInvalid       = errors.New("email does not meet requirements")
 	ErrDisplayNameInvalid = errors.New("display name does not meet requirements")
+	// ErrPasswordUnchanged is returned by ChangeOwnPassword when the new
+	// password is byte-identical to the current one. A no-op rotation
+	// still pays ChangePassword's full cost — a fresh hash, and every
+	// other session on the account revoked — for a password that reads
+	// exactly the same afterwards; refusing it before either happens
+	// tells the caller their input did nothing, rather than silently
+	// logging out every other device for a change that never took
+	// effect.
+	ErrPasswordUnchanged = errors.New("new password must differ from the current password")
 )
 
 // User is the identity domain's public view of an account. It deliberately
@@ -352,7 +361,26 @@ func (s *Service) Authenticate(ctx context.Context, email, password string) (Use
 var bootstrapRaceHook func()
 
 // BootstrapFirstAdmin creates the configured admin account when the instance
-// has no users yet. It is a no-op afterwards, and a no-op when unconfigured.
+// has no users yet, and is a no-op when unconfigured (FIRST_ADMIN_EMAIL or
+// FIRST_ADMIN_PASSWORD unset).
+//
+// When the instance is not empty, this used to be an unconditional no-op —
+// Task 21's own review found that left no recovery at all from the
+// instance's own last-admin guard (SetAdmin's ErrLastAdmin, admin.go):
+// nothing anywhere sets IsAdmin once every admin is gone, or once the one
+// admin account is simply unreachable (a forgotten password, with no
+// reset flow anywhere in this product by design). It now also
+// re-promotes: if a user with FIRST_ADMIN_EMAIL already exists and is not
+// currently an admin, this sets the flag, without touching their password
+// or anything else about the account (see repromoteConfiguredAdmin
+// below). This is deliberately narrower than "create the account if it's
+// missing" — a FIRST_ADMIN_EMAIL that matches nobody is left alone, not
+// used to conjure a brand-new admin account on every boot of an instance
+// that already has users, which would be a surprising escalation vector
+// for a misconfigured environment variable. The recovery this grants is
+// not a new capability: an operator who can set process environment
+// variables already has equivalent access to the database directly, so
+// this only turns a break-glass `psql UPDATE` into a documented restart.
 //
 // The count-then-insert below is not atomic, so two replicas booting
 // simultaneously against an empty database can both pass the count check
@@ -370,7 +398,7 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 		return fmt.Errorf("count users: %w", err)
 	}
 	if count > 0 {
-		return nil
+		return s.repromoteConfiguredAdmin(ctx)
 	}
 
 	_, err = s.createUser(ctx, CreateUserRequest{
@@ -394,6 +422,33 @@ func (s *Service) BootstrapFirstAdmin(ctx context.Context) error {
 		return fmt.Errorf("FIRST_ADMIN_PASSWORD is invalid: %w", err)
 	case err != nil:
 		return fmt.Errorf("create first admin: %w", err)
+	}
+	return nil
+}
+
+// repromoteConfiguredAdmin is BootstrapFirstAdmin's recovery path for a
+// non-empty instance: if s.cfg.FirstAdminEmail names an existing user who
+// is not currently an admin, it sets IsAdmin true and nothing else. A
+// FIRST_ADMIN_EMAIL matching no existing account is left alone — see
+// BootstrapFirstAdmin's own doc comment for why this never creates an
+// account here, only promotes one that already exists. It runs on every
+// boot once FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD are set, regardless of
+// whether anything actually needs fixing; the common case (the
+// configured admin already holds the flag) costs one extra indexed
+// lookup by email and nothing else.
+func (s *Service) repromoteConfiguredAdmin(ctx context.Context) error {
+	dbUser, err := s.q.GetUserByEmail(ctx, s.cfg.FirstAdminEmail)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup configured admin: %w", err)
+	}
+	if dbUser.IsAdmin {
+		return nil
+	}
+	if err := s.SetAdmin(ctx, dbUser.ID, true); err != nil {
+		return fmt.Errorf("re-promote configured admin: %w", err)
 	}
 	return nil
 }

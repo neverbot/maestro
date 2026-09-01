@@ -501,6 +501,38 @@ func TestChangeOwnPasswordRejectsWeakNewPassword(t *testing.T) {
 	}
 }
 
+// TestChangeOwnPasswordRejectsSamePassword pins the "rotating to the
+// same password" gap a Round 2 review found: without this check,
+// resubmitting the current password as the new one succeeded and
+// revoked every other session for a change that took no effect at all.
+func TestChangeOwnPasswordRejectsSamePassword(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email:       "same-password@studio.com",
+		DisplayName: "Same Password",
+		Password:    "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, _, err := svc.IssueSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("IssueSession: %v", err)
+	}
+
+	if err := svc.ChangeOwnPassword(ctx, user.ID, "password12345", "password12345"); !errors.Is(err, identity.ErrPasswordUnchanged) {
+		t.Fatalf("err = %v, want ErrPasswordUnchanged", err)
+	}
+
+	// A rejected no-op must have no side effect: the session survives.
+	if _, _, err := svc.UserForSession(ctx, token); err != nil {
+		t.Fatalf("session must survive a rejected no-op change, got %v", err)
+	}
+}
+
 func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())

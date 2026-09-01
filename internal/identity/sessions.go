@@ -215,7 +215,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID uuid.UUID, newPassw
 // ChangeOwnPassword is ChangePassword's self-service counterpart: it
 // verifies currentPassword against the account's own stored hash before
 // ever calling ChangePassword to rotate it. This is what the HTTP layer
-// (POST /api/me/password, api_password.go) calls, and it is the whole
+// (PATCH /api/me/password, api_password.go) calls, and it is the whole
 // answer to "what does this endpoint cost an attacker who has a live
 // session but not the password" — without this check, a stolen session
 // cookie alone would be enough to lock the real owner out permanently
@@ -257,6 +257,15 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID uuid.UUID, curre
 	ok, verr := s.verify(currentPassword, dbUser.PasswordHash)
 	if verr != nil || !ok {
 		return ErrInvalidCredentials
+	}
+
+	// Checked only after the current password verifies: a caller who
+	// does not yet know the current password gets ErrInvalidCredentials
+	// first, the same outcome as any other wrong guess, never a
+	// side-channel telling them "your new value happens to already be
+	// the stored one" before they have proven they know it.
+	if newPassword == currentPassword {
+		return ErrPasswordUnchanged
 	}
 
 	return s.ChangePassword(ctx, userID, newPassword)

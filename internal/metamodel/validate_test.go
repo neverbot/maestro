@@ -573,3 +573,165 @@ func TestValidateRejectsAJSONNumberThatIsNotANumber(t *testing.T) {
 		t.Fatalf("error = %q, want the type message", err)
 	}
 }
+
+// --- M2: a schema declaration must itself be meaningful -------------------
+
+// checkProblems runs Check and returns the message, failing if it passed.
+func checkProblems(t *testing.T, s Schema) string {
+	t.Helper()
+	err := s.Check()
+	if err == nil {
+		t.Fatalf("schema %v was accepted; want it rejected", s)
+	}
+	return err.Error()
+}
+
+func TestSchemaRejectsAKeyThatIsNotAnIdentifier(t *testing.T) {
+	// The key rule is lower_snake_case ASCII: see Field.Key's doc comment for
+	// why. Each of these is a shape an agent plausibly sends.
+	for name, key := range map[string]string{
+		"whitespace only": "   ",
+		"leading space":   " min_level",
+		"trailing space":  "min_level ",
+		"inner space":     "min level",
+		"a dot":           "min.level",
+		"upper case":      "MinLevel",
+		"a leading digit": "1st_level",
+		"a leading under": "_min_level",
+		"a dash":          "min-level",
+		"a bracket":       "min[0]",
+		"non-ASCII":       "nivel_mínimo",
+	} {
+		msg := checkProblems(t, Schema{{Key: key, Type: FieldText}})
+		if !strings.Contains(msg, "key must be lower_snake_case") {
+			t.Fatalf("%s (%q): error = %q, want the key-format message", name, key, msg)
+		}
+	}
+}
+
+func TestSchemaAcceptsAWellFormedKey(t *testing.T) {
+	for _, key := range []string{"a", "min_level", "level2", "a_b_c_9"} {
+		if err := (Schema{{Key: key, Type: FieldText}}).Check(); err != nil {
+			t.Fatalf("key %q: Check: %v", key, err)
+		}
+	}
+}
+
+func TestSchemaRejectsAnOverlongKey(t *testing.T) {
+	msg := checkProblems(t, Schema{{Key: strings.Repeat("a", maxKeyLen+1), Type: FieldText}})
+	if !strings.Contains(msg, "key must be at most") {
+		t.Fatalf("error = %q, want the key-length message", msg)
+	}
+}
+
+func TestSchemaRejectsAMinimumAboveItsMaximum(t *testing.T) {
+	msg := checkProblems(t, Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(70), Max: ptrFloat(1)}})
+	if !strings.Contains(msg, "min 70 is above max 1") {
+		t.Fatalf("error = %q, want it to name both bounds", msg)
+	}
+}
+
+func TestSchemaAcceptsAMinimumEqualToItsMaximum(t *testing.T) {
+	// A single legal value is a narrow declaration, not a contradictory one.
+	schema := Schema{{Key: "min_level", Type: FieldNumber, Min: ptrFloat(7), Max: ptrFloat(7)}}
+	if err := schema.Check(); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+}
+
+func TestSchemaRejectsBoundsOnANonNumberField(t *testing.T) {
+	for _, ft := range []FieldType{FieldText, FieldLongText, FieldBool, FieldEnum, FieldListText} {
+		schema := Schema{{Key: "a", Type: ft, Options: []string{"x"}, Min: ptrFloat(1)}}
+		msg := checkProblems(t, schema)
+		if !strings.Contains(msg, "min and max apply only to a number field") {
+			t.Fatalf("%s: error = %q, want the misplaced-bounds message", ft, msg)
+		}
+	}
+}
+
+func TestSchemaRejectsOptionsOnANonEnumField(t *testing.T) {
+	for _, ft := range []FieldType{FieldText, FieldLongText, FieldNumber, FieldBool, FieldListText} {
+		msg := checkProblems(t, Schema{{Key: "a", Type: ft, Options: []string{"x"}}})
+		if !strings.Contains(msg, "options apply only to an enum field") {
+			t.Fatalf("%s: error = %q, want the misplaced-options message", ft, msg)
+		}
+	}
+}
+
+func TestSchemaRejectsDuplicateEnumOptions(t *testing.T) {
+	msg := checkProblems(t, Schema{{Key: "difficulty", Type: FieldEnum, Options: []string{"normal", "normal"}}})
+	if !strings.Contains(msg, `duplicate option "normal"`) {
+		t.Fatalf("error = %q, want it to name the duplicated option", msg)
+	}
+}
+
+func TestSchemaRejectsAnEmptyEnumOption(t *testing.T) {
+	for name, opts := range map[string][]string{
+		"empty string":    {"normal", ""},
+		"whitespace only": {"normal", "  "},
+	} {
+		msg := checkProblems(t, Schema{{Key: "difficulty", Type: FieldEnum, Options: opts}})
+		if !strings.Contains(msg, "option 1 is empty") {
+			t.Fatalf("%s: error = %q, want the empty-option message with its index", name, msg)
+		}
+	}
+}
+
+// --- M3: required and a default are mutually exclusive --------------------
+
+func TestSchemaRejectsARequiredFieldWithADefault(t *testing.T) {
+	// The default branch runs before the required branch, so declaring both
+	// makes Required dead: no row could ever fail for omitting the field. A
+	// field either has a fallback or it does not.
+	msg := checkProblems(t, Schema{{Key: "repeatable", Type: FieldBool, Required: true, HasDefault: true, Default: false}})
+	if !strings.Contains(msg, "a required field cannot also declare a default") {
+		t.Fatalf("error = %q, want the required-plus-default message", msg)
+	}
+}
+
+// --- M5: one pass reports every problem, including on a bad key -----------
+
+func TestSchemaReportsEveryProblemOnAFieldWithABadKey(t *testing.T) {
+	// A bad key must not hide the rest of the field. The package's whole
+	// contract is that one call reports everything an agent has to fix.
+	msg := checkProblems(t, Schema{{Key: "", Type: FieldType("rgb")}})
+	if !strings.Contains(msg, "key is required") {
+		t.Fatalf("error = %q, want the missing-key problem", msg)
+	}
+	if !strings.Contains(msg, "unknown type rgb") {
+		t.Fatalf("error = %q, want the unknown-type problem reported in the same pass", msg)
+	}
+}
+
+func TestSchemaStillRejectsDuplicateKeysWhenAnEarlierFieldIsBroken(t *testing.T) {
+	msg := checkProblems(t, Schema{
+		{Key: "", Type: FieldText},
+		{Key: "a", Type: FieldText},
+		{Key: "a", Type: FieldNumber},
+	})
+	if !strings.Contains(msg, "duplicate key a") {
+		t.Fatalf("error = %q, want the duplicate reported alongside the empty key", msg)
+	}
+}
+
+// --- a schema declaration failure is not a value failure ------------------
+
+func TestSchemaErrorIsInvalidSchemaAndNotASchemaViolation(t *testing.T) {
+	err := (Schema{{Key: "difficulty", Type: FieldEnum}}).Check()
+	if !errors.Is(err, ErrInvalidSchema) {
+		t.Fatalf("errors.Is(%v, ErrInvalidSchema) = false", err)
+	}
+	if errors.Is(err, ErrSchemaViolation) {
+		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = true; a bad declaration is not a bad row", err)
+	}
+	if !strings.HasPrefix(err.Error(), "invalid_schema: ") {
+		t.Fatalf("error = %q, want it to lead with the invalid_schema code", err)
+	}
+}
+
+func TestValidationErrorIsNotAnInvalidSchema(t *testing.T) {
+	_, err := questSchema().Validate(map[string]any{"nope": 1})
+	if errors.Is(err, ErrInvalidSchema) {
+		t.Fatalf("errors.Is(%v, ErrInvalidSchema) = true; a bad row is not a bad declaration", err)
+	}
+}

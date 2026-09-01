@@ -3,6 +3,8 @@ package metamodel
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 // FieldType is one of the declarative field types a game may use. There is
@@ -28,6 +30,9 @@ const (
 // HasDefault from that presence and MarshalJSON writes the key back only
 // when HasDefault is set. See Field.UnmarshalJSON.
 type Field struct {
+	// Key identifies the field inside the row's jsonb object. It must be
+	// lower_snake_case ASCII, at most maxKeyLen characters; see keyPattern
+	// for why the rule is that narrow.
 	Key      string    `json:"key"`
 	Label    string    `json:"label,omitempty"`
 	Type     FieldType `json:"type"`
@@ -140,36 +145,108 @@ func (s Schema) JSON() ([]byte, error) {
 	return json.Marshal(s)
 }
 
+// maxKeyLen caps a field key. It is generous for a human-readable
+// identifier and short enough that a key can be used verbatim wherever
+// Maestro later needs one — a jsonb key, a view-query token, a flattened
+// column name.
+const maxKeyLen = 64
+
+// keyPattern is the field-key rule: lower_snake_case ASCII, starting with a
+// letter. It is deliberately narrow, and every exclusion pays for itself:
+//
+//   - No dot, because "fields.<key>" is the error path this package returns;
+//     a key containing a dot makes "fields.a.b" ambiguous between the field
+//     "a.b" and a nested "b" inside "a".
+//   - No upper case, so two keys can never differ only by case — a collision
+//     no case-sensitive map would catch but every human reader would trip
+//     over. Lowercasing by rule beats detecting the collision after the fact.
+//   - No whitespace, brackets or dashes, so a key is a single token wherever
+//     it is later quoted, flattened or parsed.
+//   - ASCII only, so no two spellings of one key (NFC and NFD forms of the
+//     same accented word) can coexist as different keys.
+//
+// The rule is enforced at declaration time, where an agent can still act on
+// the news, rather than being discovered six hundred rows later.
+var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
 // Check validates the schema itself, before anything is stored against it.
+// Every problem in the whole schema is reported in one pass, including
+// several problems on one field: an agent authoring a schema should be able
+// to fix all of it at once.
 func (s Schema) Check() error {
 	seen := make(map[string]struct{}, len(s))
 	var problems []FieldError
 
 	for i, f := range s {
 		path := fmt.Sprintf("field_schema[%d]", i)
-		if f.Key == "" {
-			problems = append(problems, FieldError{Path: path, Message: "key is required"})
-			continue
+		problem := func(msg string) {
+			problems = append(problems, FieldError{Path: path, Message: msg})
 		}
-		if _, dup := seen[f.Key]; dup {
-			problems = append(problems, FieldError{Path: path, Message: "duplicate key " + f.Key})
+
+		// A bad key never short-circuits the rest of the field: it would hide
+		// problems the same agent has to fix in the same edit.
+		switch {
+		case f.Key == "":
+			problem("key is required")
+		case len(f.Key) > maxKeyLen:
+			problem(fmt.Sprintf("key must be at most %d characters", maxKeyLen))
+		case !keyPattern.MatchString(f.Key):
+			problem("key must be lower_snake_case: a letter, then letters, digits or underscores")
+		default:
+			if _, dup := seen[f.Key]; dup {
+				problem("duplicate key " + f.Key)
+			}
+			seen[f.Key] = struct{}{}
 		}
-		seen[f.Key] = struct{}{}
 
 		typeOK := false
 		switch f.Type {
 		case "":
-			problems = append(problems, FieldError{Path: path, Message: "type is required"})
+			problem("type is required")
 		case FieldText, FieldLongText, FieldNumber, FieldBool, FieldListText:
 			typeOK = true
 		case FieldEnum:
 			if len(f.Options) == 0 {
-				problems = append(problems, FieldError{Path: path, Message: "an enum field needs options"})
+				problem("an enum field needs options")
 			} else {
 				typeOK = true
 			}
 		default:
-			problems = append(problems, FieldError{Path: path, Message: "unknown type " + string(f.Type)})
+			problem("unknown type " + string(f.Type))
+		}
+
+		// Options and bounds are per-type facilities. Declaring one on a type
+		// that cannot use it is never what the author meant, and silence here
+		// reads to them as acceptance.
+		if f.Type != FieldEnum && len(f.Options) > 0 {
+			problem("options apply only to an enum field")
+		}
+		if f.Type == FieldEnum {
+			seenOpt := make(map[string]struct{}, len(f.Options))
+			for j, opt := range f.Options {
+				if strings.TrimSpace(opt) == "" {
+					problem(fmt.Sprintf("option %d is empty", j))
+					continue
+				}
+				if _, dup := seenOpt[opt]; dup {
+					problem(fmt.Sprintf("duplicate option %q", opt))
+				}
+				seenOpt[opt] = struct{}{}
+			}
+		}
+		if f.Type != FieldNumber && (f.Min != nil || f.Max != nil) {
+			problem("min and max apply only to a number field")
+		}
+		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
+			problem(fmt.Sprintf("min %v is above max %v, so no value is legal", *f.Min, *f.Max))
+		}
+
+		// Required and a default are mutually exclusive. Validate applies the
+		// default before it can ever complain that the field is missing, so
+		// the pair makes Required unreachable; rejecting it here says so at
+		// the only moment the author can still choose which one they meant.
+		if f.Required && f.HasDefault {
+			problem("a required field cannot also declare a default: the default would always win")
 		}
 
 		// A declared default must itself be a value the field could actually
@@ -179,13 +256,13 @@ func (s Schema) Check() error {
 		// on a number field whose Max is 70, and so on).
 		if typeOK && f.HasDefault {
 			if _, err := coerce(f, f.Default); err != nil {
-				problems = append(problems, FieldError{Path: path, Message: "default: " + err.Error()})
+				problem("default: " + err.Error())
 			}
 		}
 	}
 
 	if len(problems) > 0 {
-		return &ValidationError{Fields: problems}
+		return &SchemaError{Fields: problems}
 	}
 	return nil
 }

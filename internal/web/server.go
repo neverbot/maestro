@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -26,6 +28,13 @@ type Server struct {
 	mux     *http.ServeMux
 	opts    Options
 	handler http.Handler
+
+	// mcp serves POST /mcp once mcpHandler has confirmed the caller holds
+	// a live api token (see that method's own doc comment). It is built
+	// from newMCPServer (mcp.go) with Stateless mode, so every tool call
+	// is its own independently authenticated HTTP request rather than a
+	// long-lived connection.
+	mcp http.Handler
 
 	// loginLimiter, loginIPLimiter and registerIPLimiter guard the two
 	// unauthenticated endpoints that accept a secret to verify: a
@@ -117,6 +126,19 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("POST /api/games/{game}/tokens", s.handleCreateToken)
 	s.registerProjectRoute("GET /api/games/{game}/tokens", s.handleListTokens)
 	s.registerProjectRoute("DELETE /api/games/{game}/tokens/{token}", s.handleRevokeToken)
+
+	// The MCP tools (mcp.go) are built once, here, and mounted in
+	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call
+	// is its own independently-authenticated HTTP request rather than a
+	// session kept alive across many — see mcpHandler's own doc comment
+	// for why that matters for a revoked token. getServer may return the
+	// same *mcp.Server for every request (its own doc comment says so),
+	// so the tool set is built exactly once rather than reconstructed on
+	// every call.
+	mcpServer := s.newMCPServer()
+	s.mcp = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpServer }, &mcp.StreamableHTTPOptions{Stateless: true})
+	s.route("/mcp", s.mcpHandler())
+
 	// Built once here, not per request in ServeHTTP: authenticate wraps
 	// s.mux in a closure, and there is no reason to allocate a fresh one
 	// for every single incoming request when the mux it wraps never

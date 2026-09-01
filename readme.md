@@ -146,6 +146,30 @@ that same account — it never creates a second one. An email bound to a
 different account than the one currently logged in is refused, the same
 as an unknown token.
 
+## Known limitations
+
+- **Single-process SSE, single-process rate limiting.** `/events` fans
+  events out from an in-memory hub inside one process, not Postgres
+  `LISTEN`/`NOTIFY`. A client only ever sees events published while its
+  own process has been running — there is no durable log behind it and
+  no catch-up on reconnect — and running more than one replica splits
+  subscribers across hubs that never talk to each other. The login,
+  invite-redemption and password-change rate limiters are in-process for
+  the same reason: N replicas means N independent budgets, not one
+  shared across the instance.
+- **The container image is not published anywhere.** CI builds it and
+  smoke-tests it against a real Postgres on every push to `master`, but
+  nothing pushes it to a registry. Building from this repository
+  (`docker compose up --build`, or `docker build .`) is currently the
+  only way to run it.
+- **argon2id cost parameters are fixed in code, not configurable.**
+  `Time=3`, `Memory=64MiB`, `Threads=2` (`internal/config/config.go`).
+  Changing them means changing the default and rebuilding, not setting
+  an environment variable.
+- **No backups, no documentation site.** Scheduled `pg_dump` backups and
+  a public documentation site are design-stage only; both were moved to
+  later sub-projects, and nothing in this repository runs either yet.
+
 ## Roadmap
 
 - [x] **Core.** Server, Postgres, identity, MCP and REST surfaces.

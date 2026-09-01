@@ -44,3 +44,60 @@ jobs:
       # enabled test suite) — running it here rather than reimplementing
       # its steps keeps CI and the local gate from drifting apart.
       - run: make check
+
+  # A separate job, not more steps on check above: this builds and boots
+  # the actual Dockerfile/compose artifact the Core sub-project's
+  # definition of done is written against, which `go test` alone never
+  # exercises — go vet and unit tests pass on code that a broken
+  # Dockerfile, a missing binary, or a container that panics before
+  # opening a listener would still fail to serve at all. Before this job
+  # existed, both container-adjacent files this task introduced
+  # (Dockerfile, compose.yml) had no CI signal whatsoever and could rot
+  # silently. needs: check keeps this from spending a container build on
+  # a change that fails the cheaper gate first.
+  container:
+    needs: check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --build-arg VERSION=${{ github.sha }} -t maestro:ci .
+      # --network host, not the default bridge network: it is the
+      # simplest way for this freshly built container to reach the
+      # postgres service above at localhost:5432 the same way the check
+      # job's own tests do, on a Linux runner where --network host
+      # actually shares the host's network namespace (this workflow only
+      # ever runs on ubuntu-latest).
+      - name: Start the container
+        run: |
+          docker run -d --name maestro-smoke --network host \
+            -e DATABASE_URL="postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable" \
+            -e SESSION_KEY="ci-smoke-test-session-key-not-a-real-secret" \
+            -e FIRST_ADMIN_EMAIL="admin@example.com" \
+            -e FIRST_ADMIN_PASSWORD="ci-smoke-test-password" \
+            -e REGISTRATION_MODE="invite_only" \
+            maestro:ci
+      - name: Wait for /healthz
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/healthz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "container never became healthy within 30s"
+          exit 1
+      - name: Show container logs
+        if: always()
+        run: docker logs maestro-smoke
+      - name: Stop the container
+        if: always()
+        run: docker rm -f maestro-smoke

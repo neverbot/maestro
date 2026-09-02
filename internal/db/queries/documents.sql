@@ -109,8 +109,10 @@ RETURNING *;
 -- TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory, through
 -- Read, and the include_deleted one by deleteRefusal and
 -- conflictAfterFailedUpsert, which have to re-read a row that may be
--- deleted in order to say why a write or a delete was refused
--- (TestDeletingTwiceIsNotFoundRatherThanASecondTombstone).
+-- deleted in order to say why a write or a delete was refused --
+-- deleteRefusal's arm by TestDeletingTwiceIsNotFoundRatherThanASecond
+-- Tombstone, and conflictAfterFailedUpsert's by
+-- TestACreationRacingACreateAndDeleteIsToldTheTombstone.
 SELECT * FROM documents
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND lower(path) = lower(sqlc.arg('path')::text)

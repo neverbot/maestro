@@ -176,7 +176,7 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		// above and this statement another writer created or advanced
 		// the row. Reachable on the creation path, where there was
 		// nothing to lock
-		// (TestTwoConcurrentCreationsOfOnePathLeaveOneWinner).
+		// (TestTheGuardedUpsertIsWhatRefusesACreationThatRacedAnother).
 		return dbq.Document{}, s.conflictAfterFailedUpsert(ctx, q, projectID, in)
 	}
 	if err != nil {
@@ -236,10 +236,14 @@ func (s *Service) conflictAfterFailedUpsert(ctx context.Context, q *dbq.Queries,
 	// IncludeDeleted is true, and Task 4 is what makes that load-bearing
 	// rather than cosmetic: a write whose guard failed because a *delete*
 	// advanced the version must re-read the tombstone in order to report
-	// the version it has to merge onto. With the filter on, this read
-	// would find nothing and the arm below would turn the caller's own
-	// version_conflict into an internal_error.
-	// TestAStaleVersionCannotSilentlyResurrectADocument covers it.
+	// the version it has to merge onto. With the filter off (IncludeDeleted:
+	// false), this read would find nothing and the arm below would turn
+	// the caller's own version_conflict into an internal_error.
+	// TestACreationRacingACreateAndDeleteIsToldTheTombstone stages exactly
+	// that race and covers it; TestAStaleVersionCannotSilentlyResurrectA
+	// Document does not reach this function at all — its stale write is
+	// refused earlier, by writeWith's own conflictOn under the locked
+	// read.
 	row, err := q.GetDocumentByPath(ctx, dbq.GetDocumentByPathParams{
 		ProjectID: projectID, Path: in.Path, IncludeDeleted: true,
 	})

@@ -189,9 +189,15 @@ func notFound(err error, missing error, doing string) error {
 // takes roughly a megabyte of multi-byte text past three `left()` calls,
 // which is more than MaxBodyBytes admits for the body alone; it is kept
 // because the alternative to an unreached mapping here is an
-// internal_error for whoever does reach it, and because Task 6's revert
-// and Task 4's resurrection write the same columns from stored values
-// that no Go bound re-checks.
+// internal_error for whoever does reach it in production. Every caller
+// that reaches writeWith's guarded upsert is exposed to it alike,
+// resurrection included: a write that brings a deleted path back is
+// still a Write, and its content is still the caller's own, revalidated
+// by SplitContent like any other. What is not exposed is Delete's own
+// tombstone insert — it writes document_versions from the row's already-
+// stored, already-validated values, and document_versions carries no
+// generated tsvector of its own, so the failure this function maps
+// cannot arise from that statement at all.
 func oversizeForIndex(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "54000" {

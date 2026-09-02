@@ -584,6 +584,81 @@ func TestACreationLosingToADifferentlySpelledPathIsToldTheSpelling(t *testing.T)
 	requireFieldError(t, <-done, "path", `already exists here spelled "lore/duskwood"`)
 }
 
+// A creation that races a path being both created *and* soft-deleted by
+// someone else is told a version_conflict naming the tombstone, not an
+// internal_error.
+//
+// The creating writer's locked read finds nothing at a free path, so it
+// locks nothing, and there is nothing to force the other writer to wait
+// on. What is staged here instead is the guarded upsert itself: the
+// other writer's uncommitted INSERT blocks our writer's own INSERT ...
+// ON CONFLICT the same way TestTheGuardedUpsertIsWhatRefusesACreation
+// ThatRacedAnother stages it, and by the time the other writer commits,
+// its transaction has both created the row and soft-deleted it, landing
+// current_version at 2 with deleted_at set before our writer's guarded
+// upsert ever runs. The guard fails on the version mismatch exactly as
+// it does for an ordinary racing creation, and conflictAfterFailedUpsert
+// must re-read the tombstone -- not a live row -- to report it, which is
+// what IncludeDeleted being true on that re-read is for.
+func TestACreationRacingACreateAndDeleteIsToldTheTombstone(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	other, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = other.Rollback(ctx) }()
+	var docID string
+	if err := other.QueryRow(ctx,
+		`INSERT INTO documents (project_id, path, body_md) VALUES ($1, 'bible', 'theirs' || chr(10))
+		 RETURNING id`, game).Scan(&docID); err != nil {
+		t.Fatalf("the other writer's insert: %v", err)
+	}
+	if _, err := other.Exec(ctx,
+		`INSERT INTO document_versions (project_id, document_id, version, body_md)
+		 VALUES ($1, $2, 1, 'theirs' || chr(10))`, game, docID); err != nil {
+		t.Fatalf("the other writer's version 1: %v", err)
+	}
+	if _, err := other.Exec(ctx,
+		`UPDATE documents SET current_version = 2, deleted_at = now() WHERE id = $1`, docID); err != nil {
+		t.Fatalf("the other writer's soft delete: %v", err)
+	}
+	if _, err := other.Exec(ctx,
+		`INSERT INTO document_versions (project_id, document_id, version, body_md, deleted)
+		 VALUES ($1, $2, 2, 'theirs' || chr(10), true)`, game, docID); err != nil {
+		t.Fatalf("the other writer's tombstone version: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.Write(ctx, game, markdown.WriteInput{
+			Path: "bible", Content: "ours\n", ExpectedVersion: ptrInt32(0),
+			IncludeCurrent: true,
+		})
+		done <- err
+	}()
+
+	waitForABlockedStatement(t, pool)
+	if err := other.Commit(ctx); err != nil {
+		t.Fatalf("commit the other writer: %v", err)
+	}
+
+	err = <-done
+	var conflict *markdown.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("want a *markdown.ConflictError from the losing creation, got %#v", err)
+	}
+	if conflict.Current != 2 {
+		t.Fatalf("Current = %d, want 2: the tombstone left by the create-and-delete",
+			conflict.Current)
+	}
+	if !conflict.Deleted {
+		t.Fatal("Deleted = false, want true: the path this write raced onto was deleted, not merely edited")
+	}
+}
+
 // The number a conflicted caller is told to merge onto is the one its own
 // write would have met, not the one that was current when it started.
 // Told a stale number, a caller retries into the same refusal forever.

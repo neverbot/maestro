@@ -30,8 +30,10 @@ type GetDocumentByPathParams struct {
 // TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory, through
 // Read, and the include_deleted one by deleteRefusal and
 // conflictAfterFailedUpsert, which have to re-read a row that may be
-// deleted in order to say why a write or a delete was refused
-// (TestDeletingTwiceIsNotFoundRatherThanASecondTombstone).
+// deleted in order to say why a write or a delete was refused --
+// deleteRefusal's arm by TestDeletingTwiceIsNotFoundRatherThanASecond
+// Tombstone, and conflictAfterFailedUpsert's by
+// TestACreationRacingACreateAndDeleteIsToldTheTombstone.
 func (q *Queries) GetDocumentByPath(ctx context.Context, arg GetDocumentByPathParams) (Document, error) {
 	row := q.db.QueryRow(ctx, getDocumentByPath, arg.ProjectID, arg.Path, arg.IncludeDeleted)
 	var i Document

@@ -4149,7 +4149,10 @@ Two differences from entity types, both from the schema
   with different fields is the whole operation, and the last writer wins
   by design. `RelationInput` therefore has no `ExpectedVersion`, and this
   is a decision rather than an omission — record it if Task 7 wants edge
-  concurrency, because it would need a migration.
+  concurrency, because it would need a migration. **It is also half of a
+  pair**: correction 21 below records why it must be revisited together
+  with the refusal of parallel edges, which is what sends a game's
+  multiplicity into the very edge fields this leaves unprotected.
 
 **Corrections made during implementation** (a pass over the landed
 package, written as Task 5 shipped so Tasks 6-9 build on what exists
@@ -4285,6 +4288,213 @@ rather than on what was planned):
     about the entity twin — the count earns a typed refusal without a
     transaction aborting on a raw constraint violation, not the refusal
     itself.
+
+**Corrections from the review of Task 5** (a second pass over the landed
+package, after the implementation corrections above. Eight findings, four
+of which were fixed before this block was written; all eight are recorded
+here, because a correction nobody can find is a correction that gets
+undone. Two of them are the same fault the earlier reviews kept finding —
+*a doc comment that states an invariant and a test that does not pin
+it* — and one is a claim that had gone false.)
+
+13. **A missing parent of an edge is named instead of arriving as
+    `internal_error`.** The three composite foreign keys under
+    `relations` — on `relation_type_id`, `source_id` and `target_id` —
+    fire when a rival transaction deletes a parent between
+    `upsertRelationWith`'s lookup and its insert; the lookups read under
+    `READ COMMITTED`, so they cannot be the only answer. Unmapped, that
+    reached a caller as `internal_error` carrying `violates foreign key
+    constraint relations_target_id_project_id_fkey`, which names neither
+    which of the three parents is gone nor that anything is missing at
+    all, and in atomic mode aborted a whole batch with it.
+    `edgeParentViolation` maps SQLSTATE 23503 on the constraint's column,
+    exactly as `actorConstraintViolation` does, to the `not_found` the
+    lookup would have given a moment earlier — the recovery is the same:
+    create the row and retry. The names in the message are the caller's
+    own spellings, because there is nothing left to read them from, which
+    is the condition being reported.
+    `TestARaceOnAnEdgesParentsNamesWhichParentIsGone` drives each of the
+    three constraints with a missing id against the real schema, so the
+    constraint names are Postgres's and not a guess. Commit `fce2df7`.
+
+14. **`foldedIdentity`'s length prefix is pinned.** Correction 3 moved the
+    length-prefixed join into `bulk.go` so entities and edges could not
+    fold identity two different ways, and then no test held the prefix in
+    place: a join on a plain separator passed every existing test while
+    letting two different five-part edges collide on one string.
+    `bulk_internal_test.go` now pins the shape and the collisions it
+    exists to prevent. Commit `d0a72fd`.
+
+15. **Removing an entity type prunes its id out of every relation type's
+    endpoint lists.** `source_type_ids` and `target_type_ids` are plain
+    `uuid[]`; Postgres has no foreign key from an array element, so
+    correction 6's invariant — an endpoint list always names a type of
+    this game — held only until the first removal. What it left behind
+    was not untidy but unrepairable: the relation type held a rule
+    nothing could satisfy, a designer who recreated the key got a fresh
+    id and was refused with `entity type "zone" cannot be the target of
+    relation type "takes_place_in"` while `zone` visibly *was* the
+    declared target, and re-declaring the type with the list it currently
+    held was refused as `invalid_input`.
+    `PruneEntityTypeFromEndpointLists` runs in the same transaction as
+    the delete. **Pruning rather than a real referential constraint** is
+    the choice and not the cheap way out of it: a constraint over these
+    lists would mean junction tables with a composite `ON DELETE
+    CASCADE`, a migration, a rewrite of every read and write of an
+    endpoint rule, and a change to the shape `RelationTypeInput` presents
+    to an agent — quite possibly the right end state, and a schema
+    decision rather than Task 5's. **One consequence is recorded because
+    it is a widening**: pruning the last id of a list leaves it empty, and
+    empty means "any type", so a relation type that accepted only `zone`
+    at its target accepts anything once `zone` is removed. That is the
+    lesser of the two — the widening is visible in the row a designer
+    reads and is one edit away from being narrowed again, where the
+    dangling id was neither visible nor repairable. Commit `4c0247f`.
+
+16. **Both bad endpoints of an edge are reported in one answer.**
+    Returning on the source made the two halves of one decision disagree:
+    `checkEndpointTypes` already reports both endpoint *lists* in one
+    pass, on exactly the argument that an agent holding two bad endpoints
+    otherwise fixes the one it was told about, resends, and is told about
+    the other. `bothEndpoints` joins two failures with `"; "` rather than
+    through `errors.Join`, whose newline would put a batch report's
+    `Message` on two lines, and wraps both with `%w` so `errors.Is` still
+    matches whichever the caller asks about and `failureFor` still files
+    the item under `not_found`. The price is the two lookups the target
+    end costs on an item that was going to fail anyway; the success path
+    always paid them. Commit `05e5e33`.
+
+17. **Correction 9 was false as written, and the test that should have
+    caught it was the reason.** It claims an unknown `TypeKey` in a
+    listing filter is "a `not_found`, not an empty listing, so a caller
+    that mistyped a key hears about the key". The listing path went
+    through `RelationTypeByKey`, which used the generic `notFound`
+    helper, so the whole message was the bare word `not_found` and the
+    key was never mentioned — the write path (`upsertRelationWith`) got
+    it right and the read path did not. The test carried the correct
+    comment and asserted only `errors.Is(err, ErrNotFound)`, which is
+    green against precisely the message the decision refuses to return:
+    *the negative test this whole series has been closing, one file away
+    from where it was last closed.*
+
+    The three by-key accessors — `EntityTypeByKey`, `RelationTypeByKey`,
+    `EntityByKey` — now name what they did not find, and the listing test
+    asserts the message and not just the sentinel.
+    `TestTheGenericNotFoundIsNotUsedWhereACallerSuppliedAKey` is the
+    standing reminder in test form.
+
+    **The sweep behind it, and where the generic helper is still
+    right.** Every remaining `notFound` call is a lookup *by id*, and
+    they fall in two groups. Those addressing a row by an id the caller
+    sent (`EntityTypeByID`, and the reads inside `RemoveEntityType`,
+    `RemoveRelationType`, `RemoveRelation`, `RemoveEntity`) have no
+    second argument to tell apart — the caller already holds the id it
+    sent — which is the rule `EntityTypeByKey`'s comment states. Two more
+    (`RemoveRelation`'s relation-type read, `RemoveEntity`'s entity-type
+    read) take their id from the row just read rather than from the
+    caller at all, and both foreign keys are `ON DELETE RESTRICT` inside
+    the read's own transaction, so no-rows there is unreachable rather
+    than unlikely: there is no key to name, and if it ever fires the
+    schema is inconsistent. Both sites now say so, so the next sweep does
+    not have to re-derive it. Commit `fce2df7` and the code commit below.
+
+18. **A test proved nothing its name claimed, and the claim was the
+    premature half.** `TestAnAtomicRelationBatchSeesItsOwnEntities`
+    pre-seeded both entities through separate committed calls, and
+    `UpsertRelations` has no path that creates an entity, so routing all
+    three of `upsertRelationWith`'s parent lookups through `s.q` instead
+    of the transaction handle left the suite green — leaving
+    `upsertRelationWith`'s central doc comment, that the atomic path
+    resolves endpoints against its own transaction, unpinned.
+
+    **The call: both halves, because the claim is true and its public
+    path is not.** Taking the transaction handle is right today — it is
+    what lets the three paths share one implementation, it costs nothing,
+    and reversing it now would be a decision to redo in Task 9 — so the
+    claim is pinned at the only level where it holds, by the package's
+    own `TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction`, which
+    writes an entity inside a transaction and then an edge naming it,
+    where no other connection can see the entity. What is narrowed is the
+    *reach* of the claim: `upsertRelationWith`'s doc comment now says
+    plainly that no public caller reaches it, and that **Task 9's seeding
+    of a whole game in one call is where a mixed batch actually
+    appears**. The external test is renamed
+    `TestAnAtomicRelationBatchLandsEveryEdgeOfTheBatch`, which is what it
+    proves, and records what it used to claim and why it did not. Commit
+    `fce2df7`.
+
+19. **A cascaded removal is announced only as its parent's event, and
+    `events.go` now says a subscriber must read those as edge
+    invalidations.** Three removals delete edges without a
+    `relation.removed` each: `entity.removed` takes every edge touching
+    the entity (both endpoint keys are `ON DELETE CASCADE`),
+    `relation_type.removed` with cascade takes every edge of that type,
+    and `type.removed` with cascade takes the type's entities and through
+    them their edges. It is inferable from the schema, and inference is
+    not a contract when the consumers are two tasks away: Task 6's
+    one-hop traversal caches a node's neighbourhood and Task 8's page
+    draws the graph from it, and every *other* way an edge disappears is
+    announced one by one, so a client written against `relation.removed`
+    alone renders dead edges.
+
+    **Publishing one `relation.removed` per cascaded edge is the
+    alternative and is deliberately not taken**: the parent's event
+    already carries enough to invalidate, and a cascade over a
+    well-connected entity would put thousands of events on a 64-deep
+    subscription buffer — the coalescing problem `events.go` already
+    records, at its worst. If Tasks 6-8 find the coarse signal too blunt,
+    the answer is a payload carrying the count or the ids, not a per-edge
+    event.
+
+20. **`Limit: 501` yielded 100 rows, so asking for slightly too much got
+    strictly less than asking for the cap.** `ListRelations` folded "no
+    opinion" (0 or negative) and "more than the cap" onto one arm and
+    gave both the default. They are two different requests: the second is
+    a caller that wants as many rows as it is allowed, which is what
+    `Limit: math.MaxInt32` means and what every paginated API in reach
+    does with it. The failure was silent, so a caller that trusted it
+    under-read the game's graph and was never told.
+    `relationPageSize` now clamps to `maxRelationPage` and keeps the
+    default only for the no-opinion arm.
+
+    The tests exercise the values that are neither 0 nor 100, which is
+    what let the bug live: `TestARelationPageAsksForTooMuchAndGetsTheCap`
+    walks -7, 0, 1, 37, 100, 499, 500, 501 and 2^20 — the boundaries
+    either side of the cap included, since a clamp written with the wrong
+    comparison passes at 501 and fails at exactly 500 — and the external
+    listing test gained an explicit `Limit: 2` and a `Limit: 501` case,
+    so the wiring is pinned and not only the arithmetic.
+
+21. **Two decisions recorded as linked rather than independent: no
+    parallel edges, and no version on edges.** Each is defensible alone
+    and neither is reversed here; together they compound, and the
+    compounding was invisible because the two were written in separate
+    doc comments. Forbidding two edges of one type between one ordered
+    pair **pushes multiplicity into the edge's fields** — that is the
+    escape hatch `UpsertRelation` offers by name, `passages: ["door",
+    "vent"]` on a single `connects_to` — and `relations` having no
+    `version` column then **leaves exactly those fields with no
+    concurrency protection at all**. The example the first decision leans
+    on is precisely a list two designers extend at once, and entity
+    fields never had this exposure: they have `version`, and an entity is
+    where multiplicity would otherwise have gone.
+
+    Verified rather than reasoned about, and now pinned by
+    `TestConcurrentEditsToOneEdgesFieldsAreLostSilently`: two upserts of
+    the same triple with `passages: "door"` then `passages: "vent"` hit
+    one row id, the second takes the row whole, no error is raised, and
+    the two
+    `relation.upserted` payloads are byte-identical — so nothing in the
+    system records that a write was lost. The test pins the loss
+    deliberately and goes red the day `version` arrives, which is the
+    correct outcome: both doc comments need rewriting with it.
+
+    **Both decisions stand and Task 7 owns any migration.** What changed
+    is that each doc comment now names the other, so whoever opens either
+    question sees both: adding `version` makes the parallel-edge refusal
+    cost what it was assumed to cost, and relaxing `relations_edge_key`
+    instead makes the version question moot — and that index is the
+    `ON CONFLICT` target a re-seed's idempotence rests on.
 
 - [x] **Step 1: Add the queries**
 

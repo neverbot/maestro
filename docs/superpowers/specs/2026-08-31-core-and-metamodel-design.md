@@ -462,7 +462,17 @@ Seeding a real game is hundreds of entities, so `entities.upsert` and
   their index and reason.
 
 `partial` is what makes real seeding workable, because a first pass
-always has a few bad rows.
+always has a few bad rows. A `partial` batch reports each rejected item
+with its index, its key and its code, so a caller retries the named items
+and nothing else, and it returns no error of its own: the failures are
+the result. An `atomic` batch that fails returns an error naming the
+failing item and reports nothing as done.
+
+A `mode` that is neither word is **refused** as `invalid_input` at path
+`mode`, rather than read as the default. Reading a typo as `partial`
+would silently downgrade an all-or-nothing request into one that lands
+rows the caller asked to have rolled back, which is a failure the caller
+has no way of seeing. An omitted `mode` is still `partial`.
 
 ### Queries, deliberately shallow here
 

@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 )
@@ -28,6 +29,15 @@ type MCPDeps struct {
 	// nothing but the Core tools does not have to build a metamodel
 	// service to get one.
 	Metamodel *metamodel.Service
+
+	// Markdown is the prose domain, and it is optional in a narrower
+	// sense than Metamodel: no tool is registered or unregistered on
+	// account of it today. The one surface that reads it is `search`,
+	// which unions the document index with the entity one and answers
+	// with entities alone when this is nil. cmd/maestro always builds
+	// one, so that arm is the shape of the dependency rather than a
+	// behaviour a caller can ask for.
+	Markdown *markdown.Service
 }
 
 // WhoamiOutput is the shape returned by the whoami tool. Its ProjectID
@@ -359,7 +369,8 @@ func readOnlyTool() *mcp.ToolAnnotations {
 // from anything captured in the closure below.
 func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "maestro", Version: s.opts.Version}, nil)
-	deps := MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects, Metamodel: s.opts.Metamodel}
+	deps := MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects,
+		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown}
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name:         "whoami",

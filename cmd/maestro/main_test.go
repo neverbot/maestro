@@ -561,9 +561,15 @@ func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 	if found.IsError {
 		t.Fatalf("search failed against the running binary: %+v", found.Content)
 	}
+	// The hit's shape as the running binary actually emits it: each hit
+	// is labelled by kind, and an entity's own fields live under
+	// `entity`, since a document hit has none of them.
 	var out struct {
 		Items []struct {
-			Key string `json:"key"`
+			Kind   string `json:"kind"`
+			Entity *struct {
+				Key string `json:"key"`
+			} `json:"entity"`
 		} `json:"items"`
 	}
 	raw, err := json.Marshal(found.StructuredContent)
@@ -573,7 +579,8 @@ func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		t.Fatalf("decode search result %s: %v", raw, err)
 	}
-	if len(out.Items) != 1 || out.Items[0].Key != "hogger" {
+	if len(out.Items) != 1 || out.Items[0].Kind != "entity" ||
+		out.Items[0].Entity == nil || out.Items[0].Entity.Key != "hogger" {
 		t.Fatalf("search found %+v, want the entity just seeded through the same binary", out.Items)
 	}
 }

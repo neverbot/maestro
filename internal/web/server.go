@@ -15,6 +15,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -34,6 +35,14 @@ type Options struct {
 	// reason Hub is: whoever builds the service has to hand this package
 	// the same instance, not a second one over the same pool.
 	Metamodel *metamodel.Service
+
+	// Markdown is the prose domain. Optional in the same sense as
+	// Metamodel and for the same reason it is a field here rather than
+	// something NewServer builds: whoever constructs the service has to
+	// hand this package the same instance, over the same pool and the
+	// same hub. Today only the search tool reads it — see
+	// MCPDeps.Markdown.
+	Markdown *markdown.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the
 	// SSE endpoint (events.go) reads from. publish.go's own handlers

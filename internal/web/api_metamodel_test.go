@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/web"
@@ -28,6 +29,7 @@ type restFixture struct {
 	ids     *identity.Service
 	proj    *projects.Service
 	mm      *metamodel.Service
+	md      *markdown.Service
 	game    uuid.UUID
 	ownerID uuid.UUID
 	cookie  *http.Cookie
@@ -35,7 +37,7 @@ type restFixture struct {
 
 func newRESTFixture(t *testing.T) restFixture {
 	t.Helper()
-	srv, ids, projSvc, mm := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -49,7 +51,7 @@ func newRESTFixture(t *testing.T) restFixture {
 		t.Fatalf("Create game: %v", err)
 	}
 	return restFixture{
-		srv: srv, ids: ids, proj: projSvc, mm: mm,
+		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md,
 		game: game.ID, ownerID: owner.ID, cookie: loginAs(t, srv, "owner@studio.com"),
 	}
 }

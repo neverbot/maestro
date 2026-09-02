@@ -36,6 +36,29 @@ const (
 	maxSearchLimit     int32 = 200
 )
 
+// MaxIndexedChars is how much of each of a document's title, summary and
+// body reaches the search vector: 0007_documents.sql wraps all three in
+// `left(…, 131072)`, in *characters*, and the tail of anything longer is
+// stored and re-read intact but is not findable by search.
+//
+// It is exported because a bound a caller cannot read is a bound a
+// caller trips over — the same argument metamodel.MaxSearchQuery makes
+// for its own. The search tool's description interpolates it, the way
+// that tool already discloses the metamodel's 128 KiB row bound.
+//
+// **This constant mirrors a literal in a migration and nothing in
+// Postgres reads it.** What keeps the two in step is
+// TestAWordPastTheIndexBoundIsStoredButNotFindable, which writes a body
+// with a distinctive word on each side of exactly this offset and
+// asserts that search finds the earlier one and not the later one — so
+// changing the migration's literal without changing this constant fails
+// there rather than quietly making the tool description a lie.
+//
+// It is far below markdown.MaxBodyBytes (1 MiB, in *bytes*), which is
+// the looser of the two at every encoding: this truncation is what binds
+// first for any body longer than it, and it happens silently.
+const MaxIndexedChars = 131072
+
 // DocumentHit is one search result: a document, whether its *title*
 // satisfied the query, the rank it matched at, and the entities it is
 // attached to.

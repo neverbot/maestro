@@ -14,6 +14,7 @@ import (
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -110,6 +111,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		Identity:  ids,
 		Projects:  projects.New(pool),
 		Metamodel: metamodel.New(pool, hub),
+		Markdown:  markdown.New(pool, hub),
 		Hub:       hub,
 	})
 	srv := &http.Server{

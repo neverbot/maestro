@@ -460,3 +460,58 @@ func TestASearchLimitDefaultsAndIsHonoured(t *testing.T) {
 		})
 	}
 }
+
+// TestAWordPastTheIndexBoundIsStoredButNotFindable is what keeps
+// markdown.MaxIndexedChars honest. The constant mirrors a literal inside
+// 0007_documents.sql's generated expression and nothing in Postgres
+// reads it, so without this the search tool's description could claim a
+// bound the database had stopped applying — the "documentation claiming
+// more than the code does" defect this plan's header names first.
+//
+// The body carries a distinctive word on each side of exactly that
+// offset. The earlier one is findable, the later one is not, and the
+// whole body — the unfindable word included — reads back through Read.
+// The tail is stored; it is only unsearchable.
+func TestAWordPastTheIndexBoundIsStoredButNotFindable(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	const early, late = "azerothian-cartography", "outlandish-cartography"
+	// One ASCII character per rune, so the migration's bound in
+	// characters and this fixture's arithmetic in bytes agree.
+	filler := strings.Repeat("x ", markdown.MaxIndexedChars)
+	body := early + " " + filler[:markdown.MaxIndexedChars-len(early)-1] + late + "\n"
+	if len(body) <= markdown.MaxIndexedChars {
+		t.Fatalf("the fixture is %d characters, which does not reach the bound", len(body))
+	}
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "lore/atlas", Content: body, ExpectedVersion: ptrInt32(0),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	found, err := svc.SearchDocuments(ctx, game, early, "", 0)
+	if err != nil {
+		t.Fatalf("SearchDocuments: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("%d hits for a word inside the bound, want 1", len(found))
+	}
+	missed, err := svc.SearchDocuments(ctx, game, late, "", 0)
+	if err != nil {
+		t.Fatalf("SearchDocuments: %v", err)
+	}
+	if len(missed) != 0 {
+		t.Fatalf("%d hits for a word past MaxIndexedChars: the constant and the migration's "+
+			"own left(…, N) no longer agree, and the search tool's description says they do",
+			len(missed))
+	}
+	doc, err := svc.Read(ctx, game, "lore/atlas")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if !strings.Contains(doc.BodyMd, late) {
+		t.Fatal("the tail past the index bound must be stored and re-read intact")
+	}
+}

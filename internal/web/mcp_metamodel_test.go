@@ -15,6 +15,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -29,7 +30,7 @@ import (
 // had to grow an ignored fourth result to reach a service none of them
 // use, and a Server built without a metamodel service is a shape this
 // package supports deliberately (MCPDeps.Metamodel).
-func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service) {
+func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *metamodel.Service, *markdown.Service) {
 	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
@@ -40,14 +41,19 @@ func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *proj
 	ids := identity.New(pool, cfg)
 	projSvc := projects.New(pool)
 	mm := metamodel.New(pool, nil)
+	// The markdown service shares the pool, because `search` unions the
+	// two indexes and a fixture holding only one of them cannot see the
+	// merge at all.
+	md := markdown.New(pool, nil)
 	srv := web.NewServer(web.Options{
 		Version:   "test",
 		Config:    cfg,
 		Identity:  ids,
 		Projects:  projSvc,
 		Metamodel: mm,
+		Markdown:  md,
 	})
-	return srv, ids, projSvc, mm
+	return srv, ids, projSvc, mm, md
 }
 
 // metamodelFixture is everything a tool test needs: the deps struct the
@@ -61,11 +67,14 @@ type metamodelFixture struct {
 	other  uuid.UUID
 	token  string
 	srv    *web.Server
+	// markdown is the prose domain behind f.deps, handed out so a test
+	// can seed documents the way the metamodel ones seed entities.
+	markdown *markdown.Service
 }
 
 func newMetamodelFixture(t *testing.T) metamodelFixture {
 	t.Helper()
-	srv, ids, projSvc, mm := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -93,12 +102,14 @@ func newMetamodelFixture(t *testing.T) metamodelFixture {
 		t.Fatalf("CallerForToken: %v", err)
 	}
 	return metamodelFixture{
-		deps:   web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm},
+		deps:   web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
 		caller: caller,
 		game:   game.ID,
 		other:  other.ID,
 		token:  token,
 		srv:    srv,
+
+		markdown: md,
 	}
 }
 
@@ -478,17 +489,31 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 		t.Fatalf("related = %+v, want the zone the quest takes place in", related.Items)
 	}
 
+	// The search hit's shape on the actual wire, decoded from the JSON
+	// the transport produced rather than from the Go struct: `kind` is
+	// what a client branches on, and the entity's own fields live under
+	// `entity` since a document hit has none of them.
 	var found struct {
 		Items []struct {
-			Key    string  `json:"key"`
-			Rank   float64 `json:"rank"`
-			Fields map[string]any
+			Kind      string  `json:"kind"`
+			NameMatch bool    `json:"name_match"`
+			Rank      float64 `json:"rank"`
+			Entity    *struct {
+				Key    string `json:"key"`
+				Fields map[string]any
+			} `json:"entity"`
+			Document *json.RawMessage `json:"document"`
 		} `json:"items"`
 		Truncated bool `json:"truncated"`
 	}
 	decodeStructured(t, callOK(t, session, "search", map[string]any{"query": "gnoll"}), &found)
-	if len(found.Items) != 1 || found.Items[0].Key != "hogger" {
-		t.Fatalf("search = %+v, want the quest whose summary carries the word", found.Items)
+	if len(found.Items) != 1 || found.Items[0].Kind != "entity" ||
+		found.Items[0].Entity == nil || found.Items[0].Entity.Key != "hogger" {
+		t.Fatalf("search = %+v, want one labelled entity hit for the quest whose summary "+
+			"carries the word", found.Items)
+	}
+	if found.Items[0].Document != nil {
+		t.Fatalf("an entity hit carries a document half: %+v", found.Items[0])
 	}
 	if found.Truncated {
 		t.Fatal("one hit under the default limit must not report the answer as truncated")
@@ -837,9 +862,9 @@ func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 	}
 	// The order the ranking fix exists to guarantee: the named row
 	// first, regardless of how the un-weighted rank alone would compare.
-	if out.Items[0].Key != "named" || out.Items[1].Key != "mentioned" {
+	if out.Items[0].Entity.Key != "named" || out.Items[1].Entity.Key != "mentioned" {
 		t.Fatalf("order = [%s %s], want [named mentioned]",
-			out.Items[0].Key, out.Items[1].Key)
+			out.Items[0].Entity.Key, out.Items[1].Entity.Key)
 	}
 	// The field the order is actually built from must say the same
 	// thing the position does, for every adjacent pair — the assertion
@@ -851,10 +876,10 @@ func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 		}
 	}
 	if !out.Items[0].NameMatch {
-		t.Fatalf("items[0] (%s) NameMatch = false, want true", out.Items[0].Key)
+		t.Fatalf("items[0] (%s) NameMatch = false, want true", out.Items[0].Entity.Key)
 	}
 	if out.Items[1].NameMatch {
-		t.Fatalf("items[1] (%s) NameMatch = true, want false", out.Items[1].Key)
+		t.Fatalf("items[1] (%s) NameMatch = true, want false", out.Items[1].Entity.Key)
 	}
 }
 

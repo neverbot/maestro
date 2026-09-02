@@ -104,7 +104,7 @@ func briefing(word string) string {
 func seedRacingGame(t *testing.T) *seeded {
 	t.Helper()
 	ctx := context.Background()
-	srv, ids, projSvc, mm := newMetamodelTestServer(t)
+	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
@@ -128,7 +128,7 @@ func seedRacingGame(t *testing.T) *seeded {
 	}
 	s := &seeded{
 		srv:     srv,
-		deps:    web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm},
+		deps:    web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
 		caller:  caller,
 		game:    game.ID,
 		cookie:  loginAs(t, srv, "designer@studio.com"),
@@ -828,12 +828,12 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 	t.Run("search finds what a designer would search for", func(t *testing.T) {
 		// A name.
 		hits := s.search(t, "Sarthe", "")
-		if len(hits) == 0 || hits[0].Key != "circuit-000" || !hits[0].NameMatch {
+		if len(hits) == 0 || hits[0].Entity.Key != "circuit-000" || !hits[0].NameMatch {
 			t.Fatalf("searching a name did not find the circuit: %+v", hits)
 		}
 		// A tag in a list<text>.
 		hits = s.search(t, "rainmaster", "")
-		if len(hits) != 1 || hits[0].Key != "driver-007" {
+		if len(hits) != 1 || hits[0].Entity.Key != "driver-007" {
 			t.Fatalf("searching a list<text> tag found %+v", hits)
 		}
 		if hits[0].NameMatch {
@@ -841,7 +841,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		}
 		// A word in the middle of a long description.
 		hits = s.search(t, "kerbstone", "")
-		if len(hits) != 1 || hits[0].Key != "race-100" {
+		if len(hits) != 1 || hits[0].Entity.Key != "race-100" {
 			t.Fatalf("searching inside a long description found %+v", hits)
 		}
 		// A name match outranks a body match, even one that repeats the
@@ -850,7 +850,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		if len(hits) < 2 {
 			t.Fatalf("Mulsanne found %d rows, want the named one and the ones that mention it", len(hits))
 		}
-		if hits[0].Key != "race-042" || !hits[0].NameMatch {
+		if hits[0].Entity.Key != "race-042" || !hits[0].NameMatch {
 			t.Fatalf("the row named Mulsanne is not first: %+v", hits)
 		}
 		var sawBody bool
@@ -858,7 +858,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			if h.NameMatch {
 				t.Fatalf("a name match sorted below a body match: %+v", hits)
 			}
-			if h.Key == "race-043" {
+			if h.Entity.Key == "race-043" {
 				sawBody = true
 			}
 		}
@@ -866,7 +866,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("the row that mentions Mulsanne forty times was not found at all: %+v", hits)
 		}
 		// Narrowing by type is the same query over one catalogue.
-		if hits := s.search(t, "Mulsanne", "circuit"); len(hits) != 1 || hits[0].Key != "circuit-000" {
+		if hits := s.search(t, "Mulsanne", "circuit"); len(hits) != 1 || hits[0].Entity.Key != "circuit-000" {
 			t.Fatalf("a type-narrowed search found %+v", hits)
 		}
 	})
@@ -1122,7 +1122,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			}
 		}
 		hits := s.search(t, "kerbstone", "")
-		if len(hits) != 1 || len(hits[0].Fields["briefing"].(string)) < 1000 {
+		if len(hits) != 1 || len(hits[0].Entity.Fields["briefing"].(string)) < 1000 {
 			t.Fatalf("search no longer returns a whole longtext; delete this case: %+v", hits)
 		}
 
@@ -1190,12 +1190,23 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 }
 
 // search is one search.* call, unwrapped.
+//
+// This game holds no documents, so every hit must be an entity hit and
+// must say so: the label is checked here rather than in each case, so
+// that a merge which stopped labelling its hits — or which answered a
+// game with no prose in it with something other than entities — fails
+// in every case below instead of dereferencing a nil Entity.
 func (s *seeded) search(t *testing.T, query, typeKey string) []web.SearchHit {
 	t.Helper()
 	out, err := web.MCPSearch(context.Background(), s.deps, s.caller, s.game,
 		web.SearchInput{Query: query, TypeKey: typeKey, Limit: 50})
 	if err != nil {
 		t.Fatalf("search %q: %v", query, err)
+	}
+	for i, hit := range out.Items {
+		if hit.Kind != "entity" || hit.Entity == nil || hit.Document != nil {
+			t.Fatalf("hit %d of %q is %+v, want a labelled entity hit", i, query, hit)
+		}
 	}
 	return out.Items
 }

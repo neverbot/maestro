@@ -76,7 +76,8 @@ const maxContentRequestBodyBytes = 4 << 20
 // than cached: it is three pointer copies, and a cached copy would be a
 // second place Options' services are read from.
 func (s *Server) deps() MCPDeps {
-	return MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects, Metamodel: s.opts.Metamodel}
+	return MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects,
+		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown}
 }
 
 // requireContentService refuses a game-content route on an instance
@@ -564,8 +565,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 	if !ok {
 		return
 	}
-	out, err := searchEntities(r.Context(), s.deps(), caller, scope.ProjectID, SearchInput{
-		Query: query, TypeKey: typeKey, Limit: limit,
+	// kind and doc_kind are read here and not only on the MCP side: this
+	// surface mirrors that one, and a filter a person cannot spell in a
+	// URL is a filter this mirror does not have.
+	kind, ok := queryString(w, r, "kind")
+	if !ok {
+		return
+	}
+	docKind, ok := queryString(w, r, "doc_kind")
+	if !ok {
+		return
+	}
+	out, err := searchContent(r.Context(), s.deps(), caller, scope.ProjectID, SearchInput{
+		Query: query, Kind: kind, TypeKey: typeKey, DocKind: docKind, Limit: limit,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)

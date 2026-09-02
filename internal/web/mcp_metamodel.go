@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -287,14 +288,6 @@ type RelationsRemoveInput struct {
 	ID string `json:"id"`
 }
 
-// SearchInput is the argument shape of search.
-type SearchInput struct {
-	ScopedArgs
-	Query   string `json:"query"`
-	TypeKey string `json:"type_key,omitempty"`
-	Limit   int32  `json:"limit,omitempty"`
-}
-
 // --- Outputs ---
 
 // TypeOutput is the slim shape an entity type is listed under.
@@ -385,36 +378,6 @@ type EntitiesListOutput struct {
 	Items      []EntityOutput `json:"items"`
 	NextCursor *string        `json:"next_cursor,omitempty"`
 	Truncated  bool           `json:"truncated"`
-}
-
-// SearchHit is one search result: an entity, whether its *name* satisfied
-// the query, and the rank it matched at.
-//
-// NameMatch is on the wire, not only in the sort, because the order
-// SearchEntities produces is `(name_match, rank)` — rank alone does not
-// explain it. A caller that re-sorts by rank, or simply reasons that a
-// higher rank must come first, reconstructs the wrong order: a row with
-// name_match false can carry a higher rank than one with it true and
-// still sort after it. name_match is what lets an agent recover the
-// grouping the order is actually built from.
-type SearchHit struct {
-	EntityOutput
-	NameMatch bool    `json:"name_match"`
-	Rank      float32 `json:"rank"`
-}
-
-// SearchOutput is search's answer.
-//
-// It carries no cursor, and that is not an omission: search returns the
-// top `limit` rows by `(name_match, rank)` order — see SearchHit — and
-// neither of those is a position a caller can resume from (Search's own
-// doc comment argues it). Truncated is therefore the only thing this
-// envelope can honestly say, and it says the weaker thing it can
-// actually check — the answer is exactly as long as the limit allowed,
-// so there may be more.
-type SearchOutput struct {
-	Items     []SearchHit `json:"items"`
-	Truncated bool        `json:"truncated"`
 }
 
 // RefOutput is one endpoint of an edge, in the terms it was written
@@ -975,51 +938,6 @@ func relationsRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID
 	return RemovedOutput{Removed: true}, nil
 }
 
-// MCPSearch implements search. The hits carry their fields: a search is
-// a caller looking for content, and a hit it then has to fetch one by
-// one is a round trip per row.
-func MCPSearch(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
-	if err := requireScope(caller, projectID); err != nil {
-		return SearchOutput{}, err
-	}
-	return searchEntities(ctx, deps, caller, projectID, in)
-}
-
-// searchEntities is MCPSearch without the token-binding check, for the
-// REST mirror (api_metamodel.go), whose caller is a person whose
-// standing requireProject already resolved. See this file's header.
-func searchEntities(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
-	rows, err := deps.Metamodel.Search(ctx, projectID, in.Query, in.TypeKey, in.Limit)
-	if err != nil {
-		return SearchOutput{}, err
-	}
-	names, err := entityTypeKeys(ctx, deps, projectID)
-	if err != nil {
-		return SearchOutput{}, err
-	}
-	items := make([]SearchHit, 0, len(rows))
-	for _, row := range rows {
-		entity, err := entityOf(dbq.Entity{
-			ID: row.ID, ProjectID: row.ProjectID, EntityTypeID: row.EntityTypeID,
-			Key: row.Key, Name: row.Name, Fields: row.Fields,
-			Invalid: row.Invalid, Version: row.Version,
-		}, names, true)
-		if err != nil {
-			return SearchOutput{}, err
-		}
-		items = append(items, SearchHit{EntityOutput: entity, NameMatch: row.NameMatch, Rank: row.Rank})
-	}
-	// The only thing this answer can honestly say about completeness:
-	// the ranking was cut at the limit, so there may be more below it.
-	// See SearchOutput. The comparison is done in int rather than int32
-	// so no conversion is needed — SearchLimit's answer is bounded by
-	// metamodel.MaxSearchLimit and cannot overflow either way.
-	return SearchOutput{
-		Items:     items,
-		Truncated: len(items) == int(metamodel.SearchLimit(in.Limit)),
-	}, nil
-}
-
 // --- Conversion helpers ---
 
 // actorOf maps an authenticated caller onto the audit columns. It is the
@@ -1496,30 +1414,47 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "search",
 		Description: fmt.Sprintf(
-			"Full-text search over a game's entities, across every type unless type_key "+
-				"narrows it — an agent looking for a name rarely knows whether the game "+
-				"modelled it as a quest, a creature or a place.\n\n"+
-				"**Ranking.** Every row whose *name* satisfies the query comes before every "+
-				"row that only mentions the words in a field, however often it mentions them "+
-				"— that is a guarantee and not a tendency, and each hit's own name_match says "+
-				"which group it landed in. `rank` only orders within a group — it does not "+
-				"explain the order between the two, and re-sorting by rank alone can undo the "+
-				"guarantee. Within each group, rank goes by how many of the query's words a "+
-				"row matches and how often. Ties break by name.\n\n"+
-				"**What is indexed.** A row's name plus the text its values carry: text, "+
-				"longtext, the chosen option of an enum, and the elements of a list<text>. "+
-				"Numbers and booleans are not — filter for those with entities.list. Only the "+
-				"first %d bytes of one row's flattened text are indexed, so a word deep inside "+
-				"a very long lore field is stored and readable but not findable.\n\n"+
+			"Search this game's content: its entities and its documents, in one ranked "+
+				"list, each hit labelled by kind. An entity hit carries `entity` and a "+
+				"document hit carries `document`; `kind` says which, and is what to branch "+
+				"on before reading anything else.\n\n"+
+				"**Ranking.** A hit whose *name* or *title* satisfies the query always "+
+				"outranks one that merely mentions the words in a field or a paragraph, "+
+				"however often it repeats them — that is a guarantee and not a tendency, on "+
+				"both indexes and across them. name_match is on the wire so you can see the "+
+				"grouping the order is built from; `rank` only orders within a group, and "+
+				"re-sorting by rank alone undoes the guarantee. The two indexes' ranks are "+
+				"comparable because both are scored the same way over the same text-search "+
+				"configuration.\n\n"+
+				"**Narrowing.** kind is \"entity\", \"document\", or omitted for both; "+
+				"type_key narrows entity hits and doc_kind narrows document hits, and "+
+				"neither may be combined with the other kind. Anything else at kind is "+
+				"invalid_input rather than a silently widened answer.\n\n"+
+				"**Entity search does not reach into attached prose.** A word that appears "+
+				"only in a quest's script produces a document hit, not a quest hit, and that "+
+				"hit's linked_to names the entities the document is attached to so you can "+
+				"get to the quest from it.\n\n"+
+				"**What is indexed.** For an entity: its name plus the text its values carry "+
+				"— text, longtext, the chosen option of an enum, and the elements of a "+
+				"list<text>; numbers and booleans are not, so filter for those with "+
+				"entities.list. Only the first %d bytes of one row's flattened text are "+
+				"indexed. For a document: its title, its summary and its body, each by its "+
+				"first %d characters — a document may hold far more body than that, and a "+
+				"word past that point is stored and re-read intact but is not findable here. "+
+				"A document's path and kind are not indexed at all; kind is a filter, not a "+
+				"term. Only current versions are indexed, and deleted documents are absent; "+
+				"use docs.history and docs.diff to find when a line changed.\n\n"+
+				"**Matching.** Postgres's `simple` configuration, which does no stemming: "+
+				"searching \"history\" does not find \"histories\".\n\n"+
 				"**Bounds.** The query is at most %d bytes, must be valid UTF-8, must hold no "+
-				"control character and must contain at least one letter or digit; each of those "+
-				"is invalid_input at path `query` rather than an empty answer.\n\n"+
+				"control character and must contain at least one letter or digit; each of "+
+				"those is invalid_input at path `query` rather than an empty answer.\n\n"+
 				"**This is a top-N, not a page.** limit defaults to %d and is capped at %d "+
-				"(and a limit below one gets the default rather than an error), "+
-				"there is no cursor, and truncated only means the answer filled the limit — "+
-				"the recovery for too many hits is a narrower query, not a deeper page.\n\n"+
+				"(and a limit below one gets the default rather than an error), there is no "+
+				"cursor, and truncated only means the answer filled the limit — the recovery "+
+				"for too many hits is a narrower query, not a deeper page.\n\n"+
 				"%s",
-			metamodel.MaxIndexedText, metamodel.MaxSearchQuery,
+			metamodel.MaxIndexedText, markdown.MaxIndexedChars, metamodel.MaxSearchQuery,
 			metamodel.DefaultSearchLimit, metamodel.MaxSearchLimit, retryAdvice),
 		OutputSchema: searchOutputSchema,
 		Annotations:  readOnlyTool(),
@@ -1688,19 +1623,49 @@ var entityOutputSchema = &jsonschema.Schema{
 
 var entitiesListOutputSchema = listEnvelopeSchema(entityOutputSchema)
 
+// The search hit schemas. They live here, beside the other output
+// schemas the SDK is handed, while the Go types they describe live in
+// mcp_search.go beside the core that fills them; splitting them the
+// other way would put a schema in a file that registers no tool.
+//
+// Every field of every one of these is Required except the two that are
+// genuinely optional: a hit's `entity` and `document`, of which exactly
+// one is present and which one is what `kind` says, and a link's `role`,
+// which a document may be attached without.
+var linkedRefOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"entity_type_key", "entity_key", "name"},
+	Properties: map[string]*jsonschema.Schema{
+		"entity_type_key": stringSchema(),
+		"entity_key":      stringSchema(),
+		"name":            stringSchema(),
+		"role":            stringSchema(),
+	},
+}
+
+var documentHitOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"id", "path", "title", "summary", "doc_kind", "version", "linked_to"},
+	Properties: map[string]*jsonschema.Schema{
+		"id":        stringSchema(),
+		"path":      stringSchema(),
+		"title":     stringSchema(),
+		"summary":   stringSchema(),
+		"doc_kind":  stringSchema(),
+		"version":   {Type: "integer"},
+		"linked_to": arrayOf(linkedRefOutputSchema),
+	},
+}
+
 var searchHitOutputSchema = &jsonschema.Schema{
 	Type:     "object",
-	Required: []string{"id", "type_key", "key", "name", "version", "invalid", "name_match", "rank"},
+	Required: []string{"kind", "name_match", "rank"},
 	Properties: map[string]*jsonschema.Schema{
-		"id":         stringSchema(),
-		"type_key":   stringSchema(),
-		"key":        stringSchema(),
-		"name":       stringSchema(),
-		"version":    {Type: "integer"},
-		"invalid":    boolSchema(),
-		"fields":     objectSchema(),
+		"kind":       stringSchema(),
 		"name_match": boolSchema(),
 		"rank":       numberSchema(),
+		"entity":     entityOutputSchema,
+		"document":   documentHitOutputSchema,
 	},
 }
 

@@ -1653,17 +1653,41 @@ func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 
 // publish emits a change event, if a hub is attached.
 //
+// minRole and humanOnly are passed explicitly rather than inferred from
+// kind, exactly as internal/web's own publish does, so each call site
+// shows the gating it chose instead of inheriting one from a table three
+// files away. The values themselves are named constants declared beside
+// the kind they belong to, in events.go, which is where the reasoning
+// for each lives; a helper that could not express these fields at all —
+// the shape this package shipped with — silently made every event as
+// open as the hub's zero value, whether or not that was the right answer.
+//
 // A payload carries only the identity of what changed — a key, an id —
 // and never a value a client could then treat as current. Publication
 // order is not commit order (internal/web/publish.go's package comment
 // works through why), so a payload holding, say, a type's new label could
 // stably tell a client the wrong label with nothing to signal it. The
 // client re-reads instead.
-func (s *Service) publish(projectID uuid.UUID, kind string, payload any) {
+//
+// **Every caller must call this after withTx has returned, never from
+// inside fn.** An event published inside the transaction announces a
+// change that may still roll back, and a subscriber that re-reads on
+// hearing it — which is the only thing this hub's payloads let it do —
+// would read the state before the change and cache it as the state
+// after. The hub itself cannot enforce that; the metamodel's own tests
+// pin it (TestNoEventIsPublishedWhenTheWriteIsRolledBack and
+// TestNothingIsAnnouncedWhileTheTransactionIsStillOpen).
+func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role, humanOnly bool, payload any) {
 	if s.hub == nil {
 		return
 	}
-	s.hub.Publish(realtime.Event{ProjectID: projectID, Kind: kind, Payload: payload})
+	s.hub.Publish(realtime.Event{
+		ProjectID: projectID,
+		Kind:      kind,
+		MinRole:   string(minRole),
+		HumanOnly: humanOnly,
+		Payload:   payload,
+	})
 }
 
 // withTx runs fn inside a transaction, rolling back unless it returns nil.
@@ -1777,26 +1801,34 @@ const maxRowKeyLen = 64
 // not otherwise impose.
 var rowKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
-// checkRowKey validates a key that addresses a row, reporting the problem
-// at the caller's path ("key") so an agent sees where it is.
+// rowKeyProblems validates a key that addresses a row, reporting the
+// problem at the caller's path ("key") so an agent sees where it is.
 //
 // A key problem is a ValidationError, not a SchemaError: the caller is
 // writing a row, not declaring a schema, and the sentinel split states
 // exactly that difference (see SchemaError's doc comment).
-func checkRowKey(path, key string) error {
+//
+// It hands back the problems rather than a wrapped error so that a caller
+// checking a key *and* a row's descriptive columns reports both in one
+// ValidationError, rather than making an agent fix the key, call again,
+// and only then learn the label was empty too. At most one problem is
+// ever reported for a single key: the three conditions are ordered from
+// most to least fundamental, and telling a caller their empty key is also
+// not a handle helps nobody.
+func rowKeyProblems(path, key string) []FieldError {
 	switch {
 	case key == "":
-		return &ValidationError{Fields: []FieldError{{Path: path, Message: "is required"}}}
+		return []FieldError{{Path: path, Message: "is required"}}
 	case len(key) > maxRowKeyLen:
-		return &ValidationError{Fields: []FieldError{{
+		return []FieldError{{
 			Path:    path,
 			Message: fmt.Sprintf("must be at most %d characters", maxRowKeyLen),
-		}}}
+		}}
 	case !rowKeyPattern.MatchString(key):
-		return &ValidationError{Fields: []FieldError{{
+		return []FieldError{{
 			Path:    path,
 			Message: "must be letters, digits, underscores or hyphens, starting with a letter or a digit",
-		}}}
+		}}
 	}
 	return nil
 }
@@ -1854,8 +1886,15 @@ const noVersion int32 = -1
 //
 // ExpectedVersion must match the stored version when the type already
 // exists; a nil ExpectedVersion against an existing type is a conflict,
-// not an overwrite. On creation there is nothing to match and the field is
-// ignored, so a seeding script may pass the same value on every run.
+// not an overwrite.
+//
+// On creation there is nothing to match, but the field is *not* ignored:
+// it is still passed as the guard on the upsert's DO UPDATE, because a
+// caller that believes it is creating may in fact be racing a creator, and
+// the guard is the only thing standing between the loser of that race and
+// a silent overwrite. A seeding script may therefore pass the same value
+// on every run, but a value it did not read from this service is not a
+// free pass — it is a claim about a row, checked as one.
 type EntityTypeInput struct {
 	Key             string
 	Label           string
@@ -1881,8 +1920,11 @@ type entityTypeEvent struct {
 // on every entity already stored against it change together, so a schema
 // edit can never land with its instances left judged by the old schema.
 func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in EntityTypeInput) (dbq.EntityType, error) {
-	if err := checkRowKey("key", in.Key); err != nil {
-		return dbq.EntityType{}, err
+	problems := rowKeyProblems("key", in.Key)
+	problems = append(problems,
+		checkDescriptors(in.Label, in.LabelPlural, in.Description, in.Color, in.Icon)...)
+	if len(problems) > 0 {
+		return dbq.EntityType{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
 	if err := in.Schema.Check(); err != nil {
 		return dbq.EntityType{}, err
@@ -1937,7 +1979,23 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 			return conflictOnEntityTypeKey(ctx, q, projectID, in.Key)
 		}
 		if err != nil {
+			if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
 			return fmt.Errorf("upsert entity type: %w", err)
+		}
+		// The locked read above cannot be the only place the spelling is
+		// checked. It runs before the write and only ever sees a row that is
+		// already visible, so on the creation path — where there is nothing
+		// to lock — a writer racing a creator, holding an ExpectedVersion
+		// that happens to match the version the winner lands on, passed both
+		// the read and the guarded DO UPDATE and updated a row it never saw,
+		// stored under a different spelling, returning no error at all. The
+		// upsert returns the row it actually touched, so comparing the stored
+		// spelling to the submitted one *after* the write closes the pre-read
+		// path and the race with one check; withTx rolls the write back.
+		if row.Key != in.Key {
+			return keyRespellingError("key", in.Key, row.Key)
 		}
 
 		// A schema change can invalidate stored rows. Re-check them rather
@@ -1948,7 +2006,8 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 		return dbq.EntityType{}, err
 	}
 
-	s.publish(projectID, "type.upserted", entityTypeEvent{ID: row.ID, Key: row.Key})
+	s.publish(projectID, eventTypeUpserted, typeEventMinRole, typeEventHumanOnly,
+		entityTypeEvent{ID: row.ID, Key: row.Key})
 	return row, nil
 }
 
@@ -2001,7 +2060,20 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // entities is refused: silently deleting a game's content is never the
 // right reading of "remove this type".
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
+	var removedKey string
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		// Read the row before deleting it, for its key: type.removed
+		// carries the same {id, key} identity type.upserted does, and a
+		// removal announced with an empty key tells a subscriber a type
+		// keyed "" is gone. The id alone would have been a defensible
+		// payload, but entityTypeEvent declares a key field and a client
+		// reading one cannot tell "not carried" from "empty".
+		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return notFound(err, "lookup entity type")
+		}
+		removedKey = typ.Key
+
 		// The count is not the only thing standing between a caller and a
 		// silently emptied type: entities.entity_type_id is ON DELETE
 		// RESTRICT, so the delete below fails on its own if any instance
@@ -2046,7 +2118,8 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		return err
 	}
 
-	s.publish(projectID, "type.removed", entityTypeEvent{ID: id})
+	s.publish(projectID, eventTypeRemoved, typeEventMinRole, typeEventHumanOnly,
+		entityTypeEvent{ID: id, Key: removedKey})
 	return nil
 }
 ```
@@ -2211,11 +2284,12 @@ rather than on what was planned):
      spells its keys consistently never meets this, which is the whole
      population of correct callers.
 
-   `checkRowKey` returns a `*ValidationError` at path `key`, not a
+   `rowKeyProblems` (named `checkRowKey` when it shipped; see correction
+   23) returns a `*ValidationError` at path `key`, not a
    `*SchemaError`: the caller is writing a row, not declaring a schema,
    which is exactly the distinction the two sentinels carry. The
    migration was not touched, and `keyPattern` was not touched. **Tasks 4
-   and 5 apply `checkRowKey` to entity keys and relation-type keys**; it
+   and 5 apply `rowKeyProblems` to entity keys and relation-type keys**; it
    is written once, in `internal/metamodel/keys.go`, for all three.
 5. **The version check is a compare-and-set in SQL, not a read followed by
    a write.** The plan's `SELECT` then unguarded `ON CONFLICT DO UPDATE`
@@ -2300,6 +2374,220 @@ rather than on what was planned):
     type with hundreds of entities pays a full re-validation for a
     changed label. The mitigation Task 2 asked for — always sweep, with
     `CheckValues` — is what shipped.
+
+**Corrections from the review of Task 3** (a second pass over the landed
+package, made before Task 4 begins. Tasks 4-6 copy this task's file shape,
+so each correction below fixes the shape and not only the symptom; where a
+correction adds a helper, the helper is written once here for all three.)
+
+15. **The respelling refusal was bypassable, and the bypass was a silent
+    overwrite.** The refusal lived only in the locked pre-read, which runs
+    before the guarded write and only sees a row that is already visible.
+    On the creation path there is nothing to lock, so a writer racing a
+    creator — carrying an `ExpectedVersion` that happens to match the
+    version the winner lands on — passed both the read (no row) and the
+    `ON CONFLICT ... DO UPDATE WHERE version = @expected_version` guard,
+    and updated a row it never saw. Proved live: a rival inserts `Hogger`,
+    the service upserts `hogger` with `ExpectedVersion: 1`, `err` is
+    `nil` and the stored row is `key="Hogger" label="MINE" version=2` —
+    exactly the outcome correction 4 rules out.
+
+    The fix checks *after* the write as well as before it. The upsert
+    returns the row it touched, and the `key` column is deliberately not
+    in the `SET` list, so the returned key is still the stored spelling:
+    comparing it to the submitted key closes the pre-read path and the
+    race with one check, and `withTx` rolls the write back.
+    `TestARaceThatWouldLandUnderAnotherSpellingIsRefused` drives it with
+    an open rival transaction, so the interleaving is the test's;
+    proved red by deleting the check (`err = <nil>`). **Tasks 4-6 must
+    carry the same post-write check** on every key-addressed upsert they
+    add — the pre-read alone is not a refusal.
+
+    The doc comment on `EntityTypeInput.ExpectedVersion` said the field
+    "is ignored" on creation. It is not — it is passed as the guard, and
+    that is precisely how this hole opened. It now says so.
+16. **The comment arguing the key policy claimed the opposite of the
+    code.** `keys.go` said permitting case buys "a re-seed that changes
+    the casing updates the existing row instead of failing". It fails —
+    `keyRespellingError`, fifteen lines below, refuses it — and this was
+    the load-bearing benefit the whole policy rested on. What permitting
+    case actually buys is that the spelling a designer chose is the
+    spelling stored; what the folding index buys is that a re-seed under
+    a different casing *addresses* the existing row rather than creating a
+    twin beside it. Fixed in `keys.go` and in this plan's copy of the
+    same block.
+17. **The policy was settled in code and still open in two specs.**
+    `2026-08-31-core-and-metamodel-design.md` said row keys were "checked
+    for non-emptiness alone" and pointed at an open question;
+    `2026-09-02-agent-skill-bundle-design.md` §10.5 said `Quest`,
+    `main quest 1` and `misión-01` were all accepted (two of the three are
+    now refused), §4.4 taught "singular, lower snake" as though the server
+    had no opinion, and open question 9 was left dangling. All four are
+    updated to the rule that shipped —
+    `^[A-Za-z0-9][A-Za-z0-9_-]*$` capped at 64 for row keys against
+    `^[a-z][a-z0-9_]*$` capped at 64 for field keys — with the reason the
+    two differ, and question 9 is closed. The skill-bundle spec is
+    agent-facing, so its examples are now ones that work, and it carries
+    the respelling message and its recovery.
+18. **The race branch that makes the refusal reachable had no test.**
+    Deleting the respelling branch inside `conflictOnEntityTypeKey` left
+    the whole suite green:
+    `TestACreationThatLosesTheRaceForItsKeyIsRefused` races two writers
+    spelling the key the same way, so it can only ever observe the
+    version-conflict branch.
+    `TestACreationThatLosesItsKeyToAnotherSpellingIsNamedAsARespelling`
+    covers the other one; proved red by deleting the branch
+    (`version_conflict: current version is 1`).
+19. **`Service.publish` could not express gating, and no test ever
+    observed an event.** Every test built the service with a nil hub, so
+    the helper's signature — `(projectID, kind, payload)` — silently made
+    every event as open as `realtime.Event`'s zero value, whether or not
+    that was right, and moving the call inside the transaction left the
+    suite green. The helper now takes `minRole` and `humanOnly`
+    explicitly, exactly as `internal/web/publish.go`'s does, so a call
+    site shows the gating it chose.
+
+    **The gating decision for entity-type events, recorded rather than
+    inherited: `MinRole` empty, `HumanOnly` false.** It lives in the new
+    `internal/metamodel/events.go`, beside the kinds it applies to, which
+    is where **Tasks 4, 5 and 6 state their own** rather than copying a
+    neighbouring call site. `HumanOnly: false` is the considered opposite
+    of every member, token and invite event in `internal/web`, and the
+    reason those set it true does not apply: each of them mirrors a REST
+    listing `requireHumanCaller` refuses a token caller outright, whereas
+    Task 7 mounts `types.list` and `types.upsert` on MCP *for agents*. An
+    agent that may read every type on demand loses nothing by being told
+    one changed, and it is the subscriber with the most to lose from not
+    being told — a seeding agent's next `entities.upsert` is judged
+    against the schema that just moved. `MinRole` empty because reading
+    types is not role-gated anywhere: a viewer's browser renders the type
+    list, and gating the invalidation above viewer would leave exactly the
+    reader who cannot re-fetch on demand watching a list drift.
+
+    Four tests now observe events with a hub attached:
+    `TestTypeEventsReachEveryMemberOfTheGameIncludingAgents` (a viewer and
+    a token subscriber both receive both kinds — proved red by setting
+    `HumanOnly: true`, and again by `MinRole: owner`),
+    `TestNoEventIsPublishedForARefusedWrite`,
+    `TestNoEventIsPublishedWhenTheWriteIsRolledBack` (the respelling
+    refusal fires after the row is written, so the database has seen the
+    change and nothing may be announced), and
+    `TestNothingIsAnnouncedWhileTheTransactionIsStillOpen`, which holds
+    the transaction open on purpose — a rival takes a row lock on one of
+    the type's entities and the re-validation sweep's `UPDATE` blocks on
+    it — and proves nothing is on the wire in that window. Proved red by
+    moving `s.publish` next to the write inside the transaction. What no
+    test in the package can pin, and the invariant is therefore stated on
+    `Service.publish` instead: a publish placed as the *very last*
+    statement inside `withTx`'s callback, which differs from the correct
+    placement only by the commit that immediately follows it.
+20. **Three project filters were presented as the isolation mechanism and
+    are not.** `metamodel.sql`'s header said "every statement in this file
+    filters on the resolved project id" as though that were what isolates
+    games. It is, for the statements addressing `entity_types` itself. It
+    is not for `ListEntityFieldsOfType`, `MarkEntitiesOfTypeInvalid` and
+    `DeleteEntitiesOfType`: `0004_metamodel.sql` gives entities a
+    composite `FOREIGN KEY (entity_type_id, project_id)`, so an entity's
+    project is already determined by its type's, dropping the filter from
+    those three changes no result, and no test can catch it. They stay as
+    defence in depth against a future schema that relaxes the composite
+    key, and so the next entities query copies the safe shape — but the
+    comment now says which statements are load-bearing and which are not,
+    because a comment claiming otherwise gets relied on. **Tasks 4-6
+    inherit the filter and the honesty about it.**
+
+    Same treatment for the sweep's `CheckValues`: `CheckValues` *is*
+    `Validate` with the map discarded, so the two agree on every input and
+    the choice cannot be caught by a test. The comment no longer implies
+    it can; what the narrower call earns is that no normalised map is in
+    scope to write back.
+21. **`FOR UPDATE` is now pinned.** Removing it left every test green,
+    because the compare-and-set in the `DO UPDATE` refuses every lost
+    update on its own. What the lock earns is the *number* the caller is
+    told to merge onto: without it the read runs against the
+    transaction's snapshot, so a caller racing an in-flight edit is told
+    "current version is 1", re-issues with 1 and is refused again — a loop
+    it cannot escape by doing what the error said.
+    `TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet` holds a
+    rival's uncommitted version bump and asserts the refusal reports 2;
+    proved red by dropping `FOR UPDATE` (reports 1, and does not block).
+22. **`type.removed` carried `"key": ""`.** `entityTypeEvent` declares a
+    key field, so a client could not tell "not carried" from "a type keyed
+    empty string is gone". `RemoveEntityType` now reads the row for its
+    key before deleting it, inside the same transaction — which also
+    replaces the `rows == 0` path as the primary source of `ErrNotFound`,
+    leaving that check as the race guard it always was.
+23. **The descriptive columns were unvalidated and unbounded.** An empty
+    label, a 5000-character colour and an `<script>` icon were all
+    accepted, and `ListEntityTypes` orders by a column that could be
+    empty. The new `internal/metamodel/descriptors.go` holds the decision
+    **for Tasks 4-6 as well**, since entity `Name` inherits exactly this
+    silence:
+
+    - `label` required, at most 200 characters. An unlabelled row sorts
+      to the front of every listing and names itself nothing.
+    - `label_plural` at most 200, `description` at most 4000, both
+      optional. Counted in *runes*, not bytes: a byte cap makes an
+      accented label shorter than an unaccented one for no reason a
+      designer could guess.
+    - `color` must be `#rgb` or `#rrggbb` when set. Named CSS colours and
+      `rgb()` were rejected because Maestro's own renderers derive
+      contrasting tones arithmetically from three channels, and a form
+      they cannot decompose is a colour some views honour and others drop.
+    - `icon` must be a lower-case icon *name*, at most 64 characters.
+      Emoji are deliberately excluded for now — they would make the column
+      two things at once — and the pending visual-identity spec owns that.
+
+    Maestro validates the *shape* of a descriptor and never its content:
+    it is the game's own prose. This is not the escaping strategy either;
+    Task 8's templates escape what they render regardless, because a label
+    legitimately contains any character a game's language uses. Problems
+    are reported together with the key's, in one `ValidationError`, so an
+    agent fixing a seed script sees everything in one answer
+    (`TestUpsertEntityTypeReportsEveryProblemAtOnce`); `checkRowKey` was
+    replaced by `rowKeyProblems`, which hands back the slice, for that.
+24. **A cross-game token passed as `Actor` surfaced raw.** The database
+    backstop worked — `0004_metamodel.sql`'s composite
+    `FOREIGN KEY (updated_by_token_id, project_id)` — but the refusal read
+    `upsert entity type: ... violates foreign key constraint ...
+    (SQLSTATE 23503)`, which tells an operator nothing about a token
+    scoped to the wrong game. `actorConstraintViolation` (in `service.go`,
+    matching on the constraint's *column* so Tasks 4-6 reuse it unchanged)
+    maps it to the new `ErrActorNotInGame`.
+
+    That sentinel is deliberately outside `errors.go`'s wire-code block.
+    An `Actor` is never caller-supplied content — `internal/web` resolves
+    it from the credential the request authenticated with — so reaching
+    this means the scope resolution above the package is wrong, not that a
+    designer typed something. Unmapped in `mcp_errors.go` it becomes
+    `internal_error` to an agent and a legible line to an operator, which
+    is the right pairing for a fault an agent cannot fix. **Task 7 decides
+    whether it earns a wire code**; giving it one now would only invite a
+    retry.
+25. **Key and descriptor problems no longer read as `schema_violation`.**
+    The `ValidationError`-not-`SchemaError` choice stands — a malformed
+    key is the caller's own input at a path, fixable in place, exactly
+    like a bad value — but the *code* was wrong. `schema_violation` is
+    what the skill bundle teaches an agent to recover from by fixing
+    entity values, which cannot help anyone whose `types.upsert` carried a
+    key with a space in it. `ValidationError` grew a `Code` field
+    defaulting to `schema_violation` (so the value validator is
+    unchanged), and row-argument problems carry `invalid_input`;
+    `ValidationError.Is` matches the sentinel its own code names and not
+    the other. Three codes, three recoveries: fix the declaration
+    (`invalid_schema`), fix the values (`schema_violation`), fix the
+    argument (`invalid_input`). **Task 7 reads `Code`** rather than
+    re-deriving it from path spelling.
+26. **Route-shaped keys are a Task 8 decision, recorded not fixed.**
+    `new`, `index`, `id`, `null`, `select`, `games` and `types` are all
+    valid keys and nothing breaks today, because no route addresses a type
+    by key yet. `keys.go` reasoned about path *escaping* and not path
+    *collision*; it now says so. Task 8 introduces
+    `/games/<slug>/types/<key>` and owns the choice — a reserved-word
+    list, a route shape that cannot collide, or resolution in the router —
+    because only Task 8 knows which segments exist. Reserving words here
+    would guess wrong, and tightening a key rule after a game is seeded
+    costs renames.
 
 ### Task 4: Entities, single and bulk
 

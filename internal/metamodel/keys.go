@@ -59,6 +59,22 @@ const codeInvalidInput = "invalid_input"
 // entity keys for a racing game, and there is no reason to make a designer
 // rename their content to satisfy an identifier convention Maestro does
 // not otherwise impose.
+//
+// What this rule reasons about is path *escaping*, not path *collision*,
+// and the difference is deliberate. "new", "index", "id", "null",
+// "select", "games" and "types" are all valid keys today and nothing
+// breaks, because no route addresses a type by key yet. Task 8 introduces
+// /games/<slug>/types/<key>, and the moment it does, a key colliding with
+// a sibling route segment (a /types/new create page, say) is a real
+// conflict — and it is Task 8's to resolve, because only Task 8 knows
+// which segments exist. Reserving a word list here, ahead of the routes,
+// would either guess wrong or forbid "new" to a game that has a perfectly
+// good reason to name a type that. **Task 8 decides**, and its options
+// are a reserved-word list checked here, a route shape that cannot
+// collide (/types/-/<key>, or the key in a query parameter), or accepting
+// the collision and resolving it in the router. Recorded rather than
+// pre-empted; a key rule tightened after a game is seeded costs renames,
+// so the choice wants to be made once, with the routes in front of it.
 var rowKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // rowKeyProblems validates a key that addresses a row, reporting the

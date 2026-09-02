@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
@@ -72,11 +74,23 @@ type RelationInput struct {
 
 // RelationFilter narrows a relation listing. Every field is optional;
 // the zero value lists the game's edges.
+//
+// Cursor is the position handed back by a previous call, and belongs to
+// the filter it was issued for; list.go's cursor carries the whole
+// argument, including why it cannot be forged into another game's rows.
 type RelationFilter struct {
 	TypeKey  string
 	SourceID *uuid.UUID
 	TargetID *uuid.UUID
+	Cursor   string
 	Limit    int32
+}
+
+// RelationPage is one page of edges plus the cursor for the next, in the
+// shape EntityPage already has.
+type RelationPage struct {
+	Relations  []dbq.Relation
+	NextCursor string
 }
 
 // RelationBulkResult reports what a batch of edges did.
@@ -470,31 +484,81 @@ func (s *Service) relationBulkSpec(projectID uuid.UUID) bulkSpec[RelationInput, 
 	}
 }
 
-// ListRelations returns the edges of a game matching a filter.
+// ListRelations returns one page of the edges of a game matching a
+// filter.
 //
 // An unknown TypeKey is a not_found rather than an empty listing: a
 // caller that mistyped a key has to hear about the key, not be told this
 // game has no such edges.
-func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f RelationFilter) ([]dbq.Relation, error) {
+//
+// **It pages, on (created_at, id).** Until this task it did not: the
+// LIMIT was the whole story, so a game with more edges than the cap
+// simply could not be read past it and nothing in the answer said so.
+// Everything list.go's cursor documents applies here — a page is a
+// position and not a snapshot, and the cursor belongs to the filter it
+// was issued for — with one difference in its favour: created_at is a
+// value nothing edits, so the boundary cannot move the way a renamed
+// entity moves an entity listing's.
+func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f RelationFilter) (RelationPage, error) {
+	limit := relationPageSize(f.Limit)
 	params := dbq.ListRelationsParams{
 		ProjectID: projectID,
 		SourceID:  f.SourceID,
 		TargetID:  f.TargetID,
-		Limit:     relationPageSize(f.Limit),
+		Limit:     limit,
 	}
+	typePart := ""
 	if f.TypeKey != "" {
 		relType, err := s.RelationTypeByKey(ctx, projectID, f.TypeKey)
 		if err != nil {
-			return nil, err
+			return RelationPage{}, err
 		}
 		params.RelationTypeID = &relType.ID
+		typePart = relType.ID.String()
+	}
+
+	fingerprint := fingerprintOf("relations", typePart,
+		endpointFilterPart(f.SourceID), endpointFilterPart(f.TargetID))
+	after, err := decodeCursor(f.Cursor, fingerprint)
+	if err != nil {
+		return RelationPage{}, err
+	}
+	if after.ID != uuid.Nil {
+		at, err := time.Parse(time.RFC3339Nano, after.Sort)
+		if err != nil {
+			// Only a hand-edited cursor reaches this: encodeRelationCursor
+			// writes the same format this parses, and the fingerprint has
+			// already agreed. It is still the caller's own argument, so it
+			// is answered as one rather than as a server fault.
+			return RelationPage{}, malformedCursor("it carries no creation time")
+		}
+		params.AfterCreatedAt = pgtype.Timestamptz{Time: at, Valid: true}
+		params.AfterID = &after.ID
 	}
 
 	rows, err := s.q.ListRelations(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("list relations: %w", err)
+		return RelationPage{}, fmt.Errorf("list relations: %w", err)
 	}
-	return rows, nil
+	page := RelationPage{Relations: rows}
+	if len(rows) == int(limit) {
+		last := rows[len(rows)-1]
+		page.NextCursor = encodeCursor(cursor{
+			Sort:        last.CreatedAt.Time.Format(time.RFC3339Nano),
+			ID:          last.ID,
+			Fingerprint: fingerprint,
+		})
+	}
+	return page, nil
+}
+
+// endpointFilterPart spells an optional endpoint filter for a
+// fingerprint, keeping "no opinion" distinct from any id.
+func endpointFilterPart(id *uuid.UUID) string {
+	if id == nil {
+		return "any"
+	}
+	return id.String()
 }
 
 // The bounds on one relation listing. There is no cursor here — Task 6

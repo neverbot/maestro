@@ -805,8 +805,10 @@ WHERE r.project_id = $1::uuid
   AND ($2::uuid IS NULL OR r.relation_type_id = $2::uuid)
   AND ($3::uuid IS NULL OR r.source_id = $3::uuid)
   AND ($4::uuid IS NULL OR r.target_id = $4::uuid)
+  AND ($5::uuid IS NULL
+       OR (r.created_at, r.id) > ($6::timestamptz, $5::uuid))
 ORDER BY r.created_at, r.id
-LIMIT $5::int
+LIMIT $7::int
 `
 
 type ListRelationsParams struct {
@@ -814,6 +816,8 @@ type ListRelationsParams struct {
 	RelationTypeID *uuid.UUID
 	SourceID       *uuid.UUID
 	TargetID       *uuid.UUID
+	AfterID        *uuid.UUID
+	AfterCreatedAt pgtype.Timestamptz
 	Limit          int32
 }
 
@@ -821,12 +825,23 @@ type ListRelationsParams struct {
 // keeps a leaked entity id from listing another game's edges: source_id
 // and target_id are caller-supplied here, unlike the entity statements
 // whose composite key already determines their project.
+//
+// The keyset is on (created_at, id), which is this listing's own sort
+// order, and not on the (name, id) the entity listings use: relations
+// have no name, and created_at is a value nothing edits, so a page
+// boundary here cannot move under a rewrite the way a renamed entity's
+// can. relations_project_idx is (project_id, created_at), so the
+// position seeks rather than scans. Before it, the LIMIT alone made
+// every edge past the cap unreachable with nothing in the answer saying
+// so.
 func (q *Queries) ListRelations(ctx context.Context, arg ListRelationsParams) ([]Relation, error) {
 	rows, err := q.db.Query(ctx, listRelations,
 		arg.ProjectID,
 		arg.RelationTypeID,
 		arg.SourceID,
 		arg.TargetID,
+		arg.AfterID,
+		arg.AfterCreatedAt,
 		arg.Limit,
 	)
 	if err != nil {

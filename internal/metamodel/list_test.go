@@ -907,3 +907,120 @@ func TestAnEdgeCannotOutliveItsRelationType(t *testing.T) {
 		t.Fatalf("err = %v, want not_found naming the removed relation type", err)
 	}
 }
+
+// TestARelationListingPagesWithACursor pins the hole this task closed in
+// ListRelations: before it, the page limit was the whole story and a
+// game with more edges than the cap could not be read past it, with
+// nothing in the answer to say rows had been left behind.
+//
+// The order is (created_at, id), so the pages come back in creation
+// order and every edge is seen exactly once.
+func TestARelationListingPagesWithACursor(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 7)
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires", SemanticRole: "prerequisite",
+	}); err != nil {
+		t.Fatalf("seed relation type: %v", err)
+	}
+	for i := 1; i < 7; i++ {
+		relate(t, svc, project, "requires",
+			metamodel.Ref{TypeKey: "quest", Key: fmt.Sprintf("quest-%02d", i)},
+			metamodel.Ref{TypeKey: "quest", Key: fmt.Sprintf("quest-%02d", i-1)})
+	}
+
+	seen := map[uuid.UUID]bool{}
+	filter := metamodel.RelationFilter{Limit: 2}
+	for page := 1; page <= 5; page++ {
+		got, err := svc.ListRelations(ctx, project, filter)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		for _, edge := range got.Relations {
+			if seen[edge.ID] {
+				t.Fatalf("page %d repeated edge %s", page, edge.ID)
+			}
+			seen[edge.ID] = true
+		}
+		if got.NextCursor == "" {
+			break
+		}
+		filter.Cursor = got.NextCursor
+	}
+	if len(seen) != 6 {
+		t.Fatalf("paged over %d edges, want 6", len(seen))
+	}
+}
+
+// TestARelationCursorBelongsToItsOwnFilter pins that an edge listing's
+// cursor is bound to its filter exactly as an entity listing's is: the
+// sort order is shared by every filter, so a cursor carried across would
+// page a different set of edges and answer a question nobody asked.
+func TestARelationCursorBelongsToItsOwnFilter(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedTakesPlaceIn(t, svc, project)
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires", SemanticRole: "prerequisite",
+	}); err != nil {
+		t.Fatalf("seed relation type: %v", err)
+	}
+	relate(t, svc, project, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	relate(t, svc, project, "requires",
+		metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"})
+
+	first, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page must carry a cursor")
+	}
+
+	hogger, err := svc.EntityByKey(ctx, project, "quest", "hogger")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		filter metamodel.RelationFilter
+	}{
+		{"narrowed by type", metamodel.RelationFilter{TypeKey: "requires", Limit: 1}},
+		{"narrowed by source", metamodel.RelationFilter{SourceID: &hogger.ID, Limit: 1}},
+		{"narrowed by target", metamodel.RelationFilter{TargetID: &hogger.ID, Limit: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tc.filter
+			f.Cursor = first.NextCursor
+			_, err := svc.ListRelations(ctx, project, f)
+			if !errors.Is(err, metamodel.ErrInvalidInput) {
+				t.Fatalf("err = %v, want invalid_input", err)
+			}
+			var ve *metamodel.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want a ValidationError", err)
+			}
+			if len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
+				t.Fatalf("fields = %+v, want one problem at path \"cursor\"", ve.Fields)
+			}
+		})
+	}
+
+	// And a malformed one is the same invalid_input the entity listings
+	// give, at the same path.
+	_, err = svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1, Cursor: "nonsense!"})
+	var ve *metamodel.ValidationError
+	if !errors.As(err, &ve) || ve.Fields[0].Path != "cursor" {
+		t.Fatalf("err = %v, want invalid_input at path \"cursor\"", err)
+	}
+}

@@ -390,11 +390,22 @@ RETURNING *;
 -- keeps a leaked entity id from listing another game's edges: source_id
 -- and target_id are caller-supplied here, unlike the entity statements
 -- whose composite key already determines their project.
+--
+-- The keyset is on (created_at, id), which is this listing's own sort
+-- order, and not on the (name, id) the entity listings use: relations
+-- have no name, and created_at is a value nothing edits, so a page
+-- boundary here cannot move under a rewrite the way a renamed entity's
+-- can. relations_project_idx is (project_id, created_at), so the
+-- position seeks rather than scans. Before it, the LIMIT alone made
+-- every edge past the cap unreachable with nothing in the answer saying
+-- so.
 SELECT r.* FROM relations r
 WHERE r.project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('relation_type_id')::uuid IS NULL OR r.relation_type_id = sqlc.narg('relation_type_id')::uuid)
   AND (sqlc.narg('source_id')::uuid IS NULL OR r.source_id = sqlc.narg('source_id')::uuid)
   AND (sqlc.narg('target_id')::uuid IS NULL OR r.target_id = sqlc.narg('target_id')::uuid)
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (r.created_at, r.id) > (sqlc.narg('after_created_at')::timestamptz, sqlc.narg('after_id')::uuid))
 ORDER BY r.created_at, r.id
 LIMIT sqlc.arg('limit')::int;
 

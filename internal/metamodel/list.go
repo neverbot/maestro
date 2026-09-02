@@ -146,11 +146,18 @@ func pageSize(limit, def, max int32) int32 {
 // plain hash of values the caller already knows, so a caller determined
 // to page one listing with another's position can recompute it.
 //
-// **It leaks nothing.** The position is the name and id of a row the
-// same call has just returned to the same caller, and the fingerprint is
-// a digest of the filter that caller supplied.
+// **It leaks nothing.** The position is the sort value and id of a row
+// the same call has just returned to the same caller, and the
+// fingerprint is a digest of the filter that caller supplied.
+//
+// Sort is the leading half of the sort key, spelled as text: an entity
+// listing's is the row's name, and ListRelations', whose rows are
+// ordered by creation, is its created_at in RFC 3339. Text and not a
+// typed union because a cursor is an opaque token whose only job is to
+// come back unchanged, and the listing that issued it — pinned by the
+// fingerprint — is the only code that has to know how to read it.
 type cursor struct {
-	Name        string    `json:"n"`
+	Sort        string    `json:"n"`
 	ID          uuid.UUID `json:"i"`
 	Fingerprint string    `json:"f"`
 }
@@ -294,7 +301,7 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	}
 	if after.ID != uuid.Nil {
 		params.AfterID = &after.ID
-		params.AfterName = &after.Name
+		params.AfterName = &after.Sort
 	}
 
 	rows, err := s.q.ListEntitiesPage(ctx, params)
@@ -357,7 +364,7 @@ func (s *Service) listRelated(ctx context.Context, projectID uuid.UUID, rel Rela
 	}
 	if after.ID != uuid.Nil {
 		params.AfterID = &after.ID
-		params.AfterName = &after.Name
+		params.AfterName = &after.Sort
 	}
 
 	rows, err := s.q.ListEntitiesRelatedTo(ctx, params)
@@ -377,7 +384,7 @@ func pageOf(rows []dbq.Entity, limit int32, fingerprint string) EntityPage {
 	if len(rows) == int(limit) {
 		last := rows[len(rows)-1]
 		page.NextCursor = encodeCursor(cursor{
-			Name: last.Name, ID: last.ID, Fingerprint: fingerprint,
+			Sort: last.Name, ID: last.ID, Fingerprint: fingerprint,
 		})
 	}
 	return page

@@ -694,8 +694,8 @@ func TestDeletingAnEntityDeletesItsRelations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRelations: %v", err)
 	}
-	if len(rels) != 0 {
-		t.Fatalf("%d relations survived their entity", len(rels))
+	if len(rels.Relations) != 0 {
+		t.Fatalf("%d relations survived their entity", len(rels.Relations))
 	}
 }
 
@@ -738,8 +738,8 @@ func TestRemoveRelationTypeRefusesWhileItHasEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRelations: %v", err)
 	}
-	if len(rels) != 0 {
-		t.Fatalf("%d relations survived their cascaded type", len(rels))
+	if len(rels.Relations) != 0 {
+		t.Fatalf("%d relations survived their cascaded type", len(rels.Relations))
 	}
 }
 
@@ -770,8 +770,8 @@ func TestRelationsAreScopedToTheirProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRelations: %v", err)
 	}
-	if len(rels) != 0 {
-		t.Fatalf("another game's listing returned %d edges", len(rels))
+	if len(rels.Relations) != 0 {
+		t.Fatalf("another game's listing returned %d edges", len(rels.Relations))
 	}
 	// A leaked id is not enough: the removal filters on the project too.
 	if err := svc.RemoveRelation(ctx, theirs, edge.ID); !errors.Is(err, metamodel.ErrNotFound) {
@@ -853,8 +853,8 @@ func TestARelationActorFromAnotherGameIsNamed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRelations: %v", err)
 	}
-	if len(rels) != 0 {
-		t.Fatalf("the refused write stored %d edges", len(rels))
+	if len(rels.Relations) != 0 {
+		t.Fatalf("the refused write stored %d edges", len(rels.Relations))
 	}
 
 	// The same token against its own game is an ordinary write, so the
@@ -940,8 +940,8 @@ func TestListRelationsFiltersByTypeAndEndpoint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ListRelations: %v", err)
 			}
-			if len(rows) != tc.want {
-				t.Fatalf("got %d edges, want %d", len(rows), tc.want)
+			if len(rows.Relations) != tc.want {
+				t.Fatalf("got %d edges, want %d", len(rows.Relations), tc.want)
 			}
 		})
 	}
@@ -1060,8 +1060,8 @@ func TestAnAtomicRelationBatchRollsBackWhole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRelations: %v", err)
 	}
-	if len(rels) != 0 {
-		t.Fatalf("%d edges survived a rolled-back atomic batch", len(rels))
+	if len(rels.Relations) != 0 {
+		t.Fatalf("%d edges survived a rolled-back atomic batch", len(rels.Relations))
 	}
 	requireNothing(t, sub, "a rolled-back batch wrote nothing")
 }
@@ -1131,8 +1131,8 @@ func TestABatchThatRepeatsAnEdgeIsDiagnosedAsSuch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListRelations: %v", err)
 	}
-	if len(rels) != 0 {
-		t.Fatalf("%d edges landed from a batch refused whole", len(rels))
+	if len(rels.Relations) != 0 {
+		t.Fatalf("%d edges landed from a batch refused whole", len(rels.Relations))
 	}
 }
 

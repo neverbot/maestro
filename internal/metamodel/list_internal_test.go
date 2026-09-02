@@ -84,7 +84,7 @@ func TestTheInvalidFilterKeepsItsThreeStatesApart(t *testing.T) {
 // here.
 func TestACursorCarriesNothingButAPositionAndAFingerprint(t *testing.T) {
 	encoded := encodeCursor(cursor{
-		Name: "Elwynn Forest", ID: uuid.MustParse("11111111-2222-3333-4444-555555555555"),
+		Sort: "Elwynn Forest", ID: uuid.MustParse("11111111-2222-3333-4444-555555555555"),
 		Fingerprint: "abc",
 	})
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)

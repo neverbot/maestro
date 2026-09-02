@@ -1960,3 +1960,127 @@ func TestABulkEdgeWriteReportsWhatLandedInAWireShape(t *testing.T) {
 		t.Fatalf("marshalled result %s carries database columns", raw)
 	}
 }
+
+// TestARelationTypeSemanticRoleIsCheckedHereAndNotOnlyByTheDatabase
+// closes review finding H3.
+//
+// `semantic_role` was validated nowhere in Go; the only guard was the
+// CHECK constraint 0004_metamodel.sql puts on the column, and a value
+// outside the list reached an agent as `internal_error` with a
+// check-constraint violation in the operator's log. That is the exact
+// shape the error vocabulary exists to prevent: something the caller
+// typed, that the caller can fix, reported as a server fault with no
+// path and no list of what would have been accepted.
+func TestARelationTypeSemanticRoleIsCheckedHereAndNotOnlyByTheDatabase(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	_, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires", SemanticRole: "nonsense",
+	})
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	requireFieldError(t, err, "semantic_role",
+		`must be one of "prerequisite", "unlock", "containment", "spatial", `+
+			`"availability", "reward", or omitted: a relation type need not classify itself`)
+
+	if _, err := svc.RelationTypeByKey(ctx, project, "requires"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the refused declaration must store nothing, got %v", err)
+	}
+
+	// Every role the column's CHECK admits is accepted here, so the two
+	// lists cannot drift apart silently.
+	for _, role := range metamodel.SemanticRoles {
+		key := "rel_" + role
+		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+			Key: key, Label: role, SemanticRole: role,
+		}); err != nil {
+			t.Fatalf("semantic role %q: %v", role, err)
+		}
+	}
+}
+
+// TestARemovalSaysWhatItCouldNotFindAndWhatStillHoldsIt closes review
+// finding L4.
+//
+// All four removals answered an unknown id with a bare `ErrNotFound`,
+// whose message is the string "not_found" — so the wire report was
+// `{"error":"not_found","message":"not_found"}`, a code repeated as
+// prose. `types.remove` on a type that still has entities was worse in
+// the same way: `{"error":"in_use","message":"in_use"}`, with nothing
+// about how many rows, or that `cascade` is the way through.
+// `entities.get` and `types.get` have named their misses since Task 4;
+// these four are now held to the same standard.
+func TestARemovalSaysWhatItCouldNotFindAndWhatStillHoldsIt(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	ghost := uuid.New()
+	for _, tc := range []struct {
+		name, what string
+		remove     func() error
+	}{
+		{"an entity type", "entity type", func() error {
+			return svc.RemoveEntityType(ctx, project, ghost, false)
+		}},
+		{"a relation type", "relation type", func() error {
+			return svc.RemoveRelationType(ctx, project, ghost, false)
+		}},
+		{"an entity", "entity", func() error { return svc.RemoveEntity(ctx, project, ghost) }},
+		{"a relation", "relation", func() error { return svc.RemoveRelation(ctx, project, ghost) }},
+	} {
+		t.Run("removing "+tc.name+" that is not there names it", func(t *testing.T) {
+			err := tc.remove()
+			if !errors.Is(err, metamodel.ErrNotFound) {
+				t.Fatalf("err = %v, want ErrNotFound", err)
+			}
+			if !strings.Contains(err.Error(), tc.what) || !strings.Contains(err.Error(), ghost.String()) {
+				t.Fatalf("message = %q, want it to name the %s and the id", err, tc.what)
+			}
+			if err.Error() == "not_found" {
+				t.Fatalf("message = %q, which is the code repeated as prose", err)
+			}
+		})
+	}
+
+	// The in-use refusals say how many rows hold the type and that
+	// cascade is the way through, which is the whole recovery.
+	quest, err := svc.EntityTypeByKey(ctx, project, "quest")
+	if err != nil {
+		t.Fatalf("quest type: %v", err)
+	}
+	// seedWorld left two quests behind, and both hold the type.
+	err = svc.RemoveEntityType(ctx, project, quest.ID, false)
+	if !errors.Is(err, metamodel.ErrInUse) {
+		t.Fatalf("err = %v, want ErrInUse", err)
+	}
+	for _, want := range []string{"quest", "2 entit", "cascade"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("message = %q, want it to mention %q", err, want)
+		}
+	}
+
+	seedTakesPlaceIn(t, svc, project)
+	relate(t, svc, project, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	takesPlaceIn, err := svc.RelationTypeByKey(ctx, project, "takes_place_in")
+	if err != nil {
+		t.Fatalf("relation type: %v", err)
+	}
+	err = svc.RemoveRelationType(ctx, project, takesPlaceIn.ID, false)
+	if !errors.Is(err, metamodel.ErrInUse) {
+		t.Fatalf("err = %v, want ErrInUse", err)
+	}
+	for _, want := range []string{"takes_place_in", "1 edge", "cascade"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("message = %q, want it to mention %q", err, want)
+		}
+	}
+}

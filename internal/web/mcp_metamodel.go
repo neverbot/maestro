@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
@@ -184,11 +185,23 @@ type EntitiesListInput struct {
 // RelatedToInput is the one-hop traversal an entity listing can be
 // anchored to: the entities reachable from (or reaching) one entity over
 // one relation type.
+//
+// **Direction carries no `omitempty`, and that is the whole point.** The
+// SDK infers this tool's input schema by reflection and puts exactly the
+// fields without `omitempty` in `required`, so the tag is the wire
+// contract. `listRelated` (internal/metamodel/list.go) refuses an absent
+// or unrecognised direction outright, arguing that answering half a
+// neighbourhood is a wrong answer rather than a refusal — and it is
+// right. Until review finding H2 this struct and the tool description
+// both told an agent the field was optional and defaulted to
+// "outgoing", so the only way to discover the domain's rule was to trip
+// over it. The three agree now: required in the schema, required in the
+// prose, refused by the domain.
 type RelatedToInput struct {
 	RelationTypeKey string `json:"relation_type_key"`
 	EntityTypeKey   string `json:"entity_type_key"`
 	EntityKey       string `json:"entity_key"`
-	Direction       string `json:"direction,omitempty"`
+	Direction       string `json:"direction"`
 }
 
 // EntitiesGetInput reads one entity by its address.
@@ -1087,13 +1100,16 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "relation_types.upsert",
-		Description: "Declare or update a relation type: a kind of directed edge between " +
-			"entities (takes_place_in, requires, unlocks, available_to). source_type_ids and " +
-			"target_type_ids are entity type ids — from types.get or types.list — and they " +
-			"are the rule every edge of this type is checked against; an empty list means " +
-			"any type. semantic_role is one of prerequisite, unlock, containment, spatial, " +
-			"availability, reward, and is what a view uses to know what the edge means. " +
-			"Idempotent by key; expected_version is required to update an existing type.",
+		Description: fmt.Sprintf(
+			"Declare or update a relation type: a kind of directed edge between "+
+				"entities (takes_place_in, requires, unlocks, available_to). source_type_ids and "+
+				"target_type_ids are entity type ids — from types.get or types.list — and they "+
+				"are the rule every edge of this type is checked against; an empty list means "+
+				"any type. semantic_role is what a view uses to know what the edge means: it is "+
+				"optional, and when given it is one of %s — anything else is invalid_input at "+
+				"path `semantic_role`, listing these same values. "+
+				"Idempotent by key; expected_version is required to update an existing type.",
+			quotedList(metamodel.SemanticRoles)),
 		OutputSchema: relationTypeDetailOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesUpsertInput) (RelationTypeDetailOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -1162,15 +1178,19 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"longer fit their type's schema), or both. Pass the previous answer's "+
 				"next_cursor to get the next page; a cursor belongs to the game and the "+
 				"filter it was issued for and is refused against any other. limit defaults "+
-				"to %d and is capped at %d — asking for more gets the cap, not the default. "+
+				"to %d and is capped at %d — asking for more gets the cap, and asking for "+
+				"less than one gets the default rather than an error. "+
 				"fields are omitted unless verbose is true. "+
 				"related_to turns this into a one-hop traversal: the entities reached from "+
-				"(direction \"outgoing\", the default) or reaching (\"incoming\") the entity "+
-				"named by entity_type_key and entity_key, over relation_type_key. **That "+
-				"traversal is not paged**: it returns at most %d neighbours, next_cursor is "+
-				"never set, and anything past the cap is silently unreachable — a densely "+
-				"connected entity needs relations.list instead.",
-			metamodel.DefaultEntityPage, metamodel.MaxEntityPage, metamodel.MaxEntityPage),
+				"(direction \"outgoing\") or reaching (\"incoming\") the entity named by "+
+				"entity_type_key and entity_key, over relation_type_key. **direction is "+
+				"required and has no default** — absent or unrecognised, it is invalid_input "+
+				"at path `related_to.direction`, because half a neighbourhood presented as "+
+				"the whole one is a worse answer than a refusal. **The traversal pages "+
+				"exactly as the plain listing does**, with the same limit, the same cap and "+
+				"the same next_cursor, so a densely connected entity is walked here and not "+
+				"somewhere else. %s",
+			metamodel.DefaultEntityPage, metamodel.MaxEntityPage, retryAdvice),
 		OutputSchema: entitiesListOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in EntitiesListInput) (EntitiesListOutput, error) {
@@ -1225,14 +1245,15 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 		Description: fmt.Sprintf(
 			"List a game's edges, optionally narrowed by relation type key and by either "+
 				"endpoint's entity id. Paged by next_cursor exactly as entities.list is; "+
-				"limit defaults to %d and is capped at %d. "+
+				"limit defaults to %d and is capped at %d, and a limit below one gets the "+
+				"default rather than an error. "+
 				"**Endpoints come back as entity ids, not as the (type_key, key) refs they "+
 				"were written with**, because that is what the row holds; to walk a game's "+
 				"graph in keys, use entities.list with related_to instead. This tool is what "+
 				"you want when the answer is about the edges themselves — removing one, or "+
-				"reading the fields of a densely connected node's edges past the traversal "+
-				"cap.",
-			metamodel.DefaultRelationPage, metamodel.MaxRelationPage),
+				"reading an edge's own fields, which a traversal over entities never "+
+				"returns. %s",
+			metamodel.DefaultRelationPage, metamodel.MaxRelationPage, retryAdvice),
 		OutputSchema: relationsListOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsListInput) (RelationsListOutput, error) {
@@ -1269,17 +1290,49 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"**Bounds.** The query is at most %d bytes, must be valid UTF-8, must hold no "+
 				"control character and must contain at least one letter or digit; each of those "+
 				"is invalid_input at path `query` rather than an empty answer.\n\n"+
-				"**This is a top-N, not a page.** limit defaults to %d and is capped at %d, "+
+				"**This is a top-N, not a page.** limit defaults to %d and is capped at %d "+
+				"(and a limit below one gets the default rather than an error), "+
 				"there is no cursor, and truncated only means the answer filled the limit — "+
-				"the recovery for too many hits is a narrower query, not a deeper page.",
+				"the recovery for too many hits is a narrower query, not a deeper page.\n\n"+
+				"%s",
 			metamodel.MaxIndexedText, metamodel.MaxSearchQuery,
-			metamodel.DefaultSearchLimit, metamodel.MaxSearchLimit),
+			metamodel.DefaultSearchLimit, metamodel.MaxSearchLimit, retryAdvice),
 		OutputSchema: searchOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPSearch(ctx, deps, caller, projectID, in)
 	})
+}
+
+// retryAdvice is what every *read* tool says about the `retryable`
+// code, and it exists because "resend the same call" is not always the
+// whole recovery on a read.
+//
+// `metamodel.IsRetryable` admits 57014, `query_canceled`, which a lock
+// wait cancelled by `statement_timeout` raises — contention, and
+// resendable — but which an operator's `statement_timeout` also raises
+// on a query that is simply too expensive, every single time it is run.
+// The code is still right, because it names the recovery the four
+// SQLSTATEs share; what a read tool has to add is what to do when that
+// recovery keeps failing, which on a read is always available: ask for
+// less. `entities.upsert` already carries the write side of the same
+// advice (send fewer rows), and this is its read counterpart.
+const retryAdvice = "A `retryable` error means the database refused the call and the same call, " +
+	"resent unchanged, may succeed. If it keeps coming back, the call is too expensive as " +
+	"written rather than unlucky: ask for less — a smaller limit, a narrower filter or query — " +
+	"instead of resending it again."
+
+// quotedList spells a domain-owned list of allowed values for a tool
+// description, so the description cannot go on offering a value the
+// domain stopped accepting — correction 13's rule, applied to a list
+// rather than to a number.
+func quotedList(values []string) string {
+	quoted := make([]string, len(values))
+	for i, v := range values {
+		quoted[i] = fmt.Sprintf("%q", v)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // boolPtr is what mcp.ToolAnnotations.DestructiveHint takes: a *bool,

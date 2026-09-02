@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,8 @@ import (
 // be stored and simply never match, leaving a rule no write can satisfy
 // and a refusal that names the wrong problem.
 //
+// SemanticRole is optional and, when set, must be one of SemanticRoles.
+//
 // ExpectedVersion carries the same meaning and the same insert-path
 // caveat as EntityTypeInput.ExpectedVersion; see it.
 type RelationTypeInput struct {
@@ -35,6 +38,55 @@ type RelationTypeInput struct {
 	Schema          Schema
 	ExpectedVersion *int32
 	Actor           Actor
+}
+
+// SemanticRoles are the classifications a relation type may declare, in
+// the order 0004_metamodel.sql's CHECK lists them.
+//
+// **This slice and that CHECK are one list written twice, and this one
+// is the copy a caller ever sees.** The constraint alone was the whole
+// guard until review finding H3: a value outside it travelled all the
+// way to Postgres, came back as an untyped check-constraint violation
+// and reached an agent as `internal_error` — a server fault, with no
+// path and no list of what would have been accepted, for something the
+// agent had typed and could have fixed. It is the only reachable CHECK
+// on the metamodel tables, so this is the only place the pairing was
+// needed; the constraint stays as the backstop for a writer that does
+// not come through this package.
+//
+// Exported for the rule correction 24 established for MaxSearchQuery: a
+// bound a caller cannot read is a bound a caller trips over. The MCP
+// tool description for `types.upsert`'s relation half is built from it,
+// so a role added here is offered to agents without a second edit.
+var SemanticRoles = []string{
+	"prerequisite", "unlock", "containment", "spatial", "availability", "reward",
+}
+
+// checkSemanticRole refuses a role the column would refuse, as
+// invalid_input at the argument's own path.
+//
+// Empty is not a role but the absence of one — the column is nullable
+// precisely because a relation type need not classify itself — so it is
+// accepted here and stored as NULL by the caller.
+func checkSemanticRole(role string) []FieldError {
+	if role == "" {
+		return nil
+	}
+	for _, allowed := range SemanticRoles {
+		if role == allowed {
+			return nil
+		}
+	}
+	quoted := make([]string, len(SemanticRoles))
+	for i, allowed := range SemanticRoles {
+		quoted[i] = fmt.Sprintf("%q", allowed)
+	}
+	return []FieldError{{
+		Path: "semantic_role",
+		Message: fmt.Sprintf(
+			"must be one of %s, or omitted: a relation type need not classify itself",
+			strings.Join(quoted, ", ")),
+	}}
 }
 
 // relationTypeEvent is the payload of the relation_type.* events:
@@ -60,6 +112,7 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 	// relation_types has label and description and no plural, colour or
 	// icon; empty means "not set", which is what those columns are.
 	problems = append(problems, checkDescriptors(in.Label, "", in.Description, "", "")...)
+	problems = append(problems, checkSemanticRole(in.SemanticRole)...)
 	if len(problems) > 0 {
 		return dbq.RelationType{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
@@ -322,7 +375,7 @@ func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUI
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
 		typ, err := q.GetRelationTypeByID(ctx, dbq.GetRelationTypeByIDParams{ProjectID: projectID, ID: id})
 		if err != nil {
-			return notFound(err, "lookup relation type")
+			return notFoundByID(err, "relation type", id, "lookup relation type")
 		}
 		removedKey = typ.Key
 
@@ -334,7 +387,8 @@ func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUI
 				return fmt.Errorf("count relations: %w", err)
 			}
 			if count > 0 {
-				return ErrInUse
+				return stillInUse("relation type", typ.Key,
+					fmt.Sprintf("%d edges", count))
 			}
 		} else if err := q.DeleteRelationsOfType(ctx, dbq.DeleteRelationsOfTypeParams{
 			ProjectID: projectID, RelationTypeID: id,
@@ -350,12 +404,13 @@ func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUI
 			// a race apart from the ordinary case.
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return ErrInUse
+				return stillInUse("relation type", typ.Key,
+					"edges, one of them written while it was being removed")
 			}
 			return fmt.Errorf("delete relation type: %w", err)
 		}
 		if rows == 0 {
-			return ErrNotFound
+			return missingByID("relation type", id)
 		}
 		return nil
 	})

@@ -2788,6 +2788,12 @@ own text going stale within two commits of being written.
   `internal/metamodel/descriptors.go`
 - Test: `internal/metamodel/entities_test.go`
 
+**Implemented, 2026-09-02.** The landed package is the authority, not
+the blocks below: they were followed closely but not exactly, and
+"Corrections made during implementation" at the end of this task lists
+every divergence and why. Read that list before copying anything from
+here.
+
 **Refreshed after Task 3's review, 2026-09-02.** Every block below was
 rewritten against the files Task 3 actually landed. The original blocks
 re-introduced six defects Task 3 closed — an unguarded `DO UPDATE`, an
@@ -2798,7 +2804,7 @@ a malformed key as `internal_error` — and the point of a plan is that its
 implementer can copy it. Task 3's corrections 4, 5, 15, 19, 21, 23 and 25
 are the reasons; each is cited where it bites.
 
-- [ ] **Step 1: Add the queries**
+- [x] **Step 1: Add the queries**
 
 Append to `internal/db/queries/metamodel.sql`:
 
@@ -2887,7 +2893,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 Run: `make sqlc`
 
-- [ ] **Step 2: State this task's event gating in `events.go`**
+- [x] **Step 2: State this task's event gating in `events.go`**
 
 Correction 19: the gating of an event is a decision about who may learn a
 fact, and it is stated beside the kind, not passed as two bare literals at
@@ -2921,7 +2927,7 @@ const (
 
 beside the type constants.
 
-- [ ] **Step 3: Give `descriptors.go` the entity's one descriptive column**
+- [x] **Step 3: Give `descriptors.go` the entity's one descriptive column**
 
 An entity carries `name` where a type carries `label`, and correction 23
 exists so that Task 4 does not re-ship the same silence under a different
@@ -2949,7 +2955,7 @@ func checkName(name string) []FieldError {
 }
 ```
 
-- [ ] **Step 4: Write the failing test**
+- [x] **Step 4: Write the failing test**
 
 `internal/metamodel/entities_test.go`. Note `newProject(t, pool)` — the
 helper takes the pool, not the service (`types_test.go`), and the same
@@ -3280,12 +3286,12 @@ exists in `types_test.go`, written against `insertEntity`; Task 4's job is
 to move it here and drive it through the service instead, not to declare
 it twice.
 
-- [ ] **Step 5: Run the test to verify it fails**
+- [x] **Step 5: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -run TestUpsertEntity -v`
 Expected: FAIL, `undefined: metamodel.EntityInput`.
 
-- [ ] **Step 6: Write the implementation**
+- [x] **Step 6: Write the implementation**
 
 `internal/metamodel/entities.go`:
 
@@ -3652,17 +3658,165 @@ func failureFor(index int, key string, err error) BulkFailure {
 `service.go`, beside `withTx` and `actorConstraintViolation`, and a
 second copy will not compile.
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `go test ./internal/metamodel/ -v`
 Expected: PASS, including `TestRemoveEntityTypeRefusesWhenInUse` from Task 3.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/db/queries internal/db/dbq internal/metamodel
 git commit -m "feat: entities with bulk partial and atomic writes"
 ```
+
+**Corrections made during implementation** (a pass over the landed
+package, written as Task 4 shipped so Tasks 5-9 build on what exists
+rather than on what was planned):
+
+1. **The two listing queries were not added.** `ListEntitiesPage` and
+   `ListEntitiesOfType` are printed in Step 1, and no line of Task 4
+   calls either. A query landing a task ahead of its only caller ships
+   generated code no test exercises, and `ListEntitiesPage` in
+   particular would have pre-committed Task 6's cursor shape — two
+   separate nargs and an `id::text` comparison — before the pagination
+   tests that have to justify it exist. `ListEntitiesPage` moved to
+   Task 6's Step 1, which is where its caller is. `ListEntitiesOfType`
+   is called by no task in this plan at all and was dropped; Task 3's
+   correction 8 says "Task 4 adds it, for its own listing", and Task 4
+   has no listing.
+2. **`upsertEntityWith` returns the type key beside the row, and the
+   events carry the stored spellings.** The block published
+   `entityEvent{TypeKey: in.TypeKey}` — the *caller's* spelling. Keys are
+   matched without regard to case, so a game whose type is stored as
+   `Quest` may be addressed as `quest`, and an event repeating that names
+   an identity no other reader of the game sees; a subscriber's only use
+   for the payload is to go and re-read the row it names. The two travel
+   together in an unexported `upsertedEntity` rather than as parallel
+   slices, which is also what removed the atomic path's index pairing
+   (correction 4). `TestEntityEventsCarryTheStoredIdentity` pins it,
+   proved red by publishing `in.TypeKey`.
+3. **`RemoveEntity` reads the type as well as the row.** The block
+   published `entityEvent{ID: id, Key: removed.Key}`, leaving `type_key`
+   empty on every removal — Task 3's correction 22 exactly, under a
+   different column: `entityEvent` declares the field, and a client
+   reading one cannot tell "not carried" from "empty". The removal now
+   reads the entity's type inside the same transaction and fills it.
+   Same test, second half, proved red by dropping the field.
+4. **The atomic path builds its events inside the transaction and
+   publishes them after the commit.** The block published
+   `entityEvent{..., TypeKey: items[i].TypeKey}` by walking
+   `result.Succeeded` and indexing back into `items`. That alignment
+   holds only because every item succeeded, and it is exactly the kind of
+   pairing a later edit breaks silently. It also reset `result` inside
+   `withTx`'s callback, which reads as a retry loop the helper does not
+   have.
+5. **An unrecognised bulk mode is refused, at path `mode`.** The block's
+   `if mode == BulkAtomic { ... }` read every other string — `"atomic "`,
+   `"all-or-nothing"`, a typo — as partial. Task 7 builds this value
+   straight from an agent-supplied string
+   (`metamodel.BulkMode(in.Mode)`), so that is a silent downgrade of an
+   all-or-nothing request into one that lands rows the caller asked to
+   have rolled back: a failure the caller has no way of seeing. The empty
+   mode stays partial, because an omitted argument is not a typo and the
+   spec names partial as the default.
+   `TestBulkRejectsAnUnknownMode` pins both halves.
+6. **A cancelled context stops a partial batch.** Every item is its own
+   transaction, so nothing else ends the loop: a cancelled caller turned
+   a 500-row batch into 500 failed round trips whose report nobody was
+   left to read, and the call still returned a nil error, which reads as
+   "the batch ran". `UpsertEntities` now returns whatever had already
+   landed *and* the error — rows landing before the cancellation is
+   partial mode's contract, not a fact to hide.
+   `TestBulkPartialStopsWhenTheCallerIsGone` pins it.
+7. **`TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem` was not
+   moved.** Step 4 says to move it out of `types_test.go` and drive it
+   through the service; declaring it in both files does not compile, and
+   the existing one is the stronger test — it asserts the sweep leaves
+   `fields` and `updated_at` untouched, which the replacement drops, and
+   it builds its invalid row with `insertEntity`, which the service path
+   cannot do because `UpsertEntity` refuses undeclared fields.
+   `entities_test.go` adds
+   `TestSchemaChangeFlagsAnEntityWrittenThroughTheService` instead: a row
+   written through `UpsertEntity`, judged by the same sweep after a new
+   required field appears, and un-flagged by writing it again.
+8. **`failureFor`'s comment overclaimed.** "Every code this package can
+   produce has an arm" — `ErrActorNotInGame` is produced by this package
+   and deliberately has none, because it is not a wire code (`errors.go`
+   argues why) and `internal_error` is the correct report for a fault an
+   agent cannot fix. The comment now says "every wire code" and names the
+   exception.
+9. **`Service.EntityByID` was written and then removed.** It had no
+   caller in this task, and shipping an exported accessor ahead of one is
+   the same fault as correction 1 with a Go signature instead of a SQL
+   statement. `q.GetEntityByID` stays, because `RemoveEntity` uses it.
+   Task 8 adds the accessor if its routes need it.
+10. **Tests the block did not carry**, all of them proved by breaking the
+    code under them: the compare-and-set guard
+    (`TestAnEntityCreationThatLosesTheRaceForItsKeyIsRefused` — two
+    writers spelling one key the same way, where the post-write spelling
+    check has nothing to catch and the guard is all that stands between
+    the loser and a silent overwrite); the pre-read's spelling-before-
+    version ordering
+    (`TestARespelledEntityKeyIsNamedEvenWhenTheVersionIsAlsoStale`, the
+    entity twin of `TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale`,
+    and the only thing that pre-read uniquely buys); the search vector
+    (`TestUpsertEntityWritesAndRewritesTheSearchVector`, below); game
+    isolation and the cross-game actor
+    (`TestEntitiesAreScopedToTheirProject`,
+    `TestAnEntityActorFromAnotherGameIsNamed` — both mandatory areas in
+    the design spec's testing section); the name cap; and an unknown type
+    key, whose message has to name the type or a seeding agent cannot
+    tell a missing type from a missing entity.
+11. **`entities.search` got its own test, and its own comment in the
+    SQL.** It is application-computed — `search_text` is derived from
+    user-declared jsonb whose text fields only the Go validator can pick
+    out, so no generated column could compute it — which means every
+    write path that changes `name` or `fields` has to come through
+    `UpsertEntity` or the row stays indexed under its previous words and
+    silently stops being findable, with nothing to signal why.
+    `TestUpsertEntityWritesAndRewritesTheSearchVector` reads the
+    `tsvector` column back through `plainto_tsquery` (the query shape
+    Task 6 will use) and asserts both arms of the upsert write it: the
+    insert indexes the name and the text fields, and the update drops the
+    replaced field's words and indexes the new ones. Proved red three
+    ways — dropping `search = excluded.search` from the `DO UPDATE`,
+    dropping `search_text` from the `to_tsvector` call, and making
+    `searchTextOf` return nothing. **Task 5 and Task 6 inherit the
+    obligation**: `insertEntity` in `types_test.go` writes rows with a
+    NULL `search`, so any test that expects to *find* a row must create
+    it through the service.
+
+**The partial-failure contract, stated once.** In `BulkPartial` each item
+is its own transaction: the rows that fit land, the ones that do not come
+back in `Failed` with their index, their key and their code, and the
+caller retries the named items and nothing else — item 200 landing never
+depended on item 3. The call returns a nil error, because the failures
+*are* the result. In `BulkAtomic` one bad row rolls the whole batch back
+and the call returns an error naming the failing item
+(`item 1 ("b"): schema_violation: …`, with the sentinel still matchable
+through the wrapping) and an empty result, because nothing was done. A
+failure message is a path and a rule, never another item's values: a
+batch report is the one place a row's content could leak into a
+neighbour's error, and
+`TestBulkPartialLandsTheGoodRowsAndReportsTheRest` asserts the failing
+item's message names `fields.min_level` and none of the names or values
+of the items around it.
+
+**The entity events' gating**, argued in `events.go` rather than
+inherited from the type events it happens to agree with: `MinRole` empty,
+because a viewer's browser renders the entity list and gating the change
+above viewer leaves exactly the reader who cannot re-fetch on demand
+watching a list that drifts; `HumanOnly` false, because Task 7 mounts
+`entities.list` and `entities.upsert` on MCP for agents, so an agent may
+already read every one of these rows and withholding the push buys
+nothing while costing a seeding agent the one warning that would explain
+its next `schema_violation`. The known consequence is recorded rather
+than gated around: these events fire once per row, so a 400-row seed puts
+400 events on every subscription. Role gating would not fix that and
+would only starve the viewer the decision exists to serve; coalescing a
+burst belongs to the transport, where the subscriber and its backlog are
+visible, and **Tasks 6 and 7 own it**.
 
 ---
 
@@ -4622,11 +4776,30 @@ svc)` (the helper takes the pool) and a malformed cursor reported with no
 code at all, which correction 25 says is an `invalid_input` — it is the
 caller's own argument, at a path, fixable in place.
 
-- [ ] **Step 1: Add the search query**
+- [ ] **Step 1: Add the listing and search queries**
+
+`ListEntitiesPage` is printed in Task 4's Step 1 but was **not** added
+there: nothing in Task 4 calls it, and a query landing a task ahead of
+its only caller ships generated code no test exercises and pre-commits
+this task's keyset shape sight unseen. It is this task's query, so add
+it here, and settle its cursor while doing so — the block below compares
+`(name, id::text)` against two separate nargs (`after_name`, `after`),
+which is a shape this task's own cursor tests have to justify.
+`ListEntitiesOfType`, also printed in Task 4, is called by no task in
+this plan and was dropped; add it if and when a caller appears.
 
 Append to `internal/db/queries/metamodel.sql`:
 
 ```sql
+-- name: ListEntitiesPage :many
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('after')::text IS NULL OR (name, id::text) > (sqlc.narg('after_name')::text, sqlc.narg('after')::text))
+ORDER BY name, id
+LIMIT sqlc.arg('limit')::int;
+
 -- name: SearchEntities :many
 SELECT e.*, ts_rank(e.search, plainto_tsquery('simple', sqlc.arg('query')::text)) AS rank
 FROM entities e

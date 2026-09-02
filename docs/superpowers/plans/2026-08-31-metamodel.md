@@ -6825,7 +6825,7 @@ answer is a top-N by rank and not a page, since a caller holding exactly
 - Modify: `internal/web/server.go`, `internal/web/mcp.go`
 - Test: `internal/web/mcp_metamodel_test.go`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `internal/web/mcp_metamodel_test.go`:
 
@@ -6947,12 +6947,12 @@ add `metamodelServiceForTest` in the same helper file, building
 `metamodel.New(pool, nil)` from it. Update the Core plan's existing callers in
 the same commit.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./internal/web/ -run TestMCPTypes -v`
 Expected: FAIL, `unknown field Metamodel in web.MCPDeps`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `internal/web/mcp_metamodel.go`:
 
@@ -7069,7 +7069,7 @@ func actorOf(caller Caller) metamodel.Actor {
 }
 ```
 
-- [ ] **Step 4: Add the remaining tools**
+- [x] **Step 4: Add the remaining tools**
 
 In the same file, following the pattern above and reusing `requireScope`, add:
 
@@ -7092,7 +7092,7 @@ Every one of them starts with `requireScope(caller, projectID)`. That call is
 the game-isolation invariant, and it is the reason no tool takes its scope from
 anything but the caller's own token.
 
-- [ ] **Step 5: Register the tools on the MCP server**
+- [x] **Step 5: Register the tools on the MCP server**
 
 In `internal/web/mcp.go`, extend `MCPDeps`:
 
@@ -7135,17 +7135,233 @@ func mcpError(err error) (string, string) {
 }
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `go test ./internal/web/ -v`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add internal/web
 git commit -m "feat: mcp tools for types, entities, relations and search"
 ```
+
+**Corrections made during implementation** (a pass over the landed
+surface, written as Task 7 shipped so Tasks 8 and 9 build on what exists
+rather than on what was planned).
+
+**The three blocking decisions, settled.**
+
+1. **Search ranking is implemented, not documented away.** The write
+   path now builds `setweight(to_tsvector(name), 'A') || setweight(
+   to_tsvector(name || ' ' || search_text), 'B')` and
+   `0006_weighted_entity_search.sql` rewrites every stored row.
+   `TestSearchRanksTheStrongerMatchFirst` became
+   `TestSearchRanksTheNameMatchFirst` and asserts the opposite order,
+   with the mentioned row carrying the word three times to the named
+   row's once so it cannot pass on frequency.
+
+   **The B half is deliberately the whole old text, name included, and
+   that is what makes the backfill exact.** A fields-only B half would
+   have needed the migration to know which of a row's jsonb fields carry
+   indexable text, which is a rule the Go validator owns and the schema
+   would have had to re-derive in SQL. With the name in both halves, the
+   backfill is `setweight(to_tsvector(name),'A') || setweight(search,
+   'B')` — a pure function of what is already stored — so a row migrated
+   here and the same row re-seeded afterwards produce identical vectors.
+   `TestTheSearchBackfillIsExact` (internal/db) asserts exactly that,
+   over three shapes including a row whose fields repeat its own name,
+   and was proved red by relabelling one side.
+
+   Ranking uses `ts_rank`'s default weight array; no explicit array is
+   passed anywhere, and `Search`'s doc comment says so.
+
+2. **A successful batch reports every row it landed.**
+   `BulkResult.Written []BulkWrite` and `RelationBulkResult.Written
+   []RelationWrite` are the wire half; `Succeeded` stays `json:"-"` and
+   unchanged for callers inside the repository. A `BulkWrite` carries
+   `type_key`, `key`, `id` and `version`; a `RelationWrite` carries
+   `type_key`, `id`, `source_id` and `target_id`, and no version,
+   because an edge has none.
+
+   **A count alone was rejected**: an agent already knows how many items
+   it sent, and subtracting the failures gives it the same number. What
+   it genuinely cannot derive is the row's `id` — every removal in this
+   package is addressed by id — and its `version`, which is not a
+   convenience but a requirement: `upsertEntityWith` *refuses* an update
+   of an existing row without a matching `ExpectedVersion`, so without
+   this an agent could not edit what it had just written without a
+   second read.
+
+3. **Retryable contention earns a wire code, and it is `retryable`.**
+   `metamodel.IsRetryable` admits four SQLSTATEs — 40001, 40P01, 55P03,
+   57014 — and `failureFor` and `mcpErrorFor` both read it.
+
+   It is named for the *recovery* and not for the cause, deliberately.
+   `contention` would be wrong for a 57014 raised by a slow statement
+   rather than by a lock; what all four share is exactly one property —
+   the identical call, resent unchanged, may succeed — and that property
+   is the only thing an agent can act on. It is also the only code in
+   the vocabulary that says *change nothing*: every other one names
+   something the caller must change first.
+
+   It is a **predicate rather than a sentinel** because contention can
+   surface from any statement in the package, so a sentinel would have
+   to be wrapped in at dozens of call sites and would be missing from
+   whichever one a later change forgot. Checked *last* in both switches,
+   after every domain code, so it can only ever intercept errors that
+   were heading for `internal_error`. Class-prefix matching was rejected:
+   class 40 also holds transaction_rollback and class 57 holds 57P01-05,
+   which are the server going away, and telling an agent to resend into
+   a shutting-down instance is not a recovery.
+   `TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput` now
+   proves it on a real held lock, not on a hand-built `PgError`.
+
+4. **`ErrActorNotInGame` does not earn a wire code.** Decided here and
+   recorded on the sentinel. A code exists to name a recovery, and this
+   condition has none on the agent's side.
+
+5. **Relations still have no `version`, and Task 7 declined the
+   migration.** Recorded on `RelationInput`. Adding the column alone
+   would harden the wrong half — the exposure is an edge's *fields*,
+   which is where the parallel-edge refusal pushes multiplicity — and
+   the two remedies have to be chosen between together. What Task 7 did
+   instead is stop the surface from implying a guarantee that is not
+   there: `relations.upsert`'s description states that an edge is
+   last-writer-wins.
+
+6. **Event coalescing: settled, and not by coalescing.** `events.go`
+   claimed Tasks 6 and 7 owned it "as the thing that makes the benefit
+   true". Two things closed it. First, coalescing cannot deliver that
+   benefit at all: collapsing many events into one necessarily discards
+   the per-row identity, so the coalesced event says "re-read", which is
+   what the resync already says — with a bounded buffer and no durable
+   log, per-row payloads and burst-proof delivery are not both
+   available. Second, decision 2 removed the need on the path the
+   comment worried about: the agent driving a batch now learns every row
+   that landed, with its version, from its own synchronous answer, so it
+   is not racing a stream for it. For every other subscriber —
+   a designer's browser, an agent watching someone else's writes —
+   overflow-to-resync is already the correct behaviour. What is left
+   open, and named as such, is *batching* in the SSE writer (one
+   flush per drained burst instead of one per event), which changes no
+   payload and belongs to whoever owns the realtime surface.
+
+**Where the plan was wrong, and what shipped instead.**
+
+7. **The printed tool functions took a caller-supplied `ProjectID` as a
+   struct field.** That is the shape Core's Task 13 review removed: a
+   caller-supplied id used as a lookup key. Every input here embeds
+   `ScopedArgs` instead, and every `MCP*` function takes the *resolved*
+   project id `addScopedTool` hands it, plus a `Caller` it re-checks with
+   `requireScope`.
+
+8. **The printed `EntitiesUpsertInput` carried `[]metamodel.EntityInput`
+   straight off the wire.** `metamodel.EntityInput` has an `Actor`, which
+   is the audit record of who wrote the row — so that shape would have
+   let an agent name any user or token it liked as the author of its
+   writes. It also has no json tags, so the wire keys would have been
+   `TypeKey`, `Key`, `Name`. **No domain type is used as a wire type
+   anywhere in `mcp_metamodel.go`**; `EntityItemInput` and
+   `RelationItemInput` carry no actor and `actorOf` builds one from the
+   authenticated caller.
+   `TestMCPEntitiesUpsertRecordsTheCallersOwnToken` pins it, proved red
+   by zeroing the actor.
+
+9. **Tools are not prefixed `maestro.`.** Step 5 names them
+   `maestro.types.upsert`; Core shipped `whoami`, `games.list`,
+   `games.get`, and the server's own implementation name is already
+   `maestro`. Sixteen tools carrying a redundant prefix the three
+   existing ones do not was the wrong half of the inconsistency to keep.
+
+10. **Ids cross the wire as strings, not `uuid.UUID`.** The SDK infers a
+    tool's *input* schema from the Go type by reflection, and
+    `uuid.UUID` is a `[16]byte` — an array of integers, not the string
+    it marshals as. Outputs keep `uuid.UUID` because their schemas are
+    hand-written, exactly as Core does. A malformed id is
+    `invalid_input` at that argument's own path (`source_type_ids[1]`
+    for an element of a list), never a 500;
+    `TestMCPMalformedIDIsTheCallersOwnArgument` pins it.
+
+11. **`newTestServer` was not changed to return the pool.** Step 1's
+    note asks for it plus an update of every existing caller. Several
+    dozen callers growing an ignored fourth result to reach a service
+    none of them use is churn for nothing, and a `Server` built without
+    a metamodel service is a shape this package supports deliberately.
+    `newMetamodelTestServer` is a second helper beside it.
+
+12. **The printed `mcpError` helper was not added; `mcpErrorFor` grew
+    the arms instead.** A second mapping function beside the one Core
+    already has is two vocabularies to keep in step. The arms match with
+    `errors.Is` against the sentinels and **never read `Code` off a
+    `*ValidationError`**, which is what makes an unrecognised code fall
+    through to `internal_error` rather than being published as whichever
+    code is most taught — the pairing `ValidationError.Is` argues from
+    the other side. `fieldDetails` puts the field paths in the error's
+    `details` as data. Every arm was proved load-bearing by deleting it
+    and watching its own case fail.
+
+**What else landed.**
+
+13. **The tool descriptions interpolate the domain's own constants.**
+    `metamodel` now exports `DefaultEntityPage`, `MaxEntityPage`,
+    `DefaultRelationPage`, `MaxRelationPage`, `DefaultSearchLimit`,
+    `MaxSearchLimit` and `MaxIndexedText` beside the already-exported
+    `MaxSearchQuery`, for the rule correction 24 established: a bound a
+    caller cannot read is a bound a caller trips over. No number in a
+    description is typed out, so a description cannot go on promising a
+    cap that moved. `search`'s description states the ranking, both
+    bounds and that the answer is a top-N and not a page;
+    `entities.list`'s states that the `related_to` traversal is not
+    paged and truncates silently at `MaxEntityPage`.
+
+14. **`TestEveryMCPToolGoesThroughAddScopedTool`** is the MCP
+    counterpart of `TestEveryGameScopedRouteGoesThroughRequireProject`.
+    `addScopedTool` records every tool it registers on the `Server`, and
+    the test compares that record against the tool list a real client
+    reads back over the real transport — in both directions. Proved red
+    by registering one tool with `mcp.AddTool` directly.
+
+15. **`TestMCPToolsRefuseAnotherGame`** calls all sixteen tools against a
+    second game the caller's own *user* owns and its *token* is not
+    bound to, and asserts `ErrScopeViolation` from every one, then that
+    nothing landed. One table rather than sixteen tests, because a
+    per-tool test is sixteen chances to forget the seventeenth.
+
+16. **The metamodel service was not wired into the binary, and now is.**
+    `cmd/maestro/main.go` built `web.Options` without one, so a
+    production instance would have served the Core three tools and
+    nothing else — and every test in `internal/web` would have kept
+    passing, because they all build their own `Server`. It also now
+    builds one `realtime.Hub` and hands the same instance to both the
+    web server and the metamodel service; two of them would have left a
+    designer's browser watching a stream nothing writes to.
+    `TestTheRunningBinaryServesTheGameContentTools` (cmd/maestro) seeds
+    an entity and searches for it through the real endpoint with a real
+    token, and was proved red by removing the wiring.
+
+17. **`entities.list`, `entities.get` and `search` resolve
+    `entity_type_id` to a type key**, at the cost of one extra small
+    query per call. A mixed listing whose rows carry a uuid the agent
+    cannot interpret is not an answer, and the recovery would have been
+    the same query one round trip later. A game's type vocabulary is a
+    handful of hand-written rows, not a table that grows with content.
+
+18. **`relations.list` answers with endpoint *ids*, and says so.** The
+    row holds ids and there is no bulk entity-by-ids query; resolving a
+    page of edges to `(type_key, key)` refs would need one. The
+    description says plainly that walking a game's graph in keys is
+    `entities.list` with `related_to`, and that this tool is for the
+    edges themselves — removing one, or reading a dense node's edges
+    past the traversal cap. **This is a real limitation and the fix is a
+    `ListEntitiesByIDs` query**; Task 8's REST mirror faces the same
+    question for the graph view and is where it is cheapest to add.
+
+19. **Batch answers emit empty arrays, never null.** A nil slice
+    marshals to JSON `null`, which fails the output schema and, more to
+    the point, makes "the batch reported no failures" look like "the
+    batch reported nothing".
 
 ---
 

@@ -75,9 +75,10 @@ type RelationInput struct {
 // RelationFilter narrows a relation listing. Every field is optional;
 // the zero value lists the game's edges.
 //
-// Cursor is the position handed back by a previous call, and belongs to
-// the filter it was issued for; list.go's cursor carries the whole
-// argument, including why it cannot be forged into another game's rows.
+// Cursor is the NextCursor of a previous call, and belongs to the game
+// and the filter it was issued for. EntityPage carries the whole
+// contract — every cursor in this package obeys it — including why one
+// cannot be forged into another game's rows.
 type RelationFilter struct {
 	TypeKey  string
 	SourceID *uuid.UUID
@@ -87,7 +88,10 @@ type RelationFilter struct {
 }
 
 // RelationPage is one page of edges plus the cursor for the next, in the
-// shape EntityPage already has.
+// shape EntityPage already has, and its NextCursor obeys the contract
+// EntityPage documents. The one difference is in its favour: this
+// listing sorts on created_at, which nothing edits, so the "a renamed
+// row moves behind the reader" clause cannot bite here.
 type RelationPage struct {
 	Relations  []dbq.Relation
 	NextCursor string
@@ -494,9 +498,9 @@ func (s *Service) relationBulkSpec(projectID uuid.UUID) bulkSpec[RelationInput, 
 // **It pages, on (created_at, id).** Until this task it did not: the
 // LIMIT was the whole story, so a game with more edges than the cap
 // simply could not be read past it and nothing in the answer said so.
-// Everything list.go's cursor documents applies here — a page is a
-// position and not a snapshot, and the cursor belongs to the filter it
-// was issued for — with one difference in its favour: created_at is a
+// Everything EntityPage documents applies here — a page is a position
+// and not a snapshot, and the cursor belongs to the game and the filter
+// it was issued for — with one difference in its favour: created_at is a
 // value nothing edits, so the boundary cannot move the way a renamed
 // entity moves an entity listing's.
 func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f RelationFilter) (RelationPage, error) {
@@ -517,7 +521,7 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 		typePart = relType.ID.String()
 	}
 
-	fingerprint := fingerprintOf("relations", typePart,
+	fingerprint := fingerprintOf(projectID.String(), "relations", typePart,
 		endpointFilterPart(f.SourceID), endpointFilterPart(f.TargetID))
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
@@ -561,9 +565,9 @@ func endpointFilterPart(id *uuid.UUID) string {
 	return id.String()
 }
 
-// The bounds on one relation listing. There is no cursor here — Task 6
-// owns pagination — so a caller that asks for nothing at all gets the
-// default rather than the whole table.
+// The bounds on one relation listing. A caller that asks for nothing at
+// all gets the default rather than the whole table, and reaches the rest
+// through the cursor ListRelations hands back.
 const (
 	defaultRelationPage int32 = 100
 	maxRelationPage     int32 = 500
@@ -585,11 +589,11 @@ const (
 // and what a caller writing `Limit: math.MaxInt32` to mean "everything"
 // expects.
 //
-// Task 6 owns the cursor, and when it arrives this stays the per-page
-// bound; nothing here is a promise about how many pages exist.
-// The rule itself is pageSize, in list.go, shared with the entity
-// listing so the two cannot drift apart; what stays here is this
-// listing's own two bounds and the argument for the shape.
+// This is the per-page bound and nothing more: the cursor ListRelations
+// now issues is what says how many pages exist. The rule itself is
+// pageSize, in list.go, shared with the entity listing so the two cannot
+// drift apart; what stays here is this listing's own two bounds and the
+// argument for the shape.
 func relationPageSize(limit int32) int32 {
 	return pageSize(limit, defaultRelationPage, maxRelationPage)
 }

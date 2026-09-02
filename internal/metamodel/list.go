@@ -63,8 +63,10 @@ const (
 // with two clauses, and a filter that only worked on one path would
 // answer the other question without saying so.
 //
-// Cursor is the position handed back by a previous call. It belongs to
-// the filter it was issued for and to no other; see cursor.
+// Cursor is the NextCursor of a previous call. It belongs to the game
+// and the filter it was issued for and to no other, and it is a position
+// rather than a snapshot; EntityPage carries the whole contract, and it
+// is worth reading before paging a game that is being edited.
 type EntityFilter struct {
 	TypeKey   string
 	Invalid   *bool
@@ -73,14 +75,67 @@ type EntityFilter struct {
 	Limit     int32
 }
 
-// EntityPage is one page of results plus the cursor for the next.
+// EntityPage is one page of results plus the cursor for the next. It is
+// where every cursor in this package comes from, so the contract a
+// caller has to know is written here — RelationPage's cursor obeys the
+// same one, and so does the one a traversal issues.
 //
-// NextCursor is set when the page came back full, which is one call more
-// than strictly necessary on a listing whose length is an exact multiple
-// of the limit: the last full page carries a cursor to an empty one. The
-// alternative — reading limit+1 rows and dropping the extra — costs a row
-// on every page of every listing to save that one call, so the empty page
-// stands and TestAFullFinalPageCarriesACursorToAnEmptyOne pins it.
+// **NextCursor is set when the page came back full**, and empty
+// otherwise. That is one call more than strictly necessary on a listing
+// whose length is an exact multiple of the limit: the last full page
+// carries a cursor to an empty one. The alternative — reading limit+1
+// rows and dropping the extra — costs a row on every page of every
+// listing to save that one call, so the empty page stands and
+// TestAFullFinalPageCarriesACursorToAnEmptyOne pins it. A caller looping
+// until NextCursor is empty is therefore correct, and must expect to be
+// handed an empty final page rather than treating one as an error.
+//
+// **A cursor is a position, not a snapshot, and this is the part that
+// bites.** It is the keyset position of the page's last row — (name, id)
+// for an entity listing, (created_at, id) for a relation one — so the
+// next page is "the rows after this position", never "skip this many
+// rows". What that buys is stability under concurrent editing: a row
+// deleted or inserted before the position does not slide the window, and
+// the row the cursor names need not still exist, because nothing
+// re-reads it.
+//
+// What it does not buy is a consistent view of the whole listing. The
+// sort key is mutable, so between two pages:
+//
+//   - a row renamed to sort *after* the position can be seen twice;
+//   - a row renamed to sort *before* it is never seen again by that
+//     listing, however many pages are still to come — it has moved
+//     behind the reader;
+//   - a row inserted before the position is likewise never seen.
+//
+// None of these is a bug and none of them is reported, so a caller that
+// needs a consistent whole re-reads the listing from no cursor rather
+// than trusting a paged walk taken while the game was being written.
+// ListRelations is the one listing this does not apply to, because
+// nothing edits created_at.
+//
+// **A cursor belongs to the listing that issued it**, and to no other:
+// the game, the filter and, for a traversal, the anchor and direction.
+// Every filter of a listing shares one sort order, so a cursor carried
+// across to another one would page perfectly and answer a different
+// question — the quest listing's position walking the zone listing and
+// returning zones, or one game's position walking another game's rows.
+// It therefore carries a fingerprint of the listing it came from and a
+// mismatch is refused as invalid_input at path `cursor`. Pass a cursor
+// back only to the call that produced it, with the same filter.
+//
+// **It is not a capability and it is not signed.** It is base64 of JSON;
+// a caller can decode it, rewrite the position and recompute the
+// fingerprint from values it already holds. That buys nothing, because
+// the position only ever becomes a `>` comparison inside a statement
+// already filtered by the caller's own project id — the worst a forged
+// position does is skip the caller's own rows, which
+// TestAForgedCursorCannotReachAnotherGamesRows pins. The fingerprint is
+// a consistency check against a caller's own mistake, and it must not be
+// relied on as a security boundary. For the same reason it leaks
+// nothing: the position is the sort value and id of a row this same call
+// just returned to this same caller, and the fingerprint is a digest of
+// the filter that caller supplied.
 type EntityPage struct {
 	Entities   []dbq.Entity
 	NextCursor string
@@ -112,43 +167,9 @@ func pageSize(limit, def, max int32) int32 {
 // cursor is the keyset position of the last row of a page, together with
 // a fingerprint of the listing it was issued for.
 //
-// **What it is.** (name, id) is exactly the sort key of every listing in
-// this file, so paging is "the rows after this position" rather than
-// "skip this many rows". That is what makes a page stable while the game
-// is being edited underneath it: a row deleted or inserted before the
-// position does not slide the window, and the row the cursor names need
-// not still exist — nothing re-reads it.
-//
-// **What it is not: a snapshot.** A row *renamed* between two pages
-// moves in the sort order, so it can be seen twice or not at all, and a
-// row inserted before the position is never seen by that listing. Both
-// are inherent to a keyset over a mutable sort key and neither is a bug;
-// a caller that needs a consistent whole re-reads from no cursor.
-//
-// **Why it carries a fingerprint.** Every filter of this listing shares
-// one sort order, so a cursor issued for the quest listing pages
-// perfectly well into the zone listing and answers with zones. Nothing
-// about the position itself could catch that. The fingerprint is a hash
-// of the resolved filter — the entity type id, the invalid flag, and a
-// traversal's relation type, anchor and direction — so a cursor carried
-// across to a different listing is refused instead of answering the
-// wrong question.
-//
-// **It is not a capability, and it is not signed.** A caller can decode
-// this, rewrite the position and re-encode it: it is base64 of JSON and
-// nothing authenticates it. That buys nothing, and the reason is not the
-// encoding but where the value is used — the position becomes a `>`
-// comparison inside a statement already filtered by the caller's own
-// project id, so the worst a forged position does is skip the caller's
-// own rows. TestAForgedCursorCannotReachAnotherGamesRows pins that. The
-// fingerprint is a consistency check against a caller's own mistake, not
-// a security boundary, and it must not be relied on as one: it is a
-// plain hash of values the caller already knows, so a caller determined
-// to page one listing with another's position can recompute it.
-//
-// **It leaks nothing.** The position is the sort value and id of a row
-// the same call has just returned to the same caller, and the
-// fingerprint is a digest of the filter that caller supplied.
+// **The contract is EntityPage's**, where a caller can read it: what a
+// position buys and does not buy, why a cursor cannot be carried between
+// listings, and why nothing signs it. This comment is only the shape.
 //
 // Sort is the leading half of the sort key, spelled as text: an entity
 // listing's is the row's name, and ListRelations', whose rows are
@@ -156,6 +177,15 @@ func pageSize(limit, def, max int32) int32 {
 // typed union because a cursor is an opaque token whose only job is to
 // come back unchanged, and the listing that issued it — pinned by the
 // fingerprint — is the only code that has to know how to read it.
+//
+// Fingerprint is fingerprintOf over the *resolved* listing: the project
+// id first, then which listing it is, then the filter — the entity type
+// id, the invalid flag, and a traversal's relation type, anchor and
+// direction. Resolved and not as spelled, so two spellings of one key
+// give one fingerprint. The project id is first because without it two
+// games' unfiltered listings shared a fingerprint and one game's cursor
+// paged the other's rows from a position that meant nothing there:
+// TestACursorFromAnotherGameIsRefused pins each of the three listings.
 type cursor struct {
 	Sort        string    `json:"n"`
 	ID          uuid.UUID `json:"i"`
@@ -263,9 +293,9 @@ func invalidFilterPart(invalid *bool) string {
 // copy of them.
 //
 // **A page is a position, not a snapshot.** Pages are keyset-ordered by
-// (name, id); cursor's doc comment records what that means while the
-// game is being written underneath the caller, and what it does not
-// mean.
+// (name, id); EntityPage records what that means while the game is being
+// written underneath the caller, what it does not mean, and why a cursor
+// cannot be carried to another listing or another game.
 func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f EntityFilter) (EntityPage, error) {
 	limit := pageSize(f.Limit, defaultEntityPage, maxEntityPage)
 
@@ -287,7 +317,8 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 		return s.listRelated(ctx, projectID, *f.RelatedTo, typeID, typePart, f, limit)
 	}
 
-	fingerprint := fingerprintOf("entities", typePart, invalidFilterPart(f.Invalid))
+	fingerprint := fingerprintOf(projectID.String(), "entities", typePart,
+		invalidFilterPart(f.Invalid))
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
 		return EntityPage{}, err
@@ -346,8 +377,8 @@ func (s *Service) listRelated(ctx context.Context, projectID uuid.UUID, rel Rela
 		return EntityPage{}, err
 	}
 
-	fingerprint := fingerprintOf("related", relType.ID.String(), anchor.ID.String(),
-		rel.Direction, typePart, invalidFilterPart(f.Invalid))
+	fingerprint := fingerprintOf(projectID.String(), "related", relType.ID.String(),
+		anchor.ID.String(), rel.Direction, typePart, invalidFilterPart(f.Invalid))
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
 		return EntityPage{}, err

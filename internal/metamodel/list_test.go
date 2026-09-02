@@ -1096,3 +1096,279 @@ func TestARelationCursorBelongsToItsOwnFilter(t *testing.T) {
 		t.Fatalf("err = %v, want invalid_input at path \"cursor\"", err)
 	}
 }
+
+// TestACursorFromAnotherGameIsRefused pins the half of the fingerprint's
+// job that the filter alone cannot do.
+//
+// Two games seeded from the same keys produce two listings with the same
+// resolved filter parts in everything but the project — the entity type
+// ids differ per game, but an *unfiltered* listing has no type part at
+// all, and a relation listing sorts on created_at, which is not even
+// game-specific. So a cursor issued to game A digested nothing that
+// named A, and handing it to game B's listing was accepted: B answered
+// from A's position, returning the tail of B's rows and silently hiding
+// the head. On relations, where games are seeded in sequence and the
+// sort key is a timestamp, B's cursor fed to A skipped every one of A's
+// edges — an empty page with no cursor, which an agent reads as "this
+// game has no edges".
+//
+// No row of another game was ever returned; the listings' project
+// filters see to that and TestAForgedCursorCannotReachAnotherGamesRows
+// pins it. What crossed was the *position*, which makes this a wrong
+// answer rather than a leak — and a wrong answer with nothing in it that
+// says so is the defect this whole read surface is most exposed to. The
+// project id is therefore the first part of every fingerprint.
+func TestACursorFromAnotherGameIsRefused(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine := newProject(t, pool)
+	theirs := newProject(t, pool)
+	for _, project := range []uuid.UUID{mine, theirs} {
+		seedQuestType(t, svc, project)
+		seedQuests(t, svc, project, 10)
+		seedZoneAnchor(t, svc, project)
+		seedTakesPlaceIn(t, svc, project)
+		for i := range 10 {
+			relate(t, svc, project, "takes_place_in",
+				metamodel.Ref{TypeKey: "quest", Key: fmt.Sprintf("quest-%02d", i)},
+				metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+		}
+	}
+
+	traversal := func() *metamodel.RelatedFilter {
+		return &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		}
+	}
+
+	t.Run("the unfiltered entity listing", func(t *testing.T) {
+		theirPage, err := svc.ListEntities(ctx, theirs, metamodel.EntityFilter{Limit: 8})
+		if err != nil {
+			t.Fatalf("their page: %v", err)
+		}
+		if theirPage.NextCursor == "" {
+			t.Fatal("their page must carry a cursor for this test to mean anything")
+		}
+		_, err = svc.ListEntities(ctx, mine,
+			metamodel.EntityFilter{Limit: 8, Cursor: theirPage.NextCursor})
+		requireCursorRefused(t, err)
+	})
+
+	t.Run("the traversal", func(t *testing.T) {
+		theirPage, err := svc.ListEntities(ctx, theirs,
+			metamodel.EntityFilter{RelatedTo: traversal(), Limit: 8})
+		if err != nil {
+			t.Fatalf("their page: %v", err)
+		}
+		if theirPage.NextCursor == "" {
+			t.Fatal("their page must carry a cursor for this test to mean anything")
+		}
+		_, err = svc.ListEntities(ctx, mine,
+			metamodel.EntityFilter{RelatedTo: traversal(), Limit: 8, Cursor: theirPage.NextCursor})
+		requireCursorRefused(t, err)
+	})
+
+	t.Run("the relation listing", func(t *testing.T) {
+		theirPage, err := svc.ListRelations(ctx, theirs, metamodel.RelationFilter{Limit: 8})
+		if err != nil {
+			t.Fatalf("their page: %v", err)
+		}
+		if theirPage.NextCursor == "" {
+			t.Fatal("their page must carry a cursor for this test to mean anything")
+		}
+		_, err = svc.ListRelations(ctx, mine,
+			metamodel.RelationFilter{Limit: 8, Cursor: theirPage.NextCursor})
+		requireCursorRefused(t, err)
+	})
+
+	// Every within-game listing still pages with its own cursor: the new
+	// part narrows the fingerprint and must not have invalidated it.
+	t.Run("a game's own cursor still pages it", func(t *testing.T) {
+		first, err := svc.ListEntities(ctx, mine, metamodel.EntityFilter{Limit: 8})
+		if err != nil {
+			t.Fatalf("first page: %v", err)
+		}
+		rest, err := svc.ListEntities(ctx, mine,
+			metamodel.EntityFilter{Limit: 8, Cursor: first.NextCursor})
+		if err != nil {
+			t.Fatalf("second page: %v", err)
+		}
+		if len(first.Entities)+len(rest.Entities) != 11 {
+			t.Fatalf("paged over %d rows, want the game's 11",
+				len(first.Entities)+len(rest.Entities))
+		}
+	})
+}
+
+// requireCursorRefused is the assertion every cursor-mismatch case makes:
+// invalid_input, one problem, at the path the caller passed the value at.
+func requireCursorRefused(t *testing.T, err error) {
+	t.Helper()
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want invalid_input", err)
+	}
+	var ve *metamodel.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v, want a ValidationError", err)
+	}
+	if len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
+		t.Fatalf("fields = %+v, want one problem at path \"cursor\"", ve.Fields)
+	}
+	if !strings.Contains(ve.Fields[0].Message, "different listing") {
+		t.Fatalf("message = %q, want it to name the mismatch", ve.Fields[0].Message)
+	}
+}
+
+// seedZoneAnchor declares the zone type and the one zone the traversal
+// tests hop through.
+func seedZoneAnchor(t *testing.T, svc *metamodel.Service, project uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	}); err != nil {
+		t.Fatalf("seed zone type: %v", err)
+	}
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest",
+	}); err != nil {
+		t.Fatalf("seed zone: %v", err)
+	}
+}
+
+// TestPagingIsStableWhenEveryRowSharesOneName pins the half of the
+// keyset that nothing else in this suite touches: the id tiebreak in
+// ORDER BY.
+//
+// The SQL comment argues at length that a keyset whose comparison
+// disagrees with its own sort skips or repeats rows and says nothing
+// about it, and then defends only the collation half of that agreement.
+// The other half was pinned by no test at all: dropping `id` from
+// `ORDER BY name, id` on either listing left the whole suite green,
+// because every other test seeds distinct names. With ten rows sharing
+// one name and a page of three, the unpinned version returned five
+// distinct rows out of ten and three of them twice — Postgres is free to
+// order the tied rows differently on each of the four statements, so the
+// `(name, id) > (name, id)` comparison lands somewhere unrelated to
+// where the previous page stopped.
+//
+// Duplicate names are ordinary in game content — "Kobold", "Bandit",
+// "Wolf" across a dozen zones — so this is the common case rather than
+// an adversarial one, and it is pinned for the traversal too, which has
+// its own copy of the clause.
+func TestPagingIsStableWhenEveryRowSharesOneName(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedZoneAnchor(t, svc, project)
+	seedTakesPlaceIn(t, svc, project)
+	const rows = 10
+	for i := range rows {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: fmt.Sprintf("kobold-%02d", i), Name: "Kobold",
+			Fields: map[string]any{"min_level": float64(1)},
+		}); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+		relate(t, svc, project, "takes_place_in",
+			metamodel.Ref{TypeKey: "quest", Key: fmt.Sprintf("kobold-%02d", i)},
+			metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	}
+
+	for _, tc := range []struct {
+		name   string
+		filter metamodel.EntityFilter
+	}{
+		{"the plain listing", metamodel.EntityFilter{TypeKey: "quest", Limit: 3}},
+		{"the traversal", metamodel.EntityFilter{Limit: 3, RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := map[string]int{}
+			filter := tc.filter
+			for page := 1; page <= rows+1; page++ {
+				got, err := svc.ListEntities(ctx, project, filter)
+				if err != nil {
+					t.Fatalf("page %d: %v", page, err)
+				}
+				for _, key := range keysOf(got) {
+					seen[key]++
+					if seen[key] > 1 {
+						t.Fatalf("page %d returned %s again (%d times now)",
+							page, key, seen[key])
+					}
+				}
+				if got.NextCursor == "" {
+					break
+				}
+				filter.Cursor = got.NextCursor
+			}
+			if len(seen) != rows {
+				t.Fatalf("paged over %d of %d rows sharing one name", len(seen), rows)
+			}
+		})
+	}
+}
+
+// TestARenamedRowCanMoveBehindTheReader pins the sharpest edge of "a
+// page is a position, not a snapshot", which EntityPage now states to
+// callers and which nothing pinned while it was documented on an
+// unexported type.
+//
+// A row not yet read, renamed between two pages to sort before the
+// cursor's position, is never returned by that listing again, however
+// many pages are still to come — it has moved behind the reader. That is
+// inherent to a keyset over a mutable sort key and it is not an error,
+// so the only defence a caller has is knowing about it: an agent walking
+// a game it is also editing can finish the walk having never seen a row
+// that existed throughout. The recovery is to re-read from no cursor,
+// which the second half of this test does.
+func TestARenamedRowCanMoveBehindTheReader(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 6)
+
+	first, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if got := keysOf(first); !equalStrings(got, []string{"quest-00", "quest-01", "quest-02"}) {
+		t.Fatalf("first page = %v", got)
+	}
+
+	// quest-04 has not been read yet. Rename it to sort before the
+	// position the cursor holds.
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "quest-04", Name: "Aaa Renamed",
+		Fields: map[string]any{"min_level": float64(5)}, ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	rest, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Limit: 10, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if got := keysOf(rest); !equalStrings(got, []string{"quest-03", "quest-05"}) {
+		t.Fatalf("second page = %v, want the renamed row to have moved behind the reader", got)
+	}
+
+	// It did not go anywhere: a listing started over sees all six.
+	whole, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{TypeKey: "quest", Limit: 50})
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if len(whole.Entities) != 6 {
+		t.Fatalf("re-read %d rows, want the game's 6", len(whole.Entities))
+	}
+}

@@ -1052,7 +1052,7 @@ func (q *Queries) PruneEntityTypeFromEndpointLists(ctx context.Context, arg Prun
 const searchEntities = `-- name: SearchEntities :many
 SELECT e.id, e.project_id, e.entity_type_id, e.key, e.name, e.fields, e.invalid, e.version, e.search, e.created_at, e.updated_at, e.updated_by_user_id, e.updated_by_token_id,
        ts_rank(e.search, plainto_tsquery('simple', $1::text)) AS rank,
-       ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', $1::text) AS name_match
+       (ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', $1::text))::bool AS name_match
 FROM entities e
 WHERE e.project_id = $2::uuid
   AND ($3::uuid IS NULL OR e.entity_type_id = $3::uuid)
@@ -1083,7 +1083,7 @@ type SearchEntitiesRow struct {
 	UpdatedByUserID  *uuid.UUID
 	UpdatedByTokenID *uuid.UUID
 	Rank             float32
-	NameMatch        interface{}
+	NameMatch        bool
 }
 
 // Full-text search over a game's entities, ranked.
@@ -1124,27 +1124,51 @@ type SearchEntitiesRow struct {
 // for a downgraded database: search works, it just ranks the old way
 // until its rows are rewritten.
 //
-// The tsquery is built twice, in the projection and in the predicate,
-// because a WHERE cannot refer to an output column's alias. **The
-// planner does not fold the two into one**, which this comment used to
-// claim it did. Measured on this project's own Postgres, 200 evaluations
-// of a non-constant plainto_tsquery: 0.63 ms each written once against
-// 1.44 ms written twice at 4 KiB of query text, and 4.09 ms against
-// 8.70 ms at 15 KiB. There is no common-subexpression elimination here;
-// the second build costs what the first one did.
+// The tsquery is built three times, not twice — once in the rank
+// projection, once in the name_match projection (added for review
+// finding M1) and once in the WHERE — because a WHERE cannot refer to an
+// output column's alias and the two projections answer different
+// questions (name_match filters to the A weight first, rank does not).
 //
-// It stays written twice anyway, now that MaxSearchQuery bounds the
-// query at 4 KiB: the doubling is worth about 0.8 ms on the worst query
-// this surface will accept, and it was only ever alarming while the
-// query side was unbounded. The obvious way to build it once, a
+// **On the call path this statement actually takes, that costs nothing
+// to run, and this comment used to claim otherwise for the wrong case.**
+// The prior text measured a *non-constant* plainto_tsquery — the query
+// text spliced into the SQL itself rather than bound as a parameter —
+// and found no folding there: 0.63 ms once against 1.44 ms written
+// twice at 4 KiB. That is not this statement's path. sqlc's generated
+// caller and every production caller reach Postgres through pgx's
+// extended protocol: `query` arrives as bound parameter $1, and
+// `plainto_tsquery` is declared IMMUTABLE, so once the parameter value
+// is known at plan time every occurrence collapses to the identical
+// `::tsquery` literal. `EXPLAIN (ANALYZE, VERBOSE)` on this project's
+// own Postgres, real seeded rows, the same bound-parameter path
+// dbq.SearchEntities uses, shows exactly that: for query text "gnoll
+// pack", all three occurrences of plainto_tsquery print in the plan as
+// the identical ::tsquery literal (Postgres's own doubled-quote spelling
+// of the two lexemes), not as a repeated function call.
+// Timed end to end over 200 runs through the same pool.Query path: the
+// statement as written (three occurrences) and a hand-rewritten version
+// built once via a LATERAL join and referenced three times measured
+// 0.370 ms and 0.389 ms per run respectively — indistinguishable, and
+// if anything the "once" form was the slower one, which is what
+// constant folding predicts: there is nothing left to save by writing
+// it once.
+//
+// So it stays written three times for the same reason it stayed written
+// twice before: doing that by hand — a
 // `WITH q AS MATERIALIZED (SELECT plainto_tsquery(...) AS ts)` joined
-// in, was measured too. It keeps the Bitmap Index Scan on
-// entities_search_idx, so it is not wrong, but the tsquery stops being a
-// constant the planner can see, and its row estimate for the match went
-// from 5 (exact) to 100 (a default guess) on the same data. Trading a
-// correct selectivity estimate on every search for 0.8 ms on the largest
-// accepted query is the wrong way round; whoever raises MaxSearchQuery
-// should measure both again.
+// in — was measured too, and it is worse, not neutral. It blocks the
+// planner from seeing the tsquery as a constant, and the row estimate
+// for the match went from 5 (exact) to 100 (a default guess) on the
+// same data. Trading a correct selectivity estimate on every search for
+// a folding the planner already does for free is the wrong way round.
+//
+// **This is scoped to the path pgx's extended protocol takes.** A caller
+// that interpolates the query text into the SQL string instead of
+// binding it as a parameter loses the constant the planner is folding
+// on, and lands back in the non-constant case the superseded measurement
+// above describes. Nothing in this package does that; if a future
+// caller ever does, re-measure rather than trust either number here.
 func (q *Queries) SearchEntities(ctx context.Context, arg SearchEntitiesParams) ([]SearchEntitiesRow, error) {
 	rows, err := q.db.Query(ctx, searchEntities,
 		arg.Query,

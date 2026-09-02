@@ -7559,6 +7559,110 @@ surface *says* and what an agent does after reading it.
     while the descriptions documented only the over-cap case; each now
     says both.
 
+**Corrections from the Task 7 re-review** (a fourth pass, after
+corrections 20-29 landed, over what the ranking fix's own wire shape and
+its own SQL comment said about themselves).
+
+30. **The rank on the wire no longer explained the order it was handed
+    in, and correction 23 is the reason.** That correction changed
+    `SearchEntities`'s `ORDER BY` to `(name_match, rank)` so a name match
+    always sorts first, but the wire still carried only `rank` — `dbq.
+    SearchEntitiesRow` had a `NameMatch` column (typed `interface{}`,
+    because `ts_filter(...) @@ plainto_tsquery(...)` alone is a type
+    sqlc could not infer) that `MCPSearch` read the sort by but never
+    put on `SearchHit`. `SearchHit`'s own doc comment still said "an
+    entity plus the rank it matched at", `SearchOutput`'s said "the top
+    `limit` rows by rank", and `Search`'s said the same — all three were
+    true before correction 23 and false after it, and nothing on the
+    wire let a caller recover the grouping the order was actually built
+    from. Proved live exactly as the re-review found it: `Gnoll Pack`
+    (rank 0.999224) sorts before `Wanted: Hogger` (rank 1.000000)
+    because the first is name-matched and the second is not; a caller
+    that re-sorted by `rank`, or simply trusted that 1.0 beats 0.999,
+    would reconstruct the wrong order.
+
+    Fixed by putting `name_match` on the wire rather than only
+    correcting the prose: `(ts_filter(e.search, '{a}') @@
+    plainto_tsquery(...))::bool AS name_match` in
+    `internal/db/queries/metamodel.sql` gives sqlc a type it can infer
+    (`bool` instead of `interface{}`), `SearchHit.NameMatch bool
+    json:"name_match"` carries it, `searchHitOutputSchema` requires it,
+    and `MCPSearch` sets it from the row. `SearchHit`, `SearchOutput`
+    and `Search`'s doc comments are corrected to describe the order as
+    `(name_match, rank)`, with `rank` ordering only within a group, and
+    the `search` tool description states the same thing an agent reads
+    before calling it.
+    `TestMCPSearchNameMatchAgreesWithTheOrderItExplains`
+    (internal/web) pins it at the wire: it fails to compile if
+    `name_match` is dropped from `SearchHit`, and fails outright if the
+    order `SearchEntities` produced and the `name_match` values on the
+    wire ever disagree in either direction. Proved red by reverting the
+    `ORDER BY` to `rank DESC` alone, which reproduces the wrong order the
+    field exists to explain.
+
+31. **The SQL comment's count and cost figure went stale in the same
+    commit that made them wrong, and both halves of the reviewer's
+    finding held up.** "The tsquery is built twice" became three —
+    correction 30 added the `name_match` projection alongside `rank`'s
+    and the `WHERE`'s — and the comment's "worth about 0.8 ms on the
+    worst query this surface will accept" was left over from measuring
+    the two-copy case, so it understated the real repetition by roughly
+    half even before asking whether the repetition costs anything at
+    all.
+
+    Re-measured on the real call path rather than trusting either
+    account: `dbq.SearchEntities` reaches Postgres through pgx's
+    extended protocol with `query` bound as parameter `$1`, and
+    `plainto_tsquery` is `IMMUTABLE`, so once the bound value is known at
+    plan time every occurrence folds to the same `::tsquery` literal.
+    `EXPLAIN (ANALYZE, VERBOSE)` over the exact statement, through the
+    exact bound-parameter path, on real seeded rows, printed all three
+    occurrences as the identical literal rather than as a repeated
+    function call. Timing 200 runs of the statement as shipped (three
+    occurrences) against a hand-written version built once via a
+    `LATERAL` join and read three times, through the same `pool.Query`
+    path: 0.370 ms/run against 0.389 ms/run — indistinguishable, and if
+    anything the "write it once" form was the slower one, which is what
+    folding predicts once nothing is left to save.
+
+    **This does not overturn the old measurement — it was answering a
+    different question.** 0.63 ms against 1.44 ms at 4 KiB was measured
+    against a *non-constant* `plainto_tsquery`, built by splicing the
+    query text into the SQL itself rather than binding it as a
+    parameter, which is exactly the case that defeats the folding just
+    measured. Nothing in this package does that. The SQL comment in
+    `internal/db/queries/metamodel.sql` (mirrored in the generated
+    `internal/db/dbq/metamodel.sql.go`) now states the count correctly,
+    states which measurement applies to which case, and says explicitly
+    that a future caller reaching this statement any other way than a
+    bound parameter should re-measure rather than trust either number
+    here. No code path changed — the statement still writes the tsquery
+    three times, and that stays right, because the `WITH ... MATERIALIZED`
+    alternative correction 20's era already measured is worse, not
+    neutral: it costs the planner its exact row estimate (5 rows exact
+    versus 100, a default guess) for a folding it already gets for free.
+
+32. **Informational — recorded, not fixed.** `0006_weighted_entity_
+    search.sql`'s Down-arm assertion, inside `TestTheSearchBackfillIsExact`
+    (`internal/db/metamodel_schema_test.go:594`), checks only "no weight,
+    no NULL" —
+    `search IS NULL OR search::text LIKE '%A%'` counts zero. The
+    migration's own comment says the Down arm removes every weight
+    **and every position**, but the test pins only the weight half:
+    replacing `strip(search)` with `setweight(search, 'D')` in the Down
+    arm would survive this guard, because `setweight` clears no weight
+    letters other than the one it sets and the row would carry no `'A'`
+    substring either way — while leaving every lexeme's position data
+    intact, which `strip` removes and `setweight` does not.
+
+    Behaviourally harmless today: `name_match`'s leading predicate reads
+    the A weight, and a `setweight(search, 'D')` row would report
+    `name_match = false` exactly as a fully stripped row does, so nothing
+    downstream would have told the difference. The guard is real for the
+    claim it makes and half of what the migration's prose claims — the
+    next person touching `0006`'s Down arm should not read this test's
+    green as proof the "every position" half holds.
+
 ---
 
 ### Task 8: REST mirror and the game home page

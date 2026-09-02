@@ -778,6 +778,86 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 	}
 }
 
+// TestMCPSearchNameMatchAgreesWithTheOrderItExplains closes the Task 7
+// re-review's finding that the wire carried only `rank` after the
+// ranking fix changed the sort to `(name_match, rank)`. SearchHit,
+// SearchOutput and Search's own doc comment all still said the order
+// was "by rank", which stopped being true the moment name_match became
+// the leading key: proved live, `Gnoll Pack` (a lower rank) sorted
+// before `Wanted: Hogger` (a higher one) because only the first is
+// *named* by the query.
+//
+// Exposing name_match on the wire, rather than only correcting the
+// prose, is what makes the guarantee legible: an agent that re-sorts by
+// rank, or reasons that a higher rank must come first, now has the
+// field that explains why it should not. This test fails two ways: it
+// will not compile if name_match is dropped from SearchHit, and it
+// fails outright if the order SearchEntities produced and the
+// name_match values on the wire ever disagree — either a hit marked
+// false sorting before one marked true, or the reverse.
+func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+
+	if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: []web.FieldInput{
+			{Key: "min_level", Type: "number", Required: true},
+			{Key: "summary", Type: "longtext"},
+		},
+	}); err != nil {
+		t.Fatalf("MCPTypesUpsert: %v", err)
+	}
+
+	// "named" is the row the query actually names. "mentioned" only
+	// carries the words in a field, repeated until ts_rank alone would
+	// have ranked it first — the exact shape review finding M1 proved
+	// live, reproduced here at the wire rather than the domain layer.
+	if _, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game, web.EntitiesUpsertInput{
+		Items: []web.EntityItemInput{
+			{TypeKey: "quest", Key: "named", Name: "Gnoll Pack",
+				Fields: map[string]any{"min_level": float64(1)}},
+			{TypeKey: "quest", Key: "mentioned", Name: "Wanted: Hogger",
+				Fields: map[string]any{
+					"min_level": float64(1),
+					"summary": strings.TrimSpace(strings.Repeat(
+						"A Gnoll Pack camp led by a Gnoll Pack chieftain. ", 500)),
+				}},
+		},
+	}); err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+
+	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "gnoll pack"})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	if len(out.Items) != 2 {
+		t.Fatalf("items = %+v, want both rows", out.Items)
+	}
+	// The order the ranking fix exists to guarantee: the named row
+	// first, regardless of how the un-weighted rank alone would compare.
+	if out.Items[0].Key != "named" || out.Items[1].Key != "mentioned" {
+		t.Fatalf("order = [%s %s], want [named mentioned]",
+			out.Items[0].Key, out.Items[1].Key)
+	}
+	// The field the order is actually built from must say the same
+	// thing the position does, for every adjacent pair — the assertion
+	// that generalises past this one fixture.
+	for i := 1; i < len(out.Items); i++ {
+		if !out.Items[i-1].NameMatch && out.Items[i].NameMatch {
+			t.Fatalf("items[%d].NameMatch = false sorted before items[%d].NameMatch = true: "+
+				"the wire order and the wire field disagree", i-1, i)
+		}
+	}
+	if !out.Items[0].NameMatch {
+		t.Fatalf("items[0] (%s) NameMatch = false, want true", out.Items[0].Key)
+	}
+	if out.Items[1].NameMatch {
+		t.Fatalf("items[1] (%s) NameMatch = true, want false", out.Items[1].Key)
+	}
+}
+
 // TestTheDomainTypesOnTheWireCarryExactlyTheseKeys closes review finding
 // L1.
 //

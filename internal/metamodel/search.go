@@ -113,14 +113,18 @@ const MaxSearchQuery = 4 << 10
 // quest, a creature or a place. typeKey narrows it to one, and an
 // unknown one is a not_found naming the key rather than an empty answer.
 //
-// **It is not paginated.** The answer is the top `limit` rows by rank,
-// and a caller holding exactly `limit` rows cannot tell whether there
-// were more. A cursor over a ranking is not the keyset the listings use —
-// rank is not unique, not stable under an edit and not a position a
-// caller can resume from — and the useful recovery for a search that
-// returned too much is a narrower query, not a deeper page. **Task 7
-// states the cap in the tool description** so an agent knows the answer
-// is a top-N.
+// **It is not paginated.** The answer is the top `limit` rows in the
+// `(name_match, rank)` order above — not by rank alone, which is a
+// weaker and narrower claim now that name_match leads the sort — and a
+// caller holding exactly `limit` rows cannot tell whether there were
+// more. A cursor over that order is not the keyset the listings use —
+// neither key is unique, neither is stable under an edit, and neither is
+// a position a caller can resume from — and the useful recovery for a
+// search that returned too much is a narrower query, not a deeper page.
+// **Task 7 states the cap in the tool description**, and puts
+// name_match itself on the wire on SearchHit, so an agent knows the
+// answer is a top-N and can read the grouping the order is built from
+// rather than reconstruct it from rank.
 func (s *Service) Search(ctx context.Context, projectID uuid.UUID, query, typeKey string, limit int32) ([]dbq.SearchEntitiesRow, error) {
 	if err := checkSearchQuery(query); err != nil {
 		return nil, err

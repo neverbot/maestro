@@ -373,20 +373,31 @@ type EntitiesListOutput struct {
 	Truncated  bool           `json:"truncated"`
 }
 
-// SearchHit is one search result: an entity plus the rank it matched at.
+// SearchHit is one search result: an entity, whether its *name* satisfied
+// the query, and the rank it matched at.
+//
+// NameMatch is on the wire, not only in the sort, because the order
+// SearchEntities produces is `(name_match, rank)` — rank alone does not
+// explain it. A caller that re-sorts by rank, or simply reasons that a
+// higher rank must come first, reconstructs the wrong order: a row with
+// name_match false can carry a higher rank than one with it true and
+// still sort after it. name_match is what lets an agent recover the
+// grouping the order is actually built from.
 type SearchHit struct {
 	EntityOutput
-	Rank float32 `json:"rank"`
+	NameMatch bool    `json:"name_match"`
+	Rank      float32 `json:"rank"`
 }
 
 // SearchOutput is search's answer.
 //
 // It carries no cursor, and that is not an omission: search returns the
-// top `limit` rows by rank, and a rank is not a position a caller can
-// resume from (Search's own doc comment argues it). Truncated is
-// therefore the only thing this envelope can honestly say, and it says
-// the weaker thing it can actually check — the answer is exactly as long
-// as the limit allowed, so there may be more.
+// top `limit` rows by `(name_match, rank)` order — see SearchHit — and
+// neither of those is a position a caller can resume from (Search's own
+// doc comment argues it). Truncated is therefore the only thing this
+// envelope can honestly say, and it says the weaker thing it can
+// actually check — the answer is exactly as long as the limit allowed,
+// so there may be more.
 type SearchOutput struct {
 	Items     []SearchHit `json:"items"`
 	Truncated bool        `json:"truncated"`
@@ -835,7 +846,7 @@ func MCPSearch(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.
 		if err != nil {
 			return SearchOutput{}, err
 		}
-		items = append(items, SearchHit{EntityOutput: entity, Rank: row.Rank})
+		items = append(items, SearchHit{EntityOutput: entity, NameMatch: row.NameMatch, Rank: row.Rank})
 	}
 	// The only thing this answer can honestly say about completeness:
 	// the ranking was cut at the limit, so there may be more below it.
@@ -1295,9 +1306,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"modelled it as a quest, a creature or a place.\n\n"+
 				"**Ranking.** Every row whose *name* satisfies the query comes before every "+
 				"row that only mentions the words in a field, however often it mentions them "+
-				"— that is a guarantee and not a tendency. Within each of those two groups, "+
-				"rank goes by how many of the query's words a row matches and how often. Ties "+
-				"break by name.\n\n"+
+				"— that is a guarantee and not a tendency, and each hit's own name_match says "+
+				"which group it landed in. `rank` only orders within a group — it does not "+
+				"explain the order between the two, and re-sorting by rank alone can undo the "+
+				"guarantee. Within each group, rank goes by how many of the query's words a "+
+				"row matches and how often. Ties break by name.\n\n"+
 				"**What is indexed.** A row's name plus the text its values carry: text, "+
 				"longtext, the chosen option of an enum, and the elements of a list<text>. "+
 				"Numbers and booleans are not — filter for those with entities.list. Only the "+
@@ -1482,16 +1495,17 @@ var entitiesListOutputSchema = listEnvelopeSchema(entityOutputSchema)
 
 var searchHitOutputSchema = &jsonschema.Schema{
 	Type:     "object",
-	Required: []string{"id", "type_key", "key", "name", "version", "invalid", "rank"},
+	Required: []string{"id", "type_key", "key", "name", "version", "invalid", "name_match", "rank"},
 	Properties: map[string]*jsonschema.Schema{
-		"id":       stringSchema(),
-		"type_key": stringSchema(),
-		"key":      stringSchema(),
-		"name":     stringSchema(),
-		"version":  {Type: "integer"},
-		"invalid":  boolSchema(),
-		"fields":   objectSchema(),
-		"rank":     numberSchema(),
+		"id":         stringSchema(),
+		"type_key":   stringSchema(),
+		"key":        stringSchema(),
+		"name":       stringSchema(),
+		"version":    {Type: "integer"},
+		"invalid":    boolSchema(),
+		"fields":     objectSchema(),
+		"name_match": boolSchema(),
+		"rank":       numberSchema(),
 	},
 }
 

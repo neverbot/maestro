@@ -4151,6 +4151,141 @@ Two differences from entity types, both from the schema
   is a decision rather than an omission — record it if Task 7 wants edge
   concurrency, because it would need a migration.
 
+**Corrections made during implementation** (a pass over the landed
+package, written as Task 5 shipped so Tasks 6-9 build on what exists
+rather than on what was planned):
+
+1. **`ListEntitiesRelatedTo` was not added.** It is printed in Step 1
+   below and called by no line of Task 5; its only caller is Task 6's
+   one-hop traversal. A query landing a task ahead of its caller ships
+   generated code no test exercises, which is Task 4's correction 1
+   exactly. It moved to Task 6's Step 1, where its caller is.
+2. **`UpsertRelations` returns a `RelationBulkResult`, not a
+   `BulkResult`.** `BulkResult.Succeeded` is `[]dbq.Entity` (Task 4's
+   correction 26 keeps it that way deliberately, since making it generic
+   would change a public type every existing caller and test names), so
+   the printed signature does not compile. The new type is the same
+   shape with `[]dbq.Relation`, carrying the same `json:"-"` and the same
+   note that **Task 7 must decide what a successful batch tells an
+   agent**.
+3. **The batch is `bulkUpsert`'s; Task 5 writes only a `bulkSpec`.** The
+   printed `UpsertRelations` reproduces the two-mode loop by hand, which
+   is the copy correction 26 extracted `bulk.go` to prevent — it would
+   have arrived without the duplicate check, without the cancellation
+   guard and without the up-front atomic refusal. What is edge-shaped is
+   `relationBulkSpec`: the identity (relation type key plus both
+   endpoints' type key and key, all five folded, since every one of them
+   is resolved through a `lower(key)` lookup), the repetition message,
+   the failure name and the publish.
+
+   The length-prefixed join moved into `foldedIdentity` in `bulk.go` and
+   both specs call it. Entities had it inline for two parts; edges have
+   five, and two kinds folding identity differently is how the two
+   silently drift apart.
+4. **Every relation event carries the *stored* spelling of the relation
+   type's key, on all three write paths**, and `RemoveRelation` reads the
+   type to fill it. The printed code publishes `TypeKey: in.TypeKey` —
+   the caller's spelling, Task 4's correction 2 under a different column
+   — and its removal publishes no type key at all, which is Task 3's
+   correction 22: `relationEvent` declares the field and a client reading
+   one cannot tell "not carried" from "empty". A written edge travels
+   with its type's stored key in an unexported `upsertedRelation`, as
+   `upsertedEntity` does, so no caller pairs a row with the wrong key by
+   getting an index wrong.
+   `TestRelationEventsReachEveryMemberOfTheGameIncludingAgents` runs
+   every path against a type stored as `Requires` and addressed as
+   `requires`; proved red on the bulk publish and on the removal in turn.
+5. **Four gating constants, not two.** The step asks for one
+   `relationEventMinRole` / `relationEventHumanOnly` pair covering both
+   kinds. A relation type is the game's edge *vocabulary* and a relation
+   is its content; the two decisions agree today, and naming one in terms
+   of the other would make a later change to either silently change both
+   — the argument `entityEventMinRole` already records. Both are argued
+   in `events.go` rather than inherited: `MinRole` empty because a
+   viewer's browser renders the graph and gating the invalidation above
+   viewer starves exactly the reader who cannot re-fetch, `HumanOnly`
+   false because Task 7 mounts these tools on MCP for agents and an
+   endpoint rule moving under a seeding agent is the one warning that
+   explains its next `endpoint_type_mismatch`.
+6. **The endpoint lists are checked when they are declared.**
+   `source_type_ids` and `target_type_ids` are plain `uuid[]` with no
+   foreign key of their own, so an id from another game — or from
+   nothing at all — was stored happily and then matched no entity ever,
+   leaving a relation type nothing could instance and a refusal
+   ("cannot be the source of") naming the wrong problem. Each id is
+   resolved against this project inside the write's own transaction and
+   reported at `source_type_ids[i]` / `target_type_ids[i]` as
+   `invalid_input`, both lists in one pass.
+   `TestARelationTypeEndpointListMustNameTypesOfThisGame` pins it.
+7. **An undeclared endpoint list is written as an empty array.** pgx
+   encodes a nil slice as SQL `NULL` and both columns are `NOT NULL`, so
+   passing the zero value through failed the insert outright — the
+   *ordinary* case, since most relation types declare no endpoint rules.
+   Empty is also what nil means here, and what the column defaults to.
+8. **Every missing piece of an edge is named, and so is the endpoint
+   that broke a rule.** An edge has three parents, any of which may be
+   absent, and `fmt.Errorf("source %s/%s: %w", …)` puts the sentinel's
+   own text (`not_found`) at the end of the sentence. The messages are
+   `not_found: no relation type "x" in this game`,
+   `not_found: source: no entity type "x" in this game`,
+   `not_found: target: no entity "y" of type "x" in this game`, and
+   `endpoint_type_mismatch: source: entity type "class" cannot be the
+   source of relation type "takes_place_in"` — each naming which end to
+   fix, since an agent with two bad endpoints cannot otherwise tell.
+   `TestEachMissingPieceOfAnEdgeIsNamed` covers the four.
+9. **An unknown `TypeKey` in a listing filter is a `not_found`, not an
+   empty listing**, so a caller that mistyped a key hears about the key.
+   The page bounds are named constants beside the listing rather than two
+   literals in the middle of it; Task 6 owns the cursor.
+10. **Parallel edges and self-loops are decided and written down**, on
+    `UpsertRelation` and in the design spec's "Constraints and indexes".
+    The `relations_edge_key` index is the ON CONFLICT target that makes a
+    re-seed idempotent, so a game cannot hold two edges of one type
+    between one ordered pair. A game that needs two says so as a second
+    relation type or in the edge's own fields (`passages: ["door",
+    "vent"]`), both of which are better records than a nameless
+    duplicate. Self-loops are allowed and pinned by
+    `TestAnEdgeMayJoinAnEntityToItself`: a self-referencing prerequisite
+    is a design mistake to surface in analysis, not a write to block.
+11. **The re-validation gap is recorded where it bites.** Editing an
+    entity type's schema re-checks its entities and flags the ones that
+    no longer fit; editing a relation type's schema does nothing of the
+    kind, because `relations` has no `invalid` column. Nothing here makes
+    that harder to close — `upsertRelationWith` validates on write
+    through the same `Schema.Validate`, and a sweep would need the column,
+    a `ListRelationFieldsOfType` query and a `MarkRelationsOfTypeInvalid`
+    beside their entity twins — but `UpsertRelationType`'s doc comment now
+    says plainly that it does not re-judge existing edges, rather than
+    leaving a reader to infer it from the entity path.
+12. **Tests the block did not carry**, each proved by breaking the code
+    under it: the relation-type creation race
+    (`TestARelationTypeCreationThatLosesTheRaceForItsKeyIsRefused`, the
+    guarded `DO UPDATE`); the post-write spelling check
+    (`…CreationRacingAnotherSpellingIsRefusedAfterTheWrite`, the only
+    path the locked pre-read cannot reach); `conflictOnRelationTypeKey`'s
+    respelling arm (`…LosingItsKeyToAnotherSpellingIsNamedAsARespelling`);
+    the `FOR UPDATE`
+    (`TestTheReportedCurrentRelationTypeVersionIsTheOneTheWriteWouldHaveMet`,
+    which needs *no* `ExpectedVersion` — with one, the guard refuses on
+    its own and the lock is unobservable, exactly as Task 4's correction
+    16 found); every project filter, one at a time, over the queries
+    themselves
+    (`TestTheRelationQueriesThatAddressARowByIDAreScopedToTheProject`,
+    since `RemoveRelation` reads, re-reads and deletes, so its three
+    filters mask each other); the three optional filters of
+    `ListRelations`; both endpoint rules and the empty-list-means-any
+    half; the cross-game endpoint and the cross-game actor; the batch in
+    both modes, including that an atomic rollback publishes nothing and
+    that a repeated edge is diagnosed as a repeated *edge*.
+
+    One mutation deliberately left green: dropping `RemoveRelationType`'s
+    in-use count still refuses, because `relations.relation_type_id` is
+    `ON DELETE RESTRICT` and the delete raises 23503, which the same
+    function maps to `ErrInUse`. That is what `types.go` already says
+    about the entity twin — the count earns a typed refusal without a
+    transaction aborting on a raw constraint violation, not the refusal
+    itself.
+
 - [ ] **Step 1: Add the queries**
 
 Append to `internal/db/queries/metamodel.sql`:
@@ -5090,9 +5225,22 @@ which is a shape this task's own cursor tests have to justify.
 `ListEntitiesOfType`, also printed in Task 4, is called by no task in
 this plan and was dropped; add it if and when a caller appears.
 
+`ListEntitiesRelatedTo` is printed in Task 5's Step 1 and was **not**
+added there either, for the same reason: nothing in Task 5 calls it, and
+its only caller is this task's `RelatedTo`. It is reprinted below.
+
 Append to `internal/db/queries/metamodel.sql`:
 
 ```sql
+-- name: ListEntitiesRelatedTo :many
+SELECT e.* FROM entities e
+JOIN relations r ON (r.source_id = e.id OR r.target_id = e.id)
+WHERE e.project_id = sqlc.arg('project_id')::uuid
+  AND r.relation_type_id = sqlc.arg('relation_type_id')::uuid
+  AND ((sqlc.arg('direction')::text = 'incoming' AND r.target_id = sqlc.arg('anchor_id')::uuid AND e.id = r.source_id)
+    OR (sqlc.arg('direction')::text = 'outgoing' AND r.source_id = sqlc.arg('anchor_id')::uuid AND e.id = r.target_id))
+ORDER BY e.name, e.id;
+
 -- name: ListEntitiesPage :many
 SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid

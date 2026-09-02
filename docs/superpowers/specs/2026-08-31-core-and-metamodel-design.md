@@ -343,7 +343,22 @@ jsonb field would be invisible to every traversal.
 entities — enforced by a unique index, not a pre-flight check, so two
 concurrent agents cannot slip between a `SELECT` and an `INSERT`.
 Relation endpoints are validated against the relation type's allowed
-lists on write. `tsvector` + GIN over names and text fields for
+lists on write, and every id in those lists must name an entity type of
+the same game — the columns are plain `uuid[]`, so an id from elsewhere
+would declare a rule no write could ever satisfy.
+
+**One edge per (relation type, source, target)**, by unique index. That
+index is what an upsert conflicts on, and it is what makes re-seeding a
+game idempotent instead of laying a second copy of every edge beside the
+first. The cost is deliberate: a game cannot hold two edges of one
+relation type between one ordered pair of entities. A game that needs
+two says so either as a second relation type (`connects_to` and
+`connects_to_secretly`) or in the edge's own fields, which is what edge
+fields are for — one `connects_to` carrying `passages: ["door", "vent"]`
+rather than two identical edges nothing tells apart. **Self-loops are
+allowed**: source and target may be the same entity. A quest that
+requires itself is a design mistake the analysis sub-project reports, not
+a write to refuse. `tsvector` + GIN over names and text fields for
 cross-cutting search. `entities.search` is a plain `tsvector` column
 written by the application, not a `GENERATED … STORED` column.
 

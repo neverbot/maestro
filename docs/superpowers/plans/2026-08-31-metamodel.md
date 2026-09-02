@@ -2742,11 +2742,11 @@ column name. Add:
 // at maxLabelLen, counted in runes — at its own wire path, so an agent
 // sees "name", not "label", for the argument it actually sent.
 //
-// It is a second function rather than a fifth argument to
-// checkDescriptors because the two rows genuinely differ: a type has
-// five descriptive columns and an entity has one, and a shared helper
-// taking three empty strings would read as though an entity had a colour
-// that simply was not being checked.
+// It is a second function rather than a call to checkDescriptors with
+// empty descriptors because the *path* has to differ: checkDescriptors
+// reports at "label", and an agent that sent `name` must be told about
+// `name`. Rows whose descriptive columns really are label-shaped —
+// relation types, Task 5 — call checkDescriptors directly instead.
 func checkName(name string) []FieldError {
 	var problems []FieldError
 	if name == "" {
@@ -3479,8 +3479,30 @@ git commit -m "feat: entities with bulk partial and atomic writes"
 
 **Files:**
 - Create: `internal/metamodel/relation_types.go`, `internal/metamodel/relations.go`
-- Modify: `internal/db/queries/metamodel.sql`
+- Modify: `internal/db/queries/metamodel.sql`, `internal/metamodel/events.go`
 - Test: `internal/metamodel/relations_test.go`
+
+**Refreshed after Task 3's review, 2026-09-02**, for the same reasons and
+against the same corrections as Task 4: the blocks below previously
+carried an unguarded `DO UPDATE`, an `updated_at = now()` the trigger
+owns, no audit columns, a three-argument `s.publish` with hand-built JSON
+string payloads, no key or descriptor validation, no `Code` on the
+`ValidationError`, no post-write spelling check and no transaction around
+the read-then-delete in `RemoveRelationType`.
+
+Two differences from entity types, both from the schema
+(`0004_metamodel.sql`) and neither an oversight:
+
+- `relation_types` has `label` and `description` and no plural, colour or
+  icon, so it calls `checkDescriptors` with the columns it does not have
+  left empty — empty means "not set", which is exactly true here.
+- `relations` has **no `version` column** at all. An edge is identified by
+  `(relation_type_id, source_id, target_id)` and carries only its own
+  fields, so there is no lost update to guard against: re-writing an edge
+  with different fields is the whole operation, and the last writer wins
+  by design. `RelationInput` therefore has no `ExpectedVersion`, and this
+  is a decision rather than an omission — record it if Task 7 wants edge
+  concurrency, because it would need a migration.
 
 - [ ] **Step 1: Add the queries**
 
@@ -3488,31 +3510,60 @@ Append to `internal/db/queries/metamodel.sql`:
 
 ```sql
 -- name: UpsertRelationType :one
-INSERT INTO relation_types (project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema)
+-- Guarded, audited and trigger-owned exactly as UpsertEntityType is; see
+-- that statement's comment for the full argument. key is not in the SET
+-- list, so the stored spelling stands and the returned row is what lets
+-- Go refuse a respelling after the write.
+INSERT INTO relation_types (project_id, key, label, description,
+                            source_type_ids, target_type_ids, semantic_role, field_schema,
+                            updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('label')::text,
         sqlc.arg('description')::text, sqlc.arg('source_type_ids')::uuid[],
         sqlc.arg('target_type_ids')::uuid[], sqlc.narg('semantic_role')::text,
-        sqlc.arg('field_schema')::jsonb)
+        sqlc.arg('field_schema')::jsonb,
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, lower(key)) DO UPDATE
-SET label           = excluded.label,
-    description     = excluded.description,
-    source_type_ids = excluded.source_type_ids,
-    target_type_ids = excluded.target_type_ids,
-    semantic_role   = excluded.semantic_role,
-    field_schema    = excluded.field_schema,
-    version         = relation_types.version + 1,
-    updated_at      = now()
+SET label               = excluded.label,
+    description         = excluded.description,
+    source_type_ids     = excluded.source_type_ids,
+    target_type_ids     = excluded.target_type_ids,
+    semantic_role       = excluded.semantic_role,
+    field_schema        = excluded.field_schema,
+    version             = relation_types.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE relation_types.version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
 -- name: GetRelationTypeByKey :one
 SELECT * FROM relation_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text);
 
+-- name: GetRelationTypeByKeyForUpdate :one
+-- FOR UPDATE, for the reason correction 21 records: the lock is what
+-- makes the reported current version the one this caller's own write
+-- would have met, so "re-read and retry with 2" is advice that works.
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
+FOR UPDATE;
+
+-- name: GetRelationTypeByID :one
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
 -- name: ListRelationTypes :many
-SELECT * FROM relation_types WHERE project_id = sqlc.arg('project_id')::uuid ORDER BY label;
+-- Ordered by label then id: labels are not unique, and a label-only
+-- order reshuffles ties between calls.
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid ORDER BY label, id;
 
 -- name: CountRelationsOfType :one
 SELECT count(*) FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid;
+
+-- name: DeleteRelationsOfType :exec
+DELETE FROM relations
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND relation_type_id = sqlc.arg('relation_type_id')::uuid;
 
@@ -3521,11 +3572,19 @@ DELETE FROM relation_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: UpsertRelation :one
-INSERT INTO relations (project_id, relation_type_id, source_id, target_id, fields)
+-- No version guard, because relations carry no version column: an edge
+-- is identified by (type, source, target) and re-writing its fields is
+-- the operation, not a lost update. No updated_at either — the
+-- set_updated_at trigger owns that column on all four tables.
+INSERT INTO relations (project_id, relation_type_id, source_id, target_id, fields,
+                       updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('relation_type_id')::uuid,
-        sqlc.arg('source_id')::uuid, sqlc.arg('target_id')::uuid, sqlc.arg('fields')::jsonb)
+        sqlc.arg('source_id')::uuid, sqlc.arg('target_id')::uuid, sqlc.arg('fields')::jsonb,
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (relation_type_id, source_id, target_id) DO UPDATE
-SET fields = excluded.fields, updated_at = now()
+SET fields              = excluded.fields,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
 RETURNING *;
 
 -- name: ListRelations :many
@@ -3534,8 +3593,12 @@ WHERE r.project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('relation_type_id')::uuid IS NULL OR r.relation_type_id = sqlc.narg('relation_type_id')::uuid)
   AND (sqlc.narg('source_id')::uuid IS NULL OR r.source_id = sqlc.narg('source_id')::uuid)
   AND (sqlc.narg('target_id')::uuid IS NULL OR r.target_id = sqlc.narg('target_id')::uuid)
-ORDER BY r.created_at
+ORDER BY r.created_at, r.id
 LIMIT sqlc.arg('limit')::int;
+
+-- name: GetRelationByID :one
+SELECT * FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: DeleteRelation :execrows
 DELETE FROM relations
@@ -3548,12 +3611,37 @@ WHERE e.project_id = sqlc.arg('project_id')::uuid
   AND r.relation_type_id = sqlc.arg('relation_type_id')::uuid
   AND ((sqlc.arg('direction')::text = 'incoming' AND r.target_id = sqlc.arg('anchor_id')::uuid AND e.id = r.source_id)
     OR (sqlc.arg('direction')::text = 'outgoing' AND r.source_id = sqlc.arg('anchor_id')::uuid AND e.id = r.target_id))
-ORDER BY e.name;
+ORDER BY e.name, e.id;
 ```
 
 Run: `make sqlc`
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: State this task's event gating in `events.go`**
+
+Correction 19 again — stated here, not copied from a neighbouring call
+site. Add to `internal/metamodel/events.go`:
+
+```go
+	// eventRelationTypeUpserted, eventRelationTypeRemoved,
+	// eventRelationUpserted and eventRelationRemoved fire from this
+	// task's writes once their transaction has committed.
+	//
+	// Gating as above — MinRole empty, HumanOnly false — and for the
+	// same reasons: relation types are the game's own vocabulary and
+	// relations are its content, both readable on demand by every member
+	// including a token caller, and a seeding agent wiring edges is the
+	// subscriber that most needs to know an endpoint rule moved under
+	// it.
+	eventRelationTypeUpserted = "relation_type.upserted"
+	eventRelationTypeRemoved  = "relation_type.removed"
+	eventRelationUpserted     = "relation.upserted"
+	eventRelationRemoved      = "relation.removed"
+```
+
+with `relationEventMinRole` / `relationEventHumanOnly` beside the other
+gating constants.
+
+- [ ] **Step 3: Write the failing test**
 
 `internal/metamodel/relations_test.go`:
 
@@ -3570,6 +3658,9 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/testutil"
 )
+
+// Note newProject(t, pool): the helper in types_test.go takes the pool,
+// not the service.
 
 // seedWorld declares Quest and Zone types plus two entities of each.
 func seedWorld(t *testing.T, svc *metamodel.Service, project uuid.UUID) {
@@ -3605,7 +3696,7 @@ func TestRelationEndpointsAreCheckedAgainstTheirType(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
 	quest, _ := svc.EntityTypeByKey(ctx, project, "quest")
@@ -3643,7 +3734,7 @@ func TestRelationCarriesItsOwnFields(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
 	// A metroidvania door: the condition belongs to the edge, not to a room.
@@ -3682,7 +3773,7 @@ func TestRelationUpsertIsIdempotent(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{Key: "requires", Label: "requires"}); err != nil {
@@ -3710,7 +3801,7 @@ func TestPrerequisiteCyclesAreAllowed(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
@@ -3732,11 +3823,73 @@ func TestPrerequisiteCyclesAreAllowed(t *testing.T) {
 	}
 }
 
+// TestUpsertRelationTypeRefusesARespelledKeyAndAMalformedOne is Task 3's
+// corrections 15, 23 and 25 for relation types: a respelling is refused
+// after the write as well as before it, a key or label problem is
+// invalid_input and not schema_violation, and both are reported in one
+// pass.
+func TestUpsertRelationTypeRefusesARespelledKeyAndAMalformedOne(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	_, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{Key: "takes place in"})
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) || len(invalid.Fields) != 2 {
+		t.Fatalf("want the key and the label reported together, got %v", err)
+	}
+
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "Takes_Place_In", Label: "takes place in",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, err = svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "MINE", ExpectedVersion: ptrInt32(1),
+	})
+	requireFieldError(t, err, "key",
+		`"takes_place_in" already exists here spelled "Takes_Place_In", and keys are matched `+
+			`without regard to case: use "Takes_Place_In" to update it, or pick a key that `+
+			`differs by more than capitalisation`)
+}
+
+// TestUpsertRelationTypeRejectsStaleVersion is correction 4 for relation
+// types: the DO UPDATE is guarded, so a blind re-declaration of a type
+// somebody else has edited is refused rather than landing.
+func TestUpsertRelationTypeRejectsStaleVersion(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// No ExpectedVersion at all is the blind overwrite, and is refused
+	// too.
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "renamed",
+	}); !errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("err = %v, want ErrVersionConflict", err)
+	}
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "renamed", ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("the matching version must be accepted: %v", err)
+	}
+}
+
 func TestDeletingAnEntityDeletesItsRelations(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{Key: "requires", Label: "requires"}); err != nil {
@@ -3765,12 +3918,12 @@ func TestDeletingAnEntityDeletesItsRelations(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [ ] **Step 4: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -run TestRelation -v`
 Expected: FAIL, `undefined: metamodel.RelationTypeInput`.
 
-- [ ] **Step 4: Write the relation-type implementation**
+- [ ] **Step 5: Write the relation-type implementation**
 
 `internal/metamodel/relation_types.go`:
 
@@ -3788,8 +3941,11 @@ import (
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
 
-// RelationTypeInput is an upsert request for a relation type. Empty endpoint
-// lists mean "any type".
+// RelationTypeInput is an upsert request for a relation type. Empty
+// endpoint lists mean "any type".
+//
+// ExpectedVersion carries the same meaning and the same insert-path
+// caveat as EntityTypeInput.ExpectedVersion; see it.
 type RelationTypeInput struct {
 	Key             string
 	Label           string
@@ -3802,60 +3958,115 @@ type RelationTypeInput struct {
 	Actor           Actor
 }
 
+// relationTypeEvent is the payload of the relation_type.* events:
+// identity only, as a struct rather than a hand-built JSON string. See
+// entityEvent.
+type relationTypeEvent struct {
+	ID  uuid.UUID `json:"id"`
+	Key string    `json:"key"`
+}
+
 // UpsertRelationType creates or updates a relation type.
 func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, in RelationTypeInput) (dbq.RelationType, error) {
-	if in.Key == "" {
-		return dbq.RelationType{}, &ValidationError{Fields: []FieldError{{Path: "key", Message: "is required"}}}
+	problems := rowKeyProblems("key", in.Key)
+	// relation_types has label and description and no plural, colour or
+	// icon; empty means "not set", which is what those columns are.
+	problems = append(problems, checkDescriptors(in.Label, "", in.Description, "", "")...)
+	if len(problems) > 0 {
+		return dbq.RelationType{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
 	if err := in.Schema.Check(); err != nil {
 		return dbq.RelationType{}, err
 	}
-
-	existing, err := s.q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{ProjectID: projectID, Key: in.Key})
-	switch {
-	case err == nil:
-		if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
-			return dbq.RelationType{}, &VersionConflictError{Current: existing.Version}
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-	default:
-		return dbq.RelationType{}, fmt.Errorf("lookup relation type: %w", err)
+	raw, err := in.Schema.JSON()
+	if err != nil {
+		return dbq.RelationType{}, fmt.Errorf("encode field schema: %w", err)
 	}
 
-	raw, err := in.Schema.JSON()
+	expected := noVersion
+	if in.ExpectedVersion != nil {
+		expected = *in.ExpectedVersion
+	}
+
+	var row dbq.RelationType
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
+		existing, err := q.GetRelationTypeByKeyForUpdate(ctx, dbq.GetRelationTypeByKeyForUpdateParams{
+			ProjectID: projectID, Key: in.Key,
+		})
+		switch {
+		case err == nil:
+			// Spelling before version; see UpsertEntityType.
+			if existing.Key != in.Key {
+				return keyRespellingError("key", in.Key, existing.Key)
+			}
+			if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
+				return &VersionConflictError{Current: existing.Version}
+			}
+		case errors.Is(err, pgx.ErrNoRows):
+		default:
+			return fmt.Errorf("lookup relation type: %w", err)
+		}
+
+		params := dbq.UpsertRelationTypeParams{
+			ProjectID:        projectID,
+			Key:              in.Key,
+			Label:            in.Label,
+			Description:      in.Description,
+			SourceTypeIds:    in.SourceTypeIDs,
+			TargetTypeIds:    in.TargetTypeIDs,
+			FieldSchema:      raw,
+			ExpectedVersion:  expected,
+			UpdatedByUserID:  in.Actor.UserID,
+			UpdatedByTokenID: in.Actor.TokenID,
+		}
+		if in.SemanticRole != "" {
+			role := in.SemanticRole
+			params.SemanticRole = &role
+		}
+
+		row, err = q.UpsertRelationType(ctx, params)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return conflictOnRelationTypeKey(ctx, q, projectID, in.Key)
+		}
+		if err != nil {
+			if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
+			return fmt.Errorf("upsert relation type: %w", err)
+		}
+		// Correction 15: the pre-read alone is not a refusal.
+		if row.Key != in.Key {
+			return keyRespellingError("key", in.Key, row.Key)
+		}
+		return nil
+	})
 	if err != nil {
 		return dbq.RelationType{}, err
 	}
-	params := dbq.UpsertRelationTypeParams{
-		ProjectID:     projectID,
-		Key:           in.Key,
-		Label:         in.Label,
-		Description:   in.Description,
-		SourceTypeIds: in.SourceTypeIDs,
-		TargetTypeIds: in.TargetTypeIDs,
-		FieldSchema:   raw,
-	}
-	if in.SemanticRole != "" {
-		role := in.SemanticRole
-		params.SemanticRole = &role
-	}
 
-	row, err := s.q.UpsertRelationType(ctx, params)
-	if err != nil {
-		return dbq.RelationType{}, fmt.Errorf("upsert relation type: %w", err)
-	}
-	s.publish(projectID, "relation_type.upserted", `{"key":"`+row.Key+`"}`)
+	s.publish(projectID, eventRelationTypeUpserted, relationEventMinRole, relationEventHumanOnly,
+		relationTypeEvent{ID: row.ID, Key: row.Key})
 	return row, nil
+}
+
+// conflictOnRelationTypeKey names what stands in the way of a guarded
+// upsert that matched no row: a respelling, or a moved version.
+func conflictOnRelationTypeKey(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, key string) error {
+	row, err := q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{ProjectID: projectID, Key: key})
+	if err != nil {
+		return fmt.Errorf("re-read relation type after a failed upsert: %w", err)
+	}
+	if row.Key != key {
+		return keyRespellingError("key", key, row.Key)
+	}
+	return &VersionConflictError{Current: row.Version}
 }
 
 // RelationTypeByKey loads one relation type.
 func (s *Service) RelationTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.RelationType, error) {
 	row, err := s.q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{ProjectID: projectID, Key: key})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return dbq.RelationType{}, ErrNotFound
-	}
 	if err != nil {
-		return dbq.RelationType{}, fmt.Errorf("lookup relation type: %w", err)
+		return dbq.RelationType{}, notFound(err, "lookup relation type")
 	}
 	return row, nil
 }
@@ -3871,29 +4082,68 @@ func (s *Service) ListRelationTypes(ctx context.Context, projectID uuid.UUID) ([
 
 // RemoveRelationType deletes a relation type, refusing while it is in use
 // unless the caller says cascade.
+//
+// One transaction, as RemoveEntityType is: the count, the cascade delete
+// and the delete itself are one decision, and a count taken outside the
+// transaction is a count another writer can invalidate before the delete
+// runs. The row is read first for its key, so relation_type.removed
+// carries the identity it declares rather than an empty string
+// (correction 22).
 func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
-	count, err := s.q.CountRelationsOfType(ctx, dbq.CountRelationsOfTypeParams{
-		ProjectID: projectID, RelationTypeID: id,
+	var removedKey string
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		typ, err := q.GetRelationTypeByID(ctx, dbq.GetRelationTypeByIDParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return notFound(err, "lookup relation type")
+		}
+		removedKey = typ.Key
+
+		if !cascade {
+			count, err := q.CountRelationsOfType(ctx, dbq.CountRelationsOfTypeParams{
+				ProjectID: projectID, RelationTypeID: id,
+			})
+			if err != nil {
+				return fmt.Errorf("count relations: %w", err)
+			}
+			if count > 0 {
+				return ErrInUse
+			}
+		} else if err := q.DeleteRelationsOfType(ctx, dbq.DeleteRelationsOfTypeParams{
+			ProjectID: projectID, RelationTypeID: id,
+		}); err != nil {
+			return fmt.Errorf("delete relations: %w", err)
+		}
+
+		rows, err := q.DeleteRelationType(ctx, dbq.DeleteRelationTypeParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			// relations.relation_type_id is ON DELETE RESTRICT, so an
+			// edge written between the count and this statement raises
+			// 23503. It is the same refusal.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return ErrInUse
+			}
+			return fmt.Errorf("delete relation type: %w", err)
+		}
+		if rows == 0 {
+			return ErrNotFound
+		}
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("count relations: %w", err)
+		return err
 	}
-	if count > 0 && !cascade {
-		return ErrInUse
-	}
-	rows, err := s.q.DeleteRelationType(ctx, dbq.DeleteRelationTypeParams{ProjectID: projectID, ID: id})
-	if err != nil {
-		return fmt.Errorf("delete relation type: %w", err)
-	}
-	if rows == 0 {
-		return ErrNotFound
-	}
-	s.publish(projectID, "relation_type.removed", `{"id":"`+id.String()+`"}`)
+
+	s.publish(projectID, eventRelationTypeRemoved, relationEventMinRole, relationEventHumanOnly,
+		relationTypeEvent{ID: id, Key: removedKey})
 	return nil
 }
 ```
 
-- [ ] **Step 5: Write the relation implementation**
+(`pgconn` joins the imports for that last branch, as it does in
+`types.go`.)
+
+- [ ] **Step 6: Write the relation implementation**
 
 `internal/metamodel/relations.go`:
 
@@ -3917,6 +4167,9 @@ type Ref struct {
 }
 
 // RelationInput is an upsert request for one edge.
+//
+// There is no ExpectedVersion: relations carry no version column. See
+// this task's header for why that is a decision and not an omission.
 type RelationInput struct {
 	TypeKey string
 	Source  Ref
@@ -3933,28 +4186,62 @@ type RelationFilter struct {
 	Limit    int32
 }
 
+// relationEvent is the payload of the relation.* events: the identity of
+// the edge — its id, its type key and both endpoint ids — and no fields.
+// A struct, not a hand-built JSON string; see entityEvent.
+type relationEvent struct {
+	ID       uuid.UUID `json:"id"`
+	TypeKey  string    `json:"type_key"`
+	SourceID uuid.UUID `json:"source_id"`
+	TargetID uuid.UUID `json:"target_id"`
+}
+
 // UpsertRelation creates or updates one edge, validating both endpoints
-// against the relation type's allowed lists and the fields against its schema.
+// against the relation type's allowed lists and the fields against its
+// schema.
 func (s *Service) UpsertRelation(ctx context.Context, projectID uuid.UUID, in RelationInput) (dbq.Relation, error) {
-	relType, err := s.RelationTypeByKey(ctx, projectID, in.TypeKey)
+	var row dbq.Relation
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		var err error
+		row, err = s.upsertRelationWith(ctx, q, projectID, in)
+		return err
+	})
 	if err != nil {
 		return dbq.Relation{}, err
 	}
+	s.publish(projectID, eventRelationUpserted, relationEventMinRole, relationEventHumanOnly,
+		relationEvent{ID: row.ID, TypeKey: in.TypeKey, SourceID: row.SourceID, TargetID: row.TargetID})
+	return row, nil
+}
 
-	source, err := s.EntityByKey(ctx, projectID, in.Source.TypeKey, in.Source.Key)
+// upsertRelationWith does the work against any queries handle, so the
+// single, partial and atomic paths share one implementation and the
+// atomic path needs no second Service value to carry a transaction.
+// Nothing in here publishes.
+func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, in RelationInput) (dbq.Relation, error) {
+	relType, err := q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{
+		ProjectID: projectID, Key: in.TypeKey,
+	})
+	if err != nil {
+		return dbq.Relation{}, notFound(err, "lookup relation type")
+	}
+
+	source, err := entityByKeyWith(ctx, q, projectID, in.Source)
 	if err != nil {
 		return dbq.Relation{}, fmt.Errorf("source %s/%s: %w", in.Source.TypeKey, in.Source.Key, err)
 	}
-	target, err := s.EntityByKey(ctx, projectID, in.Target.TypeKey, in.Target.Key)
+	target, err := entityByKeyWith(ctx, q, projectID, in.Target)
 	if err != nil {
 		return dbq.Relation{}, fmt.Errorf("target %s/%s: %w", in.Target.TypeKey, in.Target.Key, err)
 	}
 
 	if !endpointAllowed(relType.SourceTypeIds, source.EntityTypeID) {
-		return dbq.Relation{}, fmt.Errorf("%w: %s cannot be the source of %s", ErrEndpointTypeMismatch, in.Source.TypeKey, relType.Key)
+		return dbq.Relation{}, fmt.Errorf("%w: %s cannot be the source of %s",
+			ErrEndpointTypeMismatch, in.Source.TypeKey, relType.Key)
 	}
 	if !endpointAllowed(relType.TargetTypeIds, target.EntityTypeID) {
-		return dbq.Relation{}, fmt.Errorf("%w: %s cannot be the target of %s", ErrEndpointTypeMismatch, in.Target.TypeKey, relType.Key)
+		return dbq.Relation{}, fmt.Errorf("%w: %s cannot be the target of %s",
+			ErrEndpointTypeMismatch, in.Target.TypeKey, relType.Key)
 	}
 
 	schema, err := ParseSchema(relType.FieldSchema)
@@ -3970,50 +4257,83 @@ func (s *Service) UpsertRelation(ctx context.Context, projectID uuid.UUID, in Re
 		return dbq.Relation{}, fmt.Errorf("encode fields: %w", err)
 	}
 
-	row, err := s.q.UpsertRelation(ctx, dbq.UpsertRelationParams{
-		ProjectID:      projectID,
-		RelationTypeID: relType.ID,
-		SourceID:       source.ID,
-		TargetID:       target.ID,
-		Fields:         encoded,
+	row, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
+		ProjectID:        projectID,
+		RelationTypeID:   relType.ID,
+		SourceID:         source.ID,
+		TargetID:         target.ID,
+		Fields:           encoded,
+		UpdatedByUserID:  in.Actor.UserID,
+		UpdatedByTokenID: in.Actor.TokenID,
 	})
 	if err != nil {
+		if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+			return dbq.Relation{}, mapped
+		}
 		return dbq.Relation{}, fmt.Errorf("upsert relation: %w", err)
 	}
-	s.publish(projectID, "relation.upserted", `{"type":"`+relType.Key+`"}`)
 	return row, nil
 }
 
-// UpsertRelations writes a batch of edges in the requested mode.
-func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, items []RelationInput, mode BulkMode) (BulkResult, error) {
-	var result BulkResult
-	if mode == BulkAtomic {
-		// Relations are validated with several reads per item, so the atomic
-		// path runs the same code inside one transaction by deferring the
-		// commit until every item has passed.
-		tx, err := s.pool.Begin(ctx)
-		if err != nil {
-			return BulkResult{}, fmt.Errorf("begin: %w", err)
-		}
-		defer func() { _ = tx.Rollback(ctx) }()
+// entityByKeyWith resolves a Ref against a transaction's handle, so an
+// atomic batch sees the entities it has just written.
+func entityByKeyWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, ref Ref) (dbq.Entity, error) {
+	typ, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: ref.TypeKey})
+	if err != nil {
+		return dbq.Entity{}, notFound(err, "lookup entity type")
+	}
+	row, err := q.GetEntityByKey(ctx, dbq.GetEntityByKeyParams{
+		ProjectID: projectID, EntityTypeID: typ.ID, Key: ref.Key,
+	})
+	if err != nil {
+		return dbq.Entity{}, notFound(err, "lookup entity")
+	}
+	return row, nil
+}
 
-		txSvc := &Service{pool: s.pool, q: dbq.New(tx), hub: nil}
-		for i, in := range items {
-			if _, err := txSvc.UpsertRelation(ctx, projectID, in); err != nil {
-				return BulkResult{}, fmt.Errorf("item %d: %w", i, err)
+// UpsertRelations writes a batch of edges in the requested mode, with the
+// same publication discipline as UpsertEntities: after the commit, one
+// identity event per edge that landed, never a count.
+func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, items []RelationInput, mode BulkMode) (BulkResult, error) {
+	var landed []dbq.Relation
+	var result BulkResult
+
+	if mode == BulkAtomic {
+		err := s.withTx(ctx, func(q *dbq.Queries) error {
+			landed = nil
+			for i, in := range items {
+				row, err := s.upsertRelationWith(ctx, q, projectID, in)
+				if err != nil {
+					return fmt.Errorf("item %d: %w", i, err)
+				}
+				landed = append(landed, row)
 			}
+			return nil
+		})
+		if err != nil {
+			return BulkResult{}, err
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return BulkResult{}, fmt.Errorf("commit: %w", err)
+	} else {
+		for i, in := range items {
+			var row dbq.Relation
+			err := s.withTx(ctx, func(q *dbq.Queries) error {
+				var err error
+				row, err = s.upsertRelationWith(ctx, q, projectID, in)
+				return err
+			})
+			if err != nil {
+				result.Failed = append(result.Failed,
+					failureFor(i, in.Source.Key+"->"+in.Target.Key, err))
+				continue
+			}
+			landed = append(landed, row)
 		}
-		s.publish(projectID, "relation.upserted", fmt.Sprintf(`{"count":%d}`, len(items)))
-		return BulkResult{}, nil
 	}
 
-	for i, in := range items {
-		if _, err := s.UpsertRelation(ctx, projectID, in); err != nil {
-			result.Failed = append(result.Failed, failureFor(i, in.Source.Key+"->"+in.Target.Key, err))
-		}
+	for i, row := range landed {
+		s.publish(projectID, eventRelationUpserted, relationEventMinRole, relationEventHumanOnly,
+			relationEvent{ID: row.ID, TypeKey: items[i].TypeKey,
+				SourceID: row.SourceID, TargetID: row.TargetID})
 	}
 	return result, nil
 }
@@ -4041,16 +4361,30 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	return rows, nil
 }
 
-// RemoveRelation deletes one edge.
+// RemoveRelation deletes one edge, reading it first for the identity its
+// event declares (correction 22).
 func (s *Service) RemoveRelation(ctx context.Context, projectID, id uuid.UUID) error {
-	rows, err := s.q.DeleteRelation(ctx, dbq.DeleteRelationParams{ProjectID: projectID, ID: id})
+	var removed dbq.Relation
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		var err error
+		removed, err = q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return notFound(err, "lookup relation")
+		}
+		rows, err := q.DeleteRelation(ctx, dbq.DeleteRelationParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return fmt.Errorf("delete relation: %w", err)
+		}
+		if rows == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("delete relation: %w", err)
+		return err
 	}
-	if rows == 0 {
-		return ErrNotFound
-	}
-	s.publish(projectID, "relation.removed", `{"id":"`+id.String()+`"}`)
+	s.publish(projectID, eventRelationRemoved, relationEventMinRole, relationEventHumanOnly,
+		relationEvent{ID: id, SourceID: removed.SourceID, TargetID: removed.TargetID})
 	return nil
 }
 
@@ -4069,12 +4403,12 @@ func endpointAllowed(allowed []uuid.UUID, typeID uuid.UUID) bool {
 }
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `go test ./internal/metamodel/ -v`
 Expected: PASS, every test in the package.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add internal/db/queries internal/db/dbq internal/metamodel
@@ -4089,6 +4423,13 @@ git commit -m "feat: relation types and relations with endpoint validation"
 - Create: `internal/metamodel/list.go`, `internal/metamodel/search.go`
 - Modify: `internal/db/queries/metamodel.sql`
 - Test: `internal/metamodel/list_test.go`
+
+**Refreshed after Task 3's review, 2026-09-02.** This task writes
+nothing, so the corrections about guarded upserts, publication order and
+event payloads do not reach it; what did reach it was `newProject(t,
+svc)` (the helper takes the pool) and a malformed cursor reported with no
+code at all, which correction 25 says is an `invalid_input` — it is the
+caller's own argument, at a path, fixable in place.
 
 - [ ] **Step 1: Add the search query**
 
@@ -4127,7 +4468,7 @@ func TestListPaginatesWithACursor(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	for i := 0; i < 25; i++ {
@@ -4179,7 +4520,7 @@ func TestListFiltersByInvalid(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
@@ -4212,7 +4553,7 @@ func TestOneHopTraversal(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
@@ -4250,7 +4591,7 @@ func TestSearchFindsByNameAndTextField(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
@@ -4336,17 +4677,29 @@ func encodeCursor(c cursor) string {
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
+// decodeCursor reads a page position back.
+//
+// A malformed cursor is invalid_input at path "cursor", not a bare
+// error: correction 25's rule is that a caller's own argument being
+// wrong is a code with a recovery, and this one's recovery is "page from
+// the cursor a previous call handed you, or start from none". An
+// untyped error here would reach an agent as internal_error and read as
+// "the server is broken" over a value the agent itself supplied.
 func decodeCursor(s string) (cursor, error) {
 	if s == "" {
 		return cursor{}, nil
 	}
+	malformed := &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
+		Path:    "cursor",
+		Message: "is malformed: page from the cursor a previous call returned, or omit it to start",
+	}}}
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return cursor{}, fmt.Errorf("malformed cursor")
+		return cursor{}, malformed
 	}
 	var c cursor
 	if err := json.Unmarshal(raw, &c); err != nil {
-		return cursor{}, fmt.Errorf("malformed cursor")
+		return cursor{}, malformed
 	}
 	return c, nil
 }
@@ -4417,6 +4770,14 @@ func (s *Service) listRelated(ctx context.Context, projectID uuid.UUID, rel Rela
 	if err != nil {
 		return EntityPage{}, fmt.Errorf("list related entities: %w", err)
 	}
+	// The one-hop query is not paginated: it returns the whole neighbour
+	// set and this truncates it, so a page beyond the limit is silently
+	// unreachable and NextCursor is deliberately empty rather than
+	// misleading. That is acceptable for one hop over one anchor and it
+	// is not acceptable for the views engine, which is where transitive
+	// walks live. **Task 7 states the cap in the tool description** so an
+	// agent knows the answer can be truncated; if a real game needs more,
+	// the fix is a keyset on ListEntitiesRelatedTo, not a bigger limit.
 	if int32(len(rows)) > limit {
 		rows = rows[:limit]
 	}

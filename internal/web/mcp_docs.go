@@ -774,6 +774,15 @@ func linkedRefsOf(links []markdown.EntityLink) []LinkedRef {
 // caller indexing into the answer should not have to test for null
 // first, and "no frontmatter" and "an empty frontmatter" are the same
 // document.
+//
+// **The empty branch is unreachable through this server today** and is
+// kept deliberately, which is why no test pins it: the column is
+// jsonb NOT NULL DEFAULT '{}' and the domain writes `{}` for a document
+// with no frontmatter, so every row reaching here is at least two bytes
+// long. It exists because the alternative to a branch that costs
+// nothing is a nil RawMessage marshalling as `null` the first time
+// anything hands this function a zero value — a row read by a query
+// that does not select the column, say.
 func frontmatterOf(raw []byte) json.RawMessage {
 	if len(raw) == 0 {
 		return json.RawMessage(`{}`)
@@ -868,6 +877,9 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"**kind is a property of the document, not of this one edit: omitting it "+
 				"leaves the document's current kind alone, and passing \"\" clears it.** "+
 				"Fixing a typo in the body does not require knowing or restating the kind. "+
+				"kind is free text of at most %d bytes; message is the \"why\" line this "+
+				"version records, at most %d bytes, and it is what makes the history "+
+				"readable a year later. "+
 				"**links replaces the document's whole attachment set; omitting links — or "+
 				"sending `\"links\": null`, which means the same thing — leaves it "+
 				"untouched.** Pass an empty array to detach everything: that is the only "+
@@ -875,8 +887,8 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"optional role of at most %d bytes. Attachment is never inferred from the "+
 				"content. %s",
 			markdown.MaxBodyBytes, markdown.MaxIndexedChars, markdown.MaxPathLen,
-			markdown.MaxPathSegments, markdown.MaxLinksPerWrite, markdown.MaxRoleLen,
-			retryAdvice),
+			markdown.MaxPathSegments, markdown.MaxKindLen, markdown.MaxMessageLen,
+			markdown.MaxLinksPerWrite, markdown.MaxRoleLen, retryAdvice),
 		OutputSchema: documentOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteInput) (DocumentOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -889,10 +901,12 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 			"Read one document by path: its raw markdown body, its stored frontmatter, its "+
 				"current version and the entities it is attached to. The body is the "+
 				"markdown as written, never rendered HTML. "+
-				"Pass head_only true for the frontmatter and the first %d bytes of the body "+
-				"instead of the whole thing, when you are deciding whether you want the "+
-				"document at all; the answer then carries truncated true and body_length, "+
-				"the full size in bytes. **A truncated body is not the document** — do not "+
+				"Pass head_only true for at most the first %d bytes of the body, with the "+
+				"frontmatter, instead of the whole thing, when you are deciding whether you "+
+				"want the document at all; the answer then carries truncated true and "+
+				"body_length, the full size in bytes. The head is cut back off any character "+
+				"the bound would split, so it can be a byte or two shorter than that number "+
+				"and is always valid text. **A truncated body is not the document** — do not "+
 				"write it back. "+
 				"A soft-deleted document is not found here: list it with include_deleted, or "+
 				"read one of its versions with docs.read_version. %s",
@@ -915,14 +929,16 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"**kind is free text and an omitted kind means \"no filter\": there is no "+
 				"spelling for \"documents that have no kind\".** An empty string is the same "+
 				"as saying nothing, so a kind-less document can only be found without a kind "+
-				"filter. A kind or a prefix that names nothing answers with an empty page; "+
+				"filter. A kind is at most %d bytes here, as it is on a write. "+
+				"A kind or a prefix that names nothing answers with an empty page; "+
 				"an entity that names nothing is not_found, because that one is an address. "+
 				"include_deleted brings back soft-deleted documents, which are otherwise "+
 				"absent. Pass the previous answer's next_cursor for the next page; a cursor "+
 				"belongs to the game and the filter it was issued for and is refused against "+
 				"any other. limit defaults to %d and is capped at %d — asking for more gets "+
 				"the cap, asking for less than one gets the default. %s",
-			markdown.DefaultDocumentPage, markdown.MaxDocumentPage, retryAdvice),
+			markdown.MaxKindLen, markdown.DefaultDocumentPage, markdown.MaxDocumentPage,
+			retryAdvice),
 		OutputSchema: docsListOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsListInput) (DocsListOutput, error) {
@@ -943,8 +959,10 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"deletion cannot race an edit. message is recorded on the tombstone, so "+
 				"\"why was this cut\" is answerable from the history; at most %d bytes. "+
 				"A deleted document stops appearing in docs.read, in docs.list without "+
-				"include_deleted, in search, and on the entity pages it was attached to — "+
-				"its links survive and come back with it. %s",
+				"include_deleted, in search, on the entity pages it was attached to, and as "+
+				"an address for docs.links.list, docs.links.add and docs.links.remove, all "+
+				"three of which answer not_found for its path — its links survive and come "+
+				"back with it. %s",
 			markdown.MaxMessageLen, retryAdvice),
 		OutputSchema: documentSummaryOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsDeleteInput) (DocumentSummaryOutput, error) {
@@ -988,20 +1006,24 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "docs.revert",
-		Description: "Restore a past version of a document as a **new** version. History is " +
-			"append-only: reverting a three-version document leaves four versions, not one, " +
-			"and the writing that was reverted is still there to read. " +
-			"expected_version is required and is the version you read, so a revert cannot " +
-			"race an edit; to_version is the one to restore. The restored content is the " +
-			"content that was stored — title, summary and frontmatter come off the version " +
-			"row verbatim. " +
-			"**A revert does not touch the document's kind and does not touch its links**: " +
-			"it restores the writing, and what a document is about is a separate decision " +
-			"somebody made separately. Reverting a deleted document brings it back; " +
-			"reverting *to* a tombstone version restores that version's body and leaves the " +
-			"document alive, it does not re-delete it — use docs.delete for that. " +
-			"A mismatch is version_conflict and carries the current body, as on a write; " +
-			"pass include_current false to turn that echo off. " + retryAdvice,
+		Description: fmt.Sprintf(
+			"Restore a past version of a document as a **new** version. History is "+
+				"append-only: reverting a three-version document leaves four versions, not "+
+				"one, and the writing that was reverted is still there to read. "+
+				"expected_version is required and is the version you read, so a revert "+
+				"cannot race an edit; to_version is the one to restore. The restored content "+
+				"is the content that was stored — title, summary and frontmatter come off "+
+				"the version row verbatim. message is recorded on the new version, at most "+
+				"%d bytes, as on a write. "+
+				"**A revert does not touch the document's kind and does not touch its "+
+				"links**: it restores the writing, and what a document is about is a "+
+				"separate decision somebody made separately. Reverting a deleted document "+
+				"brings it back; reverting *to* a tombstone version restores that version's "+
+				"body and leaves the document alive, it does not re-delete it — use "+
+				"docs.delete for that. "+
+				"A mismatch is version_conflict and carries the current body, as on a write; "+
+				"pass include_current false to turn that echo off. %s",
+			markdown.MaxMessageLen, retryAdvice),
 		OutputSchema: documentOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsRevertInput) (DocumentOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -1038,7 +1060,10 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 			"naming both, or neither, is invalid_input, because they are two different " +
 			"questions. The answer's entities array is filled for a document-side question " +
 			"and its documents array for an entity-side one; the other is empty. " +
-			"An entity lists no document that has been soft-deleted. " + retryAdvice,
+			"An entity lists no document that has been soft-deleted, and a soft-deleted " +
+			"document is not an address either: asking by its path answers not_found rather " +
+			"than an empty set. Its links are not gone — they come back with the document " +
+			"when a write to the same path brings it back. " + retryAdvice,
 		OutputSchema: docsLinksOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsLinksListInput) (DocsLinksOutput, error) {

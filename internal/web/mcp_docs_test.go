@@ -1143,3 +1143,119 @@ func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
 		t.Fatalf("diff = %+v, want coarse false for a one-line edit", small)
 	}
 }
+
+// TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites pins the rule
+// the descriptions already follow for the body, path, link and role
+// bounds, over the two that were enforced silently: MaxKindLen, refused
+// on docs.write's kind *and* on docs.list's kind filter, and
+// MaxMessageLen, refused on docs.write, docs.delete and docs.revert but
+// named only on docs.delete.
+//
+// An undisclosed bound is a refusal an agent can only discover by
+// tripping it, and it costs a whole round trip on a call that has
+// already composed the prose it meant to save. The numbers are read from
+// the domain's own constants rather than typed out, so this cannot pass
+// against a description quoting a stale number.
+func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+	session := connectMCP(t, httpSrv.URL, f.token)
+
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	described := map[string]string{}
+	for _, tool := range tools.Tools {
+		described[tool.Name] = tool.Description
+	}
+
+	// MaxKindLen and MaxRoleLen are both 64 today, so on docs.write —
+	// where both are disclosed — the number alone proves nothing about
+	// the kind. That one case asserts the phrase around it; everywhere
+	// else the number is unambiguous and asserting the wording would
+	// only make the test brittle.
+	wantKind := "kind is free text of at most " + strconv.Itoa(markdown.MaxKindLen) + " bytes"
+	if !strings.Contains(described["docs.write"], wantKind) {
+		t.Errorf("docs.write's description does not disclose the kind bound: want %q", wantKind)
+	}
+
+	for _, tc := range []struct {
+		tool  string
+		bound string
+		what  string
+	}{
+		{"docs.write", strconv.Itoa(markdown.MaxMessageLen), "the message bound it enforces"},
+		{"docs.list", strconv.Itoa(markdown.MaxKindLen), "the kind filter's bound"},
+		{"docs.delete", strconv.Itoa(markdown.MaxMessageLen), "the message bound it enforces"},
+		{"docs.revert", strconv.Itoa(markdown.MaxMessageLen), "the message bound it enforces"},
+		{"docs.write", strconv.Itoa(markdown.MaxRoleLen), "the role bound"},
+		{"docs.links.add", strconv.Itoa(markdown.MaxRoleLen), "the role bound"},
+	} {
+		description, served := described[tc.tool]
+		if !served {
+			t.Fatalf("%s is not served at all", tc.tool)
+		}
+		if !strings.Contains(description, tc.bound) {
+			t.Errorf("%s's description does not name %s (%s): %s",
+				tc.tool, tc.what, tc.bound, description)
+		}
+	}
+}
+
+// TestADeletedDocumentIsNotAnAddressForTheLinkTools pins the behaviour
+// the two descriptions above now disclose: docs.links.list by the path
+// of a soft-deleted document answers not_found rather than an empty set.
+//
+// It is the one refusal of this surface that reads like a bug from the
+// caller's side — the document is still there, and every version of it
+// is still readable — so it has to be both said and pinned. The domain
+// pins its own half (TestADeletedDocumentIsNotAnAddressForLinks); this
+// is the wire code an agent actually receives.
+func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")
+	writeDoc(t, f, "lore/hogger.md", "# Hogger\n",
+		web.DocsLinkInput{EntityType: "quest", EntityKey: "wanted-hogger", Role: "script"})
+	if _, err := web.MCPDocsDelete(ctx, f.deps, f.caller, f.game, web.DocsDeleteInput{
+		Path: "lore/hogger.md", ExpectedVersion: int32Ptr(1),
+	}); err != nil {
+		t.Fatalf("MCPDocsDelete: %v", err)
+	}
+
+	_, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
+		Path: "lore/hogger.md",
+	})
+	if !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("MCPDocsLinksList on a deleted document = %v, want not_found", err)
+	}
+
+	// The links themselves are not gone, which is the other half of what
+	// docs.delete promises: the entity side stops listing the document,
+	// and a write to the same path brings both back.
+	fromEntity, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
+		EntityType: "quest", EntityKey: "wanted-hogger",
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsLinksList by entity: %v", err)
+	}
+	if len(fromEntity.Documents) != 0 {
+		t.Fatalf("entity lists %+v, want no deleted document", fromEntity.Documents)
+	}
+	if _, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
+		Path: "lore/hogger.md", Content: "# Hogger\n", ExpectedVersion: int32Ptr(2),
+	}); err != nil {
+		t.Fatalf("MCPDocsWrite to resurrect: %v", err)
+	}
+	back, err := web.MCPDocsLinksList(ctx, f.deps, f.caller, f.game, web.DocsLinksListInput{
+		Path: "lore/hogger.md",
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsLinksList after the resurrection: %v", err)
+	}
+	if len(back.Entities) != 1 || back.Entities[0].Role != "script" {
+		t.Fatalf("links after the resurrection = %+v, want the attachment back", back.Entities)
+	}
+}

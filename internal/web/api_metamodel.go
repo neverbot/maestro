@@ -576,3 +576,111 @@ func hasRelatedTo(r *http.Request) bool {
 	}
 	return false
 }
+
+// --- The game home page's summary ---
+
+// GameSummaryOutput is what a game's home page renders: the game's
+// declared vocabulary with a count against each entry, and the three
+// totals.
+//
+// It is deliberately a *catalogue and not a listing*. The one property
+// this endpoint has to hold is that its answer is the same size for a
+// game with four entities and a game with four hundred thousand: it
+// carries one row per declared type — a handful of rows a designer wrote
+// by hand — and never a row of content. A page that wants content asks
+// for a page of it (GET /entities), with a cursor, like everything else
+// here. TestTheGameSummaryCountsContentWithoutListingIt pins that.
+//
+// It has no MCP counterpart, and none is implied: an agent seeding a
+// game already knows what it wrote, and every number here is one
+// entities.list or relations.list away. This exists because a person
+// opening a game needs to see what is in it before they can decide
+// anything, which is not a need an agent has.
+type GameSummaryOutput struct {
+	EntityTypes   []EntityTypeSummary   `json:"entity_types"`
+	RelationTypes []RelationTypeSummary `json:"relation_types"`
+	Totals        GameTotals            `json:"totals"`
+}
+
+// EntityTypeSummary is one declared entity type and what the game holds
+// of it. InvalidCount is the number a designer has to act on: rows a
+// schema edit stopped fitting, kept and marked rather than deleted.
+type EntityTypeSummary struct {
+	TypeOutput
+	EntityCount  int64 `json:"entity_count"`
+	InvalidCount int64 `json:"invalid_count"`
+}
+
+// RelationTypeSummary is one declared relation type and how many edges
+// instance it. There is no invalid count, because an edge cannot be
+// invalid — see metamodel.RelationCountsByType.
+type RelationTypeSummary struct {
+	RelationTypeOutput
+	RelationCount int64 `json:"relation_count"`
+}
+
+// GameTotals is the whole game in three numbers.
+type GameTotals struct {
+	Entities  int64 `json:"entities"`
+	Relations int64 `json:"relations"`
+	Invalid   int64 `json:"invalid"`
+}
+
+// handleGameSummary answers the game home page. Four queries, none of
+// which grows with the game's content: the two type listings and the two
+// grouped counts.
+func (s *Server) handleGameSummary(w http.ResponseWriter, r *http.Request, _ Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	ctx := r.Context()
+	entityTypes, err := s.opts.Metamodel.ListEntityTypes(ctx, scope.ProjectID)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	relationTypes, err := s.opts.Metamodel.ListRelationTypes(ctx, scope.ProjectID)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	entityCounts, err := s.opts.Metamodel.EntityCountsByType(ctx, scope.ProjectID)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	relationCounts, err := s.opts.Metamodel.RelationCountsByType(ctx, scope.ProjectID)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+
+	// Both slices are made, never left nil: a nil slice marshals to JSON
+	// null, and a page iterating "the types this game has" must not have
+	// to tell "none" from "the server said nothing".
+	out := GameSummaryOutput{
+		EntityTypes:   make([]EntityTypeSummary, 0, len(entityTypes)),
+		RelationTypes: make([]RelationTypeSummary, 0, len(relationTypes)),
+	}
+	for _, row := range entityTypes {
+		counts := entityCounts[row.ID]
+		out.EntityTypes = append(out.EntityTypes, EntityTypeSummary{
+			TypeOutput: typeOf(row), EntityCount: counts.Total, InvalidCount: counts.Invalid,
+		})
+		out.Totals.Entities += counts.Total
+		out.Totals.Invalid += counts.Invalid
+	}
+	for _, row := range relationTypes {
+		count := relationCounts[row.ID]
+		out.RelationTypes = append(out.RelationTypes, RelationTypeSummary{
+			RelationTypeOutput: relationTypeOf(row), RelationCount: count,
+		})
+		out.Totals.Relations += count
+	}
+	// The totals are summed from the same per-type numbers the rows
+	// carry, rather than read from three separate count(*) queries, so
+	// the header and the table on the page can never disagree — and a
+	// type with no entities contributes a zero from the map's own zero
+	// value, which is the honest answer for a type nobody has filled.
+	writeJSON(w, http.StatusOK, out)
+}

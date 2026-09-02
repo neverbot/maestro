@@ -30,6 +30,47 @@ func (q *Queries) CountEntitiesOfType(ctx context.Context, arg CountEntitiesOfTy
 	return count, err
 }
 
+const countEntitiesPerType = `-- name: CountEntitiesPerType :many
+SELECT entity_type_id,
+       count(*) AS total,
+       count(*) FILTER (WHERE invalid) AS invalid
+FROM entities
+WHERE project_id = $1::uuid
+GROUP BY entity_type_id
+`
+
+type CountEntitiesPerTypeRow struct {
+	EntityTypeID uuid.UUID
+	Total        int64
+	Invalid      int64
+}
+
+// One row per entity type that has entities, with how many of them no
+// longer fit their type's schema. Grouped in SQL rather than counted per
+// type in Go: a game's home page wants every type's number at once, and
+// a query per type would make the page cost grow with the vocabulary.
+// A type with no entities is absent, not zero -- the caller already
+// holds the type list and reads a missing key as none.
+func (q *Queries) CountEntitiesPerType(ctx context.Context, projectID uuid.UUID) ([]CountEntitiesPerTypeRow, error) {
+	rows, err := q.db.Query(ctx, countEntitiesPerType, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountEntitiesPerTypeRow
+	for rows.Next() {
+		var i CountEntitiesPerTypeRow
+		if err := rows.Scan(&i.EntityTypeID, &i.Total, &i.Invalid); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countRelationsOfType = `-- name: CountRelationsOfType :one
 SELECT count(*) FROM relations
 WHERE project_id = $1::uuid
@@ -46,6 +87,39 @@ func (q *Queries) CountRelationsOfType(ctx context.Context, arg CountRelationsOf
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countRelationsPerType = `-- name: CountRelationsPerType :many
+SELECT relation_type_id, count(*) AS total
+FROM relations
+WHERE project_id = $1::uuid
+GROUP BY relation_type_id
+`
+
+type CountRelationsPerTypeRow struct {
+	RelationTypeID uuid.UUID
+	Total          int64
+}
+
+// CountEntitiesPerType for edges; see its comment.
+func (q *Queries) CountRelationsPerType(ctx context.Context, projectID uuid.UUID) ([]CountRelationsPerTypeRow, error) {
+	rows, err := q.db.Query(ctx, countRelationsPerType, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountRelationsPerTypeRow
+	for rows.Next() {
+		var i CountRelationsPerTypeRow
+		if err := rows.Scan(&i.RelationTypeID, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const deleteEntitiesOfType = `-- name: DeleteEntitiesOfType :exec

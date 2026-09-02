@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -569,4 +570,142 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 	// This game does not.
 	assertError(t, f.call(t, cookie, http.MethodGet, f.path("/types/by-key/quest"), nil),
 		http.StatusForbidden, "forbidden", "")
+}
+
+// TestTheGameSummaryCountsContentWithoutListingIt is the home page's
+// only server-side requirement, and the reason it is a separate
+// endpoint rather than the SPA counting a listing itself: the answer
+// must stay the same size whether a game holds four entities or four
+// hundred. This seeds enough rows that a listing would be obvious in
+// the payload, and asserts none of them is in it.
+func TestTheGameSummaryCountsContentWithoutListingIt(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "zone", "label": "Zone", "label_plural": "Zones"}); rec.Code != http.StatusOK {
+		t.Fatalf("zone type = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	items := make([]any, 0, 120)
+	for i := range 100 {
+		items = append(items, map[string]any{
+			"type_key": "quest", "key": "quest-" + strconv.Itoa(i), "name": "Quest " + strconv.Itoa(i)})
+	}
+	for i := range 20 {
+		items = append(items, map[string]any{
+			"type_key": "zone", "key": "zone-" + strconv.Itoa(i), "name": "Zone " + strconv.Itoa(i)})
+	}
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": items}); rec.Code != http.StatusOK {
+		t.Fatalf("seed = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec := f.as(t, http.MethodGet, "/summary", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
+	}
+	var summary gameSummary
+	decodeBody(t, rec, &summary)
+
+	counts := map[string]int64{}
+	for _, typ := range summary.EntityTypes {
+		counts[typ.Key] = typ.EntityCount
+	}
+	if counts["quest"] != 100 || counts["zone"] != 20 {
+		t.Fatalf("counts = %+v, want 100 quests and 20 zones", counts)
+	}
+	if summary.Totals.Entities != 120 || summary.Totals.Relations != 0 || summary.Totals.Invalid != 0 {
+		t.Fatalf("totals = %+v, want 120 entities and nothing else", summary.Totals)
+	}
+	// The payload is a catalogue, not a listing: no individual row of
+	// the hundred and twenty appears in it.
+	if strings.Contains(rec.Body.String(), "quest-42") {
+		t.Fatalf("the summary carries individual entities: %s", rec.Body.String())
+	}
+}
+
+// TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue pins what the home
+// page shows a designer who has just created a game: a well-formed
+// answer with nothing in it, never an error and never a 404. The page's
+// own empty state is what it renders from this.
+func TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue(t *testing.T) {
+	f := newRESTFixture(t)
+	rec := f.as(t, http.MethodGet, "/summary", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
+	}
+	var summary gameSummary
+	decodeBody(t, rec, &summary)
+	if summary.EntityTypes == nil || summary.RelationTypes == nil {
+		t.Fatalf("summary = %+v, want empty arrays a page can iterate, not nulls: %s",
+			summary, rec.Body.String())
+	}
+	if len(summary.EntityTypes) != 0 || len(summary.RelationTypes) != 0 {
+		t.Fatalf("summary = %+v, want nothing declared yet", summary)
+	}
+	if summary.Totals.Entities != 0 || summary.Totals.Relations != 0 || summary.Totals.Invalid != 0 {
+		t.Fatalf("totals = %+v, want zeros", summary.Totals)
+	}
+}
+
+// TestTheGameSummaryCountsTheRowsAScemaEditInvalidated is the one number
+// on the home page a designer has to act on: an entity whose values no
+// longer fit its type is kept, marked, and counted here, per type and in
+// the total.
+func TestTheGameSummaryCountsTheRowsASchemaEditInvalidated(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
+		map[string]any{"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger"},
+		map[string]any{"type_key": "quest", "key": "kobolds", "name": "Kobolds",
+			"fields": map[string]any{"min_level": 5}},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("seed = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Narrowing the schema: min_level becomes required, and the row
+	// that never carried one stops fitting.
+	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests", "expected_version": 1,
+		"field_schema": []any{map[string]any{"key": "min_level", "type": "number", "required": true}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("narrow = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec := f.as(t, http.MethodGet, "/summary", nil)
+	var summary gameSummary
+	decodeBody(t, rec, &summary)
+	if len(summary.EntityTypes) != 1 {
+		t.Fatalf("entity_types = %+v, want the one type", summary.EntityTypes)
+	}
+	quest := summary.EntityTypes[0]
+	if quest.EntityCount != 2 || quest.InvalidCount != 1 {
+		t.Fatalf("quest = %+v, want 2 entities of which 1 invalid", quest)
+	}
+	if summary.Totals.Invalid != 1 {
+		t.Fatalf("totals = %+v, want one invalid row", summary.Totals)
+	}
+}
+
+// gameSummary is GET /api/games/{game}/summary's answer, as a client
+// reads it.
+type gameSummary struct {
+	EntityTypes []struct {
+		ID           string `json:"id"`
+		Key          string `json:"key"`
+		Label        string `json:"label"`
+		LabelPlural  string `json:"label_plural"`
+		EntityCount  int64  `json:"entity_count"`
+		InvalidCount int64  `json:"invalid_count"`
+	} `json:"entity_types"`
+	RelationTypes []struct {
+		ID            string `json:"id"`
+		Key           string `json:"key"`
+		Label         string `json:"label"`
+		RelationCount int64  `json:"relation_count"`
+	} `json:"relation_types"`
+	Totals struct {
+		Entities  int64 `json:"entities"`
+		Relations int64 `json:"relations"`
+		Invalid   int64 `json:"invalid"`
+	} `json:"totals"`
 }

@@ -8,5 +8,25 @@
   <p class="notice">This page needs JavaScript enabled in this browser.</p>
 </noscript>
 <h1 id="game-name">Loading…</h1>
-<p class="muted" id="game-summary" aria-live="polite">This game has no content types yet.</p>
+<p class="muted" id="game-summary" aria-live="polite">Loading this game…</p>
+
+<section id="game-content" hidden>
+  <h2>Entity types</h2>
+  <ul class="catalogue" id="types"></ul>
+  <p class="muted" id="types-empty" hidden>
+    This game has no entity types yet. A game declares its own — Quest, Zone
+    and Class for one game, Driver, Car and Circuit for another — and an agent
+    connected to this game over MCP is what declares them. Nothing on this page
+    creates one yet.
+  </p>
+
+  <h2>Relation types</h2>
+  <ul class="catalogue" id="relation-types"></ul>
+  <p class="muted" id="relation-types-empty" hidden>
+    No relation types yet. A relation type is a kind of edge between entities —
+    takes_place_in, requires, unlocks — and is declared the same way an entity
+    type is.
+  </p>
+</section>
+
 <script type="module" src="/static/app.js"></script>

@@ -100,3 +100,50 @@ button:disabled {
 
 ul.games { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
 ul.games a { color: inherit; }
+
+h2 {
+  font-size: 1.05rem;
+  margin: 2rem 0 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The game home page's two catalogues: one row per declared type, with
+   the game's own label first, the key an agent addresses it by next, and
+   the count last. A grid rather than a table so a narrow screen can let
+   the label wrap without the counts drifting out of line. */
+ul.catalogue { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.25rem; }
+
+ul.catalogue li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.catalogue-label { font-weight: 600; }
+
+.catalogue-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.catalogue-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The one thing on this page that asks a designer to do something: rows
+   a schema edit stopped fitting. Given the error colour the forms use,
+   not a colour of its own, so the page has one vocabulary for "look
+   here" — and a border as well as a colour, so it does not depend on
+   colour alone to be noticed. */
+.catalogue-invalid {
+  grid-column: 1 / -1;
+  color: #a4262c;
+  border-top: 1px solid var(--line);
+  padding-top: 0.4rem;
+  font-size: 0.85rem;
+}

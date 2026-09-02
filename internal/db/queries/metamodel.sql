@@ -102,6 +102,27 @@ SELECT count(*) FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid;
 
+-- name: CountEntitiesPerType :many
+-- One row per entity type that has entities, with how many of them no
+-- longer fit their type's schema. Grouped in SQL rather than counted per
+-- type in Go: a game's home page wants every type's number at once, and
+-- a query per type would make the page cost grow with the vocabulary.
+-- A type with no entities is absent, not zero -- the caller already
+-- holds the type list and reads a missing key as none.
+SELECT entity_type_id,
+       count(*) AS total,
+       count(*) FILTER (WHERE invalid) AS invalid
+FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+GROUP BY entity_type_id;
+
+-- name: CountRelationsPerType :many
+-- CountEntitiesPerType for edges; see its comment.
+SELECT relation_type_id, count(*) AS total
+FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+GROUP BY relation_type_id;
+
 -- name: DeleteEntityType :execrows
 DELETE FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;

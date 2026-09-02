@@ -345,16 +345,16 @@ if (inviteForm) {
   });
 }
 
-// fetchGames wraps GET /api/games the same defensive way postJSON wraps a
-// POST: a network failure or a non-JSON body is reported the same shape
-// as a mapped server error, and a 401 arriving here — a session that
-// expired, or was revoked in another tab, mid-browse — is treated as
-// "sign in again", not as a blank or broken page, since staying on a page
-// that can no longer authenticate anything it fetches serves nobody.
-async function fetchGames() {
+// fetchAPI wraps a GET the same defensive way postJSON wraps a POST: a
+// network failure or a non-JSON body is reported the same shape as a
+// mapped server error, and a 401 arriving here — a session that expired,
+// or was revoked in another tab, mid-browse — is treated as "sign in
+// again", not as a blank or broken page, since staying on a page that
+// can no longer authenticate anything it fetches serves nobody.
+async function fetchAPI(path) {
   let response;
   try {
-    response = await fetch("/api/games");
+    response = await fetch(path);
   } catch {
     return { ok: false, message: fallbackMessage };
   }
@@ -365,11 +365,22 @@ async function fetchGames() {
     return { ok: false, message: await parseErrorBody(response) };
   }
   try {
-    const body = await response.json();
-    return { ok: true, games: Array.isArray(body.games) ? body.games : [] };
+    return { ok: true, body: await response.json() };
   } catch {
     return { ok: false, message: fallbackMessage };
   }
+}
+
+// fetchGames is fetchAPI over GET /api/games, with the one shape check
+// every caller of it would otherwise repeat: a body whose "games" is not
+// an array is treated as no games rather than crashing the page that is
+// about to iterate it.
+async function fetchGames() {
+  const result = await fetchAPI("/api/games");
+  if (!result.ok) {
+    return result;
+  }
+  return { ok: true, games: Array.isArray(result.body.games) ? result.body.games : [] };
 }
 
 // goToLogin sends the browser to sign in again, carrying the page it was
@@ -455,6 +466,152 @@ if (createGameForm) {
   });
 }
 
+
+// --- The game home page ---
+//
+// What this page shows is a *catalogue with counts*, never a listing:
+// the game's declared entity types and relation types, each with how
+// many rows instance it, plus three totals. That is a deliberate bound
+// rather than a stage on the way to showing everything — GET
+// /api/games/{game}/summary answers with one row per declared type, so a
+// game holding four hundred entities renders exactly as fast, and as
+// small, as one holding four. Paging content belongs to the views
+// sub-project, which is where a page that shows entities will get a
+// cursor and a filter.
+
+// countLabel spells a count with the right noun, so "1 entities" never
+// reaches a designer's screen.
+function countLabel(count, singular, plural) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+// describeTotals is the one line under the game's name. An empty game
+// says so in words rather than showing three zeros, which reads as a
+// broken page rather than a new one.
+function describeTotals(totals) {
+  const entities = Number(totals.entities ?? 0);
+  const relations = Number(totals.relations ?? 0);
+  const invalid = Number(totals.invalid ?? 0);
+  if (entities === 0 && relations === 0) {
+    return "No content yet.";
+  }
+  const parts = [countLabel(entities, "entity", "entities"), countLabel(relations, "relation", "relations")];
+  if (invalid > 0) {
+    // Only when there are any: a permanent "0 no longer fit" would
+    // train a designer to ignore the one number on this page that ever
+    // asks them to do something.
+    parts.push(`${invalid} no longer fit their type`);
+  }
+  return parts.join(" · ");
+}
+
+// catalogueRow builds one line of a catalogue. Every string on it comes
+// from the game's own content — a label a designer wrote, a key an agent
+// sent — so every one goes in through textContent and never as markup,
+// the same rule the picker follows for a game name.
+function catalogueRow(label, key, count, invalid) {
+  const item = document.createElement("li");
+
+  const name = document.createElement("span");
+  name.className = "catalogue-label";
+  name.textContent = label;
+  item.append(name);
+
+  const handle = document.createElement("code");
+  handle.className = "catalogue-key";
+  handle.textContent = key;
+  item.append(handle);
+
+  const tally = document.createElement("span");
+  tally.className = "catalogue-count";
+  tally.textContent = count;
+  item.append(tally);
+
+  if (invalid > 0) {
+    const flag = document.createElement("span");
+    flag.className = "catalogue-invalid";
+    flag.textContent = `${invalid} invalid`;
+    item.append(flag);
+  }
+  return item;
+}
+
+// fillCatalogue renders one list and shows its empty state when there is
+// nothing to render. It clears the list first (replaceChildren, not
+// innerHTML) so a re-render can never double a catalogue.
+function fillCatalogue(listEl, emptyEl, rows) {
+  if (!listEl) {
+    return;
+  }
+  listEl.replaceChildren();
+  for (const row of rows) {
+    listEl.append(row);
+  }
+  listEl.hidden = rows.length === 0;
+  if (emptyEl) {
+    emptyEl.hidden = rows.length > 0;
+  }
+}
+
+// renderGameSummary draws the whole page body from one request. A
+// failure leaves the game's name in place and puts the server's own
+// message where the totals would have gone: a page that says what went
+// wrong beats one that silently shows an empty catalogue, which is
+// indistinguishable from a game with nothing in it.
+async function renderGameSummary(gameID) {
+  const summaryEl = document.getElementById("game-summary");
+  const result = await fetchAPI(`/api/games/${gameID}/summary`);
+  if (!result.ok) {
+    if (result.expired) {
+      goToLogin();
+      return;
+    }
+    if (summaryEl) {
+      summaryEl.textContent = result.message;
+    }
+    return;
+  }
+
+  const summary = result.body ?? {};
+  const entityTypes = Array.isArray(summary.entity_types) ? summary.entity_types : [];
+  const relationTypes = Array.isArray(summary.relation_types) ? summary.relation_types : [];
+  if (summaryEl) {
+    summaryEl.textContent = describeTotals(summary.totals ?? {});
+  }
+
+  fillCatalogue(
+    document.getElementById("types"),
+    document.getElementById("types-empty"),
+    entityTypes.map((type) =>
+      catalogueRow(
+        type.label_plural || type.label || type.key,
+        type.key,
+        countLabel(Number(type.entity_count ?? 0), "entity", "entities"),
+        Number(type.invalid_count ?? 0),
+      ),
+    ),
+  );
+  fillCatalogue(
+    document.getElementById("relation-types"),
+    document.getElementById("relation-types-empty"),
+    relationTypes.map((type) =>
+      catalogueRow(
+        type.label || type.key,
+        type.key,
+        countLabel(Number(type.relation_count ?? 0), "relation", "relations"),
+        0,
+      ),
+    ),
+  );
+
+  const content = document.getElementById("game-content");
+  if (content) {
+    // Revealed only now, with both catalogues already filled, so the
+    // page never flashes two empty lists on its way to the real ones.
+    content.hidden = false;
+  }
+}
+
 // game.html: resolve this page's own name from GET /api/games — there is
 // no server-side slug resolution on this route (Task 8's Round 2
 // Correction 12 — /g/{slug} only ever serves this static shell), so the
@@ -490,6 +647,7 @@ if (gameNameEl) {
       // that cannot be reached; see LAST_GAME_KEY's own comment above for
       // why a wrong remembered value is never merely harmless.
       if (slug) rememberGame(slug);
+      await renderGameSummary(game.id);
     } else {
       gameNameEl.textContent = "Game not found";
       if (summaryEl) {

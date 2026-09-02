@@ -282,6 +282,7 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
 	s.registerProjectRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
 	s.registerProjectRoute("GET /api/games/{game}/search", s.handleSearch)
+	s.registerProjectRoute("GET /api/games/{game}/summary", s.handleGameSummary)
 
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call

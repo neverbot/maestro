@@ -77,3 +77,21 @@ func TestSafeReturnPathRejectsOffOriginBypasses(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/safe_return_path_test.mjs")
 }
+
+// TestGameHomePageRendersItsSummary drives the game home page the way a
+// browser does — the real app.js, a stubbed DOM and a stubbed fetch —
+// and pins the three things about that page a Go test of the API
+// underneath it cannot see: that a game's own labels reach the DOM as
+// text and never as markup, that a game with nothing in it gets its
+// empty states instead of two blank lists, and that a failed summary
+// leaves the server's own message on screen rather than an empty
+// catalogue that reads exactly like a game with no content.
+//
+// It also pins the property that makes this page a summary at all: it
+// issues exactly two requests, neither of them a listing, so a game
+// holding four hundred entities renders like one holding four. See
+// internal/web/jstest/game_summary_test.mjs for the harness.
+func TestGameHomePageRendersItsSummary(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/game_summary_test.mjs")
+}

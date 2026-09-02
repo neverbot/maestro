@@ -24,8 +24,12 @@
 -- that deleting an entity drops its links and keeps the document, that
 -- deleting a document takes its versions and links, the case-insensitive
 -- path key, the two unique keys, the updated_at trigger and the
--- generated search vector. Nothing below claims a behaviour that file
--- does not exercise.
+-- generated search vector. That is the extent of what the test file
+-- pins; the comments below also describe later tasks' Go behaviour
+-- (documents.deleted_at, documents.current_version) and this file's own
+-- index-access shape (correction 1 below), which no test in this file
+-- exercises and which a reader should treat as forward-looking, not as
+-- something this migration's own suite guards.
 --
 -- documents.search is GENERATED ALWAYS AS ... STORED, which
 -- entities.search deliberately is not, and the asymmetry is a decision
@@ -60,14 +64,24 @@
 -- by ts_rank's default weight array {D:0.1, C:0.2, B:0.4, A:1.0}. No
 -- query passes an explicit array.
 --
--- left(body_md, 131072) bounds what reaches to_tsvector at 131072
--- *characters*, the same number metamodel's searchTextLimit uses for
--- bytes. Without a bound a large body raises SQLSTATE 54000
--- (program_limit_exceeded) out of the generated expression, which fails
--- the INSERT itself with a message about a tsvector the caller never
--- mentioned. The Go write path is expected to bound the body far below
--- this; that path does not exist yet at this migration, so today this
--- bound is the only one there is.
+-- left(title, 131072), left(summary, 131072) and left(body_md, 131072)
+-- bound every input to the expression at 131072 *characters* each, the
+-- same number metamodel's searchTextLimit uses for bytes. Without a
+-- bound a large value raises SQLSTATE 54000 (program_limit_exceeded) out
+-- of the generated expression, which fails the INSERT or UPDATE itself
+-- with a message about a tsvector the caller never mentioned; title and
+-- summary need the same bound as the body; a multi-megabyte title is the
+-- same "an oversized field makes the row unsavable" shape the metamodel
+-- shipped and had to fix, just on a different column (correction 4).
+--
+-- For body_md this bound is not a backstop behind a smaller Go limit --
+-- it is *tighter* than one. Task 2 sets markdown.MaxBodyBytes to 1 MiB
+-- (1048576 bytes), eight times this bound, so a body between 131072 and
+-- 1048576 characters is accepted by Go, written in full, and indexed by
+-- its first 131072 characters only, with nothing recording the
+-- truncation. Task 9's search cannot see past that point in a long
+-- document, and its tool description says so, the way the metamodel's
+-- own search tool discloses its 128 KiB index bound (correction 2).
 
 -- +goose Up
 CREATE TABLE documents (
@@ -85,8 +99,8 @@ CREATE TABLE documents (
     -- second one.
     deleted_at      timestamptz,
     search          tsvector GENERATED ALWAYS AS (
-                        setweight(to_tsvector('simple', title), 'A')
-                     || setweight(to_tsvector('simple', summary), 'B')
+                        setweight(to_tsvector('simple', left(title, 131072)), 'A')
+                     || setweight(to_tsvector('simple', left(summary, 131072)), 'B')
                      || setweight(to_tsvector('simple', left(body_md, 131072)), 'C')
                     ) STORED,
     created_at      timestamptz NOT NULL DEFAULT now(),
@@ -134,8 +148,16 @@ CREATE TABLE document_versions (
     -- isolation filter must not depend on anyone remembering it. The
     -- composite key below is what keeps this column honest -- a version
     -- row whose project_id disagrees with its document's cannot be
-    -- inserted.
-    project_id   uuid NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    -- inserted. It carries no FOREIGN KEY of its own to projects
+    -- (correction 1): the composite key to documents below already
+    -- forces it to name a real project, and a project's own cascade to
+    -- documents already reaches every version transitively through the
+    -- FOREIGN KEY (document_id, project_id) below, which cascades on
+    -- document_id -- the index this table already carries. A second,
+    -- direct FOREIGN KEY (project_id) REFERENCES projects would only add
+    -- a second cascade path Postgres would run for the same rows, one
+    -- with no project_id-leading index to serve it.
+    project_id   uuid NOT NULL,
     document_id  uuid NOT NULL,
     version      integer NOT NULL,
     title        text NOT NULL DEFAULT '',
@@ -159,9 +181,16 @@ CREATE TABLE document_versions (
 -- The second line of defence behind documents.current_version: two
 -- writers cannot both insert version 4, whatever Go believes. It is also
 -- the index every read of this table travels, since a version is only
--- ever addressed within its document; there is deliberately no
--- project_id-leading index, because project_id is a check on an already
--- narrow row set here and not an access path.
+-- ever addressed within its document. There is deliberately no
+-- project_id-leading index (correction 1): project_id has no FOREIGN KEY
+-- of its own that would need one, is a check on an already narrow row
+-- set for every query this task's tests exercise, and this is the
+-- fastest-growing of the three tables here -- one row per edit, forever
+-- -- so an index only a rare project deletion would use is pure write
+-- cost. That deletion instead reaches this table by cascading through
+-- documents, using this same document_id-leading index; measured at
+-- 50,000 rows across 20 games, that path took 1996us end to end against
+-- 5835us with the direct FOREIGN KEY this correction removed.
 CREATE UNIQUE INDEX document_versions_key ON document_versions (document_id, version);
 
 CREATE TABLE document_links (

@@ -48,8 +48,12 @@ func seedDocumentGame(t *testing.T, ctx context.Context, pool *pgxpool.Pool, slu
 }
 
 // seedDocument inserts one document into the given game and returns its
-// id. The columns it leaves out are exactly the ones with defaults, so a
-// missing default shows up here rather than three tasks later.
+// id. The columns it leaves out are exactly the ones with defaults, so
+// this catches a column losing its default (e.g. body_md's empty-string
+// default, or current_version's 1) while it stays NOT NULL. It does not
+// catch a column that becomes nullable with no default at all --
+// frontmatter made nullable with no default leaves this insert, and the
+// rest of the suite, green.
 func seedDocument(t *testing.T, ctx context.Context, pool *pgxpool.Pool, projectID, path string) string {
 	t.Helper()
 
@@ -487,6 +491,64 @@ func TestTheDocumentSearchVectorIsGeneratedAndWeighted(t *testing.T) {
 	}
 }
 
+// TestTheDocumentSearchVectorCannotBeSetOnInsert is
+// TestTheDocumentSearchVectorIsGeneratedAndWeighted's refusal, proved on
+// INSERT rather than UPDATE. A generated column refuses a write in both
+// statements, but only the UPDATE path was pinned; this closes the
+// other half.
+func TestTheDocumentSearchVectorCannotBeSetOnInsert(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
+
+	_, err := pool.Exec(ctx,
+		`INSERT INTO documents (project_id, path, body_md, search)
+		 VALUES ($1, 'lore/insert-search', 'body', to_tsvector('simple', 'anything'))`,
+		azeroth.projectID)
+	if err == nil {
+		t.Fatal("INSERT into documents.search accepted a direct value; it must be a generated column")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("expected a *pgconn.PgError, got %T: %v", err, err)
+	}
+	// 428C9: cannot insert into a generated column.
+	if pgErr.Code != "428C9" {
+		t.Fatalf("expected SQLSTATE 428C9 (generated_always), got %s: %v", pgErr.Code, err)
+	}
+}
+
+// TestDocumentKeysAreNotDeferrable pins that the composite keys this
+// migration relies on for isolation refuse a row at statement time, not
+// commit time. Postgres defaults to NOT DEFERRABLE, so nothing in the
+// migration says this explicitly -- but a later edit that added
+// DEFERRABLE INITIALLY DEFERRED to any of them would move the refusal
+// from the statement inside a transaction to the COMMIT, which lets a
+// transaction observe a transiently cross-game row before it fails. The
+// review's method note: without this test that regression is invisible,
+// because every other test here only checks that the final state is
+// refused, never when.
+func TestDocumentKeysAreNotDeferrable(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
+	outland := seedDocumentGame(t, ctx, pool, "outland")
+	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO document_links (project_id, document_id, entity_id) VALUES ($1, $2, $3)`,
+		azeroth.projectID, docID, outland.entityID)
+	assertForeignKeyViolation(t, err)
+}
+
 // TestTheDocumentSearchVectorIsBounded pins the left(body_md, 131072)
 // in the generated expression. Without it a large body raises SQLSTATE
 // 54000 from the generated column itself and the INSERT fails, with a
@@ -518,6 +580,36 @@ func TestTheDocumentSearchVectorIsBounded(t *testing.T) {
 	}
 	if !indexed {
 		t.Fatal("the head of the body was not indexed")
+	}
+}
+
+// TestAnOversizedTitleOrSummaryDoesNotFailTheInsert pins left(title,
+// 131072) and left(summary, 131072), the other two inputs to the
+// generated expression. Without them, a title or summary alone can
+// exceed the roughly 1 MB a single to_tsvector call accepts and raise
+// SQLSTATE 54000 from the generated column -- the same "an oversized
+// field makes the row unsavable" shape the metamodel shipped and had to
+// fix, on a column body_md's own bound does nothing for.
+func TestAnOversizedTitleOrSummaryDoesNotFailTheInsert(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	azeroth := seedDocumentGame(t, ctx, pool, "azeroth")
+
+	var oversized strings.Builder
+	for i := range 300000 {
+		fmt.Fprintf(&oversized, "w%d ", i)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO documents (project_id, path, title) VALUES ($1, 'lore/long-title', $2)`,
+		azeroth.projectID, oversized.String()); err != nil {
+		t.Fatalf("insert a title larger than the index bound: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO documents (project_id, path, summary) VALUES ($1, 'lore/long-summary', $2)`,
+		azeroth.projectID, oversized.String()); err != nil {
+		t.Fatalf("insert a summary larger than the index bound: %v", err)
 	}
 }
 

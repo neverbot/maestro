@@ -2593,8 +2593,19 @@ correction adds a helper, the helper is written once here for all three.)
 
 **Files:**
 - Create: `internal/metamodel/entities.go`
-- Modify: `internal/db/queries/metamodel.sql`
+- Modify: `internal/db/queries/metamodel.sql`, `internal/metamodel/events.go`,
+  `internal/metamodel/descriptors.go`
 - Test: `internal/metamodel/entities_test.go`
+
+**Refreshed after Task 3's review, 2026-09-02.** Every block below was
+rewritten against the files Task 3 actually landed. The original blocks
+re-introduced six defects Task 3 closed — an unguarded `DO UPDATE`, an
+`updated_at = now()` the trigger owns, a three-argument `s.publish`,
+payloads hand-built as JSON strings with caller values interpolated
+unescaped, no post-write spelling check, and a `failureFor` that reported
+a malformed key as `internal_error` — and the point of a plan is that its
+implementer can copy it. Task 3's corrections 4, 5, 15, 19, 21, 23 and 25
+are the reasons; each is cited where it bites.
 
 - [ ] **Step 1: Add the queries**
 
@@ -2602,17 +2613,42 @@ Append to `internal/db/queries/metamodel.sql`:
 
 ```sql
 -- name: UpsertEntity :one
-INSERT INTO entities (project_id, entity_type_id, key, name, fields, search)
+-- The same shape as UpsertEntityType, for the same reasons, and that
+-- statement's comment carries the full argument. In short:
+--
+--   * The DO UPDATE is guarded by the caller's expected version, so the
+--     whole compare-and-set is one statement and two writers cannot both
+--     read version 1 and both succeed (correction 4). A creating caller
+--     passes noVersion, which no stored version can equal.
+--   * The key column is deliberately not in the SET list. The first
+--     spelling stored stands, and the returned row therefore still
+--     carries it — which is what lets Go refuse a respelling *after* the
+--     write, closing the creation-race hole (correction 15).
+--   * No write sets updated_at: 0004_metamodel.sql puts a
+--     set_updated_at trigger on all four tables, and a clause here would
+--     be a second mechanism behind one column (correction 5).
+--   * The audit columns are carried, so the composite
+--     FOREIGN KEY (updated_by_token_id, project_id) catches a token
+--     scoped to another game (correction 24).
+--
+-- invalid is reset to false because the caller has just validated these
+-- values against the type's current schema; a row that is being written
+-- is a row that has been judged.
+INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
+                      updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('entity_type_id')::uuid,
         sqlc.arg('key')::text, sqlc.arg('name')::text, sqlc.arg('fields')::jsonb,
-        to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text))
+        to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text),
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, entity_type_id, lower(key)) DO UPDATE
-SET name       = excluded.name,
-    fields     = excluded.fields,
-    search     = excluded.search,
-    invalid    = false,
-    version    = entities.version + 1,
-    updated_at = now()
+SET name                = excluded.name,
+    fields              = excluded.fields,
+    search              = excluded.search,
+    invalid             = false,
+    version             = entities.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE entities.version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
 -- name: GetEntityByKey :one
@@ -2620,6 +2656,19 @@ SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid
   AND lower(key) = lower(sqlc.arg('key')::text);
+
+-- name: GetEntityByKeyForUpdate :one
+-- FOR UPDATE, for the reason correction 21 records: without the lock the
+-- read runs against the transaction's snapshot, so a caller racing an
+-- in-flight edit is told to merge onto a version that is already stale
+-- by the time it retries, and retries into the same refusal forever.
+-- What the lock buys is not the refusal — the guarded DO UPDATE refuses
+-- on its own — but the *number* the caller is told to merge onto.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+  AND lower(key) = lower(sqlc.arg('key')::text)
+FOR UPDATE;
 
 -- name: GetEntityByID :one
 SELECT * FROM entities
@@ -2629,7 +2678,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid
-ORDER BY name;
+ORDER BY name, id;
 
 -- name: ListEntitiesPage :many
 SELECT * FROM entities
@@ -2647,9 +2696,73 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 Run: `make sqlc`
 
-- [ ] **Step 2: Write the failing test**
+- [ ] **Step 2: State this task's event gating in `events.go`**
 
-`internal/metamodel/entities_test.go`:
+Correction 19: the gating of an event is a decision about who may learn a
+fact, and it is stated beside the kind, not passed as two bare literals at
+a call site. Add to `internal/metamodel/events.go`:
+
+```go
+	// eventEntityUpserted and eventEntityRemoved fire from UpsertEntity,
+	// UpsertEntities and RemoveEntity once their transaction has
+	// committed.
+	//
+	// The gating is the same as the type events above and for the same
+	// reasons, restated rather than inherited: MinRole empty, because a
+	// viewer's browser renders the entity list and gating the change
+	// above viewer leaves exactly the reader who cannot re-fetch on
+	// demand watching a stale list; HumanOnly false, because Task 7
+	// mounts entities.list and entities.upsert on MCP for agents, and a
+	// seeding agent is the subscriber with the most to lose from not
+	// being told its content moved.
+	eventEntityUpserted = "entity.upserted"
+	eventEntityRemoved  = "entity.removed"
+```
+
+with
+
+```go
+const (
+	entityEventMinRole   = roles.Role("")
+	entityEventHumanOnly = false
+)
+```
+
+beside the type constants.
+
+- [ ] **Step 3: Give `descriptors.go` the entity's one descriptive column**
+
+An entity carries `name` where a type carries `label`, and correction 23
+exists so that Task 4 does not re-ship the same silence under a different
+column name. Add:
+
+```go
+// checkName is the entity flavour of checkDescriptors. An entity carries
+// one descriptive column and it obeys the label rule — required, capped
+// at maxLabelLen, counted in runes — at its own wire path, so an agent
+// sees "name", not "label", for the argument it actually sent.
+//
+// It is a second function rather than a fifth argument to
+// checkDescriptors because the two rows genuinely differ: a type has
+// five descriptive columns and an entity has one, and a shared helper
+// taking three empty strings would read as though an entity had a colour
+// that simply was not being checked.
+func checkName(name string) []FieldError {
+	var problems []FieldError
+	if name == "" {
+		problems = append(problems, FieldError{Path: "name", Message: "is required"})
+	} else {
+		tooLong("name", name, maxLabelLen, &problems)
+	}
+	return problems
+}
+```
+
+- [ ] **Step 4: Write the failing test**
+
+`internal/metamodel/entities_test.go`. Note `newProject(t, pool)` — the
+helper takes the pool, not the service (`types_test.go`), and the same
+correction applies to every test block in Tasks 5 and 6.
 
 ```go
 package metamodel_test
@@ -2662,6 +2775,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/realtime"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -2684,7 +2798,7 @@ func TestUpsertEntityValidatesAgainstItsType(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
@@ -2711,7 +2825,7 @@ func TestUpsertEntityIsIdempotentAndBumpsVersion(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	in := metamodel.EntityInput{
@@ -2741,7 +2855,7 @@ func TestUpsertEntityRejectsStaleVersion(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
@@ -2761,11 +2875,93 @@ func TestUpsertEntityRejectsStaleVersion(t *testing.T) {
 	}
 }
 
+// TestUpsertEntityRefusesARespelledKey is Task 3's correction 15 for
+// entities. The pre-read alone is not a refusal: on the creation path
+// there is nothing to lock, so the check has to run again on the row the
+// upsert returns. Drive the race with an open rival transaction, as
+// TestARaceThatWouldLandUnderAnotherSpellingIsRefused does, so the
+// interleaving is the test's rather than the scheduler's.
+func TestUpsertEntityRefusesARespelledKey(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "Hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "MINE",
+		Fields:          map[string]any{"min_level": float64(1)},
+		ExpectedVersion: ptrInt32(1),
+	})
+	requireFieldError(t, err, "key",
+		`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
+			`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
+
+	stored, err := svc.EntityByKey(ctx, project, "quest", "HOGGER")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	if stored.Key != "Hogger" || stored.Name != "Hogger" || stored.Version != 1 {
+		t.Fatalf("the refused upsert changed the row: %+v", stored)
+	}
+}
+
+// TestAMalformedEntityArgumentIsInvalidInput is correction 25 for
+// entities, and the finding Task 4's original block would have shipped:
+// a bad key reported as schema_violation sends an agent to inspect
+// entity *values*, and a bad key reported through failureFor's default
+// arm reports internal_error, which tells it nothing at all.
+func TestAMalformedEntityArgumentIsInvalidInput(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "main quest", Name: "",
+		Fields: map[string]any{"min_level": float64(1)},
+	})
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if errors.Is(err, metamodel.ErrSchemaViolation) {
+		t.Fatalf("err = %v must not also read as a schema violation", err)
+	}
+	// Both problems in one pass, as correction 23 requires: an agent
+	// fixing a seed script must not learn about the name only after the
+	// key is fixed.
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) || len(invalid.Fields) != 2 {
+		t.Fatalf("want the key and the name reported together, got %v", err)
+	}
+
+	// And the same fault inside a bulk batch carries the same code, not
+	// internal_error.
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "main quest", Name: "A",
+			Fields: map[string]any{"min_level": float64(1)}},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+	if len(result.Failed) != 1 || result.Failed[0].Code != "invalid_input" {
+		t.Fatalf("failures = %+v, want one invalid_input", result.Failed)
+	}
+}
+
 func TestBulkPartialLandsTheGoodRowsAndReportsTheRest(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
@@ -2785,6 +2981,9 @@ func TestBulkPartialLandsTheGoodRowsAndReportsTheRest(t *testing.T) {
 	if result.Failed[0].Index != 1 {
 		t.Fatalf("the failure must carry its index, got %d", result.Failed[0].Index)
 	}
+	if result.Failed[0].Code != "schema_violation" {
+		t.Fatalf("code = %q, want schema_violation for a bad value", result.Failed[0].Code)
+	}
 	if _, err := svc.EntityByKey(ctx, project, "quest", "c"); err != nil {
 		t.Fatalf("the row after the failure must still have landed: %v", err)
 	}
@@ -2794,7 +2993,7 @@ func TestBulkAtomicRollsBackEverythingOnOneFailure(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	_, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
@@ -2809,11 +3008,47 @@ func TestBulkAtomicRollsBackEverythingOnOneFailure(t *testing.T) {
 	}
 }
 
+// TestNoEntityEventIsPublishedForARolledBackBatch is correction 19 for
+// this task: publication happens after the transaction commits, and the
+// atomic path is where that is easiest to get wrong, because the write
+// and the commit are in different functions. A batch that rolls back
+// must put nothing on the wire.
+func TestNoEntityEventIsPublishedForARolledBackBatch(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	sub := hub.Subscribe(project, "viewer", true)
+	defer hub.Unsubscribe(sub)
+
+	if _, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": "nope"}},
+	}, metamodel.BulkAtomic); err == nil {
+		t.Fatal("the batch must fail")
+	}
+	requireNothing(t, sub, "the atomic batch rolled back")
+
+	// The subscriber is a viewer *and* a token caller: the gating stated
+	// in events.go excludes neither, so a passing batch reaches it.
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if got := receive(t, sub); got.Kind != "entity.upserted" {
+		t.Fatalf("Kind = %q, want entity.upserted", got.Kind)
+	}
+}
+
 func TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, svc)
+	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
 	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
@@ -2849,12 +3084,17 @@ func TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+Note that `TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem` already
+exists in `types_test.go`, written against `insertEntity`; Task 4's job is
+to move it here and drive it through the service instead, not to declare
+it twice.
+
+- [ ] **Step 5: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -run TestUpsertEntity -v`
 Expected: FAIL, `undefined: metamodel.EntityInput`.
 
-- [ ] **Step 4: Write the implementation**
+- [ ] **Step 6: Write the implementation**
 
 `internal/metamodel/entities.go`:
 
@@ -2866,6 +3106,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -2888,6 +3129,12 @@ const (
 )
 
 // EntityInput is an upsert request, addressed by type key plus entity key.
+//
+// ExpectedVersion carries exactly the meaning EntityTypeInput's does, and
+// the same caveat: on the insert path it is passed as the guard on the
+// DO UPDATE and is never evaluated, so a claim against a row that does
+// not exist creates one rather than being refused. See
+// EntityTypeInput.ExpectedVersion for the argument.
 type EntityInput struct {
 	TypeKey         string
 	Key             string
@@ -2895,6 +3142,22 @@ type EntityInput struct {
 	Fields          map[string]any
 	ExpectedVersion *int32
 	Actor           Actor
+}
+
+// entityEvent is the payload of the entity.* events: the identity of
+// what changed and nothing else.
+//
+// A payload never carries a value a client could treat as current —
+// Service.publish's doc comment argues why — so this holds ids and keys
+// and not the name that just changed. It is also a struct and not a
+// hand-built JSON string: interpolating in.TypeKey and row.Key into
+// `{"type":"…"}` would put unescaped caller-controlled text on the SSE
+// wire, which is a frame-injection the Core already closed once, and it
+// would do it with values this rule says must not be there at all.
+type entityEvent struct {
+	ID      uuid.UUID `json:"id"`
+	TypeKey string    `json:"type_key"`
+	Key     string    `json:"key"`
 }
 
 // BulkFailure is one rejected item of a batch.
@@ -2913,16 +3176,27 @@ type BulkResult struct {
 
 // UpsertEntity creates or updates one entity.
 func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in EntityInput) (dbq.Entity, error) {
-	q := s.q
-	row, err := s.upsertEntityWith(ctx, q, projectID, in)
+	var row dbq.Entity
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		var err error
+		row, err = s.upsertEntityWith(ctx, q, projectID, in)
+		return err
+	})
 	if err != nil {
 		return dbq.Entity{}, err
 	}
-	s.publish(projectID, "entity.upserted", `{"type":"`+in.TypeKey+`","key":"`+row.Key+`"}`)
+	s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly,
+		entityEvent{ID: row.ID, TypeKey: in.TypeKey, Key: row.Key})
 	return row, nil
 }
 
 // UpsertEntities writes a batch in the requested mode.
+//
+// Both modes publish only after their transaction has committed, and
+// publish one identity event per row that landed rather than one event
+// carrying a count: a count is a value, not an identity, and a
+// subscriber's only correct reaction to an entity event is to re-read
+// the rows it names.
 func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items []EntityInput, mode BulkMode) (BulkResult, error) {
 	if mode == BulkAtomic {
 		return s.upsertEntitiesAtomic(ctx, projectID, items)
@@ -2930,48 +3204,60 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 
 	var result BulkResult
 	for i, in := range items {
-		row, err := s.upsertEntityWith(ctx, s.q, projectID, in)
+		// Each item is its own transaction: a partial batch's whole point
+		// is that item 200 landing does not depend on item 3.
+		var row dbq.Entity
+		err := s.withTx(ctx, func(q *dbq.Queries) error {
+			var err error
+			row, err = s.upsertEntityWith(ctx, q, projectID, in)
+			return err
+		})
 		if err != nil {
 			result.Failed = append(result.Failed, failureFor(i, in.Key, err))
 			continue
 		}
 		result.Succeeded = append(result.Succeeded, row)
-	}
-	if len(result.Succeeded) > 0 {
-		s.publish(projectID, "entity.upserted", fmt.Sprintf(`{"count":%d}`, len(result.Succeeded)))
+		s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly,
+			entityEvent{ID: row.ID, TypeKey: in.TypeKey, Key: row.Key})
 	}
 	return result, nil
 }
 
 func (s *Service) upsertEntitiesAtomic(ctx context.Context, projectID uuid.UUID, items []EntityInput) (BulkResult, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return BulkResult{}, fmt.Errorf("begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	q := dbq.New(tx)
 	var result BulkResult
-	for i, in := range items {
-		row, err := s.upsertEntityWith(ctx, q, projectID, in)
-		if err != nil {
-			return BulkResult{}, fmt.Errorf("item %d (%s): %w", i, in.Key, err)
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		result = BulkResult{}
+		for i, in := range items {
+			row, err := s.upsertEntityWith(ctx, q, projectID, in)
+			if err != nil {
+				return fmt.Errorf("item %d (%s): %w", i, in.Key, err)
+			}
+			result.Succeeded = append(result.Succeeded, row)
 		}
-		result.Succeeded = append(result.Succeeded, row)
+		return nil
+	})
+	if err != nil {
+		return BulkResult{}, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return BulkResult{}, fmt.Errorf("commit: %w", err)
+	for i, row := range result.Succeeded {
+		s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly,
+			entityEvent{ID: row.ID, TypeKey: items[i].TypeKey, Key: row.Key})
 	}
-	s.publish(projectID, "entity.upserted", fmt.Sprintf(`{"count":%d}`, len(result.Succeeded)))
 	return result, nil
 }
 
-// upsertEntityWith does the work against any queries handle, so the same code
-// serves the single, partial and atomic paths.
+// upsertEntityWith does the work against any queries handle, so the same
+// code serves the single, partial and atomic paths. Every caller runs it
+// inside a transaction, and none of them publishes from in here.
 func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, in EntityInput) (dbq.Entity, error) {
-	if in.Key == "" {
-		return dbq.Entity{}, &ValidationError{Fields: []FieldError{{Path: "key", Message: "is required"}}}
+	problems := rowKeyProblems("key", in.Key)
+	problems = append(problems, checkName(in.Name)...)
+	if len(problems) > 0 {
+		return dbq.Entity{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
+	// type_key is deliberately not validated as a key here: it addresses
+	// a row this call only reads, so a malformed one has one honest
+	// answer — there is no such type — and it already gets it below.
 
 	typ, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: in.TypeKey})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -2990,15 +3276,28 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 		return dbq.Entity{}, err
 	}
 
-	existing, err := q.GetEntityByKey(ctx, dbq.GetEntityByKeyParams{
+	expected := noVersion
+	if in.ExpectedVersion != nil {
+		expected = *in.ExpectedVersion
+	}
+
+	// Read under the row lock, so the spelling and the version this
+	// caller is told about are the ones its own write will meet.
+	existing, err := q.GetEntityByKeyForUpdate(ctx, dbq.GetEntityByKeyForUpdateParams{
 		ProjectID: projectID, EntityTypeID: typ.ID, Key: in.Key,
 	})
 	switch {
 	case err == nil:
+		// Spelling before version: a caller failing for both reasons
+		// hears the one it can act on. See UpsertEntityType.
+		if existing.Key != in.Key {
+			return dbq.Entity{}, keyRespellingError("key", in.Key, existing.Key)
+		}
 		if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
 			return dbq.Entity{}, &VersionConflictError{Current: existing.Version}
 		}
 	case errors.Is(err, pgx.ErrNoRows):
+		// Creation: no version to match, nothing to lock.
 	default:
 		return dbq.Entity{}, fmt.Errorf("lookup entity: %w", err)
 	}
@@ -3009,17 +3308,55 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 	}
 
 	row, err := q.UpsertEntity(ctx, dbq.UpsertEntityParams{
-		ProjectID:    projectID,
-		EntityTypeID: typ.ID,
-		Key:          in.Key,
-		Name:         in.Name,
-		Fields:       encoded,
-		SearchText:   searchTextOf(values),
+		ProjectID:        projectID,
+		EntityTypeID:     typ.ID,
+		Key:              in.Key,
+		Name:             in.Name,
+		Fields:           encoded,
+		SearchText:       searchTextOf(values),
+		ExpectedVersion:  expected,
+		UpdatedByUserID:  in.Actor.UserID,
+		UpdatedByTokenID: in.Actor.TokenID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded DO UPDATE matched nothing: between the read above
+		// and this statement another writer created or advanced the row.
+		return dbq.Entity{}, conflictOnEntityKey(ctx, q, projectID, typ.ID, in.Key)
+	}
 	if err != nil {
+		if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+			return dbq.Entity{}, mapped
+		}
 		return dbq.Entity{}, fmt.Errorf("upsert entity: %w", err)
 	}
+	// Correction 15, for entities. The locked read cannot be the only
+	// place the spelling is checked: on the creation path there is
+	// nothing to lock, so a writer racing a creator with a matching
+	// expected version passed both the read and the guard and updated a
+	// row it never saw. The upsert returns the row it touched and key is
+	// not in the SET list, so comparing the stored spelling to the
+	// submitted one after the write closes both; the caller's
+	// transaction rolls the write back.
+	if row.Key != in.Key {
+		return dbq.Entity{}, keyRespellingError("key", in.Key, row.Key)
+	}
 	return row, nil
+}
+
+// conflictOnEntityKey re-reads a key whose guarded upsert matched no row
+// and names what actually stands in the way — a respelling, or a version
+// this caller was holding that has since moved.
+func conflictOnEntityKey(ctx context.Context, q *dbq.Queries, projectID, typeID uuid.UUID, key string) error {
+	row, err := q.GetEntityByKey(ctx, dbq.GetEntityByKeyParams{
+		ProjectID: projectID, EntityTypeID: typeID, Key: key,
+	})
+	if err != nil {
+		return fmt.Errorf("re-read entity after a failed upsert: %w", err)
+	}
+	if row.Key != key {
+		return keyRespellingError("key", key, row.Key)
+	}
+	return &VersionConflictError{Current: row.Version}
 }
 
 // EntityByKey loads one entity by type key and entity key.
@@ -3031,45 +3368,55 @@ func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey,
 	row, err := s.q.GetEntityByKey(ctx, dbq.GetEntityByKeyParams{
 		ProjectID: projectID, EntityTypeID: typ.ID, Key: key,
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return dbq.Entity{}, ErrNotFound
-	}
 	if err != nil {
-		return dbq.Entity{}, fmt.Errorf("lookup entity: %w", err)
+		return dbq.Entity{}, notFound(err, "lookup entity")
 	}
 	return row, nil
 }
 
 // RemoveEntity deletes one entity. Its relations go with it, by cascade.
 func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) error {
-	rows, err := s.q.DeleteEntity(ctx, dbq.DeleteEntityParams{ProjectID: projectID, ID: id})
+	// Read the row before deleting it, for its identity: correction 22 —
+	// an event declaring a key field and carrying "" tells a client a
+	// row keyed empty string is gone.
+	var removed dbq.Entity
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		var err error
+		removed, err = q.GetEntityByID(ctx, dbq.GetEntityByIDParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return notFound(err, "lookup entity")
+		}
+		rows, err := q.DeleteEntity(ctx, dbq.DeleteEntityParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return fmt.Errorf("delete entity: %w", err)
+		}
+		if rows == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("delete entity: %w", err)
+		return err
 	}
-	if rows == 0 {
-		return ErrNotFound
-	}
-	s.publish(projectID, "entity.removed", `{"id":"`+id.String()+`"}`)
+	s.publish(projectID, eventEntityRemoved, entityEventMinRole, entityEventHumanOnly,
+		entityEvent{ID: id, Key: removed.Key})
 	return nil
 }
 
-// decodeFields turns a stored jsonb blob back into a value map.
-func decodeFields(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("decode fields: %w", err)
-	}
-	return out, nil
-}
-
-// searchTextOf flattens the text values of a row so search can index them.
+// searchTextOf flattens the text values of a row so search can index
+// them. The keys are sorted so the same values always produce the same
+// tsvector input: map iteration order is randomised, and a search column
+// that differs between two identical writes is a diff nobody can explain.
 func searchTextOf(values map[string]any) string {
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	var b strings.Builder
-	for _, v := range values {
-		if s, ok := v.(string); ok {
+	for _, k := range keys {
+		if s, ok := values[k].(string); ok {
 			b.WriteString(s)
 			b.WriteByte(' ')
 		}
@@ -3078,17 +3425,31 @@ func searchTextOf(values map[string]any) string {
 }
 
 // failureFor maps a domain error to the wire shape of a bulk failure.
+//
+// Every code this package can produce has an arm. The default arm is
+// internal_error, which is the honest answer for something nobody
+// planned for — and precisely the wrong answer for a malformed key, so
+// ErrInvalidInput is matched explicitly. Correction 25 split that code
+// out for exactly this reason: it is a caller's own argument, at a path,
+// fixable in place, and reporting it as internal_error tells an agent to
+// give up on a call it could have fixed.
 func failureFor(index int, key string, err error) BulkFailure {
 	f := BulkFailure{Index: index, Key: key, Message: err.Error()}
 	switch {
+	case errors.Is(err, ErrInvalidInput):
+		f.Code = "invalid_input"
 	case errors.Is(err, ErrSchemaViolation):
 		f.Code = "schema_violation"
+	case errors.Is(err, ErrInvalidSchema):
+		f.Code = "invalid_schema"
 	case errors.Is(err, ErrVersionConflict):
 		f.Code = "version_conflict"
 	case errors.Is(err, ErrNotFound):
 		f.Code = "not_found"
 	case errors.Is(err, ErrEndpointTypeMismatch):
 		f.Code = "endpoint_type_mismatch"
+	case errors.Is(err, ErrInUse):
+		f.Code = "in_use"
 	default:
 		f.Code = "internal_error"
 	}
@@ -3096,12 +3457,16 @@ func failureFor(index int, key string, err error) BulkFailure {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+`decodeFields` is **not** declared here: Task 3 landed it in
+`service.go`, beside `withTx` and `actorConstraintViolation`, and a
+second copy will not compile.
+
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `go test ./internal/metamodel/ -v`
 Expected: PASS, including `TestRemoveEntityTypeRefusesWhenInUse` from Task 3.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add internal/db/queries internal/db/dbq internal/metamodel

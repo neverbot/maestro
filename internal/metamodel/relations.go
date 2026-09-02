@@ -634,9 +634,10 @@ const (
 //
 // This is the per-page bound and nothing more: the cursor ListRelations
 // now issues is what says how many pages exist. The rule itself is
-// pageSize, in list.go, shared with the entity listing so the two cannot
-// drift apart; what stays here is this listing's own two bounds and the
-// argument for the shape.
+// pageSize, in list.go — a delegation to paging.Size, shared with the
+// entity listing, the search limit and the markdown domain so that none
+// of them can drift apart; what stays here is this listing's own two
+// bounds and the argument for the shape.
 func relationPageSize(limit int32) int32 {
 	return pageSize(limit, defaultRelationPage, maxRelationPage)
 }

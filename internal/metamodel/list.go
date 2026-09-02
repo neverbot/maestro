@@ -2,15 +2,12 @@ package metamodel
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
+	"github.com/neverbot/maestro/internal/paging"
 )
 
 // RelatedFilter is the single hop of traversal this sub-project offers.
@@ -149,137 +146,80 @@ const (
 	maxEntityPage     int32 = 500
 )
 
-// pageSize turns a caller's requested limit into the one a listing will
-// use. relationPageSize's doc comment carries the argument for why a
-// limit above the cap is clamped rather than folded onto the default;
-// this is that rule, shared, so the two listings cannot drift apart.
-func pageSize(limit, def, max int32) int32 {
-	switch {
-	case limit <= 0:
-		return def
-	case limit > max:
-		return max
-	default:
-		return limit
-	}
-}
-
-// cursor is the keyset position of the last row of a page, together with
-// a fingerprint of the listing it was issued for.
+// The keyset cursor, its fingerprint and the page clamp live in
+// internal/paging, shared with the markdown domain. Two listings in two
+// packages paging with two copies of this code is how the fingerprint
+// that omitted the project id — one game's cursor paging another game's
+// rows — would have been fixed in one copy and left standing in the
+// other.
 //
-// **The contract is EntityPage's**, where a caller can read it: what a
-// position buys and does not buy, why a cursor cannot be carried between
-// listings, and why nothing signs it. This comment is only the shape.
+// What stays here is this package's own spelling of that API: six
+// one-line delegations, which the three listings and this package's
+// in-package tests (list_internal_test.go, relations_internal_test.go)
+// both go through. Keeping the names is what proves the extraction did
+// not move the shared code out from under the tests that pin it —
+// dropping the project id from a fingerprintOf call still reddens
+// TestACursorFromAnotherGameIsRefused, and folding paging.Size's
+// over-cap arm onto the default still reddens
+// TestAnEntityPageAsksForTooMuchAndGetsTheCap and
+// TestARelationPageAsksForTooMuchAndGetsTheCap — and it is why nothing
+// in internal/metamodel's tests changed for this extraction.
 //
-// Sort is the leading half of the sort key, spelled as text: an entity
-// listing's is the row's name, and ListRelations', whose rows are
-// ordered by creation, is its created_at in RFC 3339. Text and not a
-// typed union because a cursor is an opaque token whose only job is to
-// come back unchanged, and the listing that issued it — pinned by the
-// fingerprint — is the only code that has to know how to read it.
+// **The contract a caller has to know is EntityPage's**, where a caller
+// can read it, and paging.Cursor's, which states it once for both
+// domains: what a position buys and does not buy, why a cursor cannot
+// be carried between listings, and why nothing signs it.
 //
-// Fingerprint is fingerprintOf over the *resolved* listing: the project
-// id first, then which listing it is, then the filter — the entity type
+// A fingerprint here is over the *resolved* listing: the project id
+// first, then which listing it is, then the filter — the entity type
 // id, the invalid flag, and a traversal's relation type, anchor and
 // direction. Resolved and not as spelled, so two spellings of one key
 // give one fingerprint. The project id is first because without it two
 // games' unfiltered listings shared a fingerprint and one game's cursor
 // paged the other's rows from a position that meant nothing there:
 // TestACursorFromAnotherGameIsRefused pins each of the three listings.
-type cursor struct {
-	Sort        string    `json:"n"`
-	ID          uuid.UUID `json:"i"`
-	Fingerprint string    `json:"f"`
-}
+type cursor = paging.Cursor
 
-func encodeCursor(c cursor) string {
-	raw, err := json.Marshal(c)
-	if err != nil {
-		// Unreachable: every field is a string or a uuid.UUID, whose
-		// MarshalJSON cannot fail. Returning no cursor rather than
-		// panicking keeps a listing answerable if that ever stops being
-		// true — a page without a cursor ends the listing, which is a
-		// smaller lie than a page with an unreadable one.
-		return ""
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
+func pageSize(limit, def, max int32) int32 { return paging.Size(limit, def, max) }
 
-// malformedCursor is what every unreadable cursor is reported as.
+func encodeCursor(c cursor) string { return paging.Encode(c) }
+
+func fingerprintOf(parts ...string) string { return paging.Fingerprint(parts...) }
+
+func invalidFilterPart(invalid *bool) string { return paging.TriState(invalid) }
+
+// refuseCursor turns paging's message into this package's own error, at
+// the argument's own path.
 //
 // invalid_input, not a bare error: the cursor is the caller's own
 // argument, at a path, and the recovery is the caller's — page from a
 // cursor a previous call returned, or omit it. Left untyped it reaches
 // an agent as internal_error and reads as "the server is broken" over a
 // value the agent itself supplied.
-func malformedCursor(why string) error {
+//
+// The messages live in internal/paging so that this domain and the
+// markdown domain cannot tell a caller two different things about one
+// bad cursor; the *type* is this domain's, because that is what
+// internal/web's existing invalid_input arm matches on.
+func refuseCursor(message string) error {
 	return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
-		Path: "cursor",
-		Message: fmt.Sprintf(
-			"is malformed (%s): page from the cursor a previous call returned, or omit it to start",
-			why),
+		Path: "cursor", Message: message,
 	}}}
 }
 
+// malformedCursor is what every unreadable cursor is reported as. Its
+// sentence is paging.Malformed's, shared, because ListRelations finds a
+// cursor unreadable one step past paging.Decode — it parses the
+// position back into a timestamp — and a second sentence for the same
+// fault is the drift this extraction exists to prevent.
+func malformedCursor(why string) error { return paging.Malformed(why, refuseCursor) }
+
 // decodeCursor reads a page position back and checks it belongs to the
-// listing it was handed to.
-//
-// The order of the two refusals matters: a cursor that is not readable at
-// all is malformed, and only a readable one can be judged against the
-// fingerprint. Reversed, a truncated cursor would be reported as
-// belonging to another listing, which sends a caller looking at its
-// filter instead of at the value it passed.
+// listing it was handed to. The order of paging.Decode's two refusals is
+// pinned from this side by
+// TestAMalformedCursorIsRefusedBeforeItsFingerprintIsJudged.
 func decodeCursor(s, fingerprint string) (cursor, error) {
-	if s == "" {
-		return cursor{}, nil
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return cursor{}, malformedCursor("it is not the encoding this listing issues")
-	}
-	var c cursor
-	if err := json.Unmarshal(raw, &c); err != nil {
-		return cursor{}, malformedCursor("it does not decode to a page position")
-	}
-	if c.ID == uuid.Nil {
-		return cursor{}, malformedCursor("it carries no row position")
-	}
-	if c.Fingerprint != fingerprint {
-		return cursor{}, &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
-			Path: "cursor",
-			Message: "was issued for a different listing: page with the filter the cursor came " +
-				"from, or omit the cursor to start this listing over",
-		}}}
-	}
-	return c, nil
-}
-
-// fingerprintOf digests the resolved filter a cursor was issued under.
-//
-// The parts are joined length-prefixed, for the reason foldedIdentity
-// records: without it a filter whose parts run together spells the same
-// string as a different filter whose parts divide elsewhere, and two
-// listings would share one fingerprint. It hashes rather than storing the
-// parts so the cursor does not grow with the filter, and truncates to 96
-// bits because this is a consistency check against a caller's own
-// mistake and not a signature — cursor's doc comment says why it cannot
-// be one.
-func fingerprintOf(parts ...string) string {
-	var b strings.Builder
-	for _, p := range parts {
-		fmt.Fprintf(&b, "%d:%s", len(p), p)
-	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return base64.RawURLEncoding.EncodeToString(sum[:12])
-}
-
-// invalidFilterPart spells the tri-state invalid flag for a fingerprint,
-// keeping "no opinion" distinct from both of the opinions.
-func invalidFilterPart(invalid *bool) string {
-	if invalid == nil {
-		return "any"
-	}
-	return fmt.Sprintf("%t", *invalid)
+	return paging.Decode(s, fingerprint, refuseCursor)
 }
 
 // ListEntities returns one page of a game's entities, either the plain

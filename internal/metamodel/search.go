@@ -160,6 +160,18 @@ func SearchLimit(limit int32) int32 {
 	return pageSize(limit, defaultSearchLimit, maxSearchLimit)
 }
 
+// CheckSearchQuery is checkSearchQuery, exported so the markdown domain
+// applies the identical rule to the identical index configuration
+// instead of growing a copy.
+//
+// The rule is one rule and it is tied to `simple`: the "does the query
+// contain a letter or a digit" test below is only correct for a
+// configuration with no stopword list, and whoever changes the
+// configuration changes this function. A second copy in another package
+// would be a second thing to remember, in the package least likely to
+// be looked at when the configuration moves.
+func CheckSearchQuery(query string) error { return checkSearchQuery(query) }
+
 // checkSearchQuery refuses a query the database should never be shown,
 // and one that cannot match anything, rather than letting either answer
 // "nothing found" or "the server is broken".

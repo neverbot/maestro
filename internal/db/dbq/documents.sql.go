@@ -727,6 +727,189 @@ func (q *Queries) ListDocumentsPage(ctx context.Context, arg ListDocumentsPagePa
 	return items, nil
 }
 
+const listLinksForDocuments = `-- name: ListLinksForDocuments :many
+SELECT l.document_id, l.role, t.key AS entity_type_key,
+       e.id AS entity_id, e.key AS entity_key, e.name AS entity_name
+FROM document_links l
+JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
+JOIN entity_types t ON t.id = e.entity_type_id AND t.project_id = e.project_id
+WHERE l.project_id = $1::uuid
+  AND l.document_id = ANY($2::uuid[])
+ORDER BY l.document_id, t.key, e.key, e.id
+`
+
+type ListLinksForDocumentsParams struct {
+	ProjectID   uuid.UUID
+	DocumentIds []uuid.UUID
+}
+
+type ListLinksForDocumentsRow struct {
+	DocumentID    uuid.UUID
+	Role          string
+	EntityTypeKey string
+	EntityID      uuid.UUID
+	EntityKey     string
+	EntityName    string
+}
+
+// The attachments of a whole page of documents, in one call rather than
+// one per row. A search hit names its linked entities (spec §8) so a
+// designer who found the script gets to the quest in one more click, and
+// a query per hit would make a fifty-hit answer cost fifty-one round
+// trips.
+//
+// The project filter is defence in depth here, exactly as
+// ListDocumentLinksByDocument's is and stated for the same reason: the
+// document ids only ever arrive as the ids SearchDocuments just returned
+// for this game, and 0007_documents.sql's composite keys make a link row
+// whose project_id disagrees with its document's unrepresentable, so the
+// suite stays green without this clause. It stays because a clause whose
+// absence no test can catch is the one a later edit removes first.
+//
+// Ordered by document, then the entity's type key, then its key: none of
+// the first two is unique on its own, and an order that can tie
+// reshuffles its ties between two identical calls.
+func (q *Queries) ListLinksForDocuments(ctx context.Context, arg ListLinksForDocumentsParams) ([]ListLinksForDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, listLinksForDocuments, arg.ProjectID, arg.DocumentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLinksForDocumentsRow
+	for rows.Next() {
+		var i ListLinksForDocumentsRow
+		if err := rows.Scan(
+			&i.DocumentID,
+			&i.Role,
+			&i.EntityTypeKey,
+			&i.EntityID,
+			&i.EntityKey,
+			&i.EntityName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchDocuments = `-- name: SearchDocuments :many
+SELECT d.id, d.path, d.title, d.summary, d.kind, d.current_version,
+       ts_rank(d.search, plainto_tsquery('simple', $1::text)) AS rank,
+       (ts_filter(d.search, '{a}')
+         @@ plainto_tsquery('simple', $1::text))::bool AS name_match
+FROM documents d
+WHERE d.project_id = $2::uuid
+  AND d.deleted_at IS NULL
+  AND ($3::text = '' OR lower(d.kind) = lower($3::text))
+  AND d.search @@ plainto_tsquery('simple', $1::text)
+ORDER BY name_match DESC, rank DESC, d.title, d.id
+LIMIT $4::int
+`
+
+type SearchDocumentsParams struct {
+	Query     string
+	ProjectID uuid.UUID
+	Kind      string
+	Limit     int32
+}
+
+type SearchDocumentsRow struct {
+	ID             uuid.UUID
+	Path           string
+	Title          string
+	Summary        string
+	Kind           string
+	CurrentVersion int32
+	Rank           float32
+	NameMatch      bool
+}
+
+// Full-text search over a game's documents, ranked, current versions
+// only.
+//
+// **Only the current version is indexed** (spec §8). documents.search is
+// a generated column on `documents`, and `document_versions` has no
+// vector at all, so history is unreachable from here by construction.
+// Searching it would multiply the index by the number of versions to
+// answer a question that in practice is asked about one known document,
+// where history plus diff answers it better.
+// TestOnlyTheCurrentVersionIsSearchable pins it.
+//
+// The project filter is load-bearing, the way ListDocumentsPage's is and
+// unlike the ones this file's other comments call defence in depth: the
+// query text is the caller's and names no parent, and a search resolves
+// nothing beforehand, so nothing but this clause keeps one game's prose
+// out of another's answer. TestASearchNeverCrossesGames pins it.
+//
+// **name_match leads the ordering, and it is a guarantee rather than a
+// tendency**, for the reason metamodel.Search's own comment works
+// through at length: ts_rank saturates towards 1.0 as a lexeme repeats,
+// so weights alone lose to sheer frequency on a multi-word query. Here
+// the A-weighted half of the vector is the *title* and nothing else
+// (0007_documents.sql builds it that way), so ts_filter(search, '{a}')
+// @@ query asks exactly "does the title satisfy the query", and a
+// document the query names outranks one that merely mentions the words
+// in its body however often. ts_rank orders within each of the two
+// groups, which is the work the A/B/C weights were introduced for.
+// TestADocumentTheQueryNamesOutranksOneThatOnlyMentionsIt pins both
+// halves: it is red without `name_match DESC` and red with the
+// ts_filter replaced by the whole vector.
+//
+// The configuration is 'simple' on both sides of that expression and on
+// the column itself, matching entities.search: the two indexes are
+// merged into one ranked list in internal/web/mcp_search.go, and
+// ts_rank values produced under different configurations are not
+// comparable at all.
+//
+// Ties break by title then id, so two identical calls answer
+// identically. Neither key is unique on its own.
+//
+// `kind` is a plain argument rather than a nullable one because the
+// empty string is the only spelling of "no filter" this surface has —
+// the same limitation ListDocumentsPage's `kind` records, since a
+// document's kind is optional and ” is also a real stored value.
+//
+// Deleted documents are absent. A search result nobody can open is a
+// worse answer than no answer.
+// TestADeletedDocumentIsNotSearchable pins it.
+func (q *Queries) SearchDocuments(ctx context.Context, arg SearchDocumentsParams) ([]SearchDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, searchDocuments,
+		arg.Query,
+		arg.ProjectID,
+		arg.Kind,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchDocumentsRow
+	for rows.Next() {
+		var i SearchDocumentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Path,
+			&i.Title,
+			&i.Summary,
+			&i.Kind,
+			&i.CurrentVersion,
+			&i.Rank,
+			&i.NameMatch,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteDocument = `-- name: SoftDeleteDocument :one
 UPDATE documents
 SET deleted_at          = now(),

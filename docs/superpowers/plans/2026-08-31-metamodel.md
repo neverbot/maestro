@@ -8498,7 +8498,7 @@ This task proves the spec's definition of done: an agent declares a real game's
 types and seeds hundreds of rows through the same surface it will use in
 production.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 `internal/web/seed_e2e_test.go`:
 
@@ -8582,12 +8582,12 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `go test ./internal/web/ -run TestSeedARacingGame -v`
 Expected: PASS.
 
-- [ ] **Step 3: Verify by hand against a running instance**
+- [x] **Step 3: Verify by hand against a running instance**
 
 ```bash
 docker compose up -d --build
@@ -8601,12 +8601,112 @@ curl -fsS -X POST http://localhost:8080/api/games/<id>/types \
 Expected: 201 with the new type, and the game page lists `Quests (quest)` after
 a refresh.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add internal/web/seed_e2e_test.go
 git commit -m "test: end-to-end seeding of a game through the mcp surface"
 ```
+
+**Corrections made during implementation** (a pass over the landed test,
+and over what seeding a real game found in the eight tasks under it):
+
+1. **The skeleton above does not compile against the surface that
+   shipped, and the differences are all Task 7's.** `MCPTypesUpsert` and
+   its fifteen siblings take the resolved `projectID` as their own
+   parameter rather than reading one out of the input struct; every
+   input embeds `ScopedArgs`; a type's schema is `[]web.FieldInput`, not
+   `metamodel.Schema`, because the SDK infers a tool's input schema by
+   reflection and a domain type cannot cross that boundary; a bulk
+   batch's rows are `web.EntityItemInput`, not `metamodel.EntityInput`,
+   for the same reason plus the actor argument in `mcp_metamodel.go`'s
+   header; `identity.CreateUser` and `CreateAPIToken` take request
+   structs; and the helper is `newMetamodelTestServer`, which hands back
+   the metamodel service the skeleton's imagined `newMetamodelService`
+   would have built. The landed test is written against what shipped.
+
+2. **Step 3's expected `201` is wrong; the route answers `200`.** Task 8
+   decided that an upsert answers 200 even when it creates, because the
+   call is idempotent by key and a caller cannot tell the two apart
+   without a race. Verified by hand against a real instance: a fresh
+   binary on a throwaway database, an owner session, a minted token, and
+   the step's own `curl` verbatim — `200` with the new type, and the
+   game's home page listing `Quests (quest)` after a refresh, exactly as
+   the step says apart from the number.
+
+3. **Two hundred rows was not enough of a test, and the shape mattered
+   more than the count.** The landed seed is 511 entities over seven
+   entity types and 1,044 edges over eight relation types, chosen so that
+   every shape the metamodel supports is exercised by content rather than
+   by a unit test: a required field, an enum, a `list<text>`, a bounded
+   number, three declared defaults (one of them `false`), a `longtext`, a
+   self-referencing relation type used twice, a relation type with no
+   endpoint rules at all, an entity type no relation type names, and one
+   deliberately dense hub — 120 of the 200 races run at one circuit — so
+   that a traversal has more neighbours than a page can hold.
+
+4. **The claims the sub-project made along the way all held**, each
+   pinned by its own subtest: a re-seed is idempotent in row identity and
+   conflicts on every row without an `expected_version` (200 of 200,
+   every one `version_conflict`, no id or version moved); a bulk batch
+   reports every row it landed with its id and version, and every one of
+   the 200 reports addresses the row a fresh listing returns; a schema
+   change flags rows without back-filling or rejecting them, and without
+   moving their versions; search finds a name, a tag inside a
+   `list<text>` and a word buried in the middle of a long description,
+   and a name match outranks a body match that repeats the word forty
+   times; a traversal pages, and the dense hub's 120 neighbours come back
+   across three pages with no row seen twice; and the home page renders
+   the game's real counts.
+
+5. **A schema edit that flags rows has no bulk repair.** `Check` refuses
+   a field that is both `required` and defaulted — correctly, it is a
+   self-contradiction — so once a required field is added under two
+   hundred rows, nothing a designer can write into the *type* makes them
+   fit again. The only recovery is to rewrite every flagged row, each
+   carrying its own `expected_version`; and taking the field back out
+   flags all two hundred a second time, because the value they now carry
+   has become an unknown field. The test walks the whole four-step loop,
+   because it is what the skill bundle will have to teach.
+
+6. **An edge's field values cannot be read back.** A relation type may
+   declare a field schema, the values are validated on write and stored,
+   and no tool on either surface returns them: `RelationOutput` carries
+   no fields, there is no `relations.get`, and `relations.list` is the
+   only way to see an edge. This is the largest gap the seed found — a
+   whole declared feature is write-only — and it is pinned as a failing
+   expectation to delete rather than left in prose.
+
+7. **Search is unconditionally verbose and search does not index keys.**
+   `entities.list` defaults `verbose` off, arguing that five hundred rows
+   with their fields is the whole game back in one answer; `search` has
+   no such argument and returns every hit's whole field payload,
+   `longtext` included, up to its 200-row cap. Measured over the wire
+   against rows carrying 25 KB of lore each, one 60-hit search answered
+   with 1.6 MB of JSON. Separately, the search vector indexes names and
+   text values but not row keys, so a designer who types the handle they
+   see on every other screen gets nothing back.
+
+8. **Recorded, not fixed.** Nothing on the MCP surface counts, so "how
+   many races are there" is a full paged walk while the REST home page
+   has the number; `entities.remove`, `relations.remove` and
+   `relations.list`'s two endpoint filters address rows by uuid while
+   every other tool speaks `(type_key, key)`, so an agent pays a
+   resolving read; a relation type states its endpoints as entity type
+   ids, so a second seeding session has to call `types.list` and build
+   the key-to-id map before it can declare one; and a batch has no size
+   bound at all — a 5,000-item atomic batch was accepted over the wire,
+   ran in one transaction in 3.1 s and answered with 515 KB.
+
+**Verified against a running instance.** A real binary on a throwaway
+database (created and dropped), an MCP session over HTTP with a project
+token: `initialize`, `tools/list` (19 tools), `types.upsert`, a 200-row
+atomic `entities.upsert`, the same batch again in partial mode (200
+`version_conflict` failures, nothing written), `entities.list`, `search`
+and a `related_to` traversal with `direction` omitted — refused by the
+SDK's own input-schema validation, which is where Task 7's decision to
+leave the field without `omitempty` lands. Every number above was read
+off that session, not inferred.
 
 ---
 

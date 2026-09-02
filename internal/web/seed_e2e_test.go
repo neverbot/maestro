@@ -1103,7 +1103,30 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("race-000 has %d outgoing edges, want 3", len(out.Items))
 		}
 
-		// 5. **A relation type states its endpoints as entity type ids**,
+		// 5. **Search is unconditionally verbose, and cannot be asked not
+		// to be.** entities.list defaults `verbose` off, arguing that a
+		// page of five hundred rows with their fields is the whole game
+		// back in one answer; search has no such argument and hands back
+		// every hit's whole field payload, longtext included, up to its
+		// 200-row cap. Measured over the wire against a game whose rows
+		// carry 25 KB of lore each, one 60-hit search answered with 1.6 MB
+		// of JSON. Here the same asymmetry, in one pair of calls.
+		listed2, err := web.MCPEntitiesList(ctx, s.deps, s.caller, s.game,
+			web.EntitiesListInput{TypeKey: "race", Limit: 5})
+		if err != nil {
+			t.Fatalf("entities.list: %v", err)
+		}
+		for _, row := range listed2.Items {
+			if row.Fields != nil {
+				t.Fatalf("entities.list is verbose by default now: %+v", row)
+			}
+		}
+		hits := s.search(t, "kerbstone", "")
+		if len(hits) != 1 || len(hits[0].Fields["briefing"].(string)) < 1000 {
+			t.Fatalf("search no longer returns a whole longtext; delete this case: %+v", hits)
+		}
+
+		// 6. **A relation type states its endpoints as entity type ids**,
 		// so a second seeding session — one that did not itself declare
 		// the types and so never saw the ids — has to call types.list and
 		// build the key-to-id map by hand before it can declare or edit a

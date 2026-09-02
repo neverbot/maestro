@@ -5,6 +5,30 @@ Status: draft, open questions listed in section 11
 Scope: sub-project 7 of the roadmap in
 `2026-08-31-core-and-metamodel-design.md`
 
+> **Reconciled against implementation, 2026-09-02.** This document is
+> agent-facing by construction — it specifies what the bundle *teaches*
+> — so a false claim here propagates into every game an agent seeds.
+> Changed:
+>
+> - §3 — **`has_default` is not an input key.** The previous text told
+>   the bundle to teach it. A default is declared by the presence of the
+>   `"default"` key and by nothing else; `has_default` is tagged
+>   `json:"-"` in `internal/metamodel/schema.go` and is never read from
+>   or written to the wire. The same paragraph now also carries the
+>   `required`-plus-default rejection, the `"default": null` rule, the
+>   field-key rule, and the `invalid_schema` / `schema_violation` split,
+>   all against the committed validator.
+> - §3 and §4.5 — `invalid_schema` and `schema_violation` are two codes
+>   with two recoveries, not one code.
+> - §4.4 — the "singular, lower snake" key rule is a bundle convention,
+>   not a validator rule. New §10.5 and open question 9 record the
+>   inconsistency rather than resolving it.
+> - §10.1 and §10.2 — both findings were verified and accepted; the
+>   decisions they ask for now live as open questions O2 and O1 in the
+>   core spec, and §11.3–11.4 point there instead of posing them again.
+> - §10.3 — the views spec's operator table has been corrected to
+>   `list<text>`; the substantive gap this section reports is unchanged.
+
 ## 1. What this is for
 
 An agent arriving at a fresh Maestro game sees four generic primitives
@@ -137,13 +161,36 @@ agents do not use them equally.
 **Metamodel — taught completely.** Every field type
 (`text`, `longtext`, `number`, `bool`, `enum`, `list<text>`), every
 validation rule, every error. This is the surface where an agent writes
-hundreds of rows and where a misunderstanding is expensive. Three
+hundreds of rows and where a misunderstanding is expensive. Six
 validator rules get their own paragraph in `reference/fields.md` because
-they are the ones an agent gets wrong: an unknown field is an **error**,
-never silently dropped; an absent optional field with no default stays
-**absent**, not zero-filled; a declared default is applied when the
-field is absent or null, and `has_default` is what makes a declared
-default of `false` or `0` behave like any other default.
+they are the ones an agent gets wrong, and every one of them is checked
+against `internal/metamodel/` by §8.2:
+
+- An unknown field is an **error**, never silently dropped.
+- An absent optional field with no default stays **absent**, not
+  zero-filled.
+- A declared default is applied when the field is absent or null. **A
+  default is declared by the presence of the `"default"` key in the
+  field declaration and by nothing else.** There is no `has_default`
+  input key — it is a Go-side flag, tagged `json:"-"`, never read from
+  the wire and never written to it. An agent that sends `has_default`
+  gets silence: the key is ignored and the default is not declared.
+  This is what makes a declared default of `false` or `0` behave like
+  any other default, because presence, not value, is what is being
+  recorded. An explicit `"default": null` declares **no** default.
+- `required` together with a default is **rejected**. The default is
+  applied before the field could be reported missing, so the pair makes
+  `required` unreachable.
+- A field `key` must match `^[a-z][a-z0-9_]*$` and be at most 64
+  characters. Entity keys and entity-type keys are **not** constrained
+  this way — see §10.5, which the bundle must teach around rather than
+  flatten into one rule.
+- Two error codes, not one: `invalid_schema` for a type declaration
+  that cannot stand, `schema_violation` for a row of values that does
+  not fit a declaration that can. `reference/errors.md` recovers from
+  them differently — the first is fixed in `types.upsert`, the second in
+  `entities.upsert` — and an agent that treats them as one code retries
+  the wrong call.
 
 **Views — taught completely, because the query language is where an
 agent is worst.** It is JSON with named sets, and the failure mode is
@@ -180,9 +227,12 @@ that `docs.write` with `links` **replaces** the link set and without
 **Errors — taught as recovery, not as a list.** `reference/errors.md` is
 a table of code → what actually happened → the next call to make.
 `version_conflict` → re-read, merge, retry with the returned version.
-`schema_violation` → the response carries field paths; fix all of them
-in one pass, because the validator reports every problem at once and an
-agent that fixes one at a time pays a round-trip per typo.
+`schema_violation` → the response carries `fields.<key>` paths for the
+row that failed; fix all of them in one pass, because the validator
+reports every problem at once and an agent that fixes one at a time pays
+a round-trip per typo. `invalid_schema` → a *different* code with the
+same one-pass property, carrying `field_schema[<i>]` paths, and fixed by
+re-declaring the type rather than by editing the row.
 `semantics_undeclared` → the error itself carries what to declare; read
 it rather than guessing. `query_stale` → the design moved under the
 view; repair with `views.upsert`, do not switch to `on_stale:
@@ -206,7 +256,13 @@ Stated in `skill.md`, argued in `modelling/deciding.md`:
    name the type so the direction is readable. Queries take
    `direction` literally; nothing infers it.
 4. **Declare `analysis_traits` at the same moment you declare the
-   relation type.** Not later.
+   relation type.** Not later. *Contingent on open question O1 in the
+   core spec: `analysis_traits` does not exist in the committed schema
+   and the analysis spec proposes it. If O1 lands on "no traits", this
+   law becomes the same instruction about `semantic_role`, and §4.5 is
+   rewritten rather than dropped — the point is that the analytical
+   meaning of an edge is declared with the edge type, whatever the
+   column ends up being called.*
 
 ### 4.2 Decision 1 — is this a field, or a relation?
 
@@ -284,16 +340,22 @@ as text. A rename does not rewrite a stored query; it makes it stale.
 - **Entity type keys are singular, lower snake**: `quest`, not `quests`
   and not `Quest`. The plural has a home (`label_plural`); a key that is
   sometimes plural makes every query a guess. Keys are
-  case-insensitively unique per game, so `Quest` and `quest` collide.
+  case-insensitively unique per game — `entity_types_key_key` is over
+  `(project_id, lower(key))` — so `Quest` and `quest` collide. Note
+  that this is a *bundle* rule, not a validator rule: the server checks
+  only that a type key or entity key is non-empty, and `Quest` or
+  `main quest 1` is accepted. The narrow `^[a-z][a-z0-9_]*$` rule
+  applies to declared **field** keys only. See §10.5.
 - **Relation type keys are verb phrases that read source → target**:
   `takes_place_in`, `available_to`, `unlocks`, `connects_to`. Because
   `direction` in a query is literal, a name that does not encode
   direction ("zone_link") forces every future query author to look the
   type up and guess.
 - **Never declare a field named `name`, `key`, `type`, `invalid` or
-  `created_at`.** It is legal, and the built-ins stay reachable through
-  the `@` sigil, so nothing breaks — it just makes every predicate in
-  the game ambiguous to a human reader.
+  `created_at`.** It is legal — the validator's key rule permits all
+  five — and the built-ins stay reachable through the `@` sigil, so
+  nothing breaks. It just makes every predicate in the game ambiguous to
+  a human reader.
 - **Numbers are `number`.** A level stored as `text` cannot be
   range-filtered (`between`, `gte` are number-only), cannot rank a
   `layered` view, and cannot be a `timeline` axis. The cost is invisible
@@ -738,7 +800,17 @@ the metamodel and not at this sub-project:** `entities.upsert` and
 `relations.upsert` gain `on_conflict: "fail" | "skip" | "overwrite"`,
 default `"fail"` so nothing changes for existing callers. `"skip"` makes
 a re-seed genuinely idempotent; `"overwrite"` makes a corrective re-seed
-one call. Open question §11.4.
+one call.
+
+**This finding was verified and accepted.** The core spec's
+"Idempotency" section has been amended to say that idempotency here
+means row identity and not a conflict-free re-run, and the
+recommendation above is recorded there as **open question O2** — the one
+place it is stated, because it is a change to the core spec's MCP
+surface. Compare `2026-09-02-markdown-domain-design.md` §7, which
+spells a create as `expected_version: 0`; if the metamodel adopts that
+shape instead, this section's workaround becomes a two-line rule rather
+than a page.
 
 ### 10.2 Two overlapping semantic vocabularies
 
@@ -757,15 +829,25 @@ which is the tell.
 
 **Recommendation:** decide before the bundle is written. If
 `semantic_role` survives, the bundle teaches traits only and treats the
-role as a human-readable label with no analytical meaning. Open question
-§11.3.
+role as a human-readable label with no analytical meaning.
+
+**This finding was verified and accepted.** The question is now stated
+in exactly one place — **open question O1** in
+`2026-08-31-core-and-metamodel-design.md`, "Metamodel" — because
+`semantic_role` is that spec's column, and because the analysis spec's
+§2D and its own open question 3 were posing it twice more. The analysis
+spec's trait vocabulary is now marked as a *proposal* contingent on that
+answer, rather than as chosen. §11.3 no longer poses the question
+separately; it names what blocks on it.
 
 ### 10.3 `list<text>` is the only list type
 
 `internal/metamodel/schema.go` declares exactly one list type. The views
-spec's operator table promises `list<T>` with `contains_any`,
-`length_gte` and friends, which reads as though `list<number>` and
-`list<enum>` exist. They do not.
+spec's operator table originally spelled that row `list<T>`, with
+`contains_any`, `length_gte` and friends, which read as though
+`list<number>` and `list<enum>` exist. They do not; that table now says
+`list<text>`, so the two documents no longer disagree — but the gap the
+disagreement pointed at is real and is the subject of this section.
 
 An agent modelling "reward credit amounts" or "allowed difficulty tiers"
 gets `list<text>` and loses every number and enum operator, plus the
@@ -789,6 +871,37 @@ database already has cheaply. Recorded as a recommendation rather than a
 requirement; the bundle works without it, just expensively. Open
 question §11.5.
 
+### 10.5 Two key rules, one word
+
+The committed validator enforces `^[a-z][a-z0-9_]*$`, capped at 64
+characters, on a declared **field** key, and argues the case well: no
+dots, because `fields.<key>` is the error path; no upper case, so two
+keys cannot differ only by case; ASCII only, so one key has one
+spelling.
+
+None of that applies to **entity keys, entity type keys or relation type
+keys**, which the surface checks only for non-emptiness. `Quest`,
+`main quest 1` and `misión-01` are all accepted as type or entity keys.
+Uniqueness is case-insensitive — the unique indexes are over
+`lower(key)` — so the case collision is caught, but nothing else is.
+
+This matters to the bundle specifically because those keys are the API:
+§4.4 teaches "singular, lower snake" as a rule, and it is a rule the
+server does not enforce, so an agent that follows the bundle and an
+agent that does not both succeed, in the same game, forever. It also
+means a type key can contain a character that a future view-query token
+or flattened column name cannot, which is exactly the argument the
+field-key rule makes.
+
+**Not resolved here.** It is a metamodel decision with three shapes —
+apply the same rule to all keys; apply a looser rule (no whitespace, no
+dots) to type and entity keys; or leave it and let the bundle carry the
+convention. The third is the status quo and the cheapest, and it is also
+the one that guarantees the convention is broken eventually. Open
+question §11.9. It should be decided **before** a real game is seeded:
+tightening a key rule afterwards means renaming keys, and a rename
+breaks every saved view, route and analysis override that named them.
+
 ## 11. Open questions
 
 1. **The zip signing key.** Nottario signs with the session key; Core
@@ -798,13 +911,18 @@ question §11.5.
 2. **Overrides.** Ship none in v1 (§7.4), or build the per-game document
    path now? Recommendation: none. The counter-argument is that adding
    an extension point later means the first user is already forked.
-3. **Does `semantic_role` survive?** The bundle's analysis page is a
-   different document depending on the answer, and the analysis spec's
-   own open question 3 says it is cheaper to decide before any real game
-   is seeded. This blocks writing `reference/analysis.md`.
-4. **`on_conflict` on the bulk upserts** (§10.1). Is the read-then-write
-   workaround acceptable, or does the metamodel gain the mode? This is a
-   metamodel decision that the bundle merely reveals.
+3. **Does `semantic_role` survive?** Moved: the question is now stated
+   once, as **open question O1** in
+   `2026-08-31-core-and-metamodel-design.md`, "Metamodel". What blocks
+   on it here: `reference/analysis.md` cannot be written, and neither
+   can §4.1's fourth law or §4.5, since all three are about what an
+   agent declares on `relation_types.upsert`. **Do not answer it here.**
+4. **`on_conflict` on the bulk upserts** (§10.1). Moved: **open
+   question O2** in the core spec, "Idempotency". What blocks on it
+   here: `recipes/seeding-a-game.md` is either two paragraphs or two
+   pages depending on the answer, and the read-then-write loop is the
+   only part of the bundle that asks an agent to carry state across a
+   session boundary. **Do not answer it here.**
 5. **A shape-summary on `games.get`** (§10.4). Worth it, or premature?
 6. **Is the fourth-genre acceptance test worth its cost?** It is the
    only anti-ossification mechanism proposed here, and it is
@@ -823,7 +941,18 @@ question §11.5.
    `personaje`. The bundle should probably say the choice is the game's
    and only ask for consistency within one game. Confirming that is the
    user's call, since it is the one place the language policy touches
-   user data rather than artefacts.
+   user data rather than artefacts. Note that it interacts with question
+   9: a key rule of `^[a-z][a-z0-9_]*$` would make `misión` an illegal
+   key while `mision` stayed legal, which is a language decision hiding
+   inside a validation decision.
+
+9. **One key rule or two?** (§10.5.) Declared field keys are
+   `^[a-z][a-z0-9_]*$` capped at 64 characters; entity, entity-type and
+   relation-type keys are checked only for non-emptiness. The bundle
+   teaches a convention the server does not enforce. A metamodel
+   decision, and one that gets expensive after a game is seeded, because
+   tightening it later means renames and a rename breaks every saved
+   view, route and analysis override.
 
 ## 12. What this sub-project deliberately does not do
 

@@ -5,6 +5,22 @@ Status: draft, open questions marked
 Scope: third of seven sub-projects (roadmap item 3 in
 `2026-08-31-core-and-metamodel-design.md`)
 
+> **Reconciled against implementation, 2026-09-02.** Changed:
+>
+> - §2 — the committed migration is `0004_metamodel.sql`, not
+>   `0003_metamodel.sql`.
+> - §2 and §6 — the new tables' foreign keys to `entities`, `documents`
+>   and `api_tokens` must follow the committed migration's composite-key
+>   convention. "No change to the metamodel schema is needed" remains
+>   true; "these keys as written are fine" was not.
+> - §7 — `expected_version: 0` for a create is a real difference from
+>   the metamodel surface, not a restatement of it, and it bears on the
+>   core spec's open question O2.
+>
+> Unchanged and confirmed correct against the committed migration: the
+> observation that `entities.search` is a plain `tsvector` column rather
+> than `GENERATED … STORED`.
+
 ## 1. What this sub-project is
 
 The core spec settled that **long prose lives in a versioned markdown
@@ -116,10 +132,31 @@ Why:
 
 ### Consequence for the metamodel schema as committed
 
-None. `document_links.entity_id` references `entities (id)` with
-`ON DELETE CASCADE`, so deleting an entity drops its links and leaves
-the document — which is right: a quest is cut, its lore survives for
-the next quest. No change to `0003_metamodel.sql` is needed. Worth
+None. `document_links` references an entity with `ON DELETE CASCADE`,
+so deleting an entity drops its links and leaves the document — which is
+right: a quest is cut, its lore survives for the next quest. No change
+to `0004_metamodel.sql` is needed.
+
+The key itself must be **composite**, though:
+`(entity_id, project_id) REFERENCES entities (id, project_id) ON DELETE
+CASCADE`, not `entities (id)` alone. The committed migration settled
+that every foreign key to a project-scoped parent carries `project_id`
+so that the database, not Go, refuses a cross-game reference. §5 argues
+at length that a cross-game link must be "impossible by construction,
+not by review" — a single-column key makes it exactly the review-level
+guarantee that section rejects, since nothing then forces
+`document_links.project_id` to agree with the entity's. The same applies
+to `document_versions.document_id` and `document_links.document_id`
+against `documents`, which therefore needs a `UNIQUE (id, project_id)`,
+and to every `*_by_token_id` against `api_tokens` — where a composite
+`ON DELETE SET NULL` must name its column, `SET NULL
+(created_by_token_id)`, because a bare one would try to null the
+`NOT NULL` `project_id`. `*_by_user_id` stays single-column: `users` is
+global. The views and analysis specs state their own DDL in the same
+uncorrected shape; the convention lives in
+`2026-08-31-core-and-metamodel-design.md`, "Constraints and indexes".
+
+Worth
 noting for the implementer: the committed `entities.search` is a plain
 `tsvector` column, not `GENERATED … STORED` as Nottario's are, so it
 needs a trigger or an application-side write. Documents (§5) should use
@@ -331,6 +368,10 @@ CREATE INDEX document_links_entity_idx ON document_links (entity_id);
 
 Notes on the shape:
 
+- **The foreign keys above are illustrative and not yet right.** Every
+  reference to `documents`, `entities` or `api_tokens` must be
+  composite, carrying `project_id`; see §2, "Consequence for the
+  metamodel schema as committed".
 - **`path` is the key**, unique per game, case-insensitively, like
   every other key in Maestro (`documents_path_key` mirrors
   `entities_key_key`). It is what makes writes idempotent: an agent
@@ -360,7 +401,7 @@ stable and machine-readable.
 |---|---|
 | `docs.list` | `path_prefix`, `kind`, `entity_key`+`entity_type`, `include_deleted`, cursor, limit — summaries only, no bodies |
 | `docs.read` | `path`, optional `head_only` (frontmatter plus a short preview, with `{truncated, body_length}`) |
-| `docs.write` | `path`, `content`, `kind`, `message`, `expected_version` (0 for a new document), optional `links` |
+| `docs.write` | `path`, `content`, `kind`, `message`, `expected_version` (0 for a new document — see below), optional `links` |
 | `docs.delete` | `path`, `expected_version` — soft |
 | `docs.history` | `path`, cursor — version metadata only, newest first |
 | `docs.read_version` | `path`, `version` |
@@ -370,8 +411,20 @@ stable and machine-readable.
 | `docs.links.add` | `path`, `entity_key`, `entity_type`, `role` |
 | `docs.links.remove` | `path`, `entity_key`, `entity_type` |
 
-Three deliberate choices in that table:
+Four deliberate choices in that table:
 
+- **`expected_version: 0` spells a create.** This is a genuine
+  difference from the metamodel surface, not a restatement of it, and it
+  is worth naming because the two sub-projects should not end up
+  disagreeing by accident. There, an upsert that finds an existing row
+  and carries no `expected_version` returns `version_conflict`, so a
+  re-run of a seeding payload conflicts on every row it already wrote;
+  here, the version is always required and `0` is the explicit "I expect
+  this not to exist". Whether the metamodel should adopt the same shape,
+  or grow an `on_conflict` mode instead, is **open question O2** in
+  `2026-08-31-core-and-metamodel-design.md`, "Idempotency". If it is
+  answered there, this tool follows it rather than keeping a second
+  convention.
 - **`docs.write` takes an optional `links` array**, so an agent seeding
   a game creates the script and attaches it to its quest in one call.
   Passing `links` *replaces* the document's link set; omitting it

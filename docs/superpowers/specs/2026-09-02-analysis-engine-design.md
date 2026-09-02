@@ -1,9 +1,29 @@
 # Maestro — analysis engine (design)
 
 Date: 2026-09-02
-Status: draft, open questions listed in section 10
+Status: draft, open questions listed in section 12
 Scope: sub-project 6 of the roadmap in
 `2026-08-31-core-and-metamodel-design.md`
+
+> **Reconciled against implementation, 2026-09-02.** Changed:
+>
+> - Header — the open questions are in §12, not §10.
+> - §2D — `analysis_traits` is a **proposal**, not a settled choice. The
+>   decision it depends on is now stated once, as open question O1 in
+>   the core spec, and §11.5 and §12.3 cross-reference it instead of
+>   restating it. Nothing about the vocabulary itself changed.
+> - §2 and §9 — an incoherent trait combination is `invalid_schema`, not
+>   `schema_violation`. The committed `internal/metamodel/errors.go`
+>   makes those two distinct sentinels, split by who is at fault, and a
+>   bad *declaration* is the first.
+> - §4 — the empty-seed-set refusal is neither of those two codes; it
+>   needs one of its own, and that is now recorded as open.
+> - §6 and §11 — the new tables' foreign keys must follow the committed
+>   migration's composite-key convention.
+> - §7 and §11.4 — `relations` **does** have an index leading with
+>   `project_id` (`relations_project_idx (project_id, created_at)`).
+>   The index this spec wants is still absent, but the stated reason for
+>   it was false.
 
 ## 1. What this is for
 
@@ -95,9 +115,23 @@ time a genre invents a meaning, which is the exact failure mode the
 pure metamodel exists to avoid, and it still would not say whether a
 cycle in that type is a bug.
 
-**D (chosen). A closed vocabulary of analytical traits, declared per
-relation type, orthogonal to `semantic_role`, with a per-analysis
-override.**
+**D (proposed, and this spec's recommendation). A closed vocabulary of
+analytical traits, declared per relation type, orthogonal to
+`semantic_role`, with a per-analysis override.**
+
+> This is a *proposal*, not a settled decision, and the correction
+> matters because two other specs read it as settled. Adding
+> `analysis_traits` beside `semantic_role` means the schema carries two
+> vocabularies about relation types, which
+> `2026-09-02-agent-skill-bundle-design.md` §10.2 identifies as a
+> blocker for writing its analysis page. The question — traits plus a
+> demoted `semantic_role`, traits with `semantic_role` dropped, or no
+> traits at all — is recorded once, as **open question O1** in
+> `2026-08-31-core-and-metamodel-design.md`, "Metamodel". **The user
+> decides.** Everything below assumes the answer is "traits are added";
+> if it is not, §2's vocabulary and §11.1 fall and the analyses
+> themselves are unaffected, since they consume the *resolved* set of
+> gating relation types and not the mechanism that produced it.
 
 A game declares, on each relation type it cares about, which of a
 small fixed set of *graph behaviours* that type has. The vocabulary is
@@ -143,7 +177,13 @@ saying "I looked, and this type is decoration" — which is what stops
 is an orphan. That distinction is the whole reason the trait exists.
 
 Incoherent combinations are rejected at write time with
-`schema_violation`, naming the pair: `symmetric` with
+`invalid_schema`, naming the pair — **not** `schema_violation`. The
+committed `internal/metamodel/errors.go` gives those two codes two
+sentinels split by who is at fault: `invalid_schema` is a type
+*declaration* that cannot stand, `schema_violation` is a *row of
+values* that does not fit a declaration that can. A trait combination
+arrives on `relation_types.upsert` and is part of the declaration, so
+it is the first. The combinations rejected: `symmetric` with
 `prerequisite_of`, `unlocks` or `ordering`; `annotation` with anything
 else; `prerequisite_of` together with `unlocks` on the same type (a
 type cannot gate in both directions at once — declare two types).
@@ -272,8 +312,16 @@ anybody has defined a start point: everything that nothing gates is
 treated as available from the beginning, which is what a game usually
 means. With it off and no seeds, everything is unreachable and the
 report is worthless — so an empty seed set with
-`include_ungated: false` is refused with `schema_violation` rather
-than producing that report.
+`include_ungated: false` is refused rather than producing that report.
+
+The code it is refused with is **not** `schema_violation`: that code is
+defined by the committed validator as a row of values failing its type's
+field schema, and there is no row and no field schema here. Nor is it
+`invalid_schema`, which is about a *declaration*. This is an argument
+that cannot produce a meaningful answer — a third thing. Recorded as
+open question 8 in §12; the analyses need a general
+argument-validation code and this spec should not invent one on its own
+while the views spec is separately introducing `query_invalid`.
 
 **`any` versus `all`.** An entity with two incoming gating edges —
 does it need both prerequisites, or either? Maestro cannot know; the
@@ -384,6 +432,23 @@ CREATE TABLE route_steps (
 );
 CREATE INDEX route_steps_entity_idx ON route_steps (entity_id);
 ```
+
+**The DDL above is illustrative and its foreign keys are not yet
+right.** `route_steps.entity_id` and both `updated_by_token_id` columns
+reference a **project-scoped** parent by id alone. The committed
+metamodel migration settled that every such key is composite, carrying
+`project_id` alongside the parent id, so the database itself refuses a
+cross-game reference; `route_steps` therefore also needs its own
+`project_id`. Concretely: `(entity_id, project_id) REFERENCES entities
+(id, project_id) ON DELETE SET NULL (entity_id)` — the column list is
+required, since a bare `SET NULL` would try to null `project_id` too —
+and `(updated_by_token_id, project_id) REFERENCES api_tokens (id,
+project_id) ON DELETE SET NULL (updated_by_token_id)`. `routes` needs a
+`UNIQUE (id, project_id)` for `route_steps` to reference.
+`updated_by_user_id` stays single-column: `users` is global. See
+`2026-08-31-core-and-metamodel-design.md`, "Constraints and indexes";
+the views and markdown specs state their own DDL in the same
+uncorrected shape.
 
 Steps are rows, not a jsonb array on the route. The reason is
 deletion. With jsonb, deleting an entity leaves a dangling key that
@@ -503,13 +568,25 @@ persisted verdict on a named artefact, and paired with
 is the pattern: nothing is cached unless it can say when it went out
 of date.
 
-**One index is added**, because every analysis query filters on
-exactly this pair and `relations` has no index leading with
-`project_id`:
+**One index is added**, because every analysis query filters on exactly
+this pair:
 
 ```sql
 CREATE INDEX relations_project_type_idx ON relations (project_id, relation_type_id);
 ```
+
+The justification originally given here — that `relations` has no index
+leading with `project_id` — was false. The committed migration carries
+`relations_project_idx (project_id, created_at)`, added by the metamodel
+plan's Task 1, correction 6, for the unfiltered "show me this game's
+edges" listing. It leads with the right column and the wrong second one,
+so it does not serve a relation-type-filtered walk; the index above is
+still worth adding, on that narrower ground. Before adding it, check it
+against the second index
+`2026-09-02-views-and-query-language-design.md` §8 asks for,
+`relations (relation_type_id, target_id)`: `relations` would then carry
+six indexes on the table expected to hold the most rows, and each one is
+write cost on every seeded edge.
 
 **One shared implementation.** The normalised-dependency walk and the
 reachability closure live in `internal/analysis` as parameterised
@@ -584,7 +661,12 @@ is simpler for an agent than diffing, and a route is small.
 `expected_version` applies as everywhere else.
 
 **Error shapes.** Reuses `not_found`, `scope_violation`,
-`schema_violation`, `version_conflict`. Adds two:
+`version_conflict` and `invalid_schema` — the last for an incoherent
+`analysis_traits` combination on `relation_types.upsert`, which is a
+declaration failing its own rules. It does **not** reuse
+`schema_violation`: nothing in this sub-project validates a row of
+values against a field schema. See §4 and open question 8 for the
+argument-validation code the analyses still lack. Adds two:
 
 - `semantics_undeclared` — carries the project's relation types with
   their roles and traits, and what to declare.
@@ -648,15 +730,28 @@ documentation correction:
    sub-project for cache invalidation.
 3. New tables `routes` and `route_steps` (section 6).
 4. Index `relations (project_id, relation_type_id)`. **Why:** every
-   analysis filters on exactly that pair and no existing index leads
-   with `project_id`.
+   analysis filters on exactly that pair, and the existing
+   `relations_project_idx (project_id, created_at)` leads with the right
+   column and the wrong second one. See §7 for the correction and for
+   the interaction with the index the views spec asks for.
 5. Not a schema change but a correction to the core spec's wording:
    `semantic_role` is described there as the mechanism the analysis
-   sub-project will use. It is not sufficient, for the reasons in
-   section 2C. It is kept, it is still useful as descriptive metadata
-   and as the fallback in section 2's step 3, but the core spec's
-   sentence should be amended to point at traits. Whether
-   `semantic_role` survives at all is open question 3.
+   sub-project will use. This spec argues in §2C that it is not
+   sufficient. **That amendment has been made**: the core spec's
+   "Metamodel" section now records it as **open question O1** — traits
+   plus a demoted `semantic_role`, traits with `semantic_role` dropped,
+   or no traits — rather than asserting either answer. The user decides;
+   until then, §2D's vocabulary is a proposal and §11.1 is contingent on
+   it. §12.3 no longer poses the question separately.
+
+Every table added by items 2 and 3 follows the committed migration's
+composite foreign-key convention — see §6 and
+`2026-08-31-core-and-metamodel-design.md`, "Constraints and indexes".
+Item 2 in particular is a change to a **Core** table, `projects`, and a
+new obligation on every write path in the metamodel sub-project (Tasks
+3–6 of `docs/superpowers/plans/2026-08-31-metamodel.md`): the counter has to be bumped in the same transaction as
+the write, which is a place a later query can silently forget. That
+cost belongs on the record beside the benefit.
 
 ## 12. Open questions
 
@@ -681,12 +776,15 @@ Stated plainly rather than answered with false confidence.
    view carry analysis parameters. Leaning toward routes-as-seeds
    because it adds nothing, but not decided.
 
-3. **Does `semantic_role` survive?** With traits declared, its only
-   remaining jobs are the compatibility mapping and being a
-   human-readable label the UI can show. Dropping it is a smaller
-   schema than keeping two overlapping vocabularies; keeping it costs
-   little and preserves the mapping. This is the user's call, and it
-   is cheaper to make before any real game is seeded.
+3. **Does `semantic_role` survive, and are traits added at all?**
+   Moved. This question is now stated once, as **open question O1** in
+   `2026-08-31-core-and-metamodel-design.md`, "Metamodel", because
+   `semantic_role` is that spec's column and because
+   `2026-09-02-agent-skill-bundle-design.md` §11.3 was posing the same
+   question a third time. The substance is unchanged and it is still the
+   user's call, still cheaper before any real game is seeded; this spec
+   states its recommendation in §2D and consumes whichever answer comes
+   back. **Do not answer it here.**
 
 4. **Can a route step be a relation rather than an entity?** "Take the
    portal to Darnassus" is an edge, not a node. Modelling it as an
@@ -717,3 +815,21 @@ Stated plainly rather than answered with false confidence.
    expressible today. Adding a trait later is a migration and a code
    path; adding it now without a concrete game demanding it risks
    guessing its shape wrong.
+
+8. **What error does a nonsensical analysis *argument* return?** §4
+   originally spelled the empty-seed-set refusal `schema_violation`,
+   which the committed sentinels reserve for a row of values failing a
+   field schema; `invalid_schema` is reserved for a bad declaration.
+   Neither fits an argument that cannot produce a meaningful answer.
+   `2026-09-02-views-and-query-language-design.md` is separately adding
+   `query_invalid`, carrying a JSON pointer into the offending document,
+   for the same class of problem in a different surface. Either the
+   analyses reuse that code, or the core error set gains a general
+   `invalid_argument`. One of the two, decided once, rather than a third
+   code per sub-project.
+
+9. **Does the seam with views belong here or there?** §10 assigns two
+   things to the views spec that it does not define — a view whose
+   source is an analysis, and which package owns the single reachability
+   walk. Recorded there as its open question 8. Whichever sub-project is
+   planned first has to settle both.

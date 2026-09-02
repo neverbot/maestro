@@ -6,7 +6,25 @@ Scope: sub-project 4 of the roadmap in
 `docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md`
 Depends on: sub-projects 1 (core) and 2 (metamodel), both specified and
 planned. This spec writes against the committed schema in
-`docs/superpowers/plans/2026-08-31-metamodel.md`.
+`internal/db/migrations/0004_metamodel.sql` and the committed validator
+in `internal/metamodel/`; `docs/superpowers/plans/2026-08-31-metamodel.md`
+and its corrections blocks record how that schema reached its current
+shape.
+
+> **Reconciled against implementation, 2026-09-02.** Changed:
+>
+> - §2.3 — the operator table's `list<T>` row is `list<text>`. That is
+>   the only list type the committed validator declares; `list<number>`
+>   and `list<enum>` do not exist.
+> - §3.3 and §7.6 — the "a relation cannot reference a third entity"
+>   problem is now stated once, as open question O3 in the core spec,
+>   and cross-referenced from here instead of being re-argued.
+> - §5.4 — the new tables' foreign keys must follow the committed
+>   migration's composite-key convention; single-column references to
+>   `entities`, `entity_types`, `relation_types` and `api_tokens` reopen
+>   a cross-game hole.
+> - §7 — two seams this spec was assumed to own by the analysis spec,
+>   but does not define, are recorded as open.
 
 ## 1. What this spec decides, and why it exists
 
@@ -240,7 +258,16 @@ mismatch is refused at save time:
 | `number` | `eq` `neq` `lt` `lte` `gt` `gte` `between` `in` `exists` |
 | `bool` | `eq` `exists` |
 | `enum` | `eq` `neq` `in` `exists` — and the value must be one of the declared options |
-| `list<T>` | `contains` `contains_any` `contains_all` `empty` `length_eq` `length_gte` `length_lte` |
+| `list<text>` | `contains` `contains_any` `contains_all` `empty` `length_eq` `length_gte` `length_lte` |
+
+`list<text>` is the whole list family: the committed validator
+(`internal/metamodel/schema.go`) declares exactly six field types —
+`text`, `longtext`, `number`, `bool`, `enum`, `list<text>` — and there
+is no `list<number>` or `list<enum>` for these operators to apply to.
+`contains_any` over a list of numbers is therefore a string comparison
+today. Whether more list element types are added is a metamodel
+question, raised in
+`2026-09-02-agent-skill-bundle-design.md` §10.3.
 
 An enum value that is not a declared option is a `query_invalid`, not
 an empty result. Empty results that are really typos are the single
@@ -390,8 +417,10 @@ progression graph from returning the whole game.
 ### 3.3 Metroidvania — the room graph, and which doors are gated
 
 Types: `room`, `ability`. Relation `connects_to` (room → room) with
-its own field `requires_ability` (`text`, referencing an ability key —
-see the open question in §7 about that).
+its own field `requires_ability` (`text`, holding an ability key that
+nothing validates — see open question **O3** in
+`2026-08-31-core-and-metamodel-design.md`, "Field schemas", and §7.6
+below).
 
 ```json
 {
@@ -692,6 +721,37 @@ Mirroring the metamodel tables deliberately: `key` unique per project
 so `views.upsert` is idempotent, `version` for the same optimistic
 concurrency, the same audit columns.
 
+**The DDL above is illustrative and its foreign keys are not yet
+right.** The committed metamodel migration settled that every key to a
+**project-scoped** parent is composite, carrying `project_id` alongside
+the parent id, so the database itself refuses a cross-game reference
+(`0004_metamodel.sql`; metamodel plan Task 1, corrections 1, 2 and 4).
+Carrying `project_id` on the row, which these tables do, is necessary
+but not sufficient — nothing stops the two columns disagreeing. So, for
+every table in this section:
+
+- `updated_by_token_id` → `(updated_by_token_id, project_id) REFERENCES
+  api_tokens (id, project_id)`, and the `ON DELETE SET NULL` must name
+  its column, `SET NULL (updated_by_token_id)`, because a bare one would
+  try to null `project_id`.
+- `view_positions.entity_id` → `(entity_id, project_id) REFERENCES
+  entities (id, project_id)`.
+- `view_refs.entity_type_id` and `.relation_type_id` → composite against
+  `entity_types (id, project_id)` and `relation_types (id, project_id)`.
+  These are the one place where `ON DELETE SET NULL` is load-bearing
+  rather than incidental (see below), so they need the same column-list
+  form.
+- `views.background_asset_id` → composite against `view_assets`, which
+  therefore needs its own `UNIQUE (id, project_id)`, as do `views` for
+  `view_positions` and `view_refs` to reference.
+- `updated_by_user_id` stays single-column: `users` is global.
+
+`2026-09-02-analysis-engine-design.md` and
+`2026-09-02-markdown-domain-design.md` state the same DDL in the same
+uncorrected shape; the convention belongs to
+`2026-08-31-core-and-metamodel-design.md`, "Constraints and indexes",
+and applies to all three.
+
 **`view_refs`** — the dependency index that makes §6 work:
 
 ```sql
@@ -924,21 +984,62 @@ before the sub-project closes.
    each zone" is a question a designer asks constantly, and the
    analysis sub-project will want it too. Should it live here as a
    `summarise` stage, or there?
-6. **Ability references on edges.** Example 3.3 stores
-   `requires_ability` as `text` holding an ability key, because the
-   metamodel deliberately has no reference field type — a reference is
-   a relation. That rule is right and makes the graph complete, but a
-   *relation* cannot point at a third entity, so a gated door genuinely
-   has nowhere typed to put "which ability". The text field works and
-   the view above renders it, but nothing validates that the ability
-   exists. Options: leave it (analysis flags dangling keys later); add
-   a `entity_ref` field type that is validated but not traversable;
-   model the gate as its own entity. This is the one place where the
-   metamodel and this design rub against each other, and it should be
-   decided rather than absorbed.
+6. **Ability references on edges — owned by the core spec, not by
+   this one.** Example 3.3 stores `requires_ability` as `text` holding
+   an ability key, because the metamodel deliberately has no reference
+   field type — a reference is a relation — and a *relation* cannot
+   point at a third entity, so a gated door has nowhere typed to put
+   "which ability". The text field works and the view above renders it;
+   nothing validates that the ability exists, and the `map` view draws
+   a dangling key exactly as convincingly as a real one.
+
+   This is a metamodel question, not a views question, so it is stated
+   once and only once, as **open question O3** in
+   `2026-08-31-core-and-metamodel-design.md`, "Field schemas", together
+   with the three candidate answers. It is the user's decision. This
+   spec is a *consumer* of whatever is decided: `edge_where` and
+   `label_from` work unchanged on a `text` field, and an `entity_ref`
+   field type would only need `@`-style resolution added to §2.4's
+   attribute references.
 7. **Background image layers.** One image per view is assumed above.
    A world map with a separate overlay layer is a plausible near-term
    ask, and the schema as written would need a join table for it.
+
+8. **Two seams the analysis spec assigns to this one, which this spec
+   does not define.** Found when the two 2026-09-02 specs were read
+   against each other; neither is a contradiction, but both are
+   currently unowned, and the implementation plan for whichever
+   sub-project lands first has to settle them.
+
+   - **A view sourced from an analysis.**
+     `2026-09-02-analysis-engine-design.md` §10 says a view may name an
+     analysis as its source — `source: {analysis: "unreachable",
+     params: {…}}` — and that "it belongs to the views spec to define
+     precisely". §2.2's query shape has no `source` key and no way to
+     express one; a query starts at `from`, which selects entity types.
+     Either the language grows a third seed form beside `from`, or the
+     analysis result is materialised into a seed set some other way.
+   - **One reachability walk or two.** The same spec's §7 requires that
+     "the D2 query language calls this component rather than
+     reimplementing" the reachability closure in `internal/analysis` —
+     "one walk, two callers, no drift". §4.2 here specifies a compiler
+     that emits its own `WITH RECURSIVE` from the query document. The
+     two are reconcilable — this compiler's traversal is bounded and
+     parameterised, and an analysis-driven seed set would be a *caller*
+     of it, not the reverse — but nothing states which package owns the
+     walk. Deciding it after both are written is how the drift the
+     analysis spec warns about actually happens.
+
+9. **Staleness is designed twice, differently.** §6 detects a stale
+   view through `view_refs` id-versus-key resolution, which answers
+   "does this query still name things that exist". The analysis spec
+   proposes `projects.design_version`, a counter bumped by any metamodel
+   write, and says it is "also useful ... to the views sub-project for
+   cache invalidation". They answer different questions — "is this query
+   still valid" against "has anything changed since this result" — and
+   this spec deliberately caches no results, so it needs no counter
+   today. Recorded so that a later "views cache" does not invent a third
+   mechanism.
 
 ## 8. What the existing schema needs
 
@@ -953,7 +1054,21 @@ Required additions: the tables in §5.4 (`views`, `view_positions`,
 
 Recommended change to an existing table: an index on
 `relations (relation_type_id, target_id)`, for reverse traversal
-(§4.4).
+(§4.4). The metamodel plan's Task 1, correction 6, deliberately did
+*not* add it — "an index nothing reads is pure write cost ... it belongs
+to the task that introduces the query it serves" — and names this spec
+as the reason it was considered. That query is §4.2's recursive walk, so
+this is the task, and the index lands with it.
+
+`2026-09-02-analysis-engine-design.md` §7 asks for a second index,
+`relations (project_id, relation_type_id)`. The two are different
+indexes for different access shapes and neither replaces the other, but
+whichever sub-project lands first should check the other's need before
+adding a third: `relations` already carries
+`relations_project_idx (project_id, created_at)`,
+`relations_edge_key (relation_type_id, source_id, target_id)`,
+`relations_source_idx` and `relations_target_idx`, and every index is
+write cost on the table expected to hold the most rows.
 
 Two frictions worth recording, neither fatal:
 

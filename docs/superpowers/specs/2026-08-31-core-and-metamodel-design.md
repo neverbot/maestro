@@ -4,6 +4,30 @@ Date: 2026-08-31
 Status: approved, ready for implementation planning
 Scope: first of seven sub-projects (see "Roadmap" at the end)
 
+> **Reconciled against implementation, 2026-09-02.** This approved spec
+> was written before the metamodel was built; the following statements
+> were corrected against `internal/db/migrations/0004_metamodel.sql`,
+> `internal/metamodel/` and the corrections blocks of
+> `docs/superpowers/plans/2026-08-31-metamodel.md`, and three open
+> questions raised by the 2026-09-02 sub-project specs are recorded here
+> rather than being answered in two places:
+>
+> - "Field schemas" — the list type is `list<text>`, not `list<…>`; the
+>   field-key rule and the required-versus-default rule are stated.
+> - "Field schemas" — **open question (O3)**: a relation cannot carry a
+>   typed reference to a third entity.
+> - "Metamodel" — **open question (O1)**: whether `semantic_role` is the
+>   analysis mechanism, or descriptive metadata beside a separate
+>   `analysis_traits` vocabulary.
+> - "Idempotency" — **open question (O2)**: re-running a seed over rows
+>   that already exist is not conflict-free; the old wording read as
+>   though it were.
+> - "Error shapes" and "Field validation" — `invalid_schema` exists as a
+>   seventh code, distinct from `schema_violation`.
+>
+> Nothing else in the spec changed. The open questions are the user's to
+> decide; no later spec may answer them on its own.
+
 ## 1. What Maestro is
 
 Maestro is an open-source, self-hosted tool where **game designers and
@@ -168,23 +192,109 @@ Mothwing Cloak"), optional `semantic_role`, `version`.
 `fields` (jsonb).
 
 `semantic_role` is one of `prerequisite`, `unlock`, `containment`,
-`spatial`, `availability`, `reward`, or null. It is **not** used for
-drawing — views select relation types explicitly. It exists so the
-analysis sub-project can answer questions that need real semantics:
-"is this quest unreachable?", "is there a prerequisite cycle?". Those
-are the questions a designer cannot answer by eye across 400 missions.
+`spatial`, `availability`, `reward`, or null, enforced by a `CHECK` on
+the column. It is **not** used for drawing — views select relation types
+explicitly. It exists so the analysis sub-project can answer questions
+that need real semantics: "is this quest unreachable?", "is there a
+prerequisite cycle?". Those are the questions a designer cannot answer
+by eye across 400 missions.
+
+> **Open question O1 — is `semantic_role` the analysis mechanism?**
+> Recorded here, in the one place that owns the column, so that no other
+> spec answers it on its own.
+>
+> `2026-09-02-analysis-engine-design.md` §2 argues that this column
+> conflates two orthogonal axes — what an edge *means* to a designer
+> (`reward`, `availability`) and how it *behaves* in a graph walk
+> (acyclic, symmetric, direction of dependency) — that a closed enum of
+> meanings must grow every time a genre invents a meaning, and that it
+> still cannot say whether a cycle in a given type is a bug. It proposes
+> a second, orthogonal vocabulary, `relation_types.analysis_traits
+> text[]`, and keeps `semantic_role` as descriptive metadata plus a
+> fixed compatibility mapping.
+> `2026-09-02-agent-skill-bundle-design.md` §10.2 reports that two
+> vocabularies for one job is what makes an agent choose wrong
+> consistently across thirty relation types, and that its
+> `reference/analysis.md` page cannot be written until this is settled.
+>
+> Three outcomes are open, and **the user decides**:
+> (a) traits are added and `semantic_role` is kept as a human-readable
+> label with no analytical meaning; (b) traits are added and
+> `semantic_role` is dropped in a migration, before any real game is
+> seeded; (c) traits are rejected and `semantic_role` is extended
+> instead.
+>
+> Until it is decided, this sentence is the authority: `semantic_role`
+> is what the committed schema has, and whether it *drives* analysis is
+> undecided. The analysis and skill-bundle specs cross-reference this
+> question rather than restating it.
 
 ### Field schemas
 
 A `field_schema` is a declarative list of
-`{key, label, type, required, default}` with types `text`, `longtext`,
-`number` (optional range), `bool`, `enum` (with options), and
-`list<…>`.
+`{key, label, type, required, default}` with exactly six types: `text`,
+`longtext`, `number` (optional `min`/`max`), `bool`, `enum` (with
+options), and `list<text>`. `list<text>` is the **only** list type —
+there is no `list<number>` and no `list<enum>`.
+
+Three rules the validator enforces at declaration time:
+
+- A field `key` must match `^[a-z][a-z0-9_]*$` and be at most 64
+  characters. Lower snake case with no dots, so `fields.<key>` stays an
+  unambiguous error path and two keys can never differ only by case.
+  This rule applies to declared **field** keys only: entity keys and
+  type keys are checked for non-emptiness alone, and are unique per
+  scope case-insensitively. Whether that inconsistency should be closed
+  is an open question, stated once in
+  `2026-09-02-agent-skill-bundle-design.md` §10.5 and its open question
+  9, because that is the document whose teaching depends on the answer.
+- A default is declared by the **presence of the `"default"` key** in
+  the JSON and by nothing else. There is no `has_default` input key,
+  and an explicit `"default": null` declares no default. A declared
+  default of `false` or `0` is an ordinary default and is applied.
+- `required` together with a default is **rejected**. The default is
+  applied before the field could ever be reported missing, so the pair
+  makes `required` unreachable.
 
 There is deliberately **no reference type**. A pointer to another
 entity *is a relation*. That single rule keeps the graph complete and
 is what makes view queries work at all — a reference hidden inside a
 jsonb field would be invisible to every traversal.
+
+> **Open question O3 — a relation cannot carry a typed reference to a
+> third entity.** Recorded here because it is a metamodel question, not
+> a views question, and it must be stated in exactly one place.
+>
+> The rule above is stated for *entities*, and it holds there: an
+> entity pointing at an entity is an edge. It does not resolve the case
+> where the thing doing the pointing is itself an edge. A metroidvania
+> door is a `connects_to` relation from room to room whose gate is
+> "requires the Mothwing Cloak" — a reference to a third entity, the
+> `Ability`. A relation's own fields are scalars of the six types above,
+> so the only available spelling is a `text` field holding an ability
+> key, which nothing validates and no traversal can follow; and a
+> relation cannot itself be an endpoint of another relation. The
+> capability the rule promises for entities therefore has no equivalent
+> for edges.
+>
+> `2026-09-02-views-and-query-language-design.md` §3.3 hits this on its
+> metroidvania example and cross-references this question; its `map`
+> view renders the text field happily, and the dangling key is invisible
+> to it.
+>
+> Options, none chosen: leave it, and let the analysis engine report
+> dangling keys later; add an `entity_ref` field type that is validated
+> on write but is deliberately not traversable; model the gate as its
+> own entity with two relations. **The user decides**, and the decision
+> is cheaper now than after a game is seeded.
+>
+> Note for whoever decides: `readme.md`'s genre table presents this
+> exact metroidvania door as the example that justifies typed edges.
+> Edges *do* carry typed fields, so the readme is not wrong about that —
+> but the ability reference itself is untyped and unvalidated, and the
+> readme's framing reads as a stronger promise than the design makes.
+> `readme.md` was out of scope for this reconciliation pass and has not
+> been edited.
 
 ### Constraints and indexes
 
@@ -193,7 +303,26 @@ entities — enforced by a unique index, not a pre-flight check, so two
 concurrent agents cannot slip between a `SELECT` and an `INSERT`.
 Relation endpoints are validated against the relation type's allowed
 lists on write. `tsvector` + GIN over names and text fields for
-cross-cutting search.
+cross-cutting search. `entities.search` is a plain `tsvector` column
+written by the application, not a `GENERATED … STORED` column.
+
+**Isolation is enforced in SQL, not in Go**, and the committed
+migration settled the mechanism: every foreign key from a domain table
+to a **project-scoped** parent is composite, carrying `project_id`
+alongside the parent id — `(entity_type_id, project_id) → entity_types
+(id, project_id)`, and the same shape for a relation's type and both
+endpoints and for `updated_by_token_id → api_tokens`. A composite key
+needs a `UNIQUE (id, project_id)` on the parent to reference, which is
+why the types and entities carry one. A composite `ON DELETE SET NULL`
+must name its column, since a bare one would try to null `project_id`.
+Only `project_id → projects (id)` and `updated_by_user_id → users (id)`
+are single-column, because neither parent has an outer scope.
+
+**Every later sub-project's tables inherit this rule.** A new table that
+references `entities`, `entity_types`, `relation_types` or `api_tokens`
+by id alone reopens exactly the cross-game hole the metamodel migration
+closed, regardless of whether the table also carries `project_id` of its
+own.
 
 ### Deletion
 
@@ -248,6 +377,40 @@ Every `upsert` addresses rows by `(project, type, key)`, never by id.
 An agent re-running its seeding script creates no duplicates. UUIDs
 exist and are returned; agents work with readable keys.
 
+**Idempotency here means row identity, not a conflict-free re-run.**
+The concurrency rule below applies to every upsert that finds an
+existing row: the call must carry the matching `expected_version` or it
+returns `version_conflict`. A verbatim re-run of a seeding payload
+therefore conflicts on **every** row that already exists — the row
+count is unchanged, which is the guarantee, but nothing is written and
+every item comes back as a failure. The metamodel plan's Task 9 asserts
+exactly this, and it is correct.
+
+> **Open question O2 — should a bulk upsert have a conflict mode?**
+> Recorded here rather than in the sub-project specs that ran into it.
+>
+> As designed, an agent re-seeding must first read every affected row to
+> learn its version, then write with those versions. That is a page walk
+> before a 500-row write, plus one piece of state carried across a
+> session boundary an agent frequently does not survive.
+> `2026-09-02-agent-skill-bundle-design.md` §10.1 concludes the bundle
+> must teach that read-then-write loop, and correctly names a workaround
+> in a teaching document as debt.
+>
+> Its recommendation, aimed at this spec: `entities.upsert` and
+> `relations.upsert` gain `on_conflict: "fail" | "skip" | "overwrite"`,
+> defaulting to `"fail"` so nothing changes for existing callers.
+> `"skip"` makes a re-seed genuinely idempotent, `"overwrite"` makes a
+> corrective re-seed one call. The counter-argument is that
+> `"overwrite"` is a documented way to lose a concurrent editor's work,
+> which is the failure `expected_version` exists to prevent.
+>
+> Not decided. **The user decides**; it is a change to this spec's MCP
+> surface, so it belongs to the metamodel sub-project and not to the
+> bundle. Compare `2026-09-02-markdown-domain-design.md` §7, which
+> spells a create as `expected_version: 0` — an explicit "I expect this
+> not to exist" rather than an omission.
+
 ### Bulk writes
 
 Seeding a real game is hundreds of entities, so `entities.upsert` and
@@ -280,7 +443,18 @@ main consumer.
 
 Stable and machine-readable: `not_found`, `version_conflict` (carries
 the current version), `schema_violation` (carries field path and what
-was expected), `endpoint_type_mismatch`, `scope_violation`, `in_use`.
+was expected), `invalid_schema`, `endpoint_type_mismatch`,
+`scope_violation`, `in_use`.
+
+`invalid_schema` and `schema_violation` are two codes, not one, and the
+committed `internal/metamodel/errors.go` gives them two sentinels. They
+are told apart by who is at fault: `invalid_schema` is a **type
+declaration** that cannot stand (a bad field key, an enum with no
+options, `required` plus a default, a default the field could not
+hold), reported at `field_schema[<i>]` paths; `schema_violation` is a
+**row of values** that does not fit a declaration that can, reported at
+`fields.<key>` paths. A caller must never have to match on path
+spelling to tell them apart.
 
 ### REST and SSE
 
@@ -300,8 +474,17 @@ every entry point — MCP, REST, any future importer.
 
 Rules: an unknown field is an error, never silently dropped (an agent
 typing `min_lvl` must feel it); a missing optional field stays absent
-rather than being zero-filled; enums validate against their options;
-numbers honour their optional range.
+rather than being zero-filled; a declared default is applied when the
+field is absent or null, and goes through the same coercion a
+hand-written value does; enums validate against their options; numbers
+honour their optional range and must be finite.
+
+The schema **declaration** is checked separately, before anything is
+stored against it, and fails with `invalid_schema` rather than
+`schema_violation` — see "Error shapes". Re-validating a stored row
+against an edited schema reports only whether it still fits; it never
+returns a normalised map, so a re-validation pass cannot back-fill
+defaults into rows the designer did not touch.
 
 ### Graph integrity
 
@@ -434,4 +617,6 @@ puts it in a *Mage route* view.
 Two data-model consequences this spec must honour, and does: references
 between entities are always relations (never hidden in jsonb), and edges
 carry their own typed fields (a metroidvania door needs
-`requires_ability` on the edge, not on either room).
+`requires_ability` on the edge, not on either room). What that field
+cannot be is a *typed reference to the `Ability`* — see open question O3
+under "Field schemas".

@@ -183,21 +183,46 @@ func endpointList(ids []uuid.UUID) []uuid.UUID {
 // The id is repeated in the message rather than left to the path alone:
 // a caller that built the list from a map has the ids and not the
 // positions in front of it.
+//
+// **The read holds a share lock on every type it finds**, which is what
+// makes correction 6's invariant survive a concurrent removal rather
+// than only a sequential one. `RemoveEntityType` prunes the removed id
+// out of the endpoint lists, but the prune is one `UPDATE` over
+// `relation_types` under READ COMMITTED and the *creation* path here has
+// no row for it to find; before this lock, a relation type created
+// between the prune's statement and the removal's commit kept a dangling
+// id, and the row it produced was the unrepairable one `RemoveEntityType`
+// describes. With the lock, the removal's `DELETE` waits for this
+// transaction, and its prune — which runs after the delete — then sees
+// the row this one wrote. See LockEndpointEntityTypes for why the lock is
+// taken here, before the relation type's own row lock, and not later.
+//
+// One statement per list rather than one lookup per id, because the lock
+// and the check are the same read: a per-id loop would take the same
+// locks one round trip at a time. A failure to read at all is reported
+// against the list and not an element — nothing was checked, so no index
+// is the one at fault.
 func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, path string, ids []uuid.UUID) []FieldError {
+	if len(ids) == 0 {
+		return nil
+	}
+	found, err := q.LockEndpointEntityTypes(ctx, dbq.LockEndpointEntityTypesParams{
+		ProjectID: projectID, Ids: ids,
+	})
+	if err != nil {
+		return []FieldError{{Path: path, Message: "could not be checked: " + err.Error()}}
+	}
+	known := make(map[uuid.UUID]struct{}, len(found))
+	for _, id := range found {
+		known[id] = struct{}{}
+	}
+
 	var problems []FieldError
 	for i, id := range ids {
-		_, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
-		if errors.Is(err, pgx.ErrNoRows) {
+		if _, ok := known[id]; !ok {
 			problems = append(problems, FieldError{
 				Path:    fmt.Sprintf("%s[%d]", path, i),
 				Message: "names no entity type of this game: " + id.String(),
-			})
-			continue
-		}
-		if err != nil {
-			problems = append(problems, FieldError{
-				Path:    fmt.Sprintf("%s[%d]", path, i),
-				Message: "could not be checked: " + err.Error(),
 			})
 		}
 	}

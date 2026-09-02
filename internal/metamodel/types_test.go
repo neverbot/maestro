@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -34,6 +35,64 @@ func newProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 		t.Fatalf("create project: %v", err)
 	}
 	return id
+}
+
+// standaloneConn opens a connection of this test's own to the same
+// throwaway database, outside the service's pool. A staged race needs
+// connections the code under test is not using: one to hold a lock, one
+// to observe from outside every transaction involved. Both are closed
+// with the test, and the database is dropped after them.
+func standaloneConn(t *testing.T, pool *pgxpool.Pool) *pgx.Conn {
+	t.Helper()
+	conn, err := pgx.Connect(context.Background(), pool.Config().ConnString())
+	if err != nil {
+		t.Fatalf("open a standalone connection: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+// lockWaiters counts the backends of this test's own database that are
+// parked on a lock. Every test runs against a database created for it
+// alone (testutil.NewPool), so the count is this test's and nobody
+// else's, which is what makes it usable as a synchronisation point
+// rather than a sleep.
+func lockWaiters(t *testing.T, conn *pgx.Conn) int {
+	t.Helper()
+	var n int
+	if err := conn.QueryRow(context.Background(), `
+		SELECT count(*) FROM pg_stat_activity
+		WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
+		t.Fatalf("count lock waiters: %v", err)
+	}
+	return n
+}
+
+// entityTypeExists reads one row from outside every transaction under
+// test, so it sees committed state and nothing else.
+func entityTypeExists(t *testing.T, conn *pgx.Conn, id uuid.UUID) bool {
+	t.Helper()
+	var found bool
+	if err := conn.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM entity_types WHERE id = $1)`, id).Scan(&found); err != nil {
+		t.Fatalf("look up entity type: %v", err)
+	}
+	return found
+}
+
+// waitFor polls until a staged race reaches the state the test needs, or
+// fails the test. It is a poll and not a sleep: the condition is read out
+// of Postgres, so the test proceeds the moment the interleaving is real
+// and fails loudly instead of racing on if it never happens.
+func waitFor(t *testing.T, what string, ready func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for !ready() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // insertEntity writes an entity row straight to the database. Task 4 owns
@@ -1295,5 +1354,110 @@ func TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing(t *testing.
 	// update of the version it claimed would have returned 2.
 	if again.Version != 1 {
 		t.Fatalf("Version = %d, want 1 — the new row starts over", again.Version)
+	}
+}
+
+// TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID
+// stages the race the endpoint prune does not close on its own.
+//
+// `PruneEntityTypeFromEndpointLists` is a single `UPDATE` over
+// `relation_types`. Under READ COMMITTED it sees the rows that exist
+// when its statement starts, and `UpsertRelationType`'s *creation* path
+// has no row for it to find and — before the share lock this test
+// exists for — took no lock of its own against `entity_types`. A
+// relation type created between the prune's statement and
+// `RemoveEntityType`'s commit therefore kept the removed id, which is
+// exactly the unrepairable state `RemoveEntityType`'s comment describes:
+// a rule nothing can satisfy, a refusal naming the wrong problem, and a
+// row that cannot be re-declared because the list it holds is refused as
+// `invalid_input`. The *update* path was already safe — the prune's own
+// row lock plus READ COMMITTED's re-check catch it — so creation was the
+// whole hole, and creation is the common case for a seeding agent.
+//
+// **The interleaving is staged rather than raced.** A third connection
+// holds an uncommitted `relation_types` row spelled `takes_place_in`,
+// which parks the upsert on the unique index *after* it has read and
+// locked its endpoint types and before it writes anything. The removal
+// then runs into that lock. Without the share lock the removal sails
+// past, commits, prunes nothing — there is no row yet — and the upsert
+// then lands the id of a type that no longer exists.
+func TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	})
+	if err != nil {
+		t.Fatalf("seed zone type: %v", err)
+	}
+
+	// Two connections of this test's own, outside the service pool: one
+	// to hold the blocking row, one to watch the other two from outside
+	// every transaction under test.
+	blocker := standaloneConn(t, pool)
+	watcher := standaloneConn(t, pool)
+
+	tx, err := blocker.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin blocking transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO relation_types (project_id, key, label, description,
+		                            source_type_ids, target_type_ids, field_schema)
+		VALUES ($1, 'takes_place_in', 'takes place in', '', '{}', '{}', '{}')`,
+		project); err != nil {
+		t.Fatalf("hold the key uncommitted: %v", err)
+	}
+
+	upsertErr := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertRelationType(context.Background(), project, metamodel.RelationTypeInput{
+			Key: "takes_place_in", Label: "takes place in",
+			TargetTypeIDs: []uuid.UUID{zone.ID},
+		})
+		upsertErr <- err
+	}()
+
+	// The upsert has read its endpoint types and is parked on the key.
+	waitFor(t, "the upsert to block on the held key", func() bool {
+		return lockWaiters(t, watcher) >= 1
+	})
+
+	removeErr := make(chan error, 1)
+	go func() { removeErr <- svc.RemoveEntityType(context.Background(), project, zone.ID, true) }()
+
+	// Either the removal is itself blocked — by the share lock the upsert
+	// took over `zone` — or it has already committed, which is the bug
+	// this test exists to catch and which the assertions below then see.
+	waitFor(t, "the removal to block or to commit", func() bool {
+		return lockWaiters(t, watcher) >= 2 || !entityTypeExists(t, watcher, zone.ID)
+	})
+
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("release the held key: %v", err)
+	}
+	if err := <-upsertErr; err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+	if err := <-removeErr; err != nil {
+		t.Fatalf("RemoveEntityType: %v", err)
+	}
+
+	var dangling []uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT coalesce(array_agg(id), '{}') FROM (
+			SELECT unnest(source_type_ids || target_type_ids) AS id
+			FROM relation_types WHERE project_id = $1
+		) ids
+		WHERE NOT EXISTS (SELECT 1 FROM entity_types WHERE entity_types.id = ids.id)`,
+		project).Scan(&dangling); err != nil {
+		t.Fatalf("look for dangling endpoint ids: %v", err)
+	}
+	if len(dangling) > 0 {
+		t.Fatalf("endpoint lists still name %d removed entity type(s): %v", len(dangling), dangling)
 	}
 }

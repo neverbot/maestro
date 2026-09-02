@@ -106,6 +106,30 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 DELETE FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
+-- name: LockEndpointEntityTypes :many
+-- Reads the entity types an endpoint rule names, and holds a share lock
+-- on each until the reading transaction ends.
+--
+-- The read is what UpsertRelationType checks its endpoint lists against;
+-- the lock is what stops RemoveEntityType from deleting one of them
+-- underneath a relation type that is being created. Without it the
+-- creation path had no row for PruneEntityTypeFromEndpointLists to find
+-- and took no lock of its own, so a relation type created between the
+-- prune's statement and the removal's commit kept a dangling id. FOR
+-- SHARE and not FOR UPDATE: two writers may name the same entity type at
+-- once, and only a DELETE of it has to wait.
+--
+-- **Lock order is load-bearing.** UpsertRelationType takes this lock
+-- before the FOR UPDATE on its own relation_types row, and
+-- RemoveEntityType deletes the entity type before pruning the relation
+-- types; both therefore take entity_types first, and neither can hold
+-- what the other is waiting for. Moving this call after the relation
+-- type's row lock reintroduces a deadlock between the two.
+SELECT id FROM entity_types
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND id = ANY (sqlc.arg('ids')::uuid[])
+FOR SHARE;
+
 -- name: PruneEntityTypeFromEndpointLists :exec
 -- Removes a deleted entity type's id from every relation type's endpoint
 -- lists. source_type_ids and target_type_ids are plain uuid[]: Postgres

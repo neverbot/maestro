@@ -675,6 +675,56 @@ func (q *Queries) ListRelations(ctx context.Context, arg ListRelationsParams) ([
 	return items, nil
 }
 
+const lockEndpointEntityTypes = `-- name: LockEndpointEntityTypes :many
+SELECT id FROM entity_types
+WHERE project_id = $1::uuid
+  AND id = ANY ($2::uuid[])
+FOR SHARE
+`
+
+type LockEndpointEntityTypesParams struct {
+	ProjectID uuid.UUID
+	Ids       []uuid.UUID
+}
+
+// Reads the entity types an endpoint rule names, and holds a share lock
+// on each until the reading transaction ends.
+//
+// The read is what UpsertRelationType checks its endpoint lists against;
+// the lock is what stops RemoveEntityType from deleting one of them
+// underneath a relation type that is being created. Without it the
+// creation path had no row for PruneEntityTypeFromEndpointLists to find
+// and took no lock of its own, so a relation type created between the
+// prune's statement and the removal's commit kept a dangling id. FOR
+// SHARE and not FOR UPDATE: two writers may name the same entity type at
+// once, and only a DELETE of it has to wait.
+//
+// **Lock order is load-bearing.** UpsertRelationType takes this lock
+// before the FOR UPDATE on its own relation_types row, and
+// RemoveEntityType deletes the entity type before pruning the relation
+// types; both therefore take entity_types first, and neither can hold
+// what the other is waiting for. Moving this call after the relation
+// type's row lock reintroduces a deadlock between the two.
+func (q *Queries) LockEndpointEntityTypes(ctx context.Context, arg LockEndpointEntityTypesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, lockEndpointEntityTypes, arg.ProjectID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markEntitiesOfTypeInvalid = `-- name: MarkEntitiesOfTypeInvalid :exec
 UPDATE entities SET invalid = $1::boolean
 WHERE project_id = $2::uuid

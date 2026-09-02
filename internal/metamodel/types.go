@@ -253,10 +253,22 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // `RelationTypeInput` presents to an agent. That may well be the right
 // end state — it would also give the lists an index and let a view join
 // on them — but it is a schema decision, and Task 5's job is to close the
-// invariant Task 5 created. This is exact for the only way an id can go
-// dangling today: `DeleteEntityType` is the sole path by which an entity
-// type disappears, since deleting a project cascades the relation types
-// with it.
+// invariant Task 5 created.
+//
+// **The prune alone closes the sequential path and not the concurrent
+// one**, and it takes a second mechanism to close both. `DeleteEntityType`
+// is the only path by which an entity type disappears — deleting a
+// project cascades the relation types with it — so the prune is exact for
+// every id that exists when its statement runs. It is one `UPDATE` under
+// READ COMMITTED, though, and a relation type *created* after it has run
+// and before this transaction commits is a row it never saw: the update
+// path is caught by the prune's own row lock and READ COMMITTED's
+// re-check, the creation path had no row to lock. What closes it is on
+// the other side, in `checkEndpointTypes`: the endpoint read there holds
+// a share lock on every type it names, so the `DELETE` above waits for
+// that writer and the prune below then finds its row.
+// `TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID`
+// stages the interleaving deterministically.
 //
 // **One consequence, recorded because it is a widening.** Pruning the
 // last id of a list leaves it empty, and an empty list means "any type"

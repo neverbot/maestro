@@ -824,3 +824,75 @@ func TestACreationThatLosesItsKeyToAnotherSpellingIsNamedAsARespelling(t *testin
 		t.Fatal("the upsert never returned after the rival committed")
 	}
 }
+
+// TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet pins the
+// FOR UPDATE on GetEntityTypeByKeyForUpdate.
+//
+// Removing the lock leaves every other test in this file green, because
+// the compare-and-set in the upsert's own DO UPDATE still refuses every
+// lost update on its own. What the lock earns is the *number* a caller is
+// told to merge onto. Without it the read runs against this
+// transaction's snapshot and returns whatever version was committed when
+// it started, so a caller racing an in-flight edit is told "current
+// version is 1", re-issues with 1, and is refused again — a loop it
+// cannot get out of by doing what the error said.
+//
+// The rival is an open transaction, so the interleaving is the test's.
+func TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rival, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	if _, err := rival.Exec(ctx,
+		`UPDATE entity_types SET version = version + 1, label = 'Theirs' WHERE id = $1`,
+		typ.ID); err != nil {
+		t.Fatalf("rival update: %v", err)
+	}
+
+	// No ExpectedVersion, so the refusal is decided by the read alone and
+	// the version it reports is the read's answer, not the guard's.
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+			Key: "quest", Label: "Mine", LabelPlural: "Mine",
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("the upsert returned %v without waiting for the rival's row lock", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := rival.Commit(ctx); err != nil {
+		t.Fatalf("rival commit: %v", err)
+	}
+
+	select {
+	case err := <-result:
+		var conflict *metamodel.VersionConflictError
+		if !errors.As(err, &conflict) {
+			t.Fatalf("err = %v, want a *VersionConflictError", err)
+		}
+		if conflict.Current != 2 {
+			t.Fatalf("Current = %d, want 2: the caller must be told the version its own "+
+				"write would have met, not the one visible before the rival committed",
+				conflict.Current)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upsert never returned after the rival committed")
+	}
+}

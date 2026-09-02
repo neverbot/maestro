@@ -4,6 +4,24 @@
 -- between games is enforced in SQL, not in Go, so a query trusting an id
 -- alone would hand a caller another game's row the moment an id leaked.
 --
+-- That is the whole mechanism only for the statements addressing
+-- entity_types itself (GetEntityTypeByID, DeleteEntityType): drop the
+-- filter there and a leaked id reads, or deletes, another game's type,
+-- which TestTypesAreScopedToTheirProject pins. It is *not* the mechanism
+-- for the three statements reaching entities through an entity_type_id
+-- (ListEntityFieldsOfType, MarkEntitiesOfTypeInvalid,
+-- DeleteEntitiesOfType). 0004_metamodel.sql gives entities a composite
+-- FOREIGN KEY (entity_type_id, project_id) REFERENCES
+-- entity_types (id, project_id), so an entity's project is already
+-- determined by its type's: no row can match a type id under one project
+-- id and not another, and dropping the filter from those three changes no
+-- result and can be caught by no test. They keep it as defence in depth,
+-- against a future schema that relaxes that composite key, and so that a
+-- reader adding the next entities query copies the safe shape rather than
+-- having to work out which statements happen to be covered by a
+-- constraint. Written down here because a comment claiming these filters
+-- are what isolates games would be relied on as if it were true.
+--
 -- No write here sets updated_at. 0004_metamodel.sql puts a set_updated_at
 -- trigger on all four tables, so the column has one mechanism behind it
 -- rather than a trigger plus a clause every future query must remember.

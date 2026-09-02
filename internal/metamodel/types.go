@@ -260,9 +260,15 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 // required field should hold, and a validation pass is not an edit of
 // their content.
 //
-// CheckValues, never Validate: Validate hands back a normalised map with
-// declared defaults injected, and writing that back would silently
-// back-fill every row the sweep touched.
+// CheckValues, never Validate — an intent, not a behaviour. CheckValues
+// *is* Validate with the map discarded (validate.go), so the two return
+// the same verdict on every input and no test can tell this sweep's call
+// from the other. What the narrower call earns is that there is no
+// normalised map in scope to write back: Validate hands one back with
+// declared defaults injected, and a later edit that stored it would
+// back-fill every row the sweep touched, silently, with values no
+// designer chose. TestSchemaChangeDoesNotBackFillDeclaredDefaults pins
+// the outcome; this line is what keeps the temptation out of reach.
 func (s *Service) revalidateEntitiesOfType(ctx context.Context, q *dbq.Queries, typ dbq.EntityType) error {
 	schema, err := ParseSchema(typ.FieldSchema)
 	if err != nil {

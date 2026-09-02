@@ -339,17 +339,6 @@ func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey,
 	return row, nil
 }
 
-// EntityByID loads one entity by its id. The id is not enough on its own:
-// the query filters on the project too, so an id belonging to another
-// game reads as not found rather than as somebody else's row.
-func (s *Service) EntityByID(ctx context.Context, projectID, id uuid.UUID) (dbq.Entity, error) {
-	row, err := s.q.GetEntityByID(ctx, dbq.GetEntityByIDParams{ProjectID: projectID, ID: id})
-	if err != nil {
-		return dbq.Entity{}, notFound(err, "lookup entity")
-	}
-	return row, nil
-}
-
 // RemoveEntity deletes one entity. Its relations go with it, by cascade.
 func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) error {
 	// Read the row, and its type, before deleting: entity.removed

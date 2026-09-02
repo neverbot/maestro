@@ -56,18 +56,15 @@ func TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory(t *testing.T) {
 			"a delete appends a tombstone and the two must never disagree", current, versions)
 	}
 
-	var deleted bool
-	var body, message string
-	if err := pool.QueryRow(ctx,
-		`SELECT v.deleted, v.body_md, v.message FROM document_versions v
-		   JOIN documents d ON d.id = v.document_id
-		  WHERE d.project_id = $1 AND d.path = 'bible' AND v.version = 2`,
-		game).Scan(&deleted, &body, &message); err != nil {
-		t.Fatalf("read the tombstone: %v", err)
+	// Task 4 asserted the tombstone's own values over SQL because no
+	// reader existed; Task 6 reads them back through ReadVersion.
+	tombstone, err := svc.ReadVersion(ctx, game, "bible", 2)
+	if err != nil {
+		t.Fatalf("ReadVersion of the tombstone: %v", err)
 	}
-	if !deleted || body != "one\n" || message != "cut for now" {
+	if !tombstone.Deleted || tombstone.BodyMd != "one\n" || tombstone.Message != "cut for now" {
 		t.Fatalf("tombstone = (deleted %t, body %q, message %q), want (true, %q, %q)",
-			deleted, body, message, "one\n", "cut for now")
+			tombstone.Deleted, tombstone.BodyMd, tombstone.Message, "one\n", "cut for now")
 	}
 }
 
@@ -632,18 +629,20 @@ func TestTheActorOfADeletionIsRecorded(t *testing.T) {
 			"who created the document", removed.CreatedByUserID, author)
 	}
 
-	// The tombstone version carries its own author. Task 6 renders this
-	// through History; until then the assertion is against the row.
-	var versionAuthor *string
-	if err := pool.QueryRow(ctx,
-		`SELECT v.author_user_id::text FROM document_versions v
-		   JOIN documents d ON d.id = v.document_id
-		  WHERE d.project_id = $1 AND d.path = 'bible' AND v.version = 2`,
-		game).Scan(&versionAuthor); err != nil {
-		t.Fatalf("read the tombstone author: %v", err)
+	// The tombstone version carries its own author, read back through
+	// History rather than off the row as Task 4 had to.
+	page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "bible"})
+	if err != nil {
+		t.Fatalf("History: %v", err)
 	}
-	if versionAuthor == nil || *versionAuthor != remover.String() {
-		t.Fatalf("tombstone author_user_id = %v, want the remover %v", versionAuthor, remover)
+	if page.Versions[0].Version != 2 {
+		t.Fatalf("newest version = %d, want the tombstone at 2", page.Versions[0].Version)
+	}
+	if got := page.Versions[0].AuthorUserID; got == nil || *got != remover {
+		t.Fatalf("tombstone author_user_id = %v, want the remover %v", got, remover)
+	}
+	if got := page.Versions[1].AuthorUserID; got == nil || *got != author {
+		t.Fatalf("version 1's author = %v, want it unchanged at %v", got, author)
 	}
 }
 

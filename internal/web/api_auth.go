@@ -7,6 +7,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -64,9 +65,9 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // accept a legitimately much larger body than anything in this file —
 // one entities.upsert batch is hundreds of rows — and hardcoding this
 // file's 16 KiB there would have refused an ordinary seed as malformed.
-// The media-type check, the MaxBytesReader and the two refusals are
-// shared, so the two surfaces cannot answer a too-large body
-// differently.
+// The media-type check, the MaxBytesReader and all four refusals are
+// shared, so the two surfaces cannot answer a too-large body, a
+// wrong-typed field or a malformed one differently.
 func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, errCodeUnsupportedMediaType, "Content-Type must be application/json")
@@ -80,10 +81,56 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 			writeError(w, http.StatusRequestEntityTooLarge, errCodeRequestTooLarge, "request body too large")
 			return false
 		}
+		var wrongType *json.UnmarshalTypeError
+		if errors.As(err, &wrongType) && wrongType.Field != "" {
+			// Not a malformed body: the JSON parsed, and one field
+			// carried the wrong kind of value. Saying "malformed JSON
+			// body" to that is both false and unactionable — the caller
+			// is told neither which field nor what was expected — while
+			// every other refusal on the game-content surface names its
+			// own path. encoding/json already knows all three things, so
+			// the answer carries them, in the same {"fields":[{"path",
+			// "message"}]} shape the domain's own field errors use.
+			problem := "must be " + jsonTypeName(wrongType.Type) + ", not " + wrongType.Value
+			writeCodedError(w, http.StatusBadRequest, errCodeBadRequest,
+				wrongType.Field+" "+problem,
+				map[string]any{"fields": []map[string]string{{"path": wrongType.Field, "message": problem}}})
+			return false
+		}
 		writeError(w, http.StatusBadRequest, errCodeBadRequest, "malformed JSON body")
 		return false
 	}
 	return true
+}
+
+// jsonTypeName names a Go type the way the JSON a caller sent would
+// name it, because that is the vocabulary the caller is writing in: a
+// client that sent a string for `expected_version` is helped by "must be
+// a number", not by "must be int32".
+//
+// Anything this list does not recognise is called "a value" rather than
+// guessed at — a wrong name is worse than no name, and the field path is
+// the part that does the work.
+func jsonTypeName(t reflect.Type) string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "a string"
+	case reflect.Bool:
+		return "a boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return "a number"
+	case reflect.Slice, reflect.Array:
+		return "a list"
+	case reflect.Map, reflect.Struct:
+		return "an object"
+	default:
+		return "a value"
+	}
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {

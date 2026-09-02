@@ -895,3 +895,49 @@ func TestAStatedProjectIDIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
 		t.Fatalf("agreeing project_id = %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestAWrongTypedFieldIsNamed pins what a caller is told when the body
+// is valid JSON but one field is the wrong type. It used to be
+// "malformed JSON body", which is false — the JSON parsed — and named
+// neither the field nor what was wrong with it, on a surface where every
+// other refusal carries the path it is about.
+func TestAWrongTypedFieldIsNamed(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+
+	for _, tc := range []struct {
+		name, suffix string
+		body         string
+		path         string
+	}{
+		{"a string where a string is not expected", "/types",
+			`{"key":123,"label":"Quest","label_plural":"Quests"}`, "key"},
+		{"a version that is not a number", "/types",
+			`{"key":"quest","label":"Quest","label_plural":"Quests","expected_version":"one"}`, "expected_version"},
+		{"a batch that is not a list", "/entities", `{"items":"not-an-array"}`, "items"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, f.path(tc.suffix), strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(f.cookie)
+			rec := httptest.NewRecorder()
+			f.srv.ServeHTTP(rec, req)
+
+			got := assertError(t, rec, http.StatusBadRequest, "bad_request", tc.path)
+			if strings.Contains(got.Message, "malformed") {
+				t.Errorf("message = %q, but this body is well-formed JSON", got.Message)
+			}
+		})
+	}
+
+	// A body that really is malformed still says so, and names no path
+	// it cannot know.
+	req := httptest.NewRequest(http.MethodPost, f.path("/types"), strings.NewReader(`{"key":`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(f.cookie)
+	rec := httptest.NewRecorder()
+	f.srv.ServeHTTP(rec, req)
+	if got := assertError(t, rec, http.StatusBadRequest, "bad_request", ""); !strings.Contains(got.Message, "malformed") {
+		t.Errorf("message = %q, want it to say the body is malformed", got.Message)
+	}
+}

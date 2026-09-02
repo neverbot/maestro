@@ -719,6 +719,30 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 			t.Fatalf("the served tool list is missing %q", want)
 		}
 	}
+	// A tool description is documentation an agent acts on, so an empty
+	// one is a tool nobody can use correctly; this is the only place the
+	// *served* text is looked at at all.
+	//
+	// The %! check below is a backstop and not the primary guard: every
+	// format string here is a constant, so `go vet` (which `make check`
+	// runs) already rejects a mismatched argument list at build time —
+	// the fmt.Sprintf-arity mutation for this file was refused by the
+	// compiler's vet pass, not by this assertion. It is kept for the
+	// case vet cannot see, a format string that stops being constant,
+	// and it is honest to say it has never been the thing that caught
+	// one.
+	for _, tool := range tools.Tools {
+		if !strings.HasPrefix(tool.Name, "docs.") {
+			continue
+		}
+		if tool.Description == "" {
+			t.Fatalf("%s is served with no description at all", tool.Name)
+		}
+		if strings.Contains(tool.Description, "%!") {
+			t.Fatalf("%s's description has a formatting fault in it: %s",
+				tool.Name, tool.Description)
+		}
+	}
 
 	var written struct {
 		Version int32  `json:"version"`

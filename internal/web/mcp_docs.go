@@ -857,9 +857,14 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"fences, then markdown. Frontmatter is stored and echoed back and is never "+
 				"interpreted — it creates no links and no fields; `title` and `summary` are "+
 				"read out of it for display and nothing else is. The body you read back is "+
-				"the body you wrote, byte for byte. At most %d bytes. "+
-				"paths are matched without regard to case and are at most %d bytes, in "+
-				"segments of letters, digits, underscores, hyphens or dots. "+
+				"the body you wrote, byte for byte. At most %d bytes, of which only the "+
+				"first %d characters are indexed for search — a word past that is stored "+
+				"and readable but not findable. "+
+				"paths are matched without regard to case and are at most %d bytes over at "+
+				"most %d slash-separated segments, each starting with an ASCII letter or "+
+				"digit and continuing in letters, digits, underscores, hyphens or dots. "+
+				"Slashes are a naming convention, not folders: nothing is inherited along "+
+				"one. "+
 				"**kind is a property of the document, not of this one edit: omitting it "+
 				"leaves the document's current kind alone, and passing \"\" clears it.** "+
 				"Fixing a typo in the body does not require knowing or restating the kind. "+
@@ -869,8 +874,9 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"way to say it, and null is not it. At most %d attachments, each with an "+
 				"optional role of at most %d bytes. Attachment is never inferred from the "+
 				"content. %s",
-			markdown.MaxBodyBytes, markdown.MaxPathLen, markdown.MaxLinksPerWrite,
-			markdown.MaxRoleLen, retryAdvice),
+			markdown.MaxBodyBytes, markdown.MaxIndexedChars, markdown.MaxPathLen,
+			markdown.MaxPathSegments, markdown.MaxLinksPerWrite, markdown.MaxRoleLen,
+			retryAdvice),
 		OutputSchema: documentOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteInput) (DocumentOutput, error) {
 		caller, _ := CallerFrom(ctx)

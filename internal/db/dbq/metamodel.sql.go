@@ -334,10 +334,13 @@ type UpsertEntityTypeParams struct {
 // Idempotent by (project, key), matched case-insensitively through the
 // entity_types_key_key index. The key column itself is deliberately not in
 // the SET list: the first spelling stored stays, so a re-seed cannot
-// rewrite the handle other rows and documents refer to. UpsertEntityType
-// in Go refuses a spelling that differs from the stored one before it ever
-// gets here, so this clause is what makes the identical spelling a no-op
-// rather than what resolves a conflict.
+// rewrite the handle other rows and documents refer to. That omission is
+// also what lets UpsertEntityType in Go refuse a respelling *after* this
+// statement runs: the row returned still carries the stored key, so
+// comparing it to the submitted one catches a writer whose own locked read
+// could not have seen this row at all — a creation racing a creator, where
+// there was nothing yet to lock. So this clause is what makes an identical
+// spelling a no-op; it is not what resolves a conflict.
 func (q *Queries) UpsertEntityType(ctx context.Context, arg UpsertEntityTypeParams) (EntityType, error) {
 	row := q.db.QueryRow(ctx, upsertEntityType,
 		arg.ProjectID,

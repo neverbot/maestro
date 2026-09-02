@@ -1750,8 +1750,14 @@ const maxRowKeyLen = 64
 // case in row keys as well would buy nothing and cost the thing the
 // folding index was chosen for: a game whose own vocabulary capitalises
 // its handles ("Hogger", "Elwynn_Forest", "GP_Monaco") can spell them the
-// way its design documents do, and a re-seed that changes the casing
-// updates the existing row instead of failing.
+// way its design documents do, and the spelling the designer chose is the
+// one stored — Maestro neither folds it nor rewrites it. What the folding
+// index buys is that a re-seed under a different casing addresses the
+// existing row rather than creating a twin beside it; it does not update
+// it silently, and it is not meant to. keyRespellingError below refuses
+// exactly that write, naming both spellings, because a changed casing is
+// far likelier to be a typo than a deliberate rename of a handle other
+// rows and documents already refer to.
 //
 // What the pattern does exclude earns its place:
 //

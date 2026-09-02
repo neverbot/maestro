@@ -4286,7 +4286,7 @@ rather than on what was planned):
     transaction aborting on a raw constraint violation, not the refusal
     itself.
 
-- [ ] **Step 1: Add the queries**
+- [x] **Step 1: Add the queries**
 
 Append to `internal/db/queries/metamodel.sql`:
 
@@ -4398,7 +4398,7 @@ ORDER BY e.name, e.id;
 
 Run: `make sqlc`
 
-- [ ] **Step 2: State this task's event gating in `events.go`**
+- [x] **Step 2: State this task's event gating in `events.go`**
 
 Correction 19 again — stated here, not copied from a neighbouring call
 site. Add to `internal/metamodel/events.go`:
@@ -4423,7 +4423,7 @@ site. Add to `internal/metamodel/events.go`:
 with `relationEventMinRole` / `relationEventHumanOnly` beside the other
 gating constants.
 
-- [ ] **Step 3: Write the failing test**
+- [x] **Step 3: Write the failing test**
 
 `internal/metamodel/relations_test.go`:
 
@@ -4700,12 +4700,12 @@ func TestDeletingAnEntityDeletesItsRelations(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it fails**
+- [x] **Step 4: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -run TestRelation -v`
 Expected: FAIL, `undefined: metamodel.RelationTypeInput`.
 
-- [ ] **Step 5: Write the relation-type implementation**
+- [x] **Step 5: Write the relation-type implementation**
 
 `internal/metamodel/relation_types.go`:
 
@@ -4925,7 +4925,7 @@ func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUI
 (`pgconn` joins the imports for that last branch, as it does in
 `types.go`.)
 
-- [ ] **Step 6: Write the relation implementation**
+- [x] **Step 6: Write the relation implementation**
 
 `internal/metamodel/relations.go`:
 
@@ -5185,12 +5185,12 @@ func endpointAllowed(allowed []uuid.UUID, typeID uuid.UUID) bool {
 }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `go test ./internal/metamodel/ -v`
 Expected: PASS, every test in the package.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add internal/db/queries internal/db/dbq internal/metamodel

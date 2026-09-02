@@ -330,9 +330,14 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 		}
 		// The generic helper, deliberately: this id comes from the row
 		// just read and not from the caller, so there is no key to name.
-		// `entities.entity_type_id` is `ON DELETE RESTRICT` and this runs
-		// in the read's own transaction, so no-rows is unreachable; see
-		// the same note in RemoveRelation.
+		// `entities.entity_type_id` is `ON DELETE RESTRICT`, which does
+		// not make this read safe: `RemoveEntityType(cascade)` deletes the
+		// entities first and the type second, and the read above takes no
+		// row lock, so under READ COMMITTED the type can vanish between
+		// the two statements. No-rows is reachable only that way — the row
+		// just read is being deleted by the same cascade — and `not_found`
+		// is the answer this call owes its caller either way. See the same
+		// note in RemoveRelation.
 		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{
 			ProjectID: projectID, ID: row.EntityTypeID,
 		})

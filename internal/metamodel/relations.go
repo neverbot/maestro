@@ -498,10 +498,16 @@ func (s *Service) RemoveRelation(ctx context.Context, projectID, id uuid.UUID) e
 		// The generic helper is right here, unlike on every by-key
 		// accessor: this id comes from the row just read, not from the
 		// caller, so there is no key to name and nothing for a caller to
-		// fix. `relations.relation_type_id` is `ON DELETE RESTRICT` and
-		// this runs in the same transaction as the read, so no-rows is
-		// unreachable rather than merely unlikely; if it ever fires, the
-		// schema is inconsistent and `not_found` is a thin report of it.
+		// fix. `relations.relation_type_id` is `ON DELETE RESTRICT`, which
+		// is *not* what keeps this read from coming back empty: RESTRICT
+		// refuses a delete that would orphan an edge, and
+		// `RemoveRelationType(cascade)` deletes the edges first and the
+		// type second, so it never trips. The first read above takes no
+		// row lock either, so under READ COMMITTED the type can be gone by
+		// the time this statement runs. No-rows is therefore reachable —
+		// only against a cascading removal of this edge's own type, where
+		// the edge is being deleted too and `not_found` is the answer this
+		// call was going to give a moment later anyway.
 		typ, err := q.GetRelationTypeByID(ctx, dbq.GetRelationTypeByIDParams{
 			ProjectID: projectID, ID: row.RelationTypeID,
 		})

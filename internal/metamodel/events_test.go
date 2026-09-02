@@ -1,0 +1,281 @@
+package metamodel_test
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/testutil"
+)
+
+// receive takes the next event a subscription is delivered, or fails.
+func receive(t *testing.T, sub *realtime.Subscription) realtime.Event {
+	t.Helper()
+	select {
+	case got := <-sub.C:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for an event")
+		return realtime.Event{}
+	}
+}
+
+// requireNothing asserts a subscription is delivered nothing within the
+// window. The window is short deliberately: every test using it has
+// already arranged for the thing it is waiting on to be blocked, so a
+// longer wait would only slow the suite down without testing more.
+func requireNothing(t *testing.T, sub *realtime.Subscription, why string) {
+	t.Helper()
+	select {
+	case got := <-sub.C:
+		t.Fatalf("%s, but %q was published: %+v", why, got.Kind, got.Payload)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// TestTypeEventsReachEveryMemberOfTheGameIncludingAgents pins the gating
+// decision events.go records for type.upserted and type.removed:
+// MinRole empty, HumanOnly false.
+//
+// Every test in this package but these ones builds the service with a nil
+// hub, so before this file no event was ever observed at all — the gating
+// fields could have held any value, or (as they did) not existed. The two
+// subscribers here are the ones a wrong decision would have silently cut
+// out: a viewer, who is excluded by any MinRole above viewer, and a token
+// caller, who is excluded by HumanOnly regardless of role.
+func TestTypeEventsReachEveryMemberOfTheGameIncludingAgents(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	viewer := hub.Subscribe(project, "viewer", false)
+	defer hub.Unsubscribe(viewer)
+	agent := hub.Subscribe(project, "editor", true)
+	defer hub.Unsubscribe(agent)
+
+	typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "Quest", Label: "Quest", LabelPlural: "Quests",
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
+		got := receive(t, sub)
+		if got.Kind != "type.upserted" {
+			t.Fatalf("%s: Kind = %q, want type.upserted", name, got.Kind)
+		}
+		if got.ProjectID != project {
+			t.Fatalf("%s: ProjectID = %v, want %v", name, got.ProjectID, project)
+		}
+		assertIdentityPayload(t, name, got, typ.ID, "Quest")
+	}
+
+	if err := svc.RemoveEntityType(ctx, project, typ.ID, false); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
+		got := receive(t, sub)
+		if got.Kind != "type.removed" {
+			t.Fatalf("%s: Kind = %q, want type.removed", name, got.Kind)
+		}
+		// A removal announced with an empty key tells a client a type
+		// keyed "" is gone, which is not a type it has ever seen.
+		assertIdentityPayload(t, name, got, typ.ID, "Quest")
+	}
+}
+
+// TestNoEventIsPublishedForARefusedWrite covers the refusals that never
+// reach the database and the ones that reach it and are rolled back. An
+// announcement is an instruction to re-read; announcing a change that did
+// not happen makes a client re-read for nothing at best, and at worst
+// teaches it that the value it already had is new.
+func TestNoEventIsPublishedForARefusedWrite(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "malformed key", Label: "Quest", LabelPlural: "Quests",
+	}); err == nil {
+		t.Fatal("a malformed key must be refused")
+	}
+	requireNothing(t, sub, "a refused key wrote nothing")
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if got := receive(t, sub); got.Kind != "type.upserted" {
+		t.Fatalf("Kind = %q, want type.upserted", got.Kind)
+	}
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Renamed", LabelPlural: "Renamed",
+		ExpectedVersion: ptrInt32(9),
+	}); err == nil {
+		t.Fatal("a stale version must be refused")
+	}
+	requireNothing(t, sub, "a version conflict wrote nothing")
+
+	if err := svc.RemoveEntityType(ctx, project, uuid.New(), false); err == nil {
+		t.Fatal("removing an unknown id must be refused")
+	}
+	requireNothing(t, sub, "removing an unknown type wrote nothing")
+}
+
+// TestNoEventIsPublishedWhenTheWriteIsRolledBack is the half of the
+// publish-after-commit invariant that a rollback makes observable.
+//
+// The respelling refusal fires *after* the upsert statement has already
+// written the row, inside the transaction, so this is a case where the
+// database has seen the change and the caller still gets nothing. A
+// publish moved inside the transaction, next to the write it announces,
+// would announce a row that is about to vanish.
+func TestNoEventIsPublishedWhenTheWriteIsRolledBack(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "Hogger", Label: "Hogger", LabelPlural: "Hoggers",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "hogger", Label: "MINE", LabelPlural: "MINE",
+		ExpectedVersion: ptrInt32(1),
+	}); err == nil {
+		t.Fatal("a respelled key must be refused")
+	}
+	requireNothing(t, sub, "the refused write was rolled back")
+}
+
+// TestNothingIsAnnouncedWhileTheTransactionIsStillOpen is the other half,
+// and the one that needs the transaction held open on purpose.
+//
+// A rival transaction takes a row lock on one of the type's entities.
+// The schema edit under test writes its type row, then sweeps — and the
+// sweep's UPDATE blocks on that lock, so the whole transaction sits open,
+// past its own write, for as long as the test wants. Nothing may be on
+// the wire in that window: a subscriber told now would re-read a database
+// that still holds the old schema and cache that as the new one.
+//
+// What this cannot pin, and what no test in this package can: a publish
+// placed as the very last statement inside withTx's callback, which
+// differs from the correct placement only by the commit that immediately
+// follows it. Only a failing commit tells those two apart, and nothing
+// here can make a commit fail on demand. The invariant is stated on
+// Service.publish; this test covers every earlier placement, which is
+// where a publish actually tends to drift to — next to the write it
+// announces.
+func TestNothingIsAnnouncedWhileTheTransactionIsStillOpen(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
+	})
+	if err != nil {
+		t.Fatalf("declare type: %v", err)
+	}
+	// The entity carries an undeclared field, so the sweep will flip it to
+	// invalid — meaning the sweep really does issue the UPDATE that the
+	// rival's lock blocks, rather than skipping it under the invalid <>
+	// guard.
+	entity := insertEntity(t, pool, project, typ.ID, "hogger", map[string]any{
+		"min_level": 10, "summary": "x",
+	})
+
+	rival, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	var locked uuid.UUID
+	if err := rival.QueryRow(ctx,
+		`SELECT id FROM entities WHERE id = $1 FOR UPDATE`, entity).Scan(&locked); err != nil {
+		t.Fatalf("rival lock: %v", err)
+	}
+
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+			Key: "quest", Label: "Quest", LabelPlural: "Quests",
+			Schema:          metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
+			ExpectedVersion: ptrInt32(1),
+		})
+		result <- err
+	}()
+
+	requireNothing(t, sub, "the edit's transaction is still open on the sweep")
+	select {
+	case err := <-result:
+		t.Fatalf("the upsert returned %v; the rival's lock should have held it in the sweep", err)
+	default:
+	}
+
+	if err := rival.Rollback(ctx); err != nil {
+		t.Fatalf("rival rollback: %v", err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("upsert: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upsert never returned after the rival released its lock")
+	}
+	if got := receive(t, sub); got.Kind != "type.upserted" {
+		t.Fatalf("Kind = %q, want type.upserted", got.Kind)
+	}
+}
+
+// assertIdentityPayload checks the {id, key} an event carries. The
+// payload type is unexported, so the assertion goes through the JSON
+// shape, which is the only thing a client ever sees and the only thing
+// this package promises.
+func assertIdentityPayload(t *testing.T, who string, e realtime.Event, wantID uuid.UUID, wantKey string) {
+	t.Helper()
+	raw, err := json.Marshal(e.Payload)
+	if err != nil {
+		t.Fatalf("%s: marshal payload: %v", who, err)
+	}
+	var got struct {
+		ID  uuid.UUID `json:"id"`
+		Key string    `json:"key"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("%s: decode payload %s: %v", who, raw, err)
+	}
+	if got.ID != wantID {
+		t.Fatalf("%s: payload id = %v, want %v", who, got.ID, wantID)
+	}
+	if got.Key != wantKey {
+		t.Fatalf("%s: payload key = %q, want %q", who, got.Key, wantKey)
+	}
+}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/roles"
 )
 
 // Actor records who performed a write, for the audit columns. Both fields
@@ -40,17 +41,41 @@ func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 
 // publish emits a change event, if a hub is attached.
 //
+// minRole and humanOnly are passed explicitly rather than inferred from
+// kind, exactly as internal/web's own publish does, so each call site
+// shows the gating it chose instead of inheriting one from a table three
+// files away. The values themselves are named constants declared beside
+// the kind they belong to, in events.go, which is where the reasoning
+// for each lives; a helper that could not express these fields at all —
+// the shape this package shipped with — silently made every event as
+// open as the hub's zero value, whether or not that was the right answer.
+//
 // A payload carries only the identity of what changed — a key, an id —
 // and never a value a client could then treat as current. Publication
 // order is not commit order (internal/web/publish.go's package comment
 // works through why), so a payload holding, say, a type's new label could
 // stably tell a client the wrong label with nothing to signal it. The
 // client re-reads instead.
-func (s *Service) publish(projectID uuid.UUID, kind string, payload any) {
+//
+// **Every caller must call this after withTx has returned, never from
+// inside fn.** An event published inside the transaction announces a
+// change that may still roll back, and a subscriber that re-reads on
+// hearing it — which is the only thing this hub's payloads let it do —
+// would read the state before the change and cache it as the state
+// after. The hub itself cannot enforce that; the metamodel's own tests
+// pin it (TestNoEventIsPublishedWhenTheWriteIsRolledBack and
+// TestNothingIsAnnouncedWhileTheTransactionIsStillOpen).
+func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role, humanOnly bool, payload any) {
 	if s.hub == nil {
 		return
 	}
-	s.hub.Publish(realtime.Event{ProjectID: projectID, Kind: kind, Payload: payload})
+	s.hub.Publish(realtime.Event{
+		ProjectID: projectID,
+		Kind:      kind,
+		MinRole:   string(minRole),
+		HumanOnly: humanOnly,
+		Payload:   payload,
+	})
 }
 
 // withTx runs fn inside a transaction, rolling back unless it returns nil.

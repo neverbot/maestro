@@ -137,7 +137,8 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 		return dbq.EntityType{}, err
 	}
 
-	s.publish(projectID, "type.upserted", entityTypeEvent{ID: row.ID, Key: row.Key})
+	s.publish(projectID, eventTypeUpserted, typeEventMinRole, typeEventHumanOnly,
+		entityTypeEvent{ID: row.ID, Key: row.Key})
 	return row, nil
 }
 
@@ -190,7 +191,20 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // entities is refused: silently deleting a game's content is never the
 // right reading of "remove this type".
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
+	var removedKey string
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		// Read the row before deleting it, for its key: type.removed
+		// carries the same {id, key} identity type.upserted does, and a
+		// removal announced with an empty key tells a subscriber a type
+		// keyed "" is gone. The id alone would have been a defensible
+		// payload, but entityTypeEvent declares a key field and a client
+		// reading one cannot tell "not carried" from "empty".
+		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			return notFound(err, "lookup entity type")
+		}
+		removedKey = typ.Key
+
 		// The count is not the only thing standing between a caller and a
 		// silently emptied type: entities.entity_type_id is ON DELETE
 		// RESTRICT, so the delete below fails on its own if any instance
@@ -235,7 +249,8 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		return err
 	}
 
-	s.publish(projectID, "type.removed", entityTypeEvent{ID: id})
+	s.publish(projectID, eventTypeRemoved, typeEventMinRole, typeEventHumanOnly,
+		entityTypeEvent{ID: id, Key: removedKey})
 	return nil
 }
 

@@ -332,3 +332,75 @@ func TestNoEventIsPublishedWhenTheCommitFails(t *testing.T) {
 		t.Fatalf("EntityTypeByKey = %v, want ErrNotFound: nothing was stored", err)
 	}
 }
+
+// TestAPrunedEndpointListIsAnnouncedToTheRowsOwnSubscribers pins the
+// fourth thing a removal changes.
+//
+// `RemoveEntityType` prunes the removed id out of every relation type's
+// endpoint lists, which is a write to rows the caller never named. It is
+// not covered by the cascade note events.go makes about edges: nothing
+// is deleted here, the relation type is still there, and what changed is
+// the rule it states. Announcing it as `relation_type.upserted` — the
+// event a caller-visible edit of the same columns publishes — is what
+// keeps Task 8's rendering of an endpoint rule from showing a list the
+// database no longer holds. Nothing bumps `version`, so a subscriber
+// diffing versions would not see it either.
+//
+// The relation type that names no removed type is the control: it is not
+// touched, so it must not be announced.
+func TestAPrunedEndpointListIsAnnouncedToTheRowsOwnSubscribers(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	})
+	if err != nil {
+		t.Fatalf("seed zone: %v", err)
+	}
+	quest, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	})
+	if err != nil {
+		t.Fatalf("seed quest: %v", err)
+	}
+	takesPlaceIn, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+		SourceTypeIDs: []uuid.UUID{quest.ID},
+		TargetTypeIDs: []uuid.UUID{zone.ID},
+	})
+	if err != nil {
+		t.Fatalf("seed takes_place_in: %v", err)
+	}
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires",
+		SourceTypeIDs: []uuid.UUID{quest.ID},
+		TargetTypeIDs: []uuid.UUID{quest.ID},
+	}); err != nil {
+		t.Fatalf("seed requires: %v", err)
+	}
+
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	if err := svc.RemoveEntityType(ctx, project, zone.ID, true); err != nil {
+		t.Fatalf("RemoveEntityType: %v", err)
+	}
+
+	removed := receive(t, sub)
+	if removed.Kind != "type.removed" {
+		t.Fatalf("first event = %q, want type.removed", removed.Kind)
+	}
+	assertIdentityPayload(t, "removal", removed, zone.ID, "zone")
+
+	pruned := receive(t, sub)
+	if pruned.Kind != "relation_type.upserted" {
+		t.Fatalf("second event = %q, want relation_type.upserted for the pruned rule", pruned.Kind)
+	}
+	assertIdentityPayload(t, "prune", pruned, takesPlaceIn.ID, "takes_place_in")
+
+	requireNothing(t, sub, "the relation type that never named zone was not touched")
+}

@@ -755,12 +755,13 @@ func (q *Queries) MarkEntitiesOfTypeInvalid(ctx context.Context, arg MarkEntitie
 	return err
 }
 
-const pruneEntityTypeFromEndpointLists = `-- name: PruneEntityTypeFromEndpointLists :exec
+const pruneEntityTypeFromEndpointLists = `-- name: PruneEntityTypeFromEndpointLists :many
 UPDATE relation_types
 SET source_type_ids = array_remove(source_type_ids, $1::uuid),
     target_type_ids = array_remove(target_type_ids, $1::uuid)
 WHERE project_id = $2::uuid
   AND $1::uuid = ANY (source_type_ids || target_type_ids)
+RETURNING id, key
 `
 
 type PruneEntityTypeFromEndpointListsParams struct {
@@ -768,14 +769,41 @@ type PruneEntityTypeFromEndpointListsParams struct {
 	ProjectID    uuid.UUID
 }
 
+type PruneEntityTypeFromEndpointListsRow struct {
+	ID  uuid.UUID
+	Key string
+}
+
 // Removes a deleted entity type's id from every relation type's endpoint
 // lists. source_type_ids and target_type_ids are plain uuid[]: Postgres
 // has no foreign key from an array element, so nothing but this
 // statement keeps them from outliving the type they name. It runs in the
 // same transaction as the type's own delete.
-func (q *Queries) PruneEntityTypeFromEndpointLists(ctx context.Context, arg PruneEntityTypeFromEndpointListsParams) error {
-	_, err := q.db.Exec(ctx, pruneEntityTypeFromEndpointLists, arg.EntityTypeID, arg.ProjectID)
-	return err
+//
+// It returns the identity of every row it changed, because the caller
+// announces them: this is a write to relation types nobody named, and a
+// subscriber has no other way to learn its copy of an endpoint rule is
+// stale. An UPDATE cannot order its RETURNING, so the caller sorts what
+// comes back before announcing it: an unordered burst is a burst that
+// arrives differently twice.
+func (q *Queries) PruneEntityTypeFromEndpointLists(ctx context.Context, arg PruneEntityTypeFromEndpointListsParams) ([]PruneEntityTypeFromEndpointListsRow, error) {
+	rows, err := q.db.Query(ctx, pruneEntityTypeFromEndpointLists, arg.EntityTypeID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PruneEntityTypeFromEndpointListsRow
+	for rows.Next() {
+		var i PruneEntityTypeFromEndpointListsRow
+		if err := rows.Scan(&i.ID, &i.Key); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertEntity = `-- name: UpsertEntity :one

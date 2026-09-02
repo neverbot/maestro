@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -270,6 +271,12 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // `TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID`
 // stages the interleaving deterministically.
 //
+// **The prune is announced, not left to be inferred.** It changes rows
+// the caller never named and moves no `version`, so a subscriber holding
+// an endpoint rule has nothing else to learn from; `relation_type.upserted`
+// goes out for each row changed, after `type.removed`. See the cascade
+// note in events.go, which covers deleted edges and deliberately not this.
+//
 // **One consequence, recorded because it is a widening.** Pruning the
 // last id of a list leaves it empty, and an empty list means "any type"
 // rather than "no type" (see `endpointList`). A relation type that
@@ -280,6 +287,7 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // repairable.
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
 	var removedKey string
+	var pruned []dbq.PruneEntityTypeFromEndpointListsRow
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
 		// Read the row before deleting it, for its key: type.removed
 		// carries the same {id, key} identity type.upserted does, and a
@@ -334,9 +342,10 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 
 		// The type is gone; nothing in the schema takes its id out of the
 		// relation types that named it. See PruneEntityTypeFromEndpointLists.
-		return q.PruneEntityTypeFromEndpointLists(ctx, dbq.PruneEntityTypeFromEndpointListsParams{
+		pruned, err = q.PruneEntityTypeFromEndpointLists(ctx, dbq.PruneEntityTypeFromEndpointListsParams{
 			ProjectID: projectID, EntityTypeID: id,
 		})
+		return err
 	})
 	if err != nil {
 		return err
@@ -344,6 +353,20 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 
 	s.publish(projectID, eventTypeRemoved, typeEventMinRole, typeEventHumanOnly,
 		entityTypeEvent{ID: id, Key: removedKey})
+	// Every relation type the prune touched now states a different rule
+	// than the one its subscribers hold, and nothing else says so: the
+	// caller named none of these rows, no version moved, and the cascade
+	// note in events.go covers deleted edges rather than edited rules.
+	// relation_type.upserted is the event a caller-visible edit of the
+	// same two columns publishes, and this is the same change arriving by
+	// another route. Announcing them one by one is affordable here in a
+	// way the per-edge cascade is not: a game has a handful of relation
+	// types and thousands of edges.
+	sort.Slice(pruned, func(i, j int) bool { return pruned[i].Key < pruned[j].Key })
+	for _, row := range pruned {
+		s.publish(projectID, eventRelationTypeUpserted, relationTypeEventMinRole,
+			relationTypeEventHumanOnly, relationTypeEvent{ID: row.ID, Key: row.Key})
+	}
 	return nil
 }
 

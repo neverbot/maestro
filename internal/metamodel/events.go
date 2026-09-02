@@ -185,6 +185,18 @@ const (
 	// entity of the removed entity type is gone, and the only correct
 	// response is to drop it or re-read.
 	//
+	// **A fourth effect of `type.removed` is not an edge invalidation and
+	// is announced rather than inferred.** Removing an entity type also
+	// prunes its id out of every relation type's endpoint lists
+	// (`RemoveEntityType`), which edits rows the caller never named and
+	// moves no `version`. That one is *not* left to a subscriber to
+	// derive: `RemoveEntityType` publishes a `relation_type.upserted` per
+	// row it changed, because the row is still there and what changed is
+	// the rule it states — the same change a caller-visible edit of the
+	// same two columns makes, arriving by another route. It is affordable
+	// where the per-edge cascade is not: a game has a handful of relation
+	// types and thousands of edges.
+	//
 	// It is stated rather than left to be inferred because the consumers
 	// are two tasks away from this decision and every *other* way an edge
 	// disappears is announced one by one, so a client written against

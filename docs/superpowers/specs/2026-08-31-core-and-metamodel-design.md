@@ -180,6 +180,25 @@ All domain tables carry `project_id` (a project is a game).
 (`"Quest"` / `"Quests"`), description, colour/icon, `field_schema`
 (jsonb), `version`.
 
+The descriptive columns are validated in shape and never in content —
+they are the game's own prose — by `internal/metamodel/descriptors.go`,
+which every table in this section shares, entities included:
+`label` is **required** and capped at 200 characters, `label_plural` at
+200, `description` at 4000, all counted in runes rather than bytes;
+`color`, when set, is a CSS hex colour and nothing else (`#c13`,
+`#c13f`, `#c41e3a`, `#c41e3a80`); `icon`, when set, is a lower-case icon
+*name* matching `^[a-z0-9][a-z0-9_-]*$`, capped at 64. `label` is
+required because listings order by it. `color` refuses named colours and
+`rgb()`/`hsl()` because Maestro's renderers derive contrasting tones
+arithmetically from the channels and a form they cannot decompose is a
+colour some views honour and others drop — all four hex forms decompose,
+alpha included. `icon` is a name and not an image, markup or an emoji;
+the pending visual-identity spec owns the emoji question and the choice
+of icon set, and the rule admits both `scroll-2` and
+`local_fire_department` so as not to pre-commit it. Every one of these
+problems is an `invalid_input` at the column's own path, reported
+together with any key problem in one pass.
+
 **`entities`** — `entity_type_id`, stable `key`, `name`, `fields`
 (jsonb, validated against the type's schema), `version`.
 
@@ -267,7 +286,9 @@ Three rules the validator enforces at declaration time:
   **refused**, naming both spellings, rather than silently updating the
   row under the other spelling or surfacing a raw unique violation.
   Maestro never folds or rewrites a key on the designer's behalf: the
-  spelling first stored is the one that stands.
+  spelling first stored is the one that stands. That refusal, and every
+  other problem with a key's spelling, arrives as `invalid_input` at
+  path `key` — see "Error shapes".
 - A default is declared by the **presence of the `"default"` key** in
   the JSON and by nothing else. There is no `has_default` input key,
   and an explicit `"default": null` declares no default. A declared
@@ -463,18 +484,36 @@ main consumer.
 
 Stable and machine-readable: `not_found`, `version_conflict` (carries
 the current version), `schema_violation` (carries field path and what
-was expected), `invalid_schema`, `endpoint_type_mismatch`,
-`scope_violation`, `in_use`.
+was expected), `invalid_schema`, `invalid_input`,
+`endpoint_type_mismatch`, `scope_violation`, `in_use`.
 
-`invalid_schema` and `schema_violation` are two codes, not one, and the
-committed `internal/metamodel/errors.go` gives them two sentinels. They
-are told apart by who is at fault: `invalid_schema` is a **type
-declaration** that cannot stand (a bad field key, an enum with no
-options, `required` plus a default, a default the field could not
-hold), reported at `field_schema[<i>]` paths; `schema_violation` is a
-**row of values** that does not fit a declaration that can, reported at
-`fields.<key>` paths. A caller must never have to match on path
-spelling to tell them apart.
+`invalid_schema`, `schema_violation` and `invalid_input` are three
+codes, not one, and the committed `internal/metamodel/errors.go` gives
+them three sentinels. They are told apart by who is at fault, and each
+has its own recovery:
+
+- `invalid_schema` — a **type declaration** that cannot stand (a bad
+  field key, an enum with no options, `required` plus a default, a
+  default the field could not hold), reported at `field_schema[<i>]`
+  paths. Fixed by re-declaring the type.
+- `schema_violation` — a **row of values** that does not fit a
+  declaration that can, reported at `fields.<key>` paths. Fixed by
+  changing the values and writing the row again.
+- `invalid_input` — a write's **own arguments** being malformed: its
+  `key`, `label`, `label_plural`, `description`, `color` or `icon`,
+  reported at those paths. Fixed by changing that argument and
+  re-issuing the same call. It is a distinct code because
+  `schema_violation` would send an agent off to inspect entity values
+  over a `types.upsert` that carried a key with a space in it, and
+  because the same fault reaches the entity, relation-type and relation
+  upserts unchanged. The case-respelling refusal a row key can meet is
+  an `invalid_input` at path `key` too.
+
+A caller must never have to match on path spelling to tell them apart.
+`ValidationError.Code` is what carries the distinction; a code that is
+set but unrecognised matches no sentinel at all, so it surfaces as
+`internal_error` rather than silently defaulting into the most-taught
+recovery.
 
 ### REST and SSE
 

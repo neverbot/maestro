@@ -28,6 +28,15 @@ Scope: sub-project 7 of the roadmap in
 >   core spec, and §11.3–11.4 point there instead of posing them again.
 > - §10.3 — the views spec's operator table has been corrected to
 >   `list<text>`; the substantive gap this section reports is unchanged.
+>
+> **Re-reconciled, 2026-09-02 (second pass).** §10.5 said the respelling
+> refusal arrives as `schema_violation`; the committed code returns
+> `invalid_input`, and had done since the commit two after the one that
+> wrote that sentence. §10.5, §3's surface list and §3's error-recovery
+> paragraph now carry `invalid_input` as the third code, and the new
+> §10.6 documents the descriptive-column rules — `label` required, the
+> caps, the four hex colour forms, the icon-name rule — which no spec
+> stated at all.
 
 ## 1. What this is for
 
@@ -186,12 +195,14 @@ against `internal/metamodel/` by §8.2:
   wider rule of their own — `^[A-Za-z0-9][A-Za-z0-9_-]*$`, also capped
   at 64 — see §10.5, which the bundle must teach as two rules rather
   than flatten into one.
-- Two error codes, not one: `invalid_schema` for a type declaration
+- Three error codes, not one: `invalid_schema` for a type declaration
   that cannot stand, `schema_violation` for a row of values that does
-  not fit a declaration that can. `reference/errors.md` recovers from
-  them differently — the first is fixed in `types.upsert`, the second in
-  `entities.upsert` — and an agent that treats them as one code retries
-  the wrong call.
+  not fit a declaration that can, and `invalid_input` for the call's own
+  arguments being malformed — a key, a label, a colour, an icon (§10.5,
+  §10.6). `reference/errors.md` recovers from all three differently —
+  the first is fixed in `types.upsert`, the second in `entities.upsert`,
+  the third in whichever call carried the bad argument — and an agent
+  that treats them as one code retries the wrong call.
 
 **Views — taught completely, because the query language is where an
 agent is worst.** It is JSON with named sets, and the failure mode is
@@ -233,7 +244,15 @@ row that failed; fix all of them in one pass, because the validator
 reports every problem at once and an agent that fixes one at a time pays
 a round-trip per typo. `invalid_schema` → a *different* code with the
 same one-pass property, carrying `field_schema[<i>]` paths, and fixed by
-re-declaring the type rather than by editing the row.
+re-declaring the type rather than by editing the row. `invalid_input` →
+a **third** code with the same one-pass property, and the one an agent
+is likeliest to meet first: the call's own arguments are malformed, at
+paths that name the argument (`key`, `label`, `label_plural`,
+`description`, `color`, `icon`) rather than a field inside it. Fix the
+argument and re-issue the same call — do not go looking at entity
+values, which is where `schema_violation` sends you and is why these are
+three codes and not two. The respelling refusal of §10.5 is an
+`invalid_input` too, and its message carries both spellings.
 `semantics_undeclared` → the error itself carries what to declare; read
 it rather than guessing. `query_stale` → the design moved under the
 view; repair with `views.upsert`, do not switch to `on_stale:
@@ -934,9 +953,52 @@ choose a key that differs by more than capitalisation. A re-seed that
 spells its keys the same way every run never meets this, which is the
 whole population of correct callers — but a bundle that teaches
 re-seeding has to say so, because "the second run used a capital" is
-otherwise an inexplicable failure. Note the error arrives as
-`schema_violation` at path `key`, not `invalid_schema`: the caller is
-writing a row, not declaring a schema.
+otherwise an inexplicable failure. The error arrives as `invalid_input`
+at path `key` — not `schema_violation` and not `invalid_schema`. The
+caller is not declaring a schema, so it is not `invalid_schema`; and it
+is not a row of values failing a declaration that stands, so it is not
+`schema_violation` either. Every problem with a row's *own arguments* —
+its key, its labels, its description, its colour, its icon — carries
+`invalid_input`, and the recovery is to change that argument and re-issue
+the same call. `reference/errors.md` must carry all three, because
+`schema_violation` sends an agent to fix entity values, which is
+exactly the wrong move for a key with a space in it.
+
+### 10.6 The descriptive columns are validated too
+
+Committed in `internal/metamodel/descriptors.go`, and inherited
+unchanged by entity, relation-type and relation writes, so the bundle
+teaches it once:
+
+| column | rule |
+| --- | --- |
+| `label` | **required**, at most 200 characters |
+| `label_plural` | optional, at most 200 characters |
+| `description` | optional, at most 4000 characters |
+| `color` | optional; a CSS hex colour and nothing else — `#c13`, `#c13f`, `#c41e3a` or `#c41e3a80` |
+| `icon` | optional; a lower-case icon *name*, `^[a-z0-9][a-z0-9_-]*$`, at most 64 characters |
+
+Caps are counted in **runes**, not bytes, so an accented label is not
+shorter than an unaccented one.
+
+`label` is required because listings order by it: an unlabelled type
+sorts to the front of every list a designer sees and names itself
+nothing. `color` refuses named CSS colours and `rgb()`/`hsl()` because
+Maestro's own renderers derive contrasting text and border tones
+arithmetically from the channels, and a form they cannot decompose is a
+colour some views honour and others silently drop; all four hex forms
+decompose, alpha included. `icon` is a *name* — a handle into whichever
+icon set the frontend ships — not an image, not markup, and (for now)
+not an emoji, which would make the column two things at once. The
+pending visual-identity spec owns the emoji question and the choice of
+set; the rule permits both `scroll-2` and `local_fire_department` so it
+does not pre-commit that spec to one naming convention.
+
+Every one of these problems arrives as `invalid_input` at the column's
+own path (`label`, `color`, `icon`, …), reported **together** with any
+key problem in the same response: the validator makes one pass, so an
+agent fixing a seed script sees the key and the colour in one answer
+rather than paying a round trip per typo.
 
 ## 11. Open questions
 

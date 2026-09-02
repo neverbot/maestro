@@ -754,6 +754,78 @@ func TestATraversalHonoursTheEntityTypeFilter(t *testing.T) {
 	}
 }
 
+// TestATraversalHonoursTheInvalidFilter is the second half of the claim
+// EntityFilter makes: neither of the two filters that apply to both
+// shapes of listing is dropped on the traversal path. The entity type
+// half is the test above; this is the flag.
+//
+// The type is evolved after the neighbour is written, which is what
+// makes the row invalid without touching it — types.go's re-validation
+// sweep does the flagging.
+func TestATraversalHonoursTheInvalidFilter(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 2)
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	}); err != nil {
+		t.Fatalf("seed zone type: %v", err)
+	}
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest",
+	}); err != nil {
+		t.Fatalf("seed zone: %v", err)
+	}
+	seedTakesPlaceIn(t, svc, project)
+	for i := range 2 {
+		relate(t, svc, project, "takes_place_in",
+			metamodel.Ref{TypeKey: "quest", Key: fmt.Sprintf("quest-%02d", i)},
+			metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	}
+
+	// Evolving the quest schema invalidates both quests, and leaves the
+	// zone — a different type — untouched.
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: metamodel.Schema{
+			{Key: "min_level", Type: metamodel.FieldNumber, Required: true},
+			{Key: "faction", Type: metamodel.FieldText, Required: true},
+		},
+		ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("evolve: %v", err)
+	}
+
+	rel := metamodel.RelatedFilter{
+		RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+		Direction: metamodel.DirectionIncoming,
+	}
+	for _, tc := range []struct {
+		name string
+		flag *bool
+		want []string
+	}{
+		{"no opinion", nil, []string{"quest-00", "quest-01"}},
+		{"only the invalid neighbours", ptrBool(true), []string{"quest-00", "quest-01"}},
+		{"only the valid neighbours", ptrBool(false), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+				RelatedTo: &rel, Invalid: tc.flag, Limit: 50,
+			})
+			if err != nil {
+				t.Fatalf("ListEntities: %v", err)
+			}
+			if got := keysOf(page); !equalStrings(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestATraversalPagesLikeEveryOtherListing pins that a hop is not
 // silently truncated at its limit. The plan for this task cut the
 // neighbour set in Go and returned no cursor, which made every neighbour

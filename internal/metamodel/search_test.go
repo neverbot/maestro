@@ -244,32 +244,44 @@ func TestSearchIsScopedToItsGame(t *testing.T) {
 	}
 }
 
-// TestSearchClampsAnOverLargeLimit pins that this listing answers an
-// over-large limit the way every other one does — with the cap, not with
-// the default. relationPageSize's doc comment carries the argument.
-func TestSearchClampsAnOverLargeLimit(t *testing.T) {
+// TestSearchAnswersAnOverLargeLimitWithMoreThanTheDefault pins the
+// distinction relationPageSize's doc comment argues for, at the one
+// place a smaller test cannot see it: with fewer rows than the default
+// in the game, folding an over-large limit onto the default and clamping
+// it to the cap return the same answer, and a test built that way passes
+// either way.
+//
+// So there are sixty rows here, above the default of fifty and below the
+// cap of two hundred. Asking for nothing gets fifty; asking for far too
+// much gets all sixty, which is what clamping means and what folding
+// onto the default could not produce.
+func TestSearchAnswersAnOverLargeLimitWithMoreThanTheDefault(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
 	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
-	seedQuests(t, svc, project, 3)
+	seedQuests(t, svc, project, 60)
 
-	for _, limit := range []int32{0, -1, 1 << 20} {
-		rows, err := svc.Search(ctx, project, "Quest", "", limit)
-		if err != nil {
-			t.Fatalf("Search(limit %d): %v", limit, err)
-		}
-		if len(rows) != 3 {
-			t.Fatalf("Search(limit %d) found %d rows, want all 3", limit, len(rows))
-		}
-	}
-	rows, err := svc.Search(ctx, project, "Quest", "", 2)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("an explicit limit of 2 returned %d rows", len(rows))
+	for _, tc := range []struct {
+		name  string
+		limit int32
+		want  int
+	}{
+		{"nothing asked for", 0, 50},
+		{"a negative limit is still no opinion", -1, 50},
+		{"an explicit limit below the default", 2, 2},
+		{"far above the cap", 1 << 20, 60},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := svc.Search(ctx, project, "Quest", "", tc.limit)
+			if err != nil {
+				t.Fatalf("Search(limit %d): %v", tc.limit, err)
+			}
+			if len(rows) != tc.want {
+				t.Fatalf("Search(limit %d) found %d rows, want %d", tc.limit, len(rows), tc.want)
+			}
+		})
 	}
 }
 

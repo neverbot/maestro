@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -186,6 +187,59 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("matched no game-content pattern — every route under /api/games/{game}/ was read as a standing sub-resource")
+	}
+}
+
+// TestOnlyRouteTouchesTheMux closes the last way a route can reach this
+// server without either convention test above ever seeing it.
+//
+// Both of those tests walk s.registeredPatterns, and only route()
+// appends to it. A handler registered straight on s.mux — one line,
+// compiles, serves — is invisible to both, so the guarantee that a
+// game-content write cannot forget requireEditor held only for routes
+// that went through the front door. This test is the front door's lock:
+// in this package's own source, s.mux.Handle and s.mux.HandleFunc may
+// appear exactly once, inside route().
+//
+// A source-grep test is a blunt instrument and this one is deliberately
+// the narrowest form of it: it does not parse Go, it does not know what
+// a route is, and it will fire if route() is ever renamed or the mux
+// field is. That is the whole cost, and it is paid in a test that fails
+// loudly with an explanation rather than in a surface that lets a viewer
+// write. The alternative — an exported accessor, or a mux type that
+// refuses direct registration — buys the same property at the price of
+// indirection in the thing this file is trying to keep readable.
+func TestOnlyRouteTouchesTheMux(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package directory: %v", err)
+	}
+	found := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for i, line := range strings.Split(string(source), "\n") {
+			code, _, _ := strings.Cut(line, "//")
+			if !strings.Contains(code, "s.mux.Handle") {
+				continue
+			}
+			found++
+			if name != "server.go" || !strings.Contains(code, "s.mux.Handle(pattern, h)") {
+				t.Errorf("%s:%d registers on the mux directly: %s\n"+
+					"every route goes through route(), which is what records it for the two convention tests above; "+
+					"a route registered here is invisible to both", name, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+	if found != 1 {
+		t.Errorf("found %d direct mux registrations, want exactly the one inside route() — "+
+			"if route() was renamed or restructured, this test has to be taught the new shape", found)
 	}
 }
 

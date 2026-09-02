@@ -115,10 +115,37 @@ const (
 	// agent driving the batch it only becomes real once the bursts are
 	// coalesced.
 	//
-	// Coalescing therefore belongs to the transport, where the
-	// subscriber and its backlog are visible, and **Tasks 6 and 7 own
-	// it** — as the thing that makes the benefit claimed here true, not
-	// as a polish item.
+	// **Task 7 settled this, and not by coalescing.** Two things
+	// changed the question. The first is that coalescing cannot deliver
+	// what this comment wanted from it: collapsing many events into one
+	// necessarily throws away the per-row identity, so the coalesced
+	// event says "entities changed, re-read" — which is precisely what
+	// the resync already says. With a bounded buffer and no durable log
+	// behind the hub, per-row payloads and burst-proof delivery are not
+	// both available, and a change that renamed the resync would have
+	// been the only thing on offer.
+	//
+	// The second is that the subscriber this comment worried about no
+	// longer needs the stream for this. Task 7's entities.upsert answers
+	// the batch synchronously with every row that landed — its key, its
+	// id and its new version (BulkResult.Written) — so the agent driving
+	// a four-hundred-row seed learns what happened from its own call and
+	// not from a stream it is racing. What it would have learned from
+	// the per-row events, it now has by the time the call returns.
+	//
+	// So the events below are for *other* subscribers: the designer's
+	// browser, and an agent watching someone else's writes. For those,
+	// overflow-to-resync is already the right behaviour — the correct
+	// response to "four hundred things changed" is to re-read, not to
+	// apply four hundred patches — and it is what they get.
+	//
+	// What remains open is not coalescing but batching in the SSE
+	// writer: internal/web/events.go writes and flushes once per event,
+	// and draining the channel into one write would shrink the window in
+	// which the hub finds the buffer full. That is a transport
+	// performance change, it alters no payload and no contract, and it
+	// belongs to whoever owns the realtime surface — it is not owned
+	// here and it is not what this comment used to promise.
 	eventEntityUpserted = "entity.upserted"
 	eventEntityRemoved  = "entity.removed"
 
@@ -166,9 +193,10 @@ const (
 	// that size is not one event per edge: realtime.Hub buffers 64 events
 	// per subscription and drops the rest, each drop leaves a gap in that
 	// subscription's own Seq, and internal/web/events.go turns the gap
-	// into a synthetic "resync" rather than silent loss. Coalescing
-	// belongs to the transport, where the subscriber and its backlog are
-	// visible, and **Tasks 6 and 7 own it** — see the entity events above.
+	// into a synthetic "resync" rather than silent loss. Task 7 settled
+	// what to do about that, and the answer was not coalescing — see the
+	// entity events above for the argument and for what is actually
+	// still open.
 	//
 	// **Not every edge that disappears is announced as
 	// `relation.removed`, and a subscriber must know which events stand

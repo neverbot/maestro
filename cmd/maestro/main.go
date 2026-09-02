@@ -14,7 +14,9 @@ import (
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/realtime"
 	"github.com/neverbot/maestro/internal/version"
 	"github.com/neverbot/maestro/internal/web"
 )
@@ -95,11 +97,20 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// below, so the shutdown goroutine can call its Close() — see
 	// web.Server.Close's own doc comment for why http.Server.Shutdown
 	// alone is not enough once an SSE stream is in the mix.
+	// One hub, shared. The web server publishes its own membership and
+	// token events into it and the SSE endpoint reads from it, and the
+	// metamodel service publishes every content change into the same
+	// one; built here rather than left to NewServer's own nil default
+	// precisely because two of them would leave a designer's browser
+	// watching a stream nothing writes to.
+	hub := realtime.NewHub()
 	webServer := web.NewServer(web.Options{
-		Version:  version.Version,
-		Config:   cfg,
-		Identity: ids,
-		Projects: projects.New(pool),
+		Version:   version.Version,
+		Config:    cfg,
+		Identity:  ids,
+		Projects:  projects.New(pool),
+		Metamodel: metamodel.New(pool, hub),
+		Hub:       hub,
 	})
 	srv := &http.Server{
 		Addr:              cfg.Addr,

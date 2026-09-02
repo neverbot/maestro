@@ -14,6 +14,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -24,6 +25,14 @@ type Options struct {
 	Config   config.Config
 	Identity *identity.Service
 	Projects *projects.Service
+
+	// Metamodel is the game-content domain. Optional: a Server built
+	// without one serves every route and every MCP tool except the
+	// game-content ones, which newMCPServer then does not register at
+	// all — see MCPDeps.Metamodel. It is a field on Options for the same
+	// reason Hub is: whoever builds the service has to hand this package
+	// the same instance, not a second one over the same pool.
+	Metamodel *metamodel.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the
 	// SSE endpoint (events.go) reads from. publish.go's own handlers
@@ -139,6 +148,15 @@ type Server struct {
 	// project-scoped route resolves its scope through requireProject.
 	registeredPatterns    []string
 	projectScopedPatterns map[string]bool
+
+	// mcpScopedTools records every MCP tool registered through
+	// addScopedTool (mcp.go), which is the only registration path that
+	// enforces the caller's game binding.
+	// TestEveryMCPToolGoesThroughAddScopedTool checks the tool list the
+	// server actually serves against this map and fails on anything
+	// registered any other way — the MCP counterpart of
+	// TestEveryGameScopedRouteGoesThroughRequireProject above.
+	mcpScopedTools map[string]bool
 
 	// hub, sseMaxLifetime and sseHeartbeatInterval back the SSE endpoint
 	// (events.go). See Options.Hub, Options.SSEMaxLifetime and

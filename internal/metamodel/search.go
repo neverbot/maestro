@@ -130,6 +130,16 @@ func (s *Service) Search(ctx context.Context, projectID uuid.UUID, query, typeKe
 	return rows, nil
 }
 
+// SearchLimit reports how many rows Search will actually return for a
+// requested limit: the default when nothing was asked for, the cap when
+// too much was. It is exported so the MCP surface can say whether an
+// answer was cut at the limit without duplicating the clamping rule —
+// a copy of it here and there is exactly how "asking for 501 returns
+// fewer rows than asking for 500" got in the first time.
+func SearchLimit(limit int32) int32 {
+	return pageSize(limit, defaultSearchLimit, maxSearchLimit)
+}
+
 // checkSearchQuery refuses a query the database should never be shown,
 // and one that cannot match anything, rather than letting either answer
 // "nothing found" or "the server is broken".

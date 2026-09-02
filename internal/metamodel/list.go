@@ -420,3 +420,41 @@ func pageOf(rows []dbq.Entity, limit int32, fingerprint string) EntityPage {
 	}
 	return page
 }
+
+// The bounds this package's callers are allowed to state out loud.
+//
+// Every one of these mirrors an unexported constant a few lines from
+// where it is used. They are exported for one reason, and it is the rule
+// correction 24 established for MaxSearchQuery: **a bound a caller
+// cannot read is a bound a caller trips over.** The MCP tool
+// descriptions (internal/web/mcp_metamodel.go) are built with these
+// values interpolated rather than typed out, so a description cannot go
+// on promising a cap that moved.
+//
+// They are aliases and not the constants themselves because the
+// unexported names are what the code reads, and each of them lives
+// beside the listing whose bound it is; renaming them into an exported
+// block would move six constants away from the six arguments that
+// justify them.
+const (
+	// DefaultEntityPage and MaxEntityPage bound one page of
+	// ListEntities, and MaxEntityPage doubles as the cap on the
+	// neighbour set a one-hop traversal will return.
+	DefaultEntityPage = defaultEntityPage
+	MaxEntityPage     = maxEntityPage
+
+	// DefaultRelationPage and MaxRelationPage bound one page of
+	// ListRelations.
+	DefaultRelationPage = defaultRelationPage
+	MaxRelationPage     = maxRelationPage
+
+	// DefaultSearchLimit and MaxSearchLimit bound one answer from
+	// Search, which is a top-N by rank and not a page; see Search.
+	DefaultSearchLimit = defaultSearchLimit
+	MaxSearchLimit     = maxSearchLimit
+
+	// MaxIndexedText is how much of one entity's flattened text is fed
+	// to the search vector. The tail of a longer value is stored and
+	// re-read intact but is not findable; see Search.
+	MaxIndexedText = searchTextLimit
+)

@@ -103,9 +103,37 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	if errors.As(err, &domainErr) {
 		return mcpErrorResult(domainErr.Code, domainErr.Message, domainErr.Details)
 	}
+	var conflict *metamodel.VersionConflictError
 	switch {
 	case errors.Is(err, projects.ErrProjectNotFound):
 		return mcpErrorResult(errCodeNotFound, "no such game", nil)
+
+	// The metamodel's vocabulary. Each arm is matched with errors.Is
+	// against the sentinel and never by reading a code off the error
+	// itself, which is the difference that matters for
+	// *metamodel.ValidationError: it carries a Code field, its Is method
+	// answers only for the two codes that are documented, and an
+	// unrecognised one therefore matches no arm here and falls through to
+	// internal_error — an honest report for a code no spec names, rather
+	// than a typo quietly published as whichever code is most taught. See
+	// ValidationError.Is's own doc comment, which argues that pairing
+	// from the other side.
+	case errors.As(err, &conflict):
+		return mcpErrorResult(errCodeVersionConflict, err.Error(),
+			map[string]any{"current_version": conflict.Current})
+	case errors.Is(err, metamodel.ErrInvalidSchema):
+		return mcpErrorResult(errCodeInvalidSchema, err.Error(), fieldDetails(err))
+	case errors.Is(err, metamodel.ErrSchemaViolation):
+		return mcpErrorResult(errCodeSchemaViolation, err.Error(), fieldDetails(err))
+	case errors.Is(err, metamodel.ErrInvalidInput):
+		return mcpErrorResult(errCodeInvalidInput, err.Error(), fieldDetails(err))
+	case errors.Is(err, metamodel.ErrEndpointTypeMismatch):
+		return mcpErrorResult(errCodeEndpointTypeMismatch, err.Error(), nil)
+	case errors.Is(err, metamodel.ErrInUse):
+		return mcpErrorResult(errCodeInUse, err.Error(), nil)
+	case errors.Is(err, metamodel.ErrNotFound):
+		return mcpErrorResult(errCodeNotFound, err.Error(), nil)
+
 	case metamodel.IsRetryable(err):
 		// Checked before the default arm and after every mapping that
 		// names something the caller sent, for the reason failureFor
@@ -136,4 +164,38 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 // invariant is ever loosened.
 func mcpUnauthenticated() *mcp.CallToolResult {
 	return mcpErrorResult(errCodeUnauthorized, "authentication required", nil)
+}
+
+// fieldDetails pulls the per-field problems out of a domain error, so an
+// agent gets the paths as data rather than only inside a sentence it
+// would have to parse. The shape is {"fields": [{"path", "message"}]},
+// which is the same shape invalidInput (mcp_metamodel.go) builds for a
+// problem this layer diagnosed itself.
+//
+// An error carrying no field list — an endpoint mismatch, a not_found —
+// gets no details at all rather than an empty array: "there were no
+// field problems" and "this kind of error has no field problems" are
+// different statements, and only the second is true here.
+func fieldDetails(err error) map[string]any {
+	var (
+		validation *metamodel.ValidationError
+		schemaErr  *metamodel.SchemaError
+	)
+	var problems []metamodel.FieldError
+	switch {
+	case errors.As(err, &validation):
+		problems = validation.Fields
+	case errors.As(err, &schemaErr):
+		problems = schemaErr.Fields
+	default:
+		return nil
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	fields := make([]map[string]string, 0, len(problems))
+	for _, problem := range problems {
+		fields = append(fields, map[string]string{"path": problem.Path, "message": problem.Message})
+	}
+	return map[string]any{"fields": fields}
 }

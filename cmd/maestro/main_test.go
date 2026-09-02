@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -478,4 +480,109 @@ func TestStartPruneLoopSweepsImmediatelyAtStartup(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("expired session/invite still present after 5s (sessions=%d, invites=%d); startPruneLoop did not sweep at start-up", countSessions(), countInvites())
+}
+
+// TestTheRunningBinaryServesTheGameContentTools is the only test that
+// covers the wiring in run() itself: that this binary builds a metamodel
+// service, hands it to web.NewServer, and therefore actually serves the
+// game-content MCP tools an agent needs.
+//
+// internal/web's own tests all build their Server directly, with a
+// metamodel service they construct themselves, so every one of them would
+// keep passing if the line in main.go that supplies one were deleted —
+// newMCPServer would simply register the Core three and say nothing.
+// This test connects to the real binary's real endpoint with a real
+// token and asks for the tool list.
+//
+// It also seeds one entity through it, because a tool that appears in the
+// list and cannot reach a database is a different failure with the same
+// symptom in a list-only assertion: the *pool* the metamodel service
+// holds has to be the same live one the rest of the process uses.
+func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
+	base, cancel, done := startRunningServer(t)
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	session := loginAdmin(t, base)
+	gameID := createGame(t, base, session, "azeroth", "Azeroth")
+	token := mintToken(t, base, session, gameID)
+
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "wiring-test", Version: "0.0.1"}, nil)
+	mcpSession, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             base + "/mcp",
+		HTTPClient:           &http.Client{Transport: bearerTransport{token: token}},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect to /mcp: %v", err)
+	}
+	defer func() { _ = mcpSession.Close() }()
+
+	tools, err := mcpSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	names := map[string]bool{}
+	for _, tool := range tools.Tools {
+		names[tool.Name] = true
+	}
+	for _, want := range []string{"types.upsert", "entities.upsert", "entities.list", "search"} {
+		if !names[want] {
+			t.Fatalf("the running binary serves no %q tool; the metamodel service is not wired into web.NewServer", want)
+		}
+	}
+
+	for _, call := range []*mcp.CallToolParams{
+		{Name: "types.upsert", Arguments: map[string]any{
+			"key": "quest", "label": "Quest", "label_plural": "Quests",
+		}},
+		{Name: "entities.upsert", Arguments: map[string]any{
+			"items": []any{map[string]any{"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger"}},
+		}},
+	} {
+		result, err := mcpSession.CallTool(ctx, call)
+		if err != nil {
+			t.Fatalf("CallTool(%s): %v", call.Name, err)
+		}
+		if result.IsError {
+			t.Fatalf("CallTool(%s) failed against the running binary: %+v", call.Name, result.Content)
+		}
+	}
+
+	found, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "search", Arguments: map[string]any{"query": "hogger"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(search): %v", err)
+	}
+	if found.IsError {
+		t.Fatalf("search failed against the running binary: %+v", found.Content)
+	}
+	var out struct {
+		Items []struct {
+			Key string `json:"key"`
+		} `json:"items"`
+	}
+	raw, err := json.Marshal(found.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal search result: %v", err)
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode search result %s: %v", raw, err)
+	}
+	if len(out.Items) != 1 || out.Items[0].Key != "hogger" {
+		t.Fatalf("search found %+v, want the entity just seeded through the same binary", out.Items)
+	}
+}
+
+// bearerTransport authenticates every request with an API token.
+type bearerTransport struct{ token string }
+
+func (t bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+t.token)
+	return http.DefaultTransport.RoundTrip(req)
 }

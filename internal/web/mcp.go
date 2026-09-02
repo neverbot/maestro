@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 )
 
@@ -19,6 +20,14 @@ import (
 type MCPDeps struct {
 	Identity *identity.Service
 	Projects *projects.Service
+
+	// Metamodel is the game-content domain the tools in mcp_metamodel.go
+	// serve. Optional in the sense that a Server built without one still
+	// starts and still answers whoami and games.*: newMCPServer registers
+	// the metamodel tools only when it is present, so a test that needs
+	// nothing but the Core tools does not have to build a metamodel
+	// service to get one.
+	Metamodel *metamodel.Service
 }
 
 // WhoamiOutput is the shape returned by the whoami tool. Its ProjectID
@@ -245,6 +254,15 @@ type gamesGetInput struct{ ScopedArgs }
 // already-resolved, already-checked project id, never a bare Caller it
 // could forget to scope-check itself.
 //
+// Every tool registered here is recorded in s.mcpScopedTools, which is
+// what TestEveryMCPToolGoesThroughAddScopedTool checks the *served* tool
+// list against: it connects a real client, calls ListTools, and fails if
+// the server exposes a tool this function never saw. That is the MCP
+// half of TestEveryGameScopedRouteGoesThroughRequireProject (server_test.go)
+// and it exists for the same reason — the Go type system cannot stop
+// someone calling mcp.AddTool directly, and a tool registered that way
+// would answer with no scope check at all.
+//
 // handler's signature deliberately does not take a Caller: if it needs
 // more than the resolved project id (whoami needs the caller's own user
 // id and admin flag, for instance), it reads CallerFrom(ctx) itself —
@@ -260,7 +278,11 @@ type gamesGetInput struct{ ScopedArgs }
 // one from Out — the mechanism that lets a hand-written schema validate
 // correctly regardless of what Go type the domain function actually
 // returns.
-func addScopedTool[In scopedInput, Out any](srv *mcp.Server, deps MCPDeps, tool *mcp.Tool, handler func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in In) (Out, error)) {
+func addScopedTool[In scopedInput, Out any](s *Server, srv *mcp.Server, deps MCPDeps, tool *mcp.Tool, handler func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in In) (Out, error)) {
+	if s.mcpScopedTools == nil {
+		s.mcpScopedTools = map[string]bool{}
+	}
+	s.mcpScopedTools[tool.Name] = true
 	mcp.AddTool(srv, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		caller, ok := CallerFrom(ctx)
 		if !ok {
@@ -311,9 +333,9 @@ func readOnlyTool() *mcp.ToolAnnotations {
 // from anything captured in the closure below.
 func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "maestro", Version: s.opts.Version}, nil)
-	deps := MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects}
+	deps := MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects, Metamodel: s.opts.Metamodel}
 
-	addScopedTool(srv, deps, &mcp.Tool{
+	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name:         "whoami",
 		Description:  "Report the calling identity: user, admin flag, and the single game this token is bound to.",
 		OutputSchema: whoamiOutputSchema,
@@ -323,7 +345,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 		return MCPWhoami(ctx, deps, caller)
 	})
 
-	addScopedTool(srv, deps, &mcp.Tool{
+	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name:         "games.list",
 		Description:  "List the games visible to the caller. A token caller always sees exactly the one game it is bound to.",
 		OutputSchema: gamesListOutputSchema,
@@ -333,7 +355,7 @@ func (s *Server) newMCPServer() *mcp.Server {
 		return MCPGamesList(ctx, deps, caller)
 	})
 
-	addScopedTool(srv, deps, &mcp.Tool{
+	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name:         "games.get",
 		Description:  "Look up the caller's own game. Refuses any game outside the caller's own scope, instance admins included.",
 		OutputSchema: gameOutputSchema,
@@ -342,6 +364,12 @@ func (s *Server) newMCPServer() *mcp.Server {
 		caller, _ := CallerFrom(ctx)
 		return MCPGamesGet(ctx, deps, caller, projectID)
 	})
+
+	// The game-content tools, registered only when this instance was
+	// built with a metamodel service — see MCPDeps.Metamodel.
+	if deps.Metamodel != nil {
+		s.addMetamodelTools(srv, deps)
+	}
 
 	return srv
 }

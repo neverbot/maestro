@@ -57,7 +57,21 @@ const (
 	// it on the wire. Before it existed all four landed on
 	// internal_error, which tells an agent to give up on a call that
 	// would have worked.
-	errCodeRetryable            = "retryable"
+	errCodeRetryable = "retryable"
+
+	// The metamodel's own vocabulary, mirrored here so the MCP surface
+	// spells a code in exactly one place. The names match
+	// internal/metamodel/errors.go's sentinels one for one, deliberately:
+	// a change to either is a change to the public contract and should
+	// not be possible to make on one side only without the other reading
+	// as obviously stale.
+	errCodeVersionConflict      = "version_conflict"
+	errCodeSchemaViolation      = "schema_violation"
+	errCodeInvalidSchema        = "invalid_schema"
+	errCodeInvalidInput         = "invalid_input"
+	errCodeEndpointTypeMismatch = "endpoint_type_mismatch"
+	errCodeInUse                = "in_use"
+
 	errCodeSlugTaken            = "slug_taken"
 	errCodeSlugInvalid          = "slug_invalid"
 	errCodeNameInvalid          = "name_invalid"

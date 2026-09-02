@@ -133,6 +133,11 @@ type EntityFilter struct {
 // nothing: the position is the sort value and id of a row this same call
 // just returned to this same caller, and the fingerprint is a digest of
 // the filter that caller supplied.
+//
+// Cursor.Sort, for this listing, is the row's name — paging.Cursor
+// generalises Sort away from any one listing's sort key, and this is
+// the fact that generalisation abstracts over here. RelationPage's is
+// its row's created_at in RFC 3339; see that type.
 type EntityPage struct {
 	Entities   []dbq.Entity
 	NextCursor string
@@ -147,11 +152,14 @@ const (
 )
 
 // The keyset cursor, its fingerprint and the page clamp live in
-// internal/paging, shared with the markdown domain. Two listings in two
-// packages paging with two copies of this code is how the fingerprint
-// that omitted the project id — one game's cursor paging another game's
-// rows — would have been fixed in one copy and left standing in the
-// other.
+// internal/paging. Today only this package imports it; the markdown
+// domain has no listing, no cursor and no import of paging yet, and
+// arrives with one in Task 8. Extracting the code now, rather than when
+// Task 8 needs it, is what keeps that task from copying it: two
+// listings in two packages paging with two copies of this code is how
+// the fingerprint that omitted the project id — one game's cursor
+// paging another game's rows — would have been fixed in one copy and
+// left standing in the other.
 //
 // What stays here is this package's own spelling of that API: six
 // one-line delegations, which the three listings and this package's
@@ -198,9 +206,10 @@ func invalidFilterPart(invalid *bool) string { return paging.TriState(invalid) }
 // value the agent itself supplied.
 //
 // The messages live in internal/paging so that this domain and the
-// markdown domain cannot tell a caller two different things about one
-// bad cursor; the *type* is this domain's, because that is what
-// internal/web's existing invalid_input arm matches on.
+// markdown domain — once Task 8 gives it a listing of its own — cannot
+// tell a caller two different things about one bad cursor; the *type*
+// is this domain's, because that is what internal/web's existing
+// invalid_input arm matches on.
 func refuseCursor(message string) error {
 	return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
 		Path: "cursor", Message: message,

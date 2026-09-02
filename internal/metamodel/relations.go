@@ -102,6 +102,13 @@ type RelationFilter struct {
 // EntityPage documents. The one difference is in its favour: this
 // listing sorts on created_at, which nothing edits, so the "a renamed
 // row moves behind the reader" clause cannot bite here.
+//
+// Cursor.Sort, for this listing, is the row's created_at rendered in RFC
+// 3339 (time.RFC3339Nano, so two edges created within the same second
+// still divide on the id tiebreak) — paging.Cursor generalises Sort away
+// from any one listing's sort key, and this is the fact that
+// generalisation abstracts over for ListRelations. ListEntities' is the
+// row's name; see EntityPage.
 type RelationPage struct {
 	Relations  []dbq.Relation
 	NextCursor string
@@ -573,10 +580,13 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	if after.ID != uuid.Nil {
 		at, err := time.Parse(time.RFC3339Nano, after.Sort)
 		if err != nil {
-			// Only a hand-edited cursor reaches this: encodeRelationCursor
+			// Only a hand-edited cursor reaches this: encodeCursor below
 			// writes the same format this parses, and the fingerprint has
 			// already agreed. It is still the caller's own argument, so it
 			// is answered as one rather than as a server fault.
+			// TestARelationsCursorWithAForgedNonTimestampSortIsMalformed
+			// reaches this arm with exactly that: a cursor whose
+			// fingerprint agrees and whose sort half is not RFC 3339.
 			return RelationPage{}, malformedCursor("it carries no creation time")
 		}
 		params.AfterCreatedAt = pgtype.Timestamptz{Time: at, Valid: true}
@@ -635,9 +645,10 @@ const (
 // This is the per-page bound and nothing more: the cursor ListRelations
 // now issues is what says how many pages exist. The rule itself is
 // pageSize, in list.go — a delegation to paging.Size, shared with the
-// entity listing, the search limit and the markdown domain so that none
-// of them can drift apart; what stays here is this listing's own two
-// bounds and the argument for the shape.
+// entity listing and the search limit so that none of them can drift
+// apart, and ready for the markdown domain to share too once Task 8
+// gives it a listing; what stays here is this listing's own two bounds
+// and the argument for the shape.
 func relationPageSize(limit int32) int32 {
 	return pageSize(limit, defaultRelationPage, maxRelationPage)
 }

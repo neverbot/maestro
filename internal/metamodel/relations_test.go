@@ -3,6 +3,7 @@ package metamodel_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -968,6 +969,89 @@ func TestListRelationsFiltersByTypeAndEndpoint(t *testing.T) {
 	}
 	if got, want := err.Error(), `not_found: no relation type "nosuch" in this game`; got != want {
 		t.Fatalf("message = %q, want %q", got, want)
+	}
+}
+
+// TestARelationsCursorWithAForgedNonTimestampSortIsMalformed reaches the
+// arm ListRelations' comment above time.Parse says is reachable but had
+// no test: a cursor whose fingerprint agrees — so it passes
+// paging.Decode — and whose sort half is not RFC 3339, which only
+// ListRelations itself can catch, one step past paging.Decode. A
+// forged, empty sort half lands the same way, since the empty string
+// does not parse as a timestamp either.
+func TestARelationsCursorWithAForgedNonTimestampSortIsMalformed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+	}); err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+	if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "takes_place_in",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+	}); err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	// A real cursor, so its fingerprint is the one this project's
+	// unfiltered relation listing actually checks against. Limit: 1
+	// forces the one edge above to fill the page.
+	page, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("ListRelations: %v", err)
+	}
+	if page.NextCursor == "" {
+		t.Fatal("a full page did not carry a cursor to forge from")
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(page.NextCursor)
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("unmarshal cursor: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		sort string
+	}{
+		{"not a timestamp at all", `"not-a-timestamp"`},
+		{"the empty sort half", `""`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			forged := map[string]json.RawMessage{
+				"n": json.RawMessage(tc.sort),
+				"i": fields["i"],
+				"f": fields["f"],
+			}
+			forgedRaw, err := json.Marshal(forged)
+			if err != nil {
+				t.Fatalf("marshal forged cursor: %v", err)
+			}
+			forgedCursor := base64.RawURLEncoding.EncodeToString(forgedRaw)
+
+			_, err = svc.ListRelations(ctx, project,
+				metamodel.RelationFilter{Limit: 1, Cursor: forgedCursor})
+			if !errors.Is(err, metamodel.ErrInvalidInput) {
+				t.Fatalf("err = %v, want invalid_input", err)
+			}
+			var ve *metamodel.ValidationError
+			if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Path != "cursor" {
+				t.Fatalf("err = %v, want a ValidationError at path \"cursor\"", err)
+			}
+			const want = "is malformed (it carries no creation time): page from the cursor " +
+				"a previous call returned, or omit it to start"
+			if ve.Fields[0].Message != want {
+				t.Fatalf("message = %q, want %q", ve.Fields[0].Message, want)
+			}
+		})
 	}
 }
 

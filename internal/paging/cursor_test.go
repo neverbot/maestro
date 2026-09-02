@@ -1,6 +1,8 @@
 package paging_test
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -133,4 +135,88 @@ func TestTriStateKeepsNoOpinionDistinctFromBothOpinions(t *testing.T) {
 	if got[0] == got[1] || got[0] == got[2] || got[1] == got[2] {
 		t.Fatalf("TriState produced %v, want three distinct spellings", got)
 	}
+}
+
+// TestTheWireNamesArePinnedHereToo guards Cursor's JSON tags from inside
+// this package. internal/metamodel's
+// TestACursorCarriesNothingButAPositionAndAFingerprint pins the same
+// three names, but a package whose wire format is pinned exclusively
+// from another package is one deletion away from being unpinned — the
+// comment on Cursor said so honestly, which was the right instinct but
+// not a substitute for this test.
+func TestTheWireNamesArePinnedHereToo(t *testing.T) {
+	encoded := paging.Encode(paging.Cursor{
+		Sort: "Elwynn Forest", ID: uuid.New(), Fingerprint: "abc",
+	})
+	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, want := range []string{"n", "i", "f"} {
+		if _, ok := fields[want]; !ok {
+			t.Fatalf("cursor is missing %q: %s", want, raw)
+		}
+	}
+	if len(fields) != 3 {
+		t.Fatalf("cursor carries %d fields, want 3: %s", len(fields), raw)
+	}
+}
+
+// TestTheRecoveryAdviceIsPinnedTooNotJustTheMalformedPrefix guards the
+// half of the malformed sentence an agent actually acts on. Only the
+// "is malformed" prefix and the Malformed-equals-Decode equivalence were
+// pinned before this test, so the recovery clause — "page from the
+// cursor a previous call returned, or omit it to start" — could be
+// reworded into something useless and nothing here would notice.
+func TestTheRecoveryAdviceIsPinnedTooNotJustTheMalformedPrefix(t *testing.T) {
+	err := paging.Malformed("some reason", refuse)
+	const advice = "page from the cursor a previous call returned, or omit it to start"
+	if !strings.Contains(err.Error(), advice) {
+		t.Fatalf("err = %q, want it to contain the recovery advice %q", err.Error(), advice)
+	}
+}
+
+// TestMalformedPanicsOnANilRefuse pins the nil-refuse contract Malformed
+// documents: a refuse function that returns nil must not be mistaken for
+// success, because that success would be Decode handing back the zero
+// Cursor — the start of the listing — for what should have been a
+// refusal.
+func TestMalformedPanicsOnANilRefuse(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Malformed with a nil refuse did not panic")
+		}
+	}()
+	nilRefuse := func(string) error { return nil }
+	_ = paging.Malformed("why", nilRefuse)
+}
+
+// TestANilRefusePanicsRatherThanReturningTheZeroPosition pins the same
+// contract from Decode's malformed arms.
+func TestANilRefusePanicsRatherThanReturningTheZeroPosition(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Decode with a nil refuse did not panic on a malformed cursor")
+		}
+	}()
+	nilRefuse := func(string) error { return nil }
+	_, _ = paging.Decode("!!!not base64!!!", "abc", nilRefuse)
+}
+
+// TestAFingerprintMismatchWithANilRefusePanics pins the contract on
+// Decode's other refusal, the fingerprint mismatch, which does not go
+// through Malformed and so needed its own enforcement.
+func TestAFingerprintMismatchWithANilRefusePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Decode with a nil refuse did not panic on a fingerprint mismatch")
+		}
+	}()
+	c := paging.Cursor{Sort: "a", ID: uuid.New(), Fingerprint: "abc"}
+	nilRefuse := func(string) error { return nil }
+	_, _ = paging.Decode(paging.Encode(c), "a-different-fingerprint", nilRefuse)
 }

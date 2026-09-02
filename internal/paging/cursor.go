@@ -70,7 +70,10 @@ import (
 //
 // The three fields and their wire names are pinned from the metamodel
 // side by TestACursorCarriesNothingButAPositionAndAFingerprint, which
-// fails if a fourth field is added without a decision about it.
+// fails if a fourth field is added without a decision about it, and from
+// this package's own side by TestTheWireNamesArePinnedHereToo — a
+// package whose wire format is guarded only from the outside is one
+// deletion away from being unguarded at all.
 type Cursor struct {
 	Sort        string    `json:"n"`
 	ID          uuid.UUID `json:"i"`
@@ -102,14 +105,40 @@ func Encode(c Cursor) string {
 // the whole point of this package owning the text.
 //
 // refuse turns the message into the caller's own domain error, at the
-// caller's own argument path — `cursor` in both of Maestro's domains.
-// Left untyped, a bad cursor reaches an agent as internal_error and
-// reads as "the server is broken" over a value the agent itself
-// supplied.
+// caller's own argument path — `cursor` in internal/metamodel today, and
+// in the markdown domain too once Task 8 gives it a listing. Left
+// untyped, a bad cursor reaches an agent as internal_error and reads as
+// "the server is broken" over a value the agent itself supplied.
+//
+// **The contract: refuse must never return nil.** A nil result would be
+// indistinguishable from success, and the caller two frames up is
+// Decode, which would then hand back the zero Cursor with a nil error —
+// the position that starts a listing over, silently answering a page-2
+// request with page 1 forever. That is the wrong-answer-without-an-error
+// class this package exists to prevent, so it is not tolerated from the
+// one function callers plug in themselves: Malformed panics rather than
+// letting a broken refuse masquerade as a valid cursor.
+// TestMalformedPanicsOnANilRefuse pins it.
 func Malformed(why string, refuse func(message string) error) error {
-	return refuse(fmt.Sprintf(
+	return checkedRefusal(refuse, fmt.Sprintf(
 		"is malformed (%s): page from the cursor a previous call returned, or omit it to start",
 		why))
+}
+
+// checkedRefusal is the one place every refusal in this package goes
+// through, so the nil-refuse contract Malformed documents is enforced
+// once rather than at each of Decode's four call sites.
+func checkedRefusal(refuse func(message string) error, message string) error {
+	err := refuse(message)
+	if err == nil {
+		panic(fmt.Sprintf(
+			"paging: refuse(%q) returned nil; a refuse function must always "+
+				"build a non-nil error, or Decode's caller would be handed the "+
+				"zero position — the start of the listing — for what should "+
+				"have been a refusal",
+			message))
+	}
+	return err
 }
 
 // Decode reads a page position back and checks it belongs to the listing
@@ -124,6 +153,11 @@ func Malformed(why string, refuse func(message string) error) error {
 // TestAnUnreadableCursorIsMalformedBeforeItIsJudgedAgainstAFingerprint
 // and from the metamodel side by
 // TestAMalformedCursorIsRefusedBeforeItsFingerprintIsJudged.
+//
+// **refuse must never return nil**; see Malformed. Decode enforces the
+// same contract on its own fingerprint-mismatch refusal, which does not
+// go through Malformed. TestAFingerprintMismatchWithANilRefusePanics
+// pins that arm too.
 func Decode(s, fingerprint string, refuse func(message string) error) (Cursor, error) {
 	if s == "" {
 		return Cursor{}, nil
@@ -140,7 +174,7 @@ func Decode(s, fingerprint string, refuse func(message string) error) (Cursor, e
 		return Cursor{}, Malformed("it carries no row position", refuse)
 	}
 	if c.Fingerprint != fingerprint {
-		return Cursor{}, refuse("was issued for a different listing: page with the filter " +
+		return Cursor{}, checkedRefusal(refuse, "was issued for a different listing: page with the filter "+
 			"the cursor came from, or omit the cursor to start this listing over")
 	}
 	return c, nil

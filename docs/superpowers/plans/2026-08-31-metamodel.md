@@ -1436,41 +1436,77 @@ first feel them, recorded so they are not rediscovered:
   incompatible key policies live in one metamodel: `Key: "Hogger"` and
   `Key: "hogger"` pass every check this package runs and then collide at
   the database with a raw unique-violation error and no field path.
-  **This is a Task 3 decision** — whether to extend `keyPattern` (or a
-  variant of it) to entity, entity-type and relation-type keys, fold case
-  in application code before the database ever sees it, or accept the
-  raw-violation failure mode and give it a clean error path instead. Until
-  it is settled, do not extend `keyPattern` to other key kinds and do not
-  change the migration; both are product decisions for the human, not a fix
-  to slip into a validator task.
+  **Settled in Task 3** (see its correction 4): row keys get their own
+  rule in `internal/metamodel/keys.go` — `^[A-Za-z0-9][A-Za-z0-9_-]*$`,
+  at most 64 characters — which permits case, because the folding unique
+  index already delivers the guarantee `keyPattern` gets by forbidding it;
+  and a spelling differing from a stored key only by case is refused with
+  a message naming both spellings, instead of silently updating the other
+  row or surfacing a raw unique violation. Neither the migration nor
+  `keyPattern` was changed.
 
 ---
 
 ### Task 3: Entity types
 
 **Files:**
-- Create: `internal/db/queries/metamodel.sql`, `internal/metamodel/service.go`, `internal/metamodel/types.go`
+- Create: `internal/db/queries/metamodel.sql`, `internal/metamodel/service.go`,
+  `internal/metamodel/keys.go`, `internal/metamodel/types.go`
 - Test: `internal/metamodel/types_test.go`
 
-- [ ] **Step 1: Write the queries**
+Every code block below was refreshed from the landed files after the task
+was implemented, so what they show is what shipped. The corrections block
+at the end of the task records what changed from the original plan and
+why.
+
+- [x] **Step 1: Write the queries**
 
 `internal/db/queries/metamodel.sql`:
 
 ```sql
 -- name: UpsertEntityType :one
-INSERT INTO entity_types (project_id, key, label, label_plural, description, color, icon, field_schema)
+-- Every statement in this file filters on the resolved project id,
+-- including the ones addressing a row by its primary key: isolation
+-- between games is enforced in SQL, not in Go, so a query trusting an id
+-- alone would hand a caller another game's row the moment an id leaked.
+--
+-- No write here sets updated_at. 0004_metamodel.sql puts a set_updated_at
+-- trigger on all four tables, so the column has one mechanism behind it
+-- rather than a trigger plus a clause every future query must remember.
+--
+-- The DO UPDATE is guarded by the caller's expected version, so the whole
+-- compare-and-set happens in one statement and two concurrent writers
+-- cannot both read version 1 and both succeed. A creating caller has no
+-- version to expect and passes noVersion, which no stored version can
+-- equal, so the guard is a no-op on the insert path and a guaranteed
+-- mismatch when a row it did not know about turns out to exist. A guard
+-- that fails returns no row rather than an error; UpsertEntityType turns
+-- that into the typed conflict.
+--
+-- Idempotent by (project, key), matched case-insensitively through the
+-- entity_types_key_key index. The key column itself is deliberately not in
+-- the SET list: the first spelling stored stays, so a re-seed cannot
+-- rewrite the handle other rows and documents refer to. UpsertEntityType
+-- in Go refuses a spelling that differs from the stored one before it ever
+-- gets here, so this clause is what makes the identical spelling a no-op
+-- rather than what resolves a conflict.
+INSERT INTO entity_types (project_id, key, label, label_plural, description, color, icon,
+                          field_schema, updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('label')::text,
         sqlc.arg('label_plural')::text, sqlc.arg('description')::text,
-        sqlc.arg('color')::text, sqlc.arg('icon')::text, sqlc.arg('field_schema')::jsonb)
+        sqlc.arg('color')::text, sqlc.arg('icon')::text, sqlc.arg('field_schema')::jsonb,
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, lower(key)) DO UPDATE
-SET label        = excluded.label,
-    label_plural = excluded.label_plural,
-    description  = excluded.description,
-    color        = excluded.color,
-    icon         = excluded.icon,
-    field_schema = excluded.field_schema,
-    version      = entity_types.version + 1,
-    updated_at   = now()
+SET label               = excluded.label,
+    label_plural        = excluded.label_plural,
+    description         = excluded.description,
+    color               = excluded.color,
+    icon                = excluded.icon,
+    field_schema        = excluded.field_schema,
+    version             = entity_types.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE entity_types.version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
 -- name: GetEntityTypeByKey :one
@@ -1482,9 +1518,11 @@ SELECT * FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: ListEntityTypes :many
+-- Ordered by label then id: labels are not unique, and a label-only order
+-- reshuffles ties between calls in whatever order Postgres returns them.
 SELECT * FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid
-ORDER BY label;
+ORDER BY label, id;
 
 -- name: CountEntitiesOfType :one
 SELECT count(*) FROM entities
@@ -1500,174 +1538,75 @@ DELETE FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid;
 
+-- name: ListEntityFieldsOfType :many
+-- The re-validation sweep reads nothing but the stored values and the id
+-- to flag, so it does not pay to load whole rows — a type can hold
+-- hundreds of entities and every schema edit sweeps all of them.
+SELECT id, fields FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+ORDER BY id;
+
 -- name: MarkEntitiesOfTypeInvalid :exec
+-- The invalid <> flag guard keeps the sweep from rewriting rows whose
+-- verdict has not changed. Without it, every schema edit would touch each
+-- of the type's entities and the set_updated_at trigger would move their
+-- updated_at, so a validation pass would read as an edit of content
+-- nobody edited.
 UPDATE entities SET invalid = sqlc.arg('invalid')::boolean
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid
-  AND id = ANY(sqlc.arg('ids')::uuid[]);
+  AND id = ANY(sqlc.arg('ids')::uuid[])
+  AND invalid <> sqlc.arg('invalid')::boolean;
+
+-- name: GetEntityTypeByKeyForUpdate :one
+-- The upsert's own read, taken inside its transaction with the row lock
+-- held, so the spelling and version a caller is told about are the ones
+-- their write will actually meet. Without the lock, two writers racing on
+-- one key both read the same version and the second's report of "current
+-- version is N" is stale by the time it is returned.
+SELECT * FROM entity_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
+FOR UPDATE;
 ```
 
 Run: `make sqlc`
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
-`internal/metamodel/types_test.go`:
+`internal/metamodel/types_test.go`. Not reproduced here: it is some
+seven hundred lines and every one of its assertions is pinned to an exact
+message and path, which does not compress into a plan block. What it
+covers, by test name:
 
-```go
-package metamodel_test
+- `TestUpsertEntityTypeIsIdempotentByKey`,
+  `TestUpsertEntityTypeStoresTheDeclaredSchemaAndTheActor`
+- `TestUpsertEntityTypeRejectsStaleVersion`,
+  `TestUpsertEntityTypeRejectsAMissingExpectedVersionOnAnExistingType`,
+  `TestACreationThatLosesTheRaceForItsKeyIsRefused`
+- `TestUpsertEntityTypeRejectsBadSchema`, `TestUpsertEntityTypeRequiresAKey`,
+  `TestUpsertEntityTypeRejectsAKeyThatIsNotAHandle`,
+  `TestUpsertEntityTypeAcceptsTheKeysAGameActuallyWrites`,
+  `TestUpsertEntityTypeRejectsAnOverlongKey`,
+  `TestUpsertEntityTypeRefusesAKeyThatDiffersOnlyByCase`
+- `TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem`,
+  `TestSchemaChangeDoesNotBackFillDeclaredDefaults`,
+  `TestSchemaChangeClearsTheFlagWhenTheRowFitsAgain`
+- `TestRemoveEntityTypeRefusesWhenInUse`,
+  `TestRemoveEntityTypeReportsAnUnknownID`
+- `TestTypesAreScopedToTheirProject`, `TestListEntityTypesIsOrderedByLabel`
 
-import (
-	"context"
-	"errors"
-	"testing"
+The file also holds the helpers Tasks 4-6 reuse: `newProject(t, pool)`,
+`insertEntity`, `entityState`, `newUser`, `requireFieldError`,
+`ptrInt32`, `ptrFloat`. Note the signature: `newProject` takes the pool,
+not the service — see correction 1.
 
-	"github.com/google/uuid"
-
-	"github.com/neverbot/maestro/internal/metamodel"
-	"github.com/neverbot/maestro/internal/testutil"
-)
-
-// newProject creates a bare project row to scope a test's data.
-func newProject(t *testing.T, svc *metamodel.Service) uuid.UUID {
-	t.Helper()
-	id, err := svc.CreateBareProjectForTest(context.Background(), "azeroth-"+uuid.NewString()[:8])
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	return id
-}
-
-func TestUpsertEntityTypeIsIdempotentByKey(t *testing.T) {
-	pool := testutil.NewPool(t)
-	svc := metamodel.New(pool, nil)
-	ctx := context.Background()
-	project := newProject(t, svc)
-
-	first, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
-		Key: "quest", Label: "Quest", LabelPlural: "Quests",
-		Schema: metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
-	})
-	if err != nil {
-		t.Fatalf("first upsert: %v", err)
-	}
-	if first.Version != 1 {
-		t.Fatalf("Version = %d, want 1", first.Version)
-	}
-
-	second, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
-		Key: "quest", Label: "Quest", LabelPlural: "Quests",
-		Schema:          metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}},
-		ExpectedVersion: ptrInt32(1),
-	})
-	if err != nil {
-		t.Fatalf("second upsert: %v", err)
-	}
-	if second.ID != first.ID {
-		t.Fatal("upserting the same key created a second row")
-	}
-	if second.Version != 2 {
-		t.Fatalf("Version = %d, want 2", second.Version)
-	}
-}
-
-func ptrInt32(v int32) *int32 { return &v }
-
-func TestUpsertEntityTypeRejectsStaleVersion(t *testing.T) {
-	pool := testutil.NewPool(t)
-	svc := metamodel.New(pool, nil)
-	ctx := context.Background()
-	project := newProject(t, svc)
-
-	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
-		Key: "quest", Label: "Quest", LabelPlural: "Quests",
-	}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
-		Key: "quest", Label: "Quest renamed", LabelPlural: "Quests",
-		ExpectedVersion: ptrInt32(7),
-	})
-	if !errors.Is(err, metamodel.ErrVersionConflict) {
-		t.Fatalf("err = %v, want ErrVersionConflict", err)
-	}
-	var conflict *metamodel.VersionConflictError
-	if !errors.As(err, &conflict) || conflict.Current != 1 {
-		t.Fatalf("the conflict must carry the current version, got %v", err)
-	}
-}
-
-func TestUpsertEntityTypeRejectsBadSchema(t *testing.T) {
-	pool := testutil.NewPool(t)
-	svc := metamodel.New(pool, nil)
-	ctx := context.Background()
-	project := newProject(t, svc)
-
-	_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
-		Key: "quest", Label: "Quest", LabelPlural: "Quests",
-		Schema: metamodel.Schema{{Key: "difficulty", Type: metamodel.FieldEnum}},
-	})
-	if !errors.Is(err, metamodel.ErrSchemaViolation) {
-		t.Fatalf("err = %v, want ErrSchemaViolation", err)
-	}
-}
-
-func TestRemoveEntityTypeRefusesWhenInUse(t *testing.T) {
-	pool := testutil.NewPool(t)
-	svc := metamodel.New(pool, nil)
-	ctx := context.Background()
-	project := newProject(t, svc)
-
-	typ, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{Key: "quest", Label: "Quest", LabelPlural: "Quests"})
-	if err != nil {
-		t.Fatalf("upsert type: %v", err)
-	}
-	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
-		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
-	}); err != nil {
-		t.Fatalf("upsert entity: %v", err)
-	}
-
-	if err := svc.RemoveEntityType(ctx, project, typ.ID, false); !errors.Is(err, metamodel.ErrInUse) {
-		t.Fatalf("err = %v, want ErrInUse", err)
-	}
-	if err := svc.RemoveEntityType(ctx, project, typ.ID, true); err != nil {
-		t.Fatalf("cascade removal: %v", err)
-	}
-	if _, err := svc.EntityTypeByKey(ctx, project, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
-		t.Fatalf("err = %v, want ErrNotFound after removal", err)
-	}
-}
-
-func TestTypesAreScopedToTheirProject(t *testing.T) {
-	pool := testutil.NewPool(t)
-	svc := metamodel.New(pool, nil)
-	ctx := context.Background()
-	mine, theirs := newProject(t, svc), newProject(t, svc)
-
-	if _, err := svc.UpsertEntityType(ctx, mine, metamodel.EntityTypeInput{Key: "quest", Label: "Quest", LabelPlural: "Quests"}); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-	if _, err := svc.EntityTypeByKey(ctx, theirs, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
-		t.Fatalf("a type must not be visible from another project, got %v", err)
-	}
-
-	types, err := svc.ListEntityTypes(ctx, theirs)
-	if err != nil {
-		t.Fatalf("ListEntityTypes: %v", err)
-	}
-	if len(types) != 0 {
-		t.Fatalf("the other project sees %d types, want 0", len(types))
-	}
-}
-```
-
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -run TestUpsertEntityType -v`
 Expected: FAIL, `undefined: metamodel.New`.
 
-- [ ] **Step 4: Write the service scaffolding**
+- [x] **Step 4: Write the service scaffolding**
 
 `internal/metamodel/service.go`:
 
@@ -1676,16 +1615,24 @@ package metamodel
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/realtime"
 )
 
-// Actor records who performed a write, for the audit columns.
+// Actor records who performed a write, for the audit columns. Both fields
+// are optional and both may be set at once: a human editing through the UI
+// carries a UserID, an agent carries the TokenID of the credential it
+// authenticated with, and a token always belongs to the member who minted
+// it. A token id that belongs to another game is rejected by the database,
+// not here (0004_metamodel.sql's composite keys).
 type Actor struct {
 	UserID  *uuid.UUID
 	TokenID *uuid.UUID
@@ -1698,34 +1645,180 @@ type Service struct {
 	hub  *realtime.Hub
 }
 
-// New builds the service. The hub may be nil in tests.
+// New builds the service. The hub may be nil, in which case nothing is
+// published; the package's own tests run that way.
 func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 	return &Service{pool: pool, q: dbq.New(pool), hub: hub}
 }
 
 // publish emits a change event, if a hub is attached.
-func (s *Service) publish(projectID uuid.UUID, kind, payload string) {
+//
+// A payload carries only the identity of what changed — a key, an id —
+// and never a value a client could then treat as current. Publication
+// order is not commit order (internal/web/publish.go's package comment
+// works through why), so a payload holding, say, a type's new label could
+// stably tell a client the wrong label with nothing to signal it. The
+// client re-reads instead.
+func (s *Service) publish(projectID uuid.UUID, kind string, payload any) {
 	if s.hub == nil {
 		return
 	}
 	s.hub.Publish(realtime.Event{ProjectID: projectID, Kind: kind, Payload: payload})
 }
 
-// CreateBareProjectForTest inserts a project row directly. Tests of this
-// package need a project to scope their data without importing the projects
-// service, which would make an import cycle.
-func (s *Service) CreateBareProjectForTest(ctx context.Context, slug string) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO projects (slug, name) VALUES ($1, $1) RETURNING id`, slug).Scan(&id)
+// withTx runs fn inside a transaction, rolling back unless it returns nil.
+//
+// Every mutation in this package needs one: a write and the re-validation
+// sweep that follows it are one change, and half of it landing would leave
+// a type declaring a schema its own entities were never re-checked against.
+func (s *Service) withTx(ctx context.Context, fn func(*dbq.Queries) error) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("create project: %w", err)
+		return fmt.Errorf("begin: %w", err)
 	}
-	return id, nil
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := fn(dbq.New(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// decodeFields turns a stored jsonb blob back into a value map.
+func decodeFields(raw []byte) (map[string]any, error) {
+	if len(raw) == 0 {
+		return map[string]any{}, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode fields: %w", err)
+	}
+	return out, nil
+}
+
+// notFound maps pgx's no-rows sentinel onto the domain's, leaving every
+// other error wrapped with what was being looked up.
+func notFound(err error, what string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return fmt.Errorf("%s: %w", what, err)
 }
 ```
 
-- [ ] **Step 5: Write the entity-type operations**
+- [x] **Step 5: Settle the row-key policy**
+
+`internal/metamodel/keys.go`. This file is the answer to the open item
+Task 2's corrections left for this task; correction 4 below argues the
+decision.
+
+```go
+package metamodel
+
+import (
+	"fmt"
+	"regexp"
+)
+
+// maxRowKeyLen caps the keys that address rows. Sixty-four matches
+// maxKeyLen, the field-key cap, for the same reasons: generous for a
+// readable handle, short enough to sit in a URL path segment, an export
+// filename or a view-query token without anyone thinking about it.
+const maxRowKeyLen = 64
+
+// rowKeyPattern is the rule for the keys that *address rows* — entity-type
+// keys, relation-type keys and entity keys. It is deliberately wider than
+// keyPattern, the rule for the field keys inside a row's jsonb, and the
+// difference is not an inconsistency:
+//
+//   - keyPattern forbids upper case because two field keys differing only
+//     by case would be two distinct keys in a jsonb object, and nothing
+//     downstream would catch the collision.
+//   - A row key cannot produce that collision at all. Every uniqueness
+//     index over these keys is UNIQUE (project_id, lower(key)) — the
+//     database folds case for them (0004_metamodel.sql) — so "Hogger" and
+//     "hogger" are one key, by construction, in the only place it matters.
+//
+// So both rules deliver the same guarantee, "no two keys differ only by
+// case", through the mechanism each context actually has. Forbidding upper
+// case in row keys as well would buy nothing and cost the thing the
+// folding index was chosen for: a game whose own vocabulary capitalises
+// its handles ("Hogger", "Elwynn_Forest", "GP_Monaco") can spell them the
+// way its design documents do, and a re-seed that changes the casing
+// updates the existing row instead of failing.
+//
+// What the pattern does exclude earns its place:
+//
+//   - No dot, slash, space or percent, so a key drops into a REST path
+//     segment (Task 8 addresses a type as /games/<slug>/types/<key>) and
+//     into a view query without escaping, and cannot be mistaken for a
+//     path separator or a nested reference.
+//   - No leading punctuation, so no key can look like a flag, an option
+//     or a relative path to a shell, a CLI or a query parser.
+//   - ASCII only, so two Unicode normalisations of one accented word
+//     cannot coexist as two keys — lower() folds case, not normalisation
+//     form, so the index would let both through.
+//
+// Digits are allowed to lead: "1999_season" and "500_miles" are ordinary
+// entity keys for a racing game, and there is no reason to make a designer
+// rename their content to satisfy an identifier convention Maestro does
+// not otherwise impose.
+var rowKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// checkRowKey validates a key that addresses a row, reporting the problem
+// at the caller's path ("key") so an agent sees where it is.
+//
+// A key problem is a ValidationError, not a SchemaError: the caller is
+// writing a row, not declaring a schema, and the sentinel split states
+// exactly that difference (see SchemaError's doc comment).
+func checkRowKey(path, key string) error {
+	switch {
+	case key == "":
+		return &ValidationError{Fields: []FieldError{{Path: path, Message: "is required"}}}
+	case len(key) > maxRowKeyLen:
+		return &ValidationError{Fields: []FieldError{{
+			Path:    path,
+			Message: fmt.Sprintf("must be at most %d characters", maxRowKeyLen),
+		}}}
+	case !rowKeyPattern.MatchString(key):
+		return &ValidationError{Fields: []FieldError{{
+			Path:    path,
+			Message: "must be letters, digits, underscores or hyphens, starting with a letter or a digit",
+		}}}
+	}
+	return nil
+}
+
+// keyRespellingError is what a caller sees when their key matches an
+// existing row's key only case-insensitively.
+//
+// This is the collision the folding index makes possible, and it is the
+// one place the row-key policy has to say something a designer can act on.
+// Silently updating the differently-spelled row would let a typo'd capital
+// overwrite content; letting the database raise it would surface as a raw
+// unique-violation with no field path, or — since the upsert carries an ON
+// CONFLICT clause — as a version conflict, which says nothing about the
+// actual problem. Naming both spellings and both remedies is the whole
+// answer a designer needs, and they never have to know an index folds
+// case.
+func keyRespellingError(path, requested, stored string) error {
+	return &ValidationError{Fields: []FieldError{{
+		Path: path,
+		Message: fmt.Sprintf(
+			"%q already exists here spelled %q, and keys are matched without regard to case: "+
+				"use %q to update it, or pick a key that differs by more than capitalisation",
+			requested, stored, stored),
+	}}}
+}
+```
+
+- [x] **Step 6: Write the entity-type operations**
 
 `internal/metamodel/types.go`:
 
@@ -1739,12 +1832,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
 
-// EntityTypeInput is an upsert request. ExpectedVersion is required when the
-// type already exists and ignored on creation.
+// noVersion is the expected_version an upsert passes when its caller has
+// no version to expect. Versions start at 1 and only ever climb, so no
+// stored row can equal it: the guarded DO UPDATE is then a no-op on the
+// insert path and a guaranteed mismatch if a row turns out to exist after
+// all.
+const noVersion int32 = -1
+
+// EntityTypeInput is an upsert request.
+//
+// ExpectedVersion must match the stored version when the type already
+// exists; a nil ExpectedVersion against an existing type is a conflict,
+// not an overwrite. On creation there is nothing to match and the field is
+// ignored, so a seeding script may pass the same value on every run.
 type EntityTypeInput struct {
 	Key             string
 	Label           string
@@ -1757,64 +1862,122 @@ type EntityTypeInput struct {
 	Actor           Actor
 }
 
+// entityTypeEvent is the payload of the type.* events. It carries the
+// identity of what changed and nothing else; see Service.publish.
+type entityTypeEvent struct {
+	ID  uuid.UUID `json:"id"`
+	Key string    `json:"key"`
+}
+
 // UpsertEntityType creates or updates a type, addressed by its key.
+//
+// The whole operation is one transaction: the type's row and the verdict
+// on every entity already stored against it change together, so a schema
+// edit can never land with its instances left judged by the old schema.
 func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in EntityTypeInput) (dbq.EntityType, error) {
-	if in.Key == "" {
-		return dbq.EntityType{}, &ValidationError{Fields: []FieldError{{Path: "key", Message: "is required"}}}
+	if err := checkRowKey("key", in.Key); err != nil {
+		return dbq.EntityType{}, err
 	}
 	if err := in.Schema.Check(); err != nil {
 		return dbq.EntityType{}, err
 	}
-
-	existing, err := s.q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: in.Key})
-	switch {
-	case err == nil:
-		if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
-			return dbq.EntityType{}, &VersionConflictError{Current: existing.Version}
-		}
-	case errors.Is(err, pgx.ErrNoRows):
-		// Creation: no version to match.
-	default:
-		return dbq.EntityType{}, fmt.Errorf("lookup entity type: %w", err)
-	}
-
 	raw, err := in.Schema.JSON()
 	if err != nil {
-		return dbq.EntityType{}, err
+		return dbq.EntityType{}, fmt.Errorf("encode field schema: %w", err)
 	}
 
-	row, err := s.q.UpsertEntityType(ctx, dbq.UpsertEntityTypeParams{
-		ProjectID:   projectID,
-		Key:         in.Key,
-		Label:       in.Label,
-		LabelPlural: in.LabelPlural,
-		Description: in.Description,
-		Color:       in.Color,
-		Icon:        in.Icon,
-		FieldSchema: raw,
+	expected := noVersion
+	if in.ExpectedVersion != nil {
+		expected = *in.ExpectedVersion
+	}
+
+	var row dbq.EntityType
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
+		// Read under the row lock, so the spelling and the version this
+		// caller is told about are the ones its own write will meet.
+		existing, err := q.GetEntityTypeByKeyForUpdate(ctx, dbq.GetEntityTypeByKeyForUpdateParams{
+			ProjectID: projectID, Key: in.Key,
+		})
+		switch {
+		case err == nil:
+			if existing.Key != in.Key {
+				return keyRespellingError("key", in.Key, existing.Key)
+			}
+			if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
+				return &VersionConflictError{Current: existing.Version}
+			}
+		case errors.Is(err, pgx.ErrNoRows):
+			// Creation: no version to match, nothing to lock.
+		default:
+			return fmt.Errorf("lookup entity type: %w", err)
+		}
+
+		row, err = q.UpsertEntityType(ctx, dbq.UpsertEntityTypeParams{
+			ProjectID:        projectID,
+			Key:              in.Key,
+			Label:            in.Label,
+			LabelPlural:      in.LabelPlural,
+			Description:      in.Description,
+			Color:            in.Color,
+			Icon:             in.Icon,
+			FieldSchema:      raw,
+			ExpectedVersion:  expected,
+			UpdatedByUserID:  in.Actor.UserID,
+			UpdatedByTokenID: in.Actor.TokenID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The guarded DO UPDATE matched nothing: between the read above
+			// and this statement another writer created or advanced the row.
+			return conflictOnEntityTypeKey(ctx, q, projectID, in.Key)
+		}
+		if err != nil {
+			return fmt.Errorf("upsert entity type: %w", err)
+		}
+
+		// A schema change can invalidate stored rows. Re-check them rather
+		// than rejecting the change or inventing values for a new field.
+		return s.revalidateEntitiesOfType(ctx, q, row)
 	})
 	if err != nil {
-		return dbq.EntityType{}, fmt.Errorf("upsert entity type: %w", err)
-	}
-
-	// A schema change can invalidate stored rows. Re-check them rather than
-	// rejecting the change or inventing values for the new field.
-	if err := s.revalidateEntitiesOfType(ctx, row); err != nil {
 		return dbq.EntityType{}, err
 	}
 
-	s.publish(projectID, "type.upserted", `{"key":"`+row.Key+`"}`)
+	s.publish(projectID, "type.upserted", entityTypeEvent{ID: row.ID, Key: row.Key})
 	return row, nil
 }
 
-// EntityTypeByKey loads one type.
+// conflictOnEntityTypeKey re-reads a key whose guarded upsert matched no
+// row and names what actually stands in the way. Both outcomes are real:
+// the winning writer may have created the key with a different spelling,
+// or advanced a version this caller was holding.
+func conflictOnEntityTypeKey(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, key string) error {
+	row, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: key})
+	if err != nil {
+		return fmt.Errorf("re-read entity type after a failed upsert: %w", err)
+	}
+	if row.Key != key {
+		return keyRespellingError("key", key, row.Key)
+	}
+	return &VersionConflictError{Current: row.Version}
+}
+
+// EntityTypeByKey loads one type by its key, matched without regard to
+// case, as every key in this domain is.
 func (s *Service) EntityTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.EntityType, error) {
 	row, err := s.q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: key})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return dbq.EntityType{}, ErrNotFound
-	}
 	if err != nil {
-		return dbq.EntityType{}, fmt.Errorf("lookup entity type: %w", err)
+		return dbq.EntityType{}, notFound(err, "lookup entity type")
+	}
+	return row, nil
+}
+
+// EntityTypeByID loads one type by its id. The id is not enough on its
+// own: the query filters on the project too, so an id belonging to
+// another game reads as not found rather than as somebody else's type.
+func (s *Service) EntityTypeByID(ctx context.Context, projectID, id uuid.UUID) (dbq.EntityType, error) {
+	row, err := s.q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
+	if err != nil {
+		return dbq.EntityType{}, notFound(err, "lookup entity type")
 	}
 	return row, nil
 }
@@ -1829,65 +1992,80 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 }
 
 // RemoveEntityType deletes a type. Without cascade, a type that still has
-// entities is refused: silently deleting a game's content is never the right
-// reading of "remove this type".
+// entities is refused: silently deleting a game's content is never the
+// right reading of "remove this type".
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
-	count, err := s.q.CountEntitiesOfType(ctx, dbq.CountEntitiesOfTypeParams{
-		ProjectID: projectID, EntityTypeID: id,
-	})
-	if err != nil {
-		return fmt.Errorf("count entities: %w", err)
-	}
-	if count > 0 && !cascade {
-		return ErrInUse
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	q := dbq.New(tx)
-	if cascade {
-		if err := q.DeleteEntitiesOfType(ctx, dbq.DeleteEntitiesOfTypeParams{
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		// The count is not the only thing standing between a caller and a
+		// silently emptied type: entities.entity_type_id is ON DELETE
+		// RESTRICT, so the delete below fails on its own if any instance
+		// exists, and removing this check alone leaves
+		// TestRemoveEntityTypeRefusesWhenInUse green. What it earns is the
+		// refusal arriving as a typed ErrInUse without a transaction
+		// aborting on a raw constraint violation first.
+		if !cascade {
+			count, err := q.CountEntitiesOfType(ctx, dbq.CountEntitiesOfTypeParams{
+				ProjectID: projectID, EntityTypeID: id,
+			})
+			if err != nil {
+				return fmt.Errorf("count entities: %w", err)
+			}
+			if count > 0 {
+				return ErrInUse
+			}
+		} else if err := q.DeleteEntitiesOfType(ctx, dbq.DeleteEntitiesOfTypeParams{
 			ProjectID: projectID, EntityTypeID: id,
 		}); err != nil {
 			return fmt.Errorf("delete entities: %w", err)
 		}
-	}
-	rows, err := q.DeleteEntityType(ctx, dbq.DeleteEntityTypeParams{ProjectID: projectID, ID: id})
+
+		rows, err := q.DeleteEntityType(ctx, dbq.DeleteEntityTypeParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			// The RESTRICT foreign key described above is what catches an
+			// entity written between the count and this statement. It is
+			// the same refusal, and a caller should not have to tell a race
+			// apart from the ordinary case.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return ErrInUse
+			}
+			return fmt.Errorf("delete entity type: %w", err)
+		}
+		if rows == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("delete entity type: %w", err)
-	}
-	if rows == 0 {
-		return ErrNotFound
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return err
 	}
 
-	s.publish(projectID, "type.removed", `{"id":"`+id.String()+`"}`)
+	s.publish(projectID, "type.removed", entityTypeEvent{ID: id})
 	return nil
 }
 ```
 
-- [ ] **Step 6: Add the re-validation helper**
+- [x] **Step 7: Add the re-validation helper**
 
-Append to `internal/metamodel/types.go`:
+Appended to `internal/metamodel/types.go`:
 
 ```go
-// revalidateEntitiesOfType re-checks every stored entity against its type's
-// current schema and flags the ones that no longer fit. Nothing is deleted and
-// nothing is back-filled: the designer decides what a newly required field
-// should hold.
-func (s *Service) revalidateEntitiesOfType(ctx context.Context, typ dbq.EntityType) error {
+// revalidateEntitiesOfType re-checks every stored entity against its
+// type's current schema and flags the ones that no longer fit. Nothing is
+// deleted and nothing is back-filled: the designer decides what a newly
+// required field should hold, and a validation pass is not an edit of
+// their content.
+//
+// CheckValues, never Validate: Validate hands back a normalised map with
+// declared defaults injected, and writing that back would silently
+// back-fill every row the sweep touched.
+func (s *Service) revalidateEntitiesOfType(ctx context.Context, q *dbq.Queries, typ dbq.EntityType) error {
 	schema, err := ParseSchema(typ.FieldSchema)
 	if err != nil {
 		return err
 	}
 
-	rows, err := s.q.ListEntitiesOfType(ctx, dbq.ListEntitiesOfTypeParams{
+	rows, err := q.ListEntityFieldsOfType(ctx, dbq.ListEntityFieldsOfTypeParams{
 		ProjectID: typ.ProjectID, EntityTypeID: typ.ID,
 	})
 	if err != nil {
@@ -1915,7 +2093,7 @@ func (s *Service) revalidateEntitiesOfType(ctx context.Context, typ dbq.EntityTy
 		if len(batch.ids) == 0 {
 			continue
 		}
-		if err := s.q.MarkEntitiesOfTypeInvalid(ctx, dbq.MarkEntitiesOfTypeInvalidParams{
+		if err := q.MarkEntitiesOfTypeInvalid(ctx, dbq.MarkEntitiesOfTypeInvalidParams{
 			ProjectID:    typ.ProjectID,
 			EntityTypeID: typ.ID,
 			Ids:          batch.ids,
@@ -1928,19 +2106,194 @@ func (s *Service) revalidateEntitiesOfType(ctx context.Context, typ dbq.EntityTy
 }
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 8: Run the tests to verify they pass**
 
-Run: `go test ./internal/metamodel/ -v`
-Expected: PASS. `TestRemoveEntityTypeRefusesWhenInUse` needs `UpsertEntity` from Task 4; run it again at the end of that task.
+Run: `make check` with `TEST_DATABASE_URL` set.
+Expected: PASS, seventeen tests in this file.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add internal/db/queries internal/db/dbq internal/metamodel
 git commit -m "feat: entity types with optimistic concurrency and cascade removal"
 ```
 
----
+**Corrections made during implementation** (a pass over the landed
+package, written as Task 3 shipped so Tasks 4-6 build on what exists
+rather than on what was planned):
+
+1. **`Service.CreateBareProjectForTest` was not written.** It would have
+   shipped in the binary, exported, and been callable from the MCP surface
+   Task 7 mounts — production API whose only purpose is a test fixture.
+   The test file creates its project with one `INSERT` through the pool it
+   already holds, which needs no production surface and no import of
+   `internal/projects`. **The helper's signature changed with it:**
+   `newProject(t *testing.T, pool *pgxpool.Pool) uuid.UUID`. The Task 4,
+   5 and 6 test blocks below still read `newProject(t, svc)`; they mean
+   `newProject(t, pool)`.
+2. **The plan's `TestUpsertEntityTypeRejectsBadSchema` asserted the wrong
+   sentinel.** It expected `ErrSchemaViolation` from a schema whose enum
+   declares no options, but Task 2's correction 14 made `Schema.Check`
+   return a `*SchemaError` satisfying `ErrInvalidSchema` and deliberately
+   *not* `ErrSchemaViolation` — the plan block predated the split. The
+   landed test asserts `ErrInvalidSchema`, asserts `ErrSchemaViolation` is
+   false, pins the exact problem (`field_schema[0]: an enum field needs
+   options`), and checks nothing was stored.
+3. **`Actor` was a dead field.** The plan declared it on
+   `EntityTypeInput`, and `0004_metamodel.sql` has the
+   `updated_by_user_id` / `updated_by_token_id` columns to hold it, but no
+   code block ever passed it to a query: every write would have recorded a
+   NULL editor. `UpsertEntityType` (the SQL) now takes both, on the insert
+   and on the conflict update, and `TestUpsertEntityTypeStoresTheDeclaredSchemaAndTheActor`
+   pins it. Proved red by passing `nil` in place of `in.Actor.UserID`.
+4. **The row-key policy is settled here, as Task 2's third open item
+   asked. Decision: entity-type, relation-type and entity keys get their
+   own rule — `^[A-Za-z0-9][A-Za-z0-9_-]*$`, at most 64 characters —
+   which permits case, and a spelling that differs from a stored key only
+   by case is refused with a message naming both spellings.**
+
+   The split with `keyPattern` is not an inconsistency once the reason for
+   each rule is stated. `keyPattern` forbids upper case because two field
+   keys differing only by case are two distinct keys inside a jsonb
+   object and nothing downstream would ever catch the collision. A row key
+   cannot produce that collision at all: every uniqueness index over these
+   keys is `UNIQUE (project_id, lower(key))`, so the database folds case
+   for them. Both rules deliver the same guarantee — no two keys differ
+   only by case — through the mechanism each context actually has.
+
+   The two alternatives were weighed and rejected:
+
+   - *Extend `keyPattern`, forbidding capitals in row keys.* It buys
+     nothing the folding index does not already give, and it costs the
+     thing the folding index was chosen for. `0004_metamodel.sql` says so
+     in its own comment on `entity_types_key_key`: keys are matched
+     case-insensitively "so a second run with different casing collides
+     with the existing row instead of creating a twin". Games capitalise
+     their handles — `Hogger`, `Elwynn_Forest`, `GP_Monaco` — and a
+     designer should not have to rename their content to satisfy an
+     identifier convention Maestro does not otherwise impose. Leading
+     digits are allowed for the same reason: `1999_season` and
+     `500_miles` are ordinary entity keys.
+   - *Fold case in Go before the database sees it.* Storing `hogger` for
+     a designer who wrote `Hogger` silently rewrites the handle their
+     design documents, exports and relations refer to. Maestro does not
+     edit a game's vocabulary on its behalf.
+
+   **What a designer sees at a collision.** This is the half the open item
+   insisted on, and the reason the rule alone is not the whole answer.
+   `Key: "Hogger"` exists; someone writes `Key: "hogger"`. Three outcomes
+   were possible and only one is defensible:
+
+   - The `ON CONFLICT (project_id, lower(key))` clause would have
+     *silently updated* the existing row under the other spelling — a
+     typo'd capital quietly overwriting content.
+   - Letting it reach the database bare would raise SQLSTATE 23505 with
+     no field path, or — because the upsert does carry an `ON CONFLICT` —
+     a version conflict, which says nothing whatever about the real
+     problem.
+   - So the upsert reads the row first, under its lock, and refuses a
+     spelling that differs from the stored one:
+
+     ```
+     key: "hogger" already exists here spelled "Hogger", and keys are
+     matched without regard to case: use "Hogger" to update it, or pick a
+     key that differs by more than capitalisation
+     ```
+
+     It names both spellings and both remedies, and a designer never has
+     to know an index folds case. Re-seeding is unaffected: a script that
+     spells its keys consistently never meets this, which is the whole
+     population of correct callers.
+
+   `checkRowKey` returns a `*ValidationError` at path `key`, not a
+   `*SchemaError`: the caller is writing a row, not declaring a schema,
+   which is exactly the distinction the two sentinels carry. The
+   migration was not touched, and `keyPattern` was not touched. **Tasks 4
+   and 5 apply `checkRowKey` to entity keys and relation-type keys**; it
+   is written once, in `internal/metamodel/keys.go`, for all three.
+5. **The version check is a compare-and-set in SQL, not a read followed by
+   a write.** The plan's `SELECT` then unguarded `ON CONFLICT DO UPDATE`
+   is a lost update: two writers both read version 1, both succeed, and
+   the second overwrites a row it never saw. The landed upsert reads
+   through `GetEntityTypeByKeyForUpdate` (`FOR UPDATE`, inside the
+   transaction, so the version a caller is told about is the one its write
+   will meet) *and* guards the `DO UPDATE` with
+   `WHERE entity_types.version = @expected_version`. A creating caller has
+   no version to expect and passes `noVersion` (-1), which no stored
+   version can equal — a no-op on the insert path, a guaranteed mismatch
+   if a row turns out to exist. A guard that matches nothing returns no
+   row, which `conflictOnEntityTypeKey` turns into the typed error, and it
+   re-reads to say which conflict it actually is: a rival may have taken
+   the key under a different spelling rather than advanced a version.
+   The lock alone does not cover this: before the first row exists there
+   is nothing to lock. `TestACreationThatLosesTheRaceForItsKeyIsRefused`
+   drives the interleaving with an open rival transaction rather than a
+   second goroutine, so it is deterministic; proved red by loosening the
+   guard to `>=`.
+6. **The upsert and the re-validation sweep are one transaction.** The
+   plan committed the type row and then swept. Half of that landing
+   leaves a type declaring a schema its own entities were never judged
+   against, with nothing to notice. `Service.withTx` wraps both, and
+   `revalidateEntitiesOfType` takes the transaction's `*dbq.Queries`.
+7. **The sweep does not rewrite rows whose verdict has not changed.**
+   `MarkEntitiesOfTypeInvalid` carries `AND invalid <> @invalid`. Without
+   it every schema edit updates every entity of the type — including the
+   ones flipping from `false` to `false` — and the `set_updated_at`
+   trigger Task 1's correction 5 added moves their `updated_at`, so a
+   validation pass reads as an edit of content nobody edited.
+   `TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem` asserts
+   `updated_at` and the stored `fields` are both untouched; proved red by
+   dropping the guard.
+8. **The sweep reads a narrow query.** `ListEntityFieldsOfType` selects
+   `id, fields` only: it runs over every entity of a type on every schema
+   edit and needs nothing else. `ListEntitiesOfType`, which the plan named
+   here, is not in the file — **Task 4 adds it**, for its own listing.
+   `decodeFields`, which Task 4's block defines in `entities.go`, already
+   exists in `service.go`; Task 4 must not redefine it.
+9. **No write in `metamodel.sql` sets `updated_at`.** The trigger from
+   Task 1's correction 5 owns the column. Carrying the clause as well is
+   the two-mechanisms-for-one-column shape that correction went in to
+   remove — harmless while every query remembers it, silently wrong the
+   first time one does not. Tasks 4 and 5 should drop it from their blocks
+   for the same reason.
+10. **`ListEntityTypes` orders by `label, id`.** Labels are not unique —
+    two types can both be called "Zone" — and a label-only order
+    reshuffles ties between calls, the same reason `ListProjectsForUser`
+    and `ListMembers` already carry an id tiebreak.
+11. **`RemoveEntityType` counts inside the transaction and maps 23503 to
+    `ErrInUse`.** The plan counted before opening one, so an entity
+    written in between produced a raw foreign-key violation instead of the
+    refusal the count exists to give. The count is defence in depth, not
+    the enforcing mechanism: `entities.entity_type_id` is `ON DELETE
+    RESTRICT`, and removing the count alone leaves
+    `TestRemoveEntityTypeRefusesWhenInUse` green — what it earns is a
+    typed `ErrInUse` without a transaction aborting on a constraint
+    first. Removing both the count and the 23503 mapping is what turns the
+    test red.
+12. **Event payloads are typed and carry only identity.**
+    `Service.publish` takes `any`, matching `realtime.Event.Payload`,
+    rather than the plan's hand-built JSON string, and `type.upserted` /
+    `type.removed` carry `{id, key}` and nothing else. The reasoning is
+    `internal/web/publish.go`'s: publication order is not commit order, so
+    a payload holding a value (a label, a schema) could stably tell a
+    client the wrong one with nothing to signal it. The client re-reads.
+13. **Every negative assertion names its own failure.** Each test above
+    was proved red by breaking exactly the code it covers: removing
+    `checkRowKey`, removing the spelling refusal, removing
+    `Schema.Check`, dropping `ErrNotFound` on a zero-row delete, loosening
+    the SQL version guard, dropping the `invalid <>` guard, dropping the
+    project filter from `GetEntityTypeByID`, ordering the listing by key,
+    dropping the actor, and making the sweep demand every declared field
+    be present. `TestSchemaChangeDoesNotBackFillDeclaredDefaults` is
+    partly a regression guard: no code writes values back today, so only
+    its "a row missing a defaulted field still fits" half can be mutated
+    red.
+14. **Schema-evolution classification is still open, and Task 4 still owns
+    it.** Nothing here tells a caller whether an edit widens or narrows a
+    schema, so every edit sweeps. That is correct but unconditional: a
+    type with hundreds of entities pays a full re-validation for a
+    changed label. The mitigation Task 2 asked for — always sweep, with
+    `CheckValues` — is what shipped.
 
 ### Task 4: Entities, single and bulk
 

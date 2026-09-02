@@ -4351,6 +4351,10 @@ it* — and one is a claim that had gone false.)
     reads and is one edit away from being narrowed again, where the
     dangling id was neither visible nor repairable. Commit `4c0247f`.
 
+    **Superseded in part by corrections 22 and 23 — read those before
+    relying on this one.** The prune alone closes only the sequential
+    path, and it publishes.
+
 16. **Both bad endpoints of an edge are reported in one answer.**
     Returning on the source made the two halves of one decision disagree:
     `checkEndpointTypes` already reports both endpoint *lists* in one
@@ -4363,6 +4367,9 @@ it* — and one is a claim that had gone false.)
     the item under `not_found`. The price is the two lookups the target
     end costs on an item that was going to fail anyway; the success path
     always paid them. Commit `05e5e33`.
+
+    **Extended by correction 25**, which found this covered resolution
+    only and not the endpoint rule the same function checks next.
 
 17. **Correction 9 was false as written, and the test that should have
     caught it was the reason.** It claims an unknown `TypeKey` in a
@@ -4397,6 +4404,12 @@ it* — and one is a claim that had gone false.)
     than unlikely: there is no key to name, and if it ever fires the
     schema is inconsistent. Both sites now say so, so the next sweep does
     not have to re-derive it. Commit `fce2df7` and the code commit below.
+
+    **That last sentence was itself false, and correction 24 fixes it.**
+    `ON DELETE RESTRICT` does not make either read unreachable: both
+    cascading removals delete the children first and the parent second.
+    The rest of the sweep — which lookups may use the generic helper —
+    stands.
 
 18. **A test proved nothing its name claimed, and the claim was the
     premature half.** `TestAnAtomicRelationBatchSeesItsOwnEntities`
@@ -4445,6 +4458,10 @@ it* — and one is a claim that had gone false.)
     records, at its worst. If Tasks 6-8 find the coarse signal too blunt,
     the answer is a payload carrying the count or the ids, not a per-edge
     event.
+
+    **Correction 23 adds a fourth effect of `type.removed` that this note
+    deliberately does not cover**, because it deletes nothing: the
+    endpoint-list prune, which is announced per row rather than inferred.
 
 20. **`Limit: 501` yielded 100 rows, so asking for slightly too much got
     strictly less than asking for the cap.** `ListRelations` folded "no
@@ -4495,6 +4512,158 @@ it* — and one is a claim that had gone false.)
     cost what it was assumed to cost, and relaxing `relations_edge_key`
     instead makes the version question moot — and that index is the
     `ON CONFLICT` target a re-seed's idempotence rests on.
+
+**Corrections from the re-review of Task 5** (a third pass, over the
+landed package *and* the corrections block above. Five findings: one race
+the corrections above claimed to have closed and had not, one silent
+write nothing announced, and three doc comments that told the next reader
+more than the code does. Every one of them is a sentence that had gone
+false — which is the failure mode this series keeps finding, now in the
+corrections themselves.)
+
+22. **Correction 15's prune closed the sequential path and left the
+    concurrent one open, and the doc comment said otherwise.**
+    `RemoveEntityType`'s comment claimed the prune was "exact for the
+    only way an id can go dangling today". It was exact for every id that
+    existed when its statement ran, which is not the same thing:
+    `PruneEntityTypeFromEndpointLists` is a single `UPDATE` under READ
+    COMMITTED, and `UpsertRelationType`'s **creation** path had no row for
+    it to find and took no lock of its own against `entity_types`. A
+    relation type created between the prune's statement and the removal's
+    commit kept the removed id. The *update* path was genuinely safe —
+    the prune's own row lock plus READ COMMITTED's re-check catch it — so
+    creation was the whole hole, and creation is the common case for a
+    seeding agent. The victim reached exactly the state correction 15
+    calls unrepairable.
+
+    **The fix is a share lock and not a re-run of the prune**, of the
+    three shapes on the table. Re-running the prune as `RemoveEntityType`'s
+    last statement narrows the window without closing it — it is another
+    unlocked `UPDATE`, and a creation committing after *it* is the same
+    bug one statement later. The junction-table migration closes it
+    properly and is still the right end state, and is still a schema
+    decision rather than this correction's. What is left is to make the
+    two writers agree on a lock, and the read that has to happen anyway is
+    the natural place for it: `checkEndpointTypes` now reads through
+    `LockEndpointEntityTypes`, `SELECT … WHERE id = ANY(…) FOR SHARE`, so
+    the removal's `DELETE` waits for any transaction currently declaring
+    a rule over that type, and the prune — which runs after the delete —
+    then sees the row that transaction wrote. `FOR SHARE` and not `FOR
+    UPDATE`: two writers may name the same entity type at once and only a
+    delete of it has to wait. It also folds a per-id loop into one
+    statement, since the lock and the check are the same read.
+
+    **Lock order is load-bearing and is recorded in the query.**
+    `UpsertRelationType` takes this lock *before* the `FOR UPDATE` on its
+    own `relation_types` row, and `RemoveEntityType` deletes the entity
+    type before pruning the relation types; both take `entity_types`
+    first, so neither holds what the other waits for. Moving the endpoint
+    check after the relation type's row lock reintroduces a deadlock
+    between exactly these two calls.
+
+    `TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID`
+    stages the interleaving rather than racing for it: a third connection
+    holds an uncommitted `relation_types` row spelled `takes_place_in`,
+    which parks the upsert on the unique index after it has read and
+    locked its endpoint types and before it writes anything; the removal
+    then runs into the share lock. The test is deterministic in both
+    directions — it polls `pg_stat_activity` in its own throwaway
+    database rather than sleeping — and it was watched fail with the
+    dangling id before the lock existed and again with `FOR SHARE`
+    stripped out of the generated query. Commit `c6a2fb1`.
+
+23. **The prune wrote rows nobody named and announced nothing; it now
+    publishes `relation_type.upserted` for each.** Correction 15
+    introduced a fourth effect of `type.removed` that correction 19's
+    cascade note does not cover, and could not: that note is about edges
+    that are *deleted*, and here nothing is deleted — the relation type is
+    still there and what changed is the rule it states. No caller-visible
+    write bumped its `version` either, so a subscriber diffing versions
+    saw nothing, and Task 8's rendering of an endpoint rule would show a
+    list the database no longer holds.
+
+    **Publishing beats widening the note**, which is the opposite call to
+    correction 19 and for the reason correction 19 itself gives. That note
+    refuses a per-edge event because a cascade over a well-connected
+    entity would put thousands of events on a 64-deep buffer; a game has a
+    handful of relation types, so the same argument does not reach here.
+    And a subscriber told only "`type.removed` also invalidates endpoint
+    lists" has to re-read every relation type of the game to find out
+    which; the event names the row. `relation_type.upserted` and not a new
+    event kind, because it is the same change a caller-visible edit of the
+    same two columns publishes, arriving by another route.
+    `PruneEntityTypeFromEndpointLists` returns the identity of each row it
+    changed, and the caller sorts them by key before publishing — an
+    `UPDATE` cannot order its `RETURNING`, and an unordered burst is a
+    burst that arrives differently twice.
+    `TestAPrunedEndpointListIsAnnouncedToTheRowsOwnSubscribers` pins the
+    event and the untouched relation type that must *not* be announced.
+    Commit `b0de96b`.
+
+24. **"Unreachable rather than merely unlikely" was false at both sites,
+    and it is the last paragraph of correction 17 that said so.**
+    `RemoveRelation` and `RemoveEntity` each read their row and then read
+    its parent type, and both comments argued the second read cannot come
+    back empty because the foreign key is `ON DELETE RESTRICT` inside the
+    read's own transaction. RESTRICT does not protect it: it refuses a
+    delete that would orphan a child, and both cascading removals delete
+    the children *first* and the type second. The first read takes no row
+    lock, so under READ COMMITTED the type can vanish between the two
+    statements. Verified live at both sites.
+
+    **A doc defect and not a behavioural one**, which is why nothing
+    changed but the comments. The `not_found` the branch produces is the
+    right answer: the row being read is itself being deleted by the same
+    cascade, so the call was going to fail a statement later anyway. What
+    was wrong was telling the next sweep the branch cannot fire and that
+    firing would mean a corrupt schema — both halves false, and the second
+    one is the kind of claim that gets a real incident misdiagnosed. Both
+    comments now say it is reachable only against a cascading removal of
+    the parent, where `not_found` is correct regardless. Commit `967e2da`.
+
+25. **Correction 16 covered resolution only, and its own comment claimed
+    otherwise.** `upsertRelationWith` justified reporting both ends
+    together as "the same argument `checkEndpointTypes` makes twenty lines
+    from here". `checkEndpointTypes` genuinely reports both endpoint lists
+    in one pass; the edge path did not — the two `endpointAllowed` checks
+    still returned one at a time, so two wrongly-typed ends yielded only
+    the source's mismatch. Worse, a caller with one *missing* end and one
+    *wrongly-typed* end heard only the `not_found`, fixed it, resent, and
+    only then heard the mismatch: the hidden second hop, inside the code
+    whose comment said it had been removed.
+
+    Both ends are now judged — resolved and checked against the endpoint
+    rule — before either is reported; an end that did not resolve has no
+    type to judge and its own failure stands. **`not_found` wins when the
+    two halves disagree**, and it falls out of `failureFor`'s existing
+    order rather than needing a rule of its own. That is the right way
+    round and not an accident: an end that does not exist cannot be judged
+    against the endpoint rule at all, and creating it is the step that
+    decides which type it will have — so `not_found` names the work to do
+    next, and the mismatch travels in the message so the retry already
+    knows about it. `TestBothBadEndsOfAnEdgeAreAnsweredInOnePass` pins the
+    message and, through `UpsertRelations`, the wire code; flipping the
+    two arms of `failureFor` turns it red.
+
+    **The doubled prefix is gone with it.** Two ends failing the same way
+    printed `not_found: source: …; not_found: target: …`, naming a code
+    the reader had already been given. `bothEndpoints` returns a
+    `joinedEndpointError` whose `Unwrap() []error` keeps both sentinels
+    reachable — `errors.Is` and `failureFor` behave exactly as before —
+    and whose message drops the second copy of the prefix *only* when the
+    two halves agree on it. When they name different codes both are kept,
+    because then the second code is news. Commit `8ebc29e`.
+
+26. **A caveat, recorded rather than closed: a raced edge names one
+    missing parent per answer.** Postgres reports the first constraint a
+    statement violates and stops, so a race deleting two of an edge's
+    three parents at once is answered with one of them and the caller
+    meets the second on its retry — the same class of hidden second hop
+    correction 25 closes for the ordinary path. It is left open
+    deliberately: closing it would mean re-reading all three parents after
+    a failed write to find out which are still gone, work on a path only a
+    race reaches to save a round trip only a rarer race costs.
+    `edgeParentViolation`'s comment now says so. Commit `5478acc`.
 
 - [x] **Step 1: Add the queries**
 

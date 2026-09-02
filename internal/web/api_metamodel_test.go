@@ -941,3 +941,101 @@ func TestAWrongTypedFieldIsNamed(t *testing.T) {
 		t.Errorf("message = %q, want it to say the body is malformed", got.Message)
 	}
 }
+
+// TestASeedSizedBatchIsAccepted pins maxContentRequestBodyBytes' whole
+// justification: this surface's bound exists because the 16 KiB that is
+// right for a login would refuse an ordinary seed as malformed. A batch
+// far over that limit and far under this one has to land.
+func TestASeedSizedBatchIsAccepted(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+
+	items := make([]any, 0, 300)
+	for i := 0; i < 300; i++ {
+		items = append(items, map[string]any{
+			"type_key": "quest",
+			"key":      "quest-" + strconv.Itoa(i),
+			"name":     "Quest " + strconv.Itoa(i) + ": " + strings.Repeat("a long designed name ", 6),
+		})
+	}
+	body, err := json.Marshal(map[string]any{"items": items})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if len(body) <= 16*1024 {
+		t.Fatalf("the batch is %d bytes, too small to prove anything about a 16 KiB bound", len(body))
+	}
+
+	req := httptest.NewRequest(http.MethodPost, f.path("/entities"), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(f.cookie)
+	rec := httptest.NewRecorder()
+	f.srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("seed of %d bytes = %d: %s", len(body), rec.Code, rec.Body.String())
+	}
+	// A batch answers 200 with a report even when rows failed, so the
+	// status alone would pass for a request that landed nothing.
+	var report struct {
+		Written []struct {
+			Key string `json:"key"`
+		} `json:"written"`
+		Failed []any `json:"failed"`
+	}
+	decodeBody(t, rec, &report)
+	if len(report.Written) != len(items) || len(report.Failed) != 0 {
+		t.Fatalf("wrote %d of %d rows, %d failed: %s",
+			len(report.Written), len(items), len(report.Failed), rec.Body.String())
+	}
+}
+
+// TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame
+// pins hasRelatedTo's "any part, not all four". Read as "all four", a
+// query naming one part of the traversal and forgetting the rest falls
+// through to an ordinary listing — which answers a caller who asked for
+// one entity's neighbours with every entity in the game, the exact
+// failure that function's comment argues against.
+func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testing.T) {
+	f := newRESTFixture(t)
+	invalidAndValidQuests(t, f)
+
+	for _, query := range []string{
+		"?related_to.entity_key=hogger",
+		"?related_to.entity_type_key=quest",
+		"?related_to.relation_type_key=takes_place_in",
+		"?related_to.direction=outgoing",
+	} {
+		rec := f.as(t, http.MethodGet, "/entities"+query, nil)
+		if rec.Code == http.StatusOK {
+			t.Errorf("%s = 200 with %s, want a refusal rather than the whole game",
+				query, rec.Body.String())
+		}
+	}
+}
+
+// TestRemovingATypeStillInUseIsAConflict pins the status the domain's
+// own refusal gets. in_use is not the caller being wrong — the request
+// was well formed and the type is real — it is the world holding on to
+// the row, which is what 409 says and 400 does not.
+func TestRemovingATypeStillInUseIsAConflict(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
+		map[string]any{"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger"},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("seed = %d: %s", rec.Code, rec.Body.String())
+	}
+	var declared struct {
+		ID string `json:"id"`
+	}
+	decodeBody(t, f.as(t, http.MethodGet, "/types/by-key/quest", nil), &declared)
+
+	rec := f.as(t, http.MethodDelete, "/types/by-id/"+declared.ID, nil)
+	assertError(t, rec, http.StatusConflict, "in_use", "")
+
+	// And with cascade the same removal succeeds, so the conflict is
+	// about the entities and not about the route.
+	if rec := f.as(t, http.MethodDelete, "/types/by-id/"+declared.ID+"?cascade=true", nil); rec.Code != http.StatusOK {
+		t.Fatalf("cascade remove = %d: %s", rec.Code, rec.Body.String())
+	}
+}

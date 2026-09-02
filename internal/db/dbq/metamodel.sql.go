@@ -514,6 +514,11 @@ type ListEntitiesPageParams struct {
 
 // One page of a game's entities, keyed on (name, id).
 //
+// entities_listing_idx, added in 0005, is (project_id, name, id): this
+// statement's filter and its whole sort key, so the position a cursor
+// carries is sought to rather than arrived at by sorting the game. The
+// migration carries the measurement and what the index costs a write.
+//
 // **The project filter is load-bearing**, as it is on ListRelations and
 // for the same reason: the after_name/after_id position is
 // caller-supplied and names no parent whose composite key could scope
@@ -525,7 +530,22 @@ type ListEntitiesPageParams struct {
 // keyset whose comparison disagrees with its own ORDER BY skips or
 // repeats rows at a page boundary and says nothing, so the comparison
 // must use the same operator the sort does -- and here it demonstrably
-// does, rather than being trusted to agree. The text form was measured
+// does, rather than being trusted to agree.
+//
+// **`id` in the ORDER BY is half of that agreement and it is pinned by a
+// test**, which it was not at first: dropping it left the whole suite
+// green, because every test then in the suite seeded distinct names.
+// With ten rows sharing one name and a page of three, the unpinned
+// version returned five distinct rows of ten and three of them twice --
+// Postgres orders tied rows however each statement happens to, so the
+// comparison lands nowhere near where the previous page stopped.
+// Duplicate names are ordinary in game content, so
+// TestPagingIsStableWhenEveryRowSharesOneName now holds both listings to
+// it. The collation half below was defended from the start; this half
+// was not, and a convention defended only by a comment is what the next
+// listing will copy.
+//
+// The text form was measured
 // on this project's own Postgres before the choice was made: over
 // 300,000 random pairs under its en_US.utf8 collation, (a < b) and
 // (a::text < b::text) never disagreed, so the cast is not a live bug
@@ -1074,9 +1094,26 @@ type SearchEntitiesRow struct {
 // its ties between two identical calls.
 //
 // The tsquery is built twice, in the projection and in the predicate,
-// because a WHERE cannot refer to an output column's alias. It is the
-// same expression over the same immutable function and the planner
-// evaluates it once.
+// because a WHERE cannot refer to an output column's alias. **The
+// planner does not fold the two into one**, which this comment used to
+// claim it did. Measured on this project's own Postgres, 200 evaluations
+// of a non-constant plainto_tsquery: 0.63 ms each written once against
+// 1.44 ms written twice at 4 KiB of query text, and 4.09 ms against
+// 8.70 ms at 15 KiB. There is no common-subexpression elimination here;
+// the second build costs what the first one did.
+//
+// It stays written twice anyway, now that MaxSearchQuery bounds the
+// query at 4 KiB: the doubling is worth about 0.8 ms on the worst query
+// this surface will accept, and it was only ever alarming while the
+// query side was unbounded. The obvious way to build it once, a
+// `WITH q AS MATERIALIZED (SELECT plainto_tsquery(...) AS ts)` joined
+// in, was measured too. It keeps the Bitmap Index Scan on
+// entities_search_idx, so it is not wrong, but the tsquery stops being a
+// constant the planner can see, and its row estimate for the match went
+// from 5 (exact) to 100 (a default guess) on the same data. Trading a
+// correct selectivity estimate on every search for 0.8 ms on the largest
+// accepted query is the wrong way round; whoever raises MaxSearchQuery
+// should measure both again.
 func (q *Queries) SearchEntities(ctx context.Context, arg SearchEntitiesParams) ([]SearchEntitiesRow, error) {
 	rows, err := q.db.Query(ctx, searchEntities,
 		arg.Query,

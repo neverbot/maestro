@@ -8,6 +8,7 @@ package db
 
 import (
 	"context"
+	"io/fs"
 	"net/url"
 	"os"
 	"strings"
@@ -73,33 +74,36 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 //
 // migrateDown rolls back a single migration (the most recent one goose
 // hasn't already rolled back), so tearing down everything Migrate applied
-// means calling it once per migration file, not once. This is currently
-// four calls because there are currently four migrations (0001, 0002,
-// 0003, 0004); a fifth migration needs a fifth call here, the same way it
-// needs its own entry in Task 8's file structure table.
+// means calling it once per migration file, not once. The count comes
+// from the embedded directory rather than from a literal: it used to be a
+// hand-written four, which meant every new migration made this test fail
+// in a way that looked like a broken rollback and was really a stale
+// number. A new migration still needs its own entry in Task 8's file
+// structure table; it no longer needs an edit here.
 func TestMigrateUpDownUp(t *testing.T) {
 	t.Parallel()
 	pool := newTestDatabase(t)
 	ctx := context.Background()
 
+	files, err := fs.Glob(migrationsFS, "migrations/*.sql")
+	if err != nil {
+		t.Fatalf("list migrations: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("no migrations found; this test would assert nothing")
+	}
+
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if err := migrateDown(ctx, pool); err != nil {
-		t.Fatalf("migrateDown (0004): %v", err)
-	}
-	if err := migrateDown(ctx, pool); err != nil {
-		t.Fatalf("migrateDown (0003): %v", err)
-	}
-	if err := migrateDown(ctx, pool); err != nil {
-		t.Fatalf("migrateDown (0002): %v", err)
-	}
-	if err := migrateDown(ctx, pool); err != nil {
-		t.Fatalf("migrateDown (0001): %v", err)
+	for i := len(files) - 1; i >= 0; i-- {
+		if err := migrateDown(ctx, pool); err != nil {
+			t.Fatalf("migrateDown (%s): %v", files[i], err)
+		}
 	}
 
 	var exists bool
-	err := pool.QueryRow(ctx,
+	err = pool.QueryRow(ctx,
 		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users')`,
 	).Scan(&exists)
 	if err != nil {

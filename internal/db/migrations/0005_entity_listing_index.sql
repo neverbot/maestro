@@ -1,0 +1,37 @@
+-- The index the entity listing's keyset sorts on.
+--
+-- 0004 gave relations the equivalent (relations_project_idx, on
+-- (project_id, created_at)) and its comment says why: without a
+-- project-leading index in the listing's own sort order, the position a
+-- cursor carries cannot be sought to, so every page reads the whole
+-- game and sorts it. entities was left without one, and it is the table
+-- read far more often -- every listing, every traversal's far end, and
+-- the game home page.
+--
+-- Measured on this project's own Postgres, 50,000 entities across 20
+-- games, paging the middle game 50 rows at a time:
+--
+--   without: Bitmap Index Scan on entities_key_key over the whole
+--            game, 2,499 rows to the heap, then a top-N sort; 75 shared
+--            buffers a page, 200 pages in 235 ms.
+--   with:    Index Scan with the cursor's (name, id) folded into the
+--            Index Cond, 50 rows read; 52 buffers a page, 200 pages in
+--            49 ms.
+--
+-- **What it costs.** 3,320 kB over those 50,000 rows, about 68 bytes a
+-- row, and one more b-tree entry to maintain on every insert and on
+-- every update that moves `name` -- which is every rename, so this is a
+-- write cost a content editor pays and not only a bulk import. Measured
+-- over 2,000 single-row inserts it did not rise above the round trip:
+-- 580 ms with the index against 609 ms without, which is to say the cost
+-- is real but below what this workload can see.
+--
+-- entities_key_key already leads with project_id, which is why the
+-- unindexed plan was a bitmap scan rather than a sequential one; what it
+-- cannot do is deliver rows in name order, and that is the whole
+-- difference above.
+-- +goose Up
+CREATE INDEX entities_listing_idx ON entities (project_id, name, id);
+
+-- +goose Down
+DROP INDEX entities_listing_idx;

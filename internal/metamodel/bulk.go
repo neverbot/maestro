@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
@@ -255,6 +256,27 @@ func bulkAtomic[In, Out any](
 		spec.publish(written)
 	}
 	return rows, nil
+}
+
+// foldedIdentity builds the string a bulkSpec.identity returns from the
+// parts of a row's identity, folding case as the unique indexes over
+// these keys do (all of them are UNIQUE (…, lower(key)), and
+// strings.ToLower is exact for them because rowKeyPattern admits ASCII
+// only).
+//
+// Every part is length-prefixed, including the last, because the driver
+// folds an item to one string and none of these parts is pattern-checked
+// before it gets here: an entity's type key is answered by a lookup and
+// not by a pattern, and an edge's five parts are all lookups. Without the
+// prefixes ("ab", "c") and ("a", "bc") meet in the middle, and one is
+// refused as a repetition of the other.
+func foldedIdentity(parts ...string) string {
+	var b strings.Builder
+	for _, part := range parts {
+		part = strings.ToLower(part)
+		fmt.Fprintf(&b, "%d:%s", len(part), part)
+	}
+	return b.String()
 }
 
 // repeatedIdentities finds the items of a batch that address a row an

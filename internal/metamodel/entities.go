@@ -140,16 +140,9 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 // deliberately does not know.
 //
 // Identity is (type key, key), both folded, because that is what the
-// unique index folds: one key under two types is two rows. Folding with
-// strings.ToLower is exact here — rowKeyPattern admits ASCII only, so
-// there is no case where it and the index's lower() can disagree — and
-// an item whose key is malformed enough to escape that is refused on its
-// own arguments anyway. The two parts are joined length-prefixed rather
-// than with a separator: bulk.go folds an item to one string, a type key
-// is not validated here at all — an unknown one is answered by the
-// lookup, not by a pattern — and no character can be assumed absent from
-// it, so ("ab", "c") and ("a", "bc") must not be able to meet in the
-// middle and have one refused as a repetition of the other.
+// unique index folds: one key under two types is two rows. foldedIdentity
+// does the folding and the length-prefixed join, and records why both are
+// what they are.
 //
 // The message names both indices and the case-folding rule, because the
 // caller cannot see either from what it sent: a batch built from a file
@@ -157,8 +150,7 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 func (s *Service) entityBulkSpec(projectID uuid.UUID) bulkSpec[EntityInput, upsertedEntity] {
 	return bulkSpec[EntityInput, upsertedEntity]{
 		identity: func(in EntityInput) string {
-			typeKey := strings.ToLower(in.TypeKey)
-			return fmt.Sprintf("%d:%s:%s", len(typeKey), typeKey, strings.ToLower(in.Key))
+			return foldedIdentity(in.TypeKey, in.Key)
 		},
 		key: func(in EntityInput) string { return in.Key },
 		repeated: func(i, first int, in EntityInput) FieldError {

@@ -29,6 +29,24 @@ func (q *Queries) CountEntitiesOfType(ctx context.Context, arg CountEntitiesOfTy
 	return count, err
 }
 
+const countRelationsOfType = `-- name: CountRelationsOfType :one
+SELECT count(*) FROM relations
+WHERE project_id = $1::uuid
+  AND relation_type_id = $2::uuid
+`
+
+type CountRelationsOfTypeParams struct {
+	ProjectID      uuid.UUID
+	RelationTypeID uuid.UUID
+}
+
+func (q *Queries) CountRelationsOfType(ctx context.Context, arg CountRelationsOfTypeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRelationsOfType, arg.ProjectID, arg.RelationTypeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteEntitiesOfType = `-- name: DeleteEntitiesOfType :exec
 DELETE FROM entities
 WHERE project_id = $1::uuid
@@ -79,6 +97,58 @@ func (q *Queries) DeleteEntityType(ctx context.Context, arg DeleteEntityTypePara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteRelation = `-- name: DeleteRelation :execrows
+DELETE FROM relations
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type DeleteRelationParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) DeleteRelation(ctx context.Context, arg DeleteRelationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRelation, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteRelationType = `-- name: DeleteRelationType :execrows
+DELETE FROM relation_types
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type DeleteRelationTypeParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) DeleteRelationType(ctx context.Context, arg DeleteRelationTypeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRelationType, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteRelationsOfType = `-- name: DeleteRelationsOfType :exec
+DELETE FROM relations
+WHERE project_id = $1::uuid
+  AND relation_type_id = $2::uuid
+`
+
+type DeleteRelationsOfTypeParams struct {
+	ProjectID      uuid.UUID
+	RelationTypeID uuid.UUID
+}
+
+func (q *Queries) DeleteRelationsOfType(ctx context.Context, arg DeleteRelationsOfTypeParams) error {
+	_, err := q.db.Exec(ctx, deleteRelationsOfType, arg.ProjectID, arg.RelationTypeID)
+	return err
 }
 
 const getEntityByID = `-- name: GetEntityByID :one
@@ -292,6 +362,135 @@ func (q *Queries) GetEntityTypeByKeyForUpdate(ctx context.Context, arg GetEntity
 	return i, err
 }
 
+const getRelationByID = `-- name: GetRelationByID :one
+SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relations
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type GetRelationByIDParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) GetRelationByID(ctx context.Context, arg GetRelationByIDParams) (Relation, error) {
+	row := q.db.QueryRow(ctx, getRelationByID, arg.ProjectID, arg.ID)
+	var i Relation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RelationTypeID,
+		&i.SourceID,
+		&i.TargetID,
+		&i.Fields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getRelationTypeByID = `-- name: GetRelationTypeByID :one
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type GetRelationTypeByIDParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) GetRelationTypeByID(ctx context.Context, arg GetRelationTypeByIDParams) (RelationType, error) {
+	row := q.db.QueryRow(ctx, getRelationTypeByID, arg.ProjectID, arg.ID)
+	var i RelationType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.Description,
+		&i.SourceTypeIds,
+		&i.TargetTypeIds,
+		&i.SemanticRole,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getRelationTypeByKey = `-- name: GetRelationTypeByKey :one
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
+`
+
+type GetRelationTypeByKeyParams struct {
+	ProjectID uuid.UUID
+	Key       string
+}
+
+func (q *Queries) GetRelationTypeByKey(ctx context.Context, arg GetRelationTypeByKeyParams) (RelationType, error) {
+	row := q.db.QueryRow(ctx, getRelationTypeByKey, arg.ProjectID, arg.Key)
+	var i RelationType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.Description,
+		&i.SourceTypeIds,
+		&i.TargetTypeIds,
+		&i.SemanticRole,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getRelationTypeByKeyForUpdate = `-- name: GetRelationTypeByKeyForUpdate :one
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
+FOR UPDATE
+`
+
+type GetRelationTypeByKeyForUpdateParams struct {
+	ProjectID uuid.UUID
+	Key       string
+}
+
+// FOR UPDATE, for the reason GetEntityTypeByKeyForUpdate records: the
+// lock is what makes the reported current version the one this caller's
+// own write would have met, so "re-read and retry with 2" is advice that
+// works.
+func (q *Queries) GetRelationTypeByKeyForUpdate(ctx context.Context, arg GetRelationTypeByKeyForUpdateParams) (RelationType, error) {
+	row := q.db.QueryRow(ctx, getRelationTypeByKeyForUpdate, arg.ProjectID, arg.Key)
+	var i RelationType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.Description,
+		&i.SourceTypeIds,
+		&i.TargetTypeIds,
+		&i.SemanticRole,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
 const listEntityFieldsOfType = `-- name: ListEntityFieldsOfType :many
 SELECT id, fields FROM entities
 WHERE project_id = $1::uuid
@@ -360,6 +559,107 @@ func (q *Queries) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]E
 			&i.Icon,
 			&i.FieldSchema,
 			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRelationTypes = `-- name: ListRelationTypes :many
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+WHERE project_id = $1::uuid ORDER BY label, id
+`
+
+// Ordered by label then id: labels are not unique, and a label-only
+// order reshuffles ties between calls.
+func (q *Queries) ListRelationTypes(ctx context.Context, projectID uuid.UUID) ([]RelationType, error) {
+	rows, err := q.db.Query(ctx, listRelationTypes, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RelationType
+	for rows.Next() {
+		var i RelationType
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Key,
+			&i.Label,
+			&i.Description,
+			&i.SourceTypeIds,
+			&i.TargetTypeIds,
+			&i.SemanticRole,
+			&i.FieldSchema,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRelations = `-- name: ListRelations :many
+SELECT r.id, r.project_id, r.relation_type_id, r.source_id, r.target_id, r.fields, r.created_at, r.updated_at, r.updated_by_user_id, r.updated_by_token_id FROM relations r
+WHERE r.project_id = $1::uuid
+  AND ($2::uuid IS NULL OR r.relation_type_id = $2::uuid)
+  AND ($3::uuid IS NULL OR r.source_id = $3::uuid)
+  AND ($4::uuid IS NULL OR r.target_id = $4::uuid)
+ORDER BY r.created_at, r.id
+LIMIT $5::int
+`
+
+type ListRelationsParams struct {
+	ProjectID      uuid.UUID
+	RelationTypeID *uuid.UUID
+	SourceID       *uuid.UUID
+	TargetID       *uuid.UUID
+	Limit          int32
+}
+
+// Every filter but the project is optional, and the project one is what
+// keeps a leaked entity id from listing another game's edges: source_id
+// and target_id are caller-supplied here, unlike the entity statements
+// whose composite key already determines their project.
+func (q *Queries) ListRelations(ctx context.Context, arg ListRelationsParams) ([]Relation, error) {
+	rows, err := q.db.Query(ctx, listRelations,
+		arg.ProjectID,
+		arg.RelationTypeID,
+		arg.SourceID,
+		arg.TargetID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Relation
+	for rows.Next() {
+		var i Relation
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.RelationTypeID,
+			&i.SourceID,
+			&i.TargetID,
+			&i.Fields,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.UpdatedByUserID,
@@ -620,6 +920,151 @@ func (q *Queries) UpsertEntityType(ctx context.Context, arg UpsertEntityTypePara
 		&i.Description,
 		&i.Color,
 		&i.Icon,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const upsertRelation = `-- name: UpsertRelation :one
+INSERT INTO relations (project_id, relation_type_id, source_id, target_id, fields,
+                       updated_by_user_id, updated_by_token_id)
+VALUES ($1::uuid, $2::uuid,
+        $3::uuid, $4::uuid, $5::jsonb,
+        $6::uuid, $7::uuid)
+ON CONFLICT (relation_type_id, source_id, target_id) DO UPDATE
+SET fields              = excluded.fields,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+RETURNING id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id
+`
+
+type UpsertRelationParams struct {
+	ProjectID        uuid.UUID
+	RelationTypeID   uuid.UUID
+	SourceID         uuid.UUID
+	TargetID         uuid.UUID
+	Fields           []byte
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+}
+
+// No version guard, because relations carry no version column: an edge
+// is identified by (type, source, target) and re-writing its fields is
+// the operation, not a lost update. Two writers editing one edge's
+// fields therefore both succeed and the last one wins, which is this
+// table's documented concurrency behaviour and not an oversight -- see
+// RelationInput.
+//
+// The ON CONFLICT target is relations_edge_key, so a re-seed of the same
+// edge updates it rather than laying a second copy beside it. That is
+// also why a game cannot hold two edges of one type between one ordered
+// pair; UpsertRelation's doc comment says what to do when it genuinely
+// needs to.
+//
+// No updated_at either -- the set_updated_at trigger owns that column on
+// all four tables. project_id is the column this statement writes rather
+// than a filter it applies, exactly as in UpsertEntity, and the
+// composite foreign keys on the type and both endpoints are what keep an
+// edge inside one game.
+func (q *Queries) UpsertRelation(ctx context.Context, arg UpsertRelationParams) (Relation, error) {
+	row := q.db.QueryRow(ctx, upsertRelation,
+		arg.ProjectID,
+		arg.RelationTypeID,
+		arg.SourceID,
+		arg.TargetID,
+		arg.Fields,
+		arg.UpdatedByUserID,
+		arg.UpdatedByTokenID,
+	)
+	var i Relation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RelationTypeID,
+		&i.SourceID,
+		&i.TargetID,
+		&i.Fields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const upsertRelationType = `-- name: UpsertRelationType :one
+INSERT INTO relation_types (project_id, key, label, description,
+                            source_type_ids, target_type_ids, semantic_role, field_schema,
+                            updated_by_user_id, updated_by_token_id)
+VALUES ($1::uuid, $2::text, $3::text,
+        $4::text, $5::uuid[],
+        $6::uuid[], $7::text,
+        $8::jsonb,
+        $9::uuid, $10::uuid)
+ON CONFLICT (project_id, lower(key)) DO UPDATE
+SET label               = excluded.label,
+    description         = excluded.description,
+    source_type_ids     = excluded.source_type_ids,
+    target_type_ids     = excluded.target_type_ids,
+    semantic_role       = excluded.semantic_role,
+    field_schema        = excluded.field_schema,
+    version             = relation_types.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE relation_types.version = $11::integer
+RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
+`
+
+type UpsertRelationTypeParams struct {
+	ProjectID        uuid.UUID
+	Key              string
+	Label            string
+	Description      string
+	SourceTypeIds    []uuid.UUID
+	TargetTypeIds    []uuid.UUID
+	SemanticRole     *string
+	FieldSchema      []byte
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+	ExpectedVersion  int32
+}
+
+// Guarded, audited and trigger-owned exactly as UpsertEntityType is; see
+// that statement's comment for the full argument. In short: the DO UPDATE
+// carries the caller's expected version so the compare-and-set is one
+// statement, no write sets updated_at because the set_updated_at trigger
+// owns it, and key is not in the SET list, so the stored spelling stands
+// and the returned row is what lets Go refuse a respelling after the
+// write.
+func (q *Queries) UpsertRelationType(ctx context.Context, arg UpsertRelationTypeParams) (RelationType, error) {
+	row := q.db.QueryRow(ctx, upsertRelationType,
+		arg.ProjectID,
+		arg.Key,
+		arg.Label,
+		arg.Description,
+		arg.SourceTypeIds,
+		arg.TargetTypeIds,
+		arg.SemanticRole,
+		arg.FieldSchema,
+		arg.UpdatedByUserID,
+		arg.UpdatedByTokenID,
+		arg.ExpectedVersion,
+	)
+	var i RelationType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.Description,
+		&i.SourceTypeIds,
+		&i.TargetTypeIds,
+		&i.SemanticRole,
 		&i.FieldSchema,
 		&i.Version,
 		&i.CreatedAt,

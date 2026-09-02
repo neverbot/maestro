@@ -219,3 +219,120 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 -- name: DeleteEntity :execrows
 DELETE FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: UpsertRelationType :one
+-- Guarded, audited and trigger-owned exactly as UpsertEntityType is; see
+-- that statement's comment for the full argument. In short: the DO UPDATE
+-- carries the caller's expected version so the compare-and-set is one
+-- statement, no write sets updated_at because the set_updated_at trigger
+-- owns it, and key is not in the SET list, so the stored spelling stands
+-- and the returned row is what lets Go refuse a respelling after the
+-- write.
+INSERT INTO relation_types (project_id, key, label, description,
+                            source_type_ids, target_type_ids, semantic_role, field_schema,
+                            updated_by_user_id, updated_by_token_id)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('label')::text,
+        sqlc.arg('description')::text, sqlc.arg('source_type_ids')::uuid[],
+        sqlc.arg('target_type_ids')::uuid[], sqlc.narg('semantic_role')::text,
+        sqlc.arg('field_schema')::jsonb,
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
+ON CONFLICT (project_id, lower(key)) DO UPDATE
+SET label               = excluded.label,
+    description         = excluded.description,
+    source_type_ids     = excluded.source_type_ids,
+    target_type_ids     = excluded.target_type_ids,
+    semantic_role       = excluded.semantic_role,
+    field_schema        = excluded.field_schema,
+    version             = relation_types.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE relation_types.version = sqlc.arg('expected_version')::integer
+RETURNING *;
+
+-- name: GetRelationTypeByKey :one
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text);
+
+-- name: GetRelationTypeByKeyForUpdate :one
+-- FOR UPDATE, for the reason GetEntityTypeByKeyForUpdate records: the
+-- lock is what makes the reported current version the one this caller's
+-- own write would have met, so "re-read and retry with 2" is advice that
+-- works.
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
+FOR UPDATE;
+
+-- name: GetRelationTypeByID :one
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: ListRelationTypes :many
+-- Ordered by label then id: labels are not unique, and a label-only
+-- order reshuffles ties between calls.
+SELECT * FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid ORDER BY label, id;
+
+-- name: CountRelationsOfType :one
+SELECT count(*) FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid;
+
+-- name: DeleteRelationsOfType :exec
+DELETE FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid;
+
+-- name: DeleteRelationType :execrows
+DELETE FROM relation_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: UpsertRelation :one
+-- No version guard, because relations carry no version column: an edge
+-- is identified by (type, source, target) and re-writing its fields is
+-- the operation, not a lost update. Two writers editing one edge's
+-- fields therefore both succeed and the last one wins, which is this
+-- table's documented concurrency behaviour and not an oversight -- see
+-- RelationInput.
+--
+-- The ON CONFLICT target is relations_edge_key, so a re-seed of the same
+-- edge updates it rather than laying a second copy beside it. That is
+-- also why a game cannot hold two edges of one type between one ordered
+-- pair; UpsertRelation's doc comment says what to do when it genuinely
+-- needs to.
+--
+-- No updated_at either -- the set_updated_at trigger owns that column on
+-- all four tables. project_id is the column this statement writes rather
+-- than a filter it applies, exactly as in UpsertEntity, and the
+-- composite foreign keys on the type and both endpoints are what keep an
+-- edge inside one game.
+INSERT INTO relations (project_id, relation_type_id, source_id, target_id, fields,
+                       updated_by_user_id, updated_by_token_id)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('relation_type_id')::uuid,
+        sqlc.arg('source_id')::uuid, sqlc.arg('target_id')::uuid, sqlc.arg('fields')::jsonb,
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
+ON CONFLICT (relation_type_id, source_id, target_id) DO UPDATE
+SET fields              = excluded.fields,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+RETURNING *;
+
+-- name: ListRelations :many
+-- Every filter but the project is optional, and the project one is what
+-- keeps a leaked entity id from listing another game's edges: source_id
+-- and target_id are caller-supplied here, unlike the entity statements
+-- whose composite key already determines their project.
+SELECT r.* FROM relations r
+WHERE r.project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('relation_type_id')::uuid IS NULL OR r.relation_type_id = sqlc.narg('relation_type_id')::uuid)
+  AND (sqlc.narg('source_id')::uuid IS NULL OR r.source_id = sqlc.narg('source_id')::uuid)
+  AND (sqlc.narg('target_id')::uuid IS NULL OR r.target_id = sqlc.narg('target_id')::uuid)
+ORDER BY r.created_at, r.id
+LIMIT sqlc.arg('limit')::int;
+
+-- name: GetRelationByID :one
+SELECT * FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: DeleteRelation :execrows
+DELETE FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;

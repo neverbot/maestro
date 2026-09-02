@@ -121,6 +121,56 @@ const (
 	// as a polish item.
 	eventEntityUpserted = "entity.upserted"
 	eventEntityRemoved  = "entity.removed"
+
+	// eventRelationTypeUpserted and eventRelationTypeRemoved fire from
+	// UpsertRelationType and RemoveRelationType once their transaction
+	// has committed.
+	//
+	// The gating lands on the same two values as the type events, and it
+	// is stated here rather than inherited because a relation type is not
+	// an entity type: it is the game's *edge* vocabulary, including the
+	// endpoint rules every later write is judged against.
+	//
+	// MinRole is empty — every member of the game, viewer included.
+	// Reading relation types is not role-gated anywhere: a viewer's
+	// browser renders the graph these types define, so gating the
+	// invalidation above viewer would leave exactly the reader who cannot
+	// re-fetch on demand looking at a graph that silently drifts.
+	//
+	// HumanOnly is false. Task 7 mounts relation_types.list and
+	// relation_types.upsert on MCP for agents, so an agent may already
+	// read every one of these rows on demand and withholding the push
+	// buys nothing. It costs more here than anywhere else in this
+	// package: an endpoint rule moving under a seeding agent turns its
+	// next relations.upsert into an endpoint_type_mismatch it cannot
+	// explain, and this is the one event that warns it.
+	eventRelationTypeUpserted = "relation_type.upserted"
+	eventRelationTypeRemoved  = "relation_type.removed"
+
+	// eventRelationUpserted and eventRelationRemoved fire from
+	// UpsertRelation, UpsertRelations and RemoveRelation once their
+	// transaction has committed.
+	//
+	// MinRole empty and HumanOnly false again, and for the reasons the
+	// entity events give: an edge is the game's content, a viewer's
+	// browser renders it, and an agent that may read every edge on demand
+	// loses no confidentiality by being told one moved. The payload
+	// carries the edge's id, the stored spelling of its type key and both
+	// endpoint ids — identity a subscriber can re-read from — and never
+	// the edge's fields.
+	//
+	// **The same known consequence as the entity events, and a little
+	// worse.** These fire once per edge, so seeding a game's graph puts
+	// one event per edge on every subscription, and a game has more edges
+	// than entities. What a subscriber actually receives from a burst
+	// that size is not one event per edge: realtime.Hub buffers 64 events
+	// per subscription and drops the rest, each drop leaves a gap in that
+	// subscription's own Seq, and internal/web/events.go turns the gap
+	// into a synthetic "resync" rather than silent loss. Coalescing
+	// belongs to the transport, where the subscriber and its backlog are
+	// visible, and **Tasks 6 and 7 own it** — see the entity events above.
+	eventRelationUpserted = "relation.upserted"
+	eventRelationRemoved  = "relation.removed"
 )
 
 // typeEventMinRole and typeEventHumanOnly are the gating decided above,
@@ -139,4 +189,18 @@ const (
 const (
 	entityEventMinRole   = roles.Role("")
 	entityEventHumanOnly = false
+)
+
+// relationTypeEventMinRole / relationTypeEventHumanOnly and
+// relationEventMinRole / relationEventHumanOnly are the gating decided
+// above. They are four constants rather than two, and neither pair is an
+// alias of the other or of the entity pairs: all four decisions happen to
+// agree today, and naming one in terms of another would make a later
+// change to either silently change both.
+const (
+	relationTypeEventMinRole   = roles.Role("")
+	relationTypeEventHumanOnly = false
+
+	relationEventMinRole   = roles.Role("")
+	relationEventHumanOnly = false
 )

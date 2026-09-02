@@ -169,6 +169,36 @@ const (
 	// into a synthetic "resync" rather than silent loss. Coalescing
 	// belongs to the transport, where the subscriber and its backlog are
 	// visible, and **Tasks 6 and 7 own it** — see the entity events above.
+	//
+	// **Not every edge that disappears is announced as
+	// `relation.removed`, and a subscriber must know which events stand
+	// in for the ones it will not get.** Three removals delete edges by
+	// cascade and publish only the parent's own event:
+	// `entity.removed` takes every edge touching that entity with it
+	// (`relations.source_id` / `.target_id` are `ON DELETE CASCADE`),
+	// `relation_type.removed` with cascade takes every edge of that type
+	// (`RemoveRelationType`'s `DeleteRelationsOfType`), and
+	// `type.removed` with cascade takes the type's entities and, through
+	// them, their edges. **A subscriber must therefore treat those three
+	// events as edge invalidations**: on any of them, every edge it holds
+	// that names the removed entity, the removed relation type, or an
+	// entity of the removed entity type is gone, and the only correct
+	// response is to drop it or re-read.
+	//
+	// It is stated rather than left to be inferred because the consumers
+	// are two tasks away from this decision and every *other* way an edge
+	// disappears is announced one by one, so a client written against
+	// `relation.removed` alone is a client that renders dead edges:
+	// Task 6's one-hop traversal caches the neighbourhood of a node and
+	// Task 8's page draws the graph from it. Publishing one
+	// `relation.removed` per cascaded edge is the alternative, and it is
+	// deliberately not taken — the parent's own event already carries
+	// enough to invalidate, and a cascade over a well-connected entity
+	// would put thousands of events on a 64-deep subscription buffer,
+	// which is the coalescing problem above at its worst rather than a
+	// solution to this one. If Tasks 6-8 find the coarse signal too
+	// blunt in practice, the answer is a payload that carries the count
+	// or the ids, not a per-edge event.
 	eventRelationUpserted = "relation.upserted"
 	eventRelationRemoved  = "relation.removed"
 )

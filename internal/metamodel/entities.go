@@ -328,6 +328,11 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 		if err != nil {
 			return notFound(err, "lookup entity")
 		}
+		// The generic helper, deliberately: this id comes from the row
+		// just read and not from the caller, so there is no key to name.
+		// `entities.entity_type_id` is `ON DELETE RESTRICT` and this runs
+		// in the read's own transaction, so no-rows is unreachable; see
+		// the same note in RemoveRelation.
 		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{
 			ProjectID: projectID, ID: row.EntityTypeID,
 		})

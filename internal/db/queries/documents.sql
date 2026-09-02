@@ -407,3 +407,62 @@ WHERE l.project_id = sqlc.arg('project_id')::uuid
   AND l.entity_id = sqlc.arg('entity_id')::uuid
   AND d.deleted_at IS NULL
 ORDER BY d.path, d.id;
+
+-- name: ListDocumentsPage :many
+-- One page of a game's documents, keyset-ordered by (path, id).
+--
+-- **No body_md and no frontmatter in the select list.** They are the two
+-- largest columns in the schema and a listing never needs either; a
+-- SELECT * here would quietly put a megabyte of prose per row on a page
+-- of fifty. markdown.DocumentSummary carries no field for either, which
+-- is what makes the rule a fact about the type rather than a promise
+-- about this select list (TestAListingRowCarriesNoBodyAtAll).
+--
+-- **starts_with, not LIKE, and this is a correctness choice rather than
+-- a style one.** A path may legally contain `_`, which is LIKE's
+-- single-character wildcard, so `path_prefix: "lore_x"` under LIKE would
+-- also match `loreax` -- a filter silently answering a question the
+-- caller did not ask, which is the class of defect this whole read
+-- surface is most exposed to. Escaping it correctly is possible and is
+-- one forgotten backslash away from the same bug.
+-- TestAPathPrefixFilterDoesNotTreatUnderscoreAsAWildcard pins it. The
+-- cost is that starts_with cannot use documents_listing_idx for the
+-- prefix, so a prefixed listing scans the game's documents; a game has
+-- hundreds of documents, not millions, and the ordering half of the
+-- index still applies.
+--
+-- The prefix and the kind are folded, like every other path comparison
+-- in this file, so `Lore/` and `lore/` name the same subtree and
+-- `SCRIPT` and `script` name the same shelf
+-- (TestAListingFiltersByKindAndByEntity).
+--
+-- The entity filter is an EXISTS rather than a join, so a document
+-- attached to one entity appears once and the page's row count is the
+-- number of documents rather than the number of links.
+-- TestADocumentAttachedToTwoEntitiesAppearsOnceInAFilteredListing pins
+-- that, with a document attached to two entities of which one is
+-- filtered on; a JOIN would answer with the same row twice.
+--
+-- The project filter is load-bearing here, unlike the ones the header
+-- describes as defence in depth: a listing resolves nothing beforehand,
+-- so this filter is the only thing keeping one game's prose out of
+-- another's page. TestAListingNeverCrossesGames pins it.
+SELECT d.id, d.project_id, d.path, d.kind, d.title, d.summary, d.current_version,
+       d.deleted_at, d.created_at, d.updated_at,
+       d.created_by_user_id, d.created_by_token_id,
+       d.updated_by_user_id, d.updated_by_token_id
+FROM documents d
+WHERE d.project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.arg('include_deleted')::bool OR d.deleted_at IS NULL)
+  AND (sqlc.narg('path_prefix')::text IS NULL
+       OR starts_with(lower(d.path), lower(sqlc.narg('path_prefix')::text)))
+  AND (sqlc.narg('kind')::text IS NULL OR lower(d.kind) = lower(sqlc.narg('kind')::text))
+  AND (sqlc.narg('entity_id')::uuid IS NULL
+       OR EXISTS (SELECT 1 FROM document_links l
+                   WHERE l.project_id = d.project_id
+                     AND l.document_id = d.id
+                     AND l.entity_id = sqlc.narg('entity_id')::uuid))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (d.path, d.id) > (sqlc.narg('after_path')::text, sqlc.narg('after_id')::uuid))
+ORDER BY d.path, d.id
+LIMIT sqlc.arg('limit')::int;

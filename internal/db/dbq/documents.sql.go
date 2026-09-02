@@ -584,6 +584,138 @@ func (q *Queries) ListDocumentVersions(ctx context.Context, arg ListDocumentVers
 	return items, nil
 }
 
+const listDocumentsPage = `-- name: ListDocumentsPage :many
+SELECT d.id, d.project_id, d.path, d.kind, d.title, d.summary, d.current_version,
+       d.deleted_at, d.created_at, d.updated_at,
+       d.created_by_user_id, d.created_by_token_id,
+       d.updated_by_user_id, d.updated_by_token_id
+FROM documents d
+WHERE d.project_id = $1::uuid
+  AND ($2::bool OR d.deleted_at IS NULL)
+  AND ($3::text IS NULL
+       OR starts_with(lower(d.path), lower($3::text)))
+  AND ($4::text IS NULL OR lower(d.kind) = lower($4::text))
+  AND ($5::uuid IS NULL
+       OR EXISTS (SELECT 1 FROM document_links l
+                   WHERE l.project_id = d.project_id
+                     AND l.document_id = d.id
+                     AND l.entity_id = $5::uuid))
+  AND ($6::uuid IS NULL
+       OR (d.path, d.id) > ($7::text, $6::uuid))
+ORDER BY d.path, d.id
+LIMIT $8::int
+`
+
+type ListDocumentsPageParams struct {
+	ProjectID      uuid.UUID
+	IncludeDeleted bool
+	PathPrefix     *string
+	Kind           *string
+	EntityID       *uuid.UUID
+	AfterID        *uuid.UUID
+	AfterPath      *string
+	Limit          int32
+}
+
+type ListDocumentsPageRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Path             string
+	Kind             string
+	Title            string
+	Summary          string
+	CurrentVersion   int32
+	DeletedAt        pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+}
+
+// One page of a game's documents, keyset-ordered by (path, id).
+//
+// **No body_md and no frontmatter in the select list.** They are the two
+// largest columns in the schema and a listing never needs either; a
+// SELECT * here would quietly put a megabyte of prose per row on a page
+// of fifty. markdown.DocumentSummary carries no field for either, which
+// is what makes the rule a fact about the type rather than a promise
+// about this select list (TestAListingRowCarriesNoBodyAtAll).
+//
+// **starts_with, not LIKE, and this is a correctness choice rather than
+// a style one.** A path may legally contain `_`, which is LIKE's
+// single-character wildcard, so `path_prefix: "lore_x"` under LIKE would
+// also match `loreax` -- a filter silently answering a question the
+// caller did not ask, which is the class of defect this whole read
+// surface is most exposed to. Escaping it correctly is possible and is
+// one forgotten backslash away from the same bug.
+// TestAPathPrefixFilterDoesNotTreatUnderscoreAsAWildcard pins it. The
+// cost is that starts_with cannot use documents_listing_idx for the
+// prefix, so a prefixed listing scans the game's documents; a game has
+// hundreds of documents, not millions, and the ordering half of the
+// index still applies.
+//
+// The prefix and the kind are folded, like every other path comparison
+// in this file, so `Lore/` and `lore/` name the same subtree and
+// `SCRIPT` and `script` name the same shelf
+// (TestAListingFiltersByKindAndByEntity).
+//
+// The entity filter is an EXISTS rather than a join, so a document
+// attached to one entity appears once and the page's row count is the
+// number of documents rather than the number of links.
+// TestADocumentAttachedToTwoEntitiesAppearsOnceInAFilteredListing pins
+// that, with a document attached to two entities of which one is
+// filtered on; a JOIN would answer with the same row twice.
+//
+// The project filter is load-bearing here, unlike the ones the header
+// describes as defence in depth: a listing resolves nothing beforehand,
+// so this filter is the only thing keeping one game's prose out of
+// another's page. TestAListingNeverCrossesGames pins it.
+func (q *Queries) ListDocumentsPage(ctx context.Context, arg ListDocumentsPageParams) ([]ListDocumentsPageRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentsPage,
+		arg.ProjectID,
+		arg.IncludeDeleted,
+		arg.PathPrefix,
+		arg.Kind,
+		arg.EntityID,
+		arg.AfterID,
+		arg.AfterPath,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentsPageRow
+	for rows.Next() {
+		var i ListDocumentsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Path,
+			&i.Kind,
+			&i.Title,
+			&i.Summary,
+			&i.CurrentVersion,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedByUserID,
+			&i.CreatedByTokenID,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const softDeleteDocument = `-- name: SoftDeleteDocument :one
 UPDATE documents
 SET deleted_at          = now(),

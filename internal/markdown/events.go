@@ -23,8 +23,9 @@ import (
 // commits, never inside it (Service.publish's own doc comment).
 const (
 	// eventDocumentWritten fires from Write once its transaction has
-	// committed. Tasks 4, 5 and 6 add the other kinds and state their
-	// own gating here rather than copying this one.
+	// committed. Tasks 5 and 6 add the remaining kinds and state their
+	// own gating here rather than copying this one; Task 4's
+	// eventDocumentDeleted, below, is the first to do so.
 	//
 	// **The gating below is decided for documents, not inherited.**
 	// internal/metamodel/events.go argues four pairs of its own and
@@ -83,12 +84,38 @@ const (
 	// alike: a document write is one row per event, like an entity, not
 	// a handful per game, like a type.
 	eventDocumentWritten = "document.written"
+
+	// eventDocumentDeleted fires from Delete once its transaction has
+	// committed. The gating is documentEventMinRole /
+	// documentEventHumanOnly, the pair eventDocumentWritten's comment
+	// argues: a deletion is the same kind of fact as a write — the
+	// game's own content moved — and a viewer whose browser is
+	// rendering the document is precisely the subscriber who cannot
+	// find out any other way.
+	//
+	// **A subscriber must read this as an invalidation of the
+	// document's links as well.** Nothing cascades on a soft delete —
+	// document_links rows survive, because the document does — but a UI
+	// listing an entity's documents will stop being shown this one, and
+	// a client that only re-reads the document itself keeps a stale
+	// entry in that list.
+	//
+	// The payload is a DocumentEvent like a write's, carrying the
+	// *tombstone's* version number rather than the last live one. That
+	// is the number a subscriber must compare against what it holds to
+	// know its copy is stale, and it is the number a caller passes as
+	// expected_version to bring the document back.
+	// TestADeletionIsAnnounced pins the kind and the version;
+	// TestNoDeletionIsAnnouncedWhenTheTombstoneCannotBeWritten pins
+	// that a delete which rolls back announces nothing, which is the
+	// case TestADeletionIsAnnounced cannot reach on its own.
+	eventDocumentDeleted = "document.deleted"
 )
 
 // documentEventMinRole and documentEventHumanOnly are the gating decided
 // above, named so the call sites read as the decision rather than as two
-// bare literals a later edit could drift apart. Tasks 4, 5 and 6 reuse
-// these two constants — the kinds this package publishes are one
+// bare literals a later edit could drift apart. Task 4 already reuses
+// them and Tasks 5 and 6 do too — the kinds this package publishes are one
 // decision about one kind of fact, unlike the metamodel's four pairs,
 // which cover two genuinely different facts (a game's vocabulary and its
 // content). TestADocumentEventReachesAViewerAndATokenAlike is what pins

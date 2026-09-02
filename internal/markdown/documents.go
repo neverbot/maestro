@@ -203,14 +203,22 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 	// conflictAfterFailedUpsert answers. A check that cannot fire is a
 	// second claim about a race that only one place actually handles.
 	if _, err := q.InsertDocumentVersion(ctx, dbq.InsertDocumentVersionParams{
-		ProjectID:     projectID,
-		DocumentID:    row.ID,
-		Version:       row.CurrentVersion,
-		Title:         row.Title,
-		Summary:       row.Summary,
-		BodyMd:        row.BodyMd,
-		Frontmatter:   row.Frontmatter,
-		Message:       in.Message,
+		ProjectID:   projectID,
+		DocumentID:  row.ID,
+		Version:     row.CurrentVersion,
+		Title:       row.Title,
+		Summary:     row.Summary,
+		BodyMd:      row.BodyMd,
+		Frontmatter: row.Frontmatter,
+		Message:     in.Message,
+		// Stated rather than defaulted: InsertDocumentVersion requires
+		// the argument so that Delete's tombstone is the only row in
+		// the table that could ever carry true, and so that a future
+		// snapshot-writing path cannot inherit the wrong answer by
+		// saying nothing. TestOnlyTheTombstoneVersionIsMarkedDeleted
+		// reads all four versions of one document back and pins which
+		// of them is the tombstone.
+		Deleted:       false,
 		AuthorUserID:  in.Actor.UserID,
 		AuthorTokenID: in.Actor.TokenID,
 	}); err != nil {
@@ -225,10 +233,30 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 func (s *Service) conflictAfterFailedUpsert(ctx context.Context, q *dbq.Queries,
 	projectID uuid.UUID, in WriteInput,
 ) error {
+	// IncludeDeleted is true, and Task 4 is what makes that load-bearing
+	// rather than cosmetic: a write whose guard failed because a *delete*
+	// advanced the version must re-read the tombstone in order to report
+	// the version it has to merge onto. With the filter on, this read
+	// would find nothing and the arm below would turn the caller's own
+	// version_conflict into an internal_error.
+	// TestAStaleVersionCannotSilentlyResurrectADocument covers it.
 	row, err := q.GetDocumentByPath(ctx, dbq.GetDocumentByPathParams{
 		ProjectID: projectID, Path: in.Path, IncludeDeleted: true,
 	})
 	if err != nil {
+		// **pgx.ErrNoRows lands here as an internal_error, and that is
+		// checked rather than assumed.** It would mean the row vanished
+		// between the failed upsert and this statement, one statement
+		// later in the same transaction — which takes a *hard* delete,
+		// and this package has none: Delete is soft (see its comment),
+		// and no query in internal/db/queries deletes a documents row at
+		// all. The one thing that does remove documents is a project's
+		// own ON DELETE CASCADE, and that takes the same row lock this
+		// transaction is already holding, so it waits rather than racing.
+		// Task 3's review recorded this case for Task 4 to settle; it is
+		// settled as unreachable, and it is left as an internal_error
+		// deliberately, because if it ever fires the cause is a hard
+		// delete nobody wrote, not a caller's mistake.
 		return fmt.Errorf("re-read document after a failed upsert: %w", err)
 	}
 	if row.Path != in.Path {
@@ -239,10 +267,21 @@ func (s *Service) conflictAfterFailedUpsert(ctx context.Context, q *dbq.Queries,
 
 // conflictOn builds the conflict a caller must merge onto, carrying the
 // current document when the caller asked for it.
+//
+// Deleted is read off the row rather than passed in, so no call site can
+// forget it: every path that reaches here has already re-read the
+// document, and whether that document is a tombstone is a property of
+// what was read and not of who is asking. It is the difference between
+// telling a caller to merge and re-read — which for a deleted document
+// answers not_found — and telling it that writing brings the document
+// back. Both directions are pinned:
+// TestAStaleVersionCannotSilentlyResurrectADocument and
+// TestAnOrdinaryConflictDoesNotClaimTheDocumentWasDeleted.
 func conflictOn(row dbq.Document, include bool) error {
 	return &ConflictError{
 		Current:     row.CurrentVersion,
 		Include:     include,
+		Deleted:     row.DeletedAt.Valid,
 		Title:       row.Title,
 		BodyMD:      row.BodyMd,
 		Frontmatter: json.RawMessage(row.Frontmatter),
@@ -254,8 +293,11 @@ func conflictOn(row dbq.Document, include bool) error {
 // A soft-deleted document is not found. Deletion is soft so that nothing
 // is lost and a mistaken removal is recoverable (spec §3), not so that
 // every reader has to filter — a caller that wants the deleted row asks
-// the listing for it (Task 8) or reads a version (Task 6). Nothing sets
-// deleted_at before Task 4, so no test here exercises that arm yet.
+// the listing for it (Task 8) or reads a version (Task 6).
+// TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory pins the
+// hiding, and
+// TestWritingToADeletedPathResurrectsItAndContinuesTheNumbering pins
+// that the same path reads again once it is written to.
 func (s *Service) Read(ctx context.Context, projectID uuid.UUID, path string) (dbq.Document, error) {
 	if err := CheckPath(path); err != nil {
 		return dbq.Document{}, err
@@ -267,4 +309,166 @@ func (s *Service) Read(ctx context.Context, projectID uuid.UUID, path string) (d
 		return dbq.Document{}, notFound(err, missingDocument(path), "read document")
 	}
 	return row, nil
+}
+
+// DeleteInput is one soft deletion.
+//
+// Message is recorded on the tombstone version, so "why was this cut"
+// is answerable from the history rather than from someone's memory.
+//
+// ExpectedVersion is required for the same reason it is on a write, and
+// there is no value with a special meaning here: 0 spells "create" on a
+// write, and on a delete it can match no stored current_version at all
+// — the column starts at 1 and only climbs — so a caller passing it is
+// simply refused, as not_found if the path is free and as a conflict if
+// it is not.
+type DeleteInput struct {
+	Path            string
+	Message         string
+	ExpectedVersion *int32
+	Actor           Actor
+}
+
+// Delete soft-deletes one document: the row keeps its path and its whole
+// history, and a later write to the same path resurrects it.
+//
+// **It appends a tombstone version and advances current_version**, and
+// the plan's Task 4 argues why at length; in short, so that
+// current_version never disagrees with the newest version row, and so
+// that a caller holding a version from before the delete conflicts
+// instead of resurrecting the document without noticing
+// (TestAStaleVersionCannotSilentlyResurrectADocument).
+//
+// **It returns the tombstoned row**, which the plan's signature did not.
+// The version number the deletion landed on is the one a caller must
+// pass as expected_version to bring the document back, and it is the one
+// number Read cannot supply, because Read is precisely what stops
+// answering. Returning nothing would leave "delete, then undo" to a
+// caller inferring current + 1 from what it happened to hold.
+// TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory reads it back.
+//
+// Hard deletion is deliberately not offered. Losing a designer's writing
+// to an agent's mistaken tool call is not a risk this product takes; an
+// instance admin who genuinely must purge a row does it in the database.
+// That is also what keeps GetDocumentByPathForUpdate's third argument
+// for FOR UPDATE hypothetical rather than load-bearing, and what keeps
+// conflictAfterFailedUpsert's re-read from ever missing its row: with no
+// hard delete anywhere in this package, a row that failed the guarded
+// upsert is still there to be re-read a statement later, so that
+// function's error arm cannot turn a caller's own conflict into an
+// internal_error.
+func (s *Service) Delete(ctx context.Context, projectID uuid.UUID, in DeleteInput) (dbq.Document, error) {
+	// One pass over every argument, as Write does: a caller whose path
+	// and whose message are both wrong hears about both.
+	// TestEveryProblemWithOneDeleteIsReportedInOnePass pins it.
+	problems := pathProblems(in.Path)
+	problems = append(problems, checkShortText("message", in.Message, MaxMessageLen)...)
+	if in.ExpectedVersion == nil {
+		problems = append(problems, metamodel.FieldError{
+			Path:    "expected_version",
+			Message: "is required: pass the version you read, so a delete cannot race an edit",
+		})
+	}
+	if len(problems) > 0 {
+		return dbq.Document{}, invalidInputProblems(problems)
+	}
+
+	var removed dbq.Document
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		row, err := q.SoftDeleteDocument(ctx, dbq.SoftDeleteDocumentParams{
+			ProjectID:       projectID,
+			Path:            in.Path,
+			ExpectedVersion: *in.ExpectedVersion,
+			ActorUserID:     in.Actor.UserID,
+			ActorTokenID:    in.Actor.TokenID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Three things reach here and they need telling apart, which
+			// is why this is a re-read and not a bare not_found: the
+			// path names no document at all, it names a document already
+			// deleted, or it names one whose version has moved. Only the
+			// third is a conflict, and only the third has a recovery
+			// that is not "stop".
+			return s.deleteRefusal(ctx, q, projectID, in)
+		}
+		if err != nil {
+			return fmt.Errorf("soft delete document: %w", err)
+		}
+		removed = row
+		// The tombstone carries the document exactly as it stood: the
+		// same title, summary, body and frontmatter the last live
+		// version had, with deleted true. A tombstone that blanked them
+		// would make the history unreadable at the one point a reader
+		// most wants to see what was lost.
+		// TestATombstonesBodyIsStillReadableAsAVersion pins all four.
+		if _, err := q.InsertDocumentVersion(ctx, dbq.InsertDocumentVersionParams{
+			ProjectID:     projectID,
+			DocumentID:    row.ID,
+			Version:       row.CurrentVersion,
+			Title:         row.Title,
+			Summary:       row.Summary,
+			BodyMd:        row.BodyMd,
+			Frontmatter:   row.Frontmatter,
+			Message:       in.Message,
+			Deleted:       true,
+			AuthorUserID:  in.Actor.UserID,
+			AuthorTokenID: in.Actor.TokenID,
+		}); err != nil {
+			return fmt.Errorf("insert tombstone version: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return dbq.Document{}, err
+	}
+	s.publish(projectID, eventDocumentDeleted, documentEventMinRole, documentEventHumanOnly,
+		DocumentEvent{ID: removed.ID, Path: removed.Path, Version: removed.CurrentVersion})
+	return removed, nil
+}
+
+// deleteRefusal names what actually stood in the way of a delete that
+// matched no row.
+func (s *Service) deleteRefusal(ctx context.Context, q *dbq.Queries,
+	projectID uuid.UUID, in DeleteInput,
+) error {
+	row, err := q.GetDocumentByPath(ctx, dbq.GetDocumentByPathParams{
+		ProjectID: projectID, Path: in.Path, IncludeDeleted: true,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return missingDocument(in.Path)
+	}
+	if err != nil {
+		return fmt.Errorf("re-read document after a refused delete: %w", err)
+	}
+	if row.DeletedAt.Valid {
+		// not_found, like a path that was never here, because the
+		// recovery is the same: there is nothing to delete. The message
+		// is what separates the two, and both are asserted —
+		// TestDeletingTwiceIsNotFoundRatherThanASecondTombstone and
+		// TestDeletingADocumentThatWasNeverThereIsNotFoundNamingThePath.
+		// A conflict would be the wrong shape: it would tell a caller to
+		// merge onto a version and try again, and trying again can only
+		// produce this same answer forever.
+		return &MissingError{
+			Path: "path",
+			Message: fmt.Sprintf("the document at %q was already deleted; "+
+				"write to the path to bring it back", in.Path),
+		}
+	}
+	// IncludeCurrent is deliberately false: a caller deleting a document
+	// is not merging prose, and echoing a body it asked to remove would
+	// be the largest payload in the system attached to the one call that
+	// wanted none of it. TestDeletingWithAStaleVersionIsAConflict asserts
+	// the conflict carries the version and no body.
+	//
+	// The path is not re-checked for a respelling here, unlike
+	// conflictAfterFailedUpsert. It cannot differ in a way that matters:
+	// SoftDeleteDocument matches on lower(path), so a delete addressed
+	// under another casing reaches the same row and succeeds, and the
+	// stored spelling comes back on it
+	// (TestAPathIsMatchedWithoutRegardToCaseOnDelete). A write refuses a
+	// respelling because it would otherwise overwrite content under a
+	// handle the caller did not mean; a delete overwrites nothing and
+	// removes exactly the document the caller named.
+	return conflictOn(row, false)
 }

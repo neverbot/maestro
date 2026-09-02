@@ -62,6 +62,25 @@ func requireFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 	t.Fatalf("no problem at %q containing %q; got %v", wantPath, wantMessage, v.Fields)
 }
 
+// requireMissing is requireFieldError for a *markdown.MissingError,
+// which is not a *metamodel.ValidationError and so does not go through
+// that helper. It exists because this package's not_found refusals
+// differ from each other only in their message — "already deleted" and
+// "never here" carry the same sentinel and the same path — so a test
+// asserting the sentinel alone cannot tell them apart, and both have
+// different recoveries for the caller.
+func requireMissing(t *testing.T, err error, wantPath, wantMessage string) {
+	t.Helper()
+	var missing *markdown.MissingError
+	if !errors.As(err, &missing) {
+		t.Fatalf("want a *markdown.MissingError, got %#v", err)
+	}
+	if missing.Path != wantPath || !strings.Contains(missing.Message, wantMessage) {
+		t.Fatalf("missing = (%q, %q), want path %q with a message containing %q",
+			missing.Path, missing.Message, wantPath, wantMessage)
+	}
+}
+
 func ptrInt32(v int32) *int32 { return &v }
 
 func ptrString(v string) *string { return &v }

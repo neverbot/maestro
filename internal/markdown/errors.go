@@ -121,15 +121,31 @@ func missingDocument(path string) error {
 // publishes this type: what is pinned here is the sentinel it satisfies
 // and the payload Details builds
 // (TestAConflictErrorCarriesTheCurrentDocument).
+//
+// **Deleted is a fourth thing a conflict can be about**, added by Task 4
+// rather than inherited: the version a caller is told to merge onto may
+// be a tombstone. The default message sends that caller to re-read the
+// document, and a re-read of a deleted document answers not_found —
+// two refusals with nothing connecting them, from one call. Saying so
+// costs a bool and turns a dead end into an instruction, because
+// resurrection is exactly the same call the caller was already making.
+// TestAStaleVersionCannotSilentlyResurrectADocument pins it and
+// TestAnOrdinaryConflictDoesNotClaimTheDocumentWasDeleted pins that a
+// live conflict says nothing about deletion.
 type ConflictError struct {
 	Current     int32
 	Include     bool
+	Deleted     bool
 	Title       string
 	BodyMD      string
 	Frontmatter json.RawMessage
 }
 
 func (e *ConflictError) Error() string {
+	if e.Deleted {
+		return fmt.Sprintf("version_conflict: this document was deleted at version %d; "+
+			"write to the path with that expected_version to bring it back", e.Current)
+	}
 	return fmt.Sprintf("version_conflict: this document is at version %d; "+
 		"merge onto it and write again", e.Current)
 }
@@ -142,6 +158,13 @@ func (e *ConflictError) Is(target error) bool { return target == metamodel.ErrVe
 // disagree about what a conflict carries.
 func (e *ConflictError) Details() map[string]any {
 	details := map[string]any{"current_version": e.Current}
+	// Present only when true. An absent key and a false one read the
+	// same to a caller that checks for truth, and the absent one does
+	// not invite a reader of an ordinary conflict to wonder what
+	// deletion has to do with it.
+	if e.Deleted {
+		details["deleted"] = true
+	}
 	if !e.Include {
 		return details
 	}

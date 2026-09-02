@@ -76,8 +76,9 @@
 -- deleted_at = NULL on the update arm is the resurrection rule (spec
 -- §3): writing to a soft-deleted path brings the document back and
 -- continues its version numbering, because the path is still taken and
--- the history is still there. Nothing in Task 3 can set deleted_at, so
--- that clause is exercised by no test until Task 4 lands the delete.
+-- the history is still there. TestWritingToADeletedPathResurrectsItAnd
+-- ContinuesTheNumbering is what pins it: delete the clause and the
+-- resurrected document reads back as still deleted.
 INSERT INTO documents (project_id, path, kind, title, summary, body_md, frontmatter,
                        current_version,
                        created_by_user_id, created_by_token_id,
@@ -104,8 +105,12 @@ RETURNING *;
 -- name: GetDocumentByPath :one
 -- The read path. A soft-deleted document is not found unless the caller
 -- asked for it: deletion is soft so nothing is lost, not so that every
--- reader has to filter. (Nothing sets deleted_at before Task 4, so the
--- include_deleted arm is unexercised until then.)
+-- reader has to filter. Both arms are exercised: the filtering one by
+-- TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory, through
+-- Read, and the include_deleted one by deleteRefusal and
+-- conflictAfterFailedUpsert, which have to re-read a row that may be
+-- deleted in order to say why a write or a delete was refused
+-- (TestDeletingTwiceIsNotFoundRatherThanASecondTombstone).
 SELECT * FROM documents
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND lower(path) = lower(sqlc.arg('path')::text)
@@ -143,7 +148,11 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- lands deletion, and deletion there is soft, so it is not reachable
 -- even then; a *hard* delete racing this read is not something Task 3
 -- or 4 need close, only something worth naming so a future hard-delete
--- feature does not skip it.)
+-- feature does not skip it. Task 4 landed and deletion there is soft, as
+-- predicted: SoftDeleteDocument is an UPDATE, so it takes this same row
+-- lock and the two serialise on it, and the resurrection the upsert then
+-- performs is the documented behaviour rather than a silent
+-- re-creation.)
 SELECT * FROM documents
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND lower(path) = lower(sqlc.arg('path')::text)
@@ -160,10 +169,58 @@ FOR UPDATE;
 -- key is what keeps it honest: a version row whose project_id disagrees
 -- with its document's cannot be inserted at all
 -- (documents_schema_test.go pins that refusal).
+--
+-- deleted is a required argument rather than a column left to its
+-- DEFAULT false, and that is deliberate: Delete's tombstone is the one
+-- caller that passes true, and every other caller has to say false out
+-- loud. A defaulted column would let a future snapshot-writing path
+-- forget the question and store a live version where a tombstone
+-- belonged, silently; a required argument turns the same omission into
+-- a compile error. TestDeletingADocumentHidesItFromReadsAndKeepsIts
+-- History reads the true case back and Task 3's
+-- TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage the
+-- false one.
 INSERT INTO document_versions (project_id, document_id, version, title, summary, body_md,
-                               frontmatter, message, author_user_id, author_token_id)
+                               frontmatter, message, deleted, author_user_id, author_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('document_id')::uuid,
         sqlc.arg('version')::integer, sqlc.arg('title')::text, sqlc.arg('summary')::text,
         sqlc.arg('body_md')::text, sqlc.arg('frontmatter')::jsonb, sqlc.arg('message')::text,
+        sqlc.arg('deleted')::boolean,
         sqlc.narg('author_user_id')::uuid, sqlc.narg('author_token_id')::uuid)
+RETURNING *;
+
+-- name: SoftDeleteDocument :one
+-- Guarded by the caller's expected version, exactly as UpsertDocument
+-- is, so a delete cannot race an edit: the loser matches no row and gets
+-- back no row, which Go turns into the typed conflict.
+-- TestDeletingWithAStaleVersionIsAConflict pins the guard and
+-- TestDeletingAnotherGamesDocumentIsNotFound the project filter.
+--
+-- deleted_at IS NULL is part of the guard, so deleting a document twice
+-- is not_found on the second call rather than a second tombstone. That
+-- is the honest answer: the document is already gone, and the caller has
+-- nothing to do. TestDeletingTwiceIsNotFoundRatherThanASecondTombstone
+-- pins it.
+--
+-- current_version advances here and the caller appends the matching
+-- tombstone version in the same transaction. The two are one change and
+-- withTx is what keeps them so; the count assertion in
+-- TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory is what
+-- refuses to let them drift.
+--
+-- There is no FOR UPDATE read before this statement, unlike the write
+-- path. It would buy nothing here: this UPDATE takes the row lock
+-- itself, and everything the write path reads under its lock -- the
+-- stored spelling, a body to echo on a conflict -- this call either does
+-- not need or reads afterwards, in deleteRefusal, once it already knows
+-- it was refused.
+UPDATE documents
+SET deleted_at          = now(),
+    current_version     = current_version + 1,
+    updated_by_user_id  = sqlc.narg('actor_user_id')::uuid,
+    updated_by_token_id = sqlc.narg('actor_token_id')::uuid
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND lower(path) = lower(sqlc.arg('path')::text)
+  AND deleted_at IS NULL
+  AND current_version = sqlc.arg('expected_version')::integer
 RETURNING *;

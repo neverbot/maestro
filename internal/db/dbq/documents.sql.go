@@ -26,8 +26,12 @@ type GetDocumentByPathParams struct {
 
 // The read path. A soft-deleted document is not found unless the caller
 // asked for it: deletion is soft so nothing is lost, not so that every
-// reader has to filter. (Nothing sets deleted_at before Task 4, so the
-// include_deleted arm is unexercised until then.)
+// reader has to filter. Both arms are exercised: the filtering one by
+// TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory, through
+// Read, and the include_deleted one by deleteRefusal and
+// conflictAfterFailedUpsert, which have to re-read a row that may be
+// deleted in order to say why a write or a delete was refused
+// (TestDeletingTwiceIsNotFoundRatherThanASecondTombstone).
 func (q *Queries) GetDocumentByPath(ctx context.Context, arg GetDocumentByPathParams) (Document, error) {
 	row := q.db.QueryRow(ctx, getDocumentByPath, arg.ProjectID, arg.Path, arg.IncludeDeleted)
 	var i Document
@@ -96,7 +100,11 @@ type GetDocumentByPathForUpdateParams struct {
 // lands deletion, and deletion there is soft, so it is not reachable
 // even then; a *hard* delete racing this read is not something Task 3
 // or 4 need close, only something worth naming so a future hard-delete
-// feature does not skip it.)
+// feature does not skip it. Task 4 landed and deletion there is soft, as
+// predicted: SoftDeleteDocument is an UPDATE, so it takes this same row
+// lock and the two serialise on it, and the resurrection the upsert then
+// performs is the documented behaviour rather than a silent
+// re-creation.)
 func (q *Queries) GetDocumentByPathForUpdate(ctx context.Context, arg GetDocumentByPathForUpdateParams) (Document, error) {
 	row := q.db.QueryRow(ctx, getDocumentByPathForUpdate, arg.ProjectID, arg.Path)
 	var i Document
@@ -124,11 +132,12 @@ func (q *Queries) GetDocumentByPathForUpdate(ctx context.Context, arg GetDocumen
 
 const insertDocumentVersion = `-- name: InsertDocumentVersion :one
 INSERT INTO document_versions (project_id, document_id, version, title, summary, body_md,
-                               frontmatter, message, author_user_id, author_token_id)
+                               frontmatter, message, deleted, author_user_id, author_token_id)
 VALUES ($1::uuid, $2::uuid,
         $3::integer, $4::text, $5::text,
         $6::text, $7::jsonb, $8::text,
-        $9::uuid, $10::uuid)
+        $9::boolean,
+        $10::uuid, $11::uuid)
 RETURNING id, project_id, document_id, version, title, summary, body_md, frontmatter, message, deleted, author_user_id, author_token_id, created_at
 `
 
@@ -141,6 +150,7 @@ type InsertDocumentVersionParams struct {
 	BodyMd        string
 	Frontmatter   []byte
 	Message       string
+	Deleted       bool
 	AuthorUserID  *uuid.UUID
 	AuthorTokenID *uuid.UUID
 }
@@ -155,6 +165,17 @@ type InsertDocumentVersionParams struct {
 // key is what keeps it honest: a version row whose project_id disagrees
 // with its document's cannot be inserted at all
 // (documents_schema_test.go pins that refusal).
+//
+// deleted is a required argument rather than a column left to its
+// DEFAULT false, and that is deliberate: Delete's tombstone is the one
+// caller that passes true, and every other caller has to say false out
+// loud. A defaulted column would let a future snapshot-writing path
+// forget the question and store a live version where a tombstone
+// belonged, silently; a required argument turns the same omission into
+// a compile error. TestDeletingADocumentHidesItFromReadsAndKeepsIts
+// History reads the true case back and Task 3's
+// TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage the
+// false one.
 func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentVersionParams) (DocumentVersion, error) {
 	row := q.db.QueryRow(ctx, insertDocumentVersion,
 		arg.ProjectID,
@@ -165,6 +186,7 @@ func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentV
 		arg.BodyMd,
 		arg.Frontmatter,
 		arg.Message,
+		arg.Deleted,
 		arg.AuthorUserID,
 		arg.AuthorTokenID,
 	)
@@ -183,6 +205,82 @@ func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentV
 		&i.AuthorUserID,
 		&i.AuthorTokenID,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const softDeleteDocument = `-- name: SoftDeleteDocument :one
+UPDATE documents
+SET deleted_at          = now(),
+    current_version     = current_version + 1,
+    updated_by_user_id  = $1::uuid,
+    updated_by_token_id = $2::uuid
+WHERE project_id = $3::uuid
+  AND lower(path) = lower($4::text)
+  AND deleted_at IS NULL
+  AND current_version = $5::integer
+RETURNING id, project_id, path, kind, title, summary, body_md, frontmatter, current_version, deleted_at, search, created_at, updated_at, created_by_user_id, created_by_token_id, updated_by_user_id, updated_by_token_id
+`
+
+type SoftDeleteDocumentParams struct {
+	ActorUserID     *uuid.UUID
+	ActorTokenID    *uuid.UUID
+	ProjectID       uuid.UUID
+	Path            string
+	ExpectedVersion int32
+}
+
+// Guarded by the caller's expected version, exactly as UpsertDocument
+// is, so a delete cannot race an edit: the loser matches no row and gets
+// back no row, which Go turns into the typed conflict.
+// TestDeletingWithAStaleVersionIsAConflict pins the guard and
+// TestDeletingAnotherGamesDocumentIsNotFound the project filter.
+//
+// deleted_at IS NULL is part of the guard, so deleting a document twice
+// is not_found on the second call rather than a second tombstone. That
+// is the honest answer: the document is already gone, and the caller has
+// nothing to do. TestDeletingTwiceIsNotFoundRatherThanASecondTombstone
+// pins it.
+//
+// current_version advances here and the caller appends the matching
+// tombstone version in the same transaction. The two are one change and
+// withTx is what keeps them so; the count assertion in
+// TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory is what
+// refuses to let them drift.
+//
+// There is no FOR UPDATE read before this statement, unlike the write
+// path. It would buy nothing here: this UPDATE takes the row lock
+// itself, and everything the write path reads under its lock -- the
+// stored spelling, a body to echo on a conflict -- this call either does
+// not need or reads afterwards, in deleteRefusal, once it already knows
+// it was refused.
+func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocumentParams) (Document, error) {
+	row := q.db.QueryRow(ctx, softDeleteDocument,
+		arg.ActorUserID,
+		arg.ActorTokenID,
+		arg.ProjectID,
+		arg.Path,
+		arg.ExpectedVersion,
+	)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Path,
+		&i.Kind,
+		&i.Title,
+		&i.Summary,
+		&i.BodyMd,
+		&i.Frontmatter,
+		&i.CurrentVersion,
+		&i.DeletedAt,
+		&i.Search,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CreatedByUserID,
+		&i.CreatedByTokenID,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
 	)
 	return i, err
 }
@@ -302,8 +400,9 @@ type UpsertDocumentParams struct {
 // deleted_at = NULL on the update arm is the resurrection rule (spec
 // §3): writing to a soft-deleted path brings the document back and
 // continues its version numbering, because the path is still taken and
-// the history is still there. Nothing in Task 3 can set deleted_at, so
-// that clause is exercised by no test until Task 4 lands the delete.
+// the history is still there. TestWritingToADeletedPathResurrectsItAnd
+// ContinuesTheNumbering is what pins it: delete the clause and the
+// resurrected document reads back as still deleted.
 func (q *Queries) UpsertDocument(ctx context.Context, arg UpsertDocumentParams) (Document, error) {
 	row := q.db.QueryRow(ctx, upsertDocument,
 		arg.ProjectID,

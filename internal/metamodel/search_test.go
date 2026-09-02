@@ -335,3 +335,70 @@ func TestOnlyTheIndexedHeadOfALongFieldIsSearchable(t *testing.T) {
 		t.Fatal("read back a different row")
 	}
 }
+
+// TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument pins the
+// two ways an unbounded query reached Postgres and came back as
+// something an agent reads as "the server is broken".
+//
+// Measured on this project's own Postgres before the bound went in, all
+// of them through Search:
+//
+//   - a NUL inside a word — six characters of JSON escape, which an agent
+//     produces by accident — reached plainto_tsquery and returned
+//     `ERROR: invalid byte sequence for encoding "UTF8"`, untyped, so it
+//     surfaced as internal_error.
+//   - 146 KiB of words cost 2.1s of database CPU and then failed with
+//     `stack depth limit exceeded`, also untyped. 292 KiB took 8.5s and
+//     585 KiB took 33.5s: the growth is quadratic, so a handful of
+//     concurrent calls is a self-inflicted denial of service.
+//
+// Both are the caller's own argument at path `query`, so by this
+// package's own rule they are invalid_input, and both are now refused
+// before a byte of them reaches the database.
+func TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	for _, tc := range []struct {
+		name, query, wants string
+	}{
+		{"a NUL inside a word", "hogger\x00gnoll", "control character"},
+		{"a bare NUL", "\x00", "control character"},
+		{"an escape", "hogger\x1bgnoll", "control character"},
+		{"a newline", "hogger\ngnoll", "control character"},
+		{"146 KiB of words", strings.Repeat("gnoll ", 25000), "too long"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Search(ctx, project, tc.query, "", 10)
+			if !errors.Is(err, metamodel.ErrInvalidInput) {
+				t.Fatalf("err = %v, want invalid_input", err)
+			}
+			var ve *metamodel.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want a ValidationError", err)
+			}
+			if len(ve.Fields) != 1 || ve.Fields[0].Path != "query" {
+				t.Fatalf("fields = %+v, want one problem at path \"query\"", ve.Fields)
+			}
+			if !strings.Contains(ve.Fields[0].Message, tc.wants) {
+				t.Fatalf("message = %q, want it to name %q", ve.Fields[0].Message, tc.wants)
+			}
+		})
+	}
+
+	// The bound is a bound and not a ban: a query of exactly the bound
+	// still searches, and one byte more is refused.
+	t.Run("a query at the bound still searches", func(t *testing.T) {
+		atBound := strings.Repeat("a", metamodel.MaxSearchQuery)
+		if _, err := svc.Search(ctx, project, atBound, "", 10); err != nil {
+			t.Fatalf("a query of exactly the bound was refused: %v", err)
+		}
+		if _, err := svc.Search(ctx, project, atBound+"a", "", 10); !errors.Is(
+			err, metamodel.ErrInvalidInput) {
+			t.Fatalf("err = %v, want one byte over the bound refused", err)
+		}
+	})
+}

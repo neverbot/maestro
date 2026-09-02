@@ -219,10 +219,21 @@ func conflictOnRelationTypeKey(ctx context.Context, q *dbq.Queries, projectID uu
 
 // RelationTypeByKey loads one relation type, matched without regard to
 // case as every key in this domain is.
+//
+// A missing key is named, not reported through the generic notFound
+// helper. The caller supplied this key: ListRelations filters on it and
+// says so in its own doc comment, and "not_found" on its own tells an
+// agent that mistyped `requires` as `require` nothing about which of the
+// arguments it sent was wrong — the one thing it needs to fix the call.
+// upsertRelationWith has named it since it shipped; this is the same
+// message from the read path.
 func (s *Service) RelationTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.RelationType, error) {
 	row, err := s.q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{ProjectID: projectID, Key: key})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbq.RelationType{}, fmt.Errorf("%w: no relation type %q in this game", ErrNotFound, key)
+	}
 	if err != nil {
-		return dbq.RelationType{}, notFound(err, "lookup relation type")
+		return dbq.RelationType{}, fmt.Errorf("lookup relation type: %w", err)
 	}
 	return row, nil
 }

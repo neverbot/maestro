@@ -831,9 +831,16 @@ func TestListRelationsFiltersByTypeAndEndpoint(t *testing.T) {
 
 	// An unknown relation type in the filter is not an empty listing: a
 	// caller that mistyped a key must hear about the key, not be told
-	// this game has no such edges.
-	if _, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{TypeKey: "nosuch"}); !errors.Is(err, metamodel.ErrNotFound) {
+	// this game has no such edges. The message is asserted and not just
+	// the sentinel — the whole point of the decision is the key, and a
+	// test that only matches ErrNotFound stays green against exactly the
+	// bare "not_found" this refuses to return.
+	_, err = svc.ListRelations(ctx, project, metamodel.RelationFilter{TypeKey: "nosuch"})
+	if !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if got, want := err.Error(), `not_found: no relation type "nosuch" in this game`; got != want {
+		t.Fatalf("message = %q, want %q", got, want)
 	}
 }
 
@@ -1012,12 +1019,21 @@ func TestABatchThatRepeatsAnEdgeIsDiagnosedAsSuch(t *testing.T) {
 	}
 }
 
-// TestAnAtomicRelationBatchSeesItsOwnEntities pins that the batch runs
-// against the transaction's handle: an agent seeding a game writes the
-// entities and the edges between them in one call, and an edge resolving
-// its endpoints against the pool would not find rows its own
-// transaction has just written.
-func TestAnAtomicRelationBatchSeesItsOwnEntities(t *testing.T) {
+// TestAnAtomicRelationBatchLandsEveryEdgeOfTheBatch pins the ordinary
+// success of atomic mode: every item lands, and Succeeded reports them
+// all.
+//
+// It used to be called …SeesItsOwnEntities and claimed to pin that the
+// batch resolves its endpoints against its own transaction. It did not:
+// both entities are seeded here through separate committed calls, and
+// UpsertRelations has no path that writes an entity, so routing every
+// lookup in upsertRelationWith through the pool leaves this green. That
+// claim needs a transaction shared between an entity write and an edge
+// write, which no public caller has until Task 9 seeds a whole game in
+// one call — it is pinned in the package's own
+// TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction, which is the
+// only level where it is true today.
+func TestAnAtomicRelationBatchLandsEveryEdgeOfTheBatch(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()

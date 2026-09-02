@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
@@ -198,9 +200,53 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 			return upsertedRelation{}, mapped
 		}
+		if mapped := edgeParentViolation(err, in); errors.Is(mapped, ErrNotFound) {
+			return upsertedRelation{}, mapped
+		}
 		return upsertedRelation{}, fmt.Errorf("upsert relation: %w", err)
 	}
 	return upsertedRelation{row: row, typeKey: relType.Key}, nil
+}
+
+// edgeParentViolation recognises a write refused because one of an edge's
+// three parents was no longer there when the insert ran, and names which
+// one; every other error passes through unchanged.
+//
+// The lookups above this are the ordinary answer, and they cannot be the
+// only one: they read under READ COMMITTED, so a rival transaction that
+// deletes a parent after the lookup and commits before the insert leaves
+// this call holding an id the composite foreign keys then refuse. Left
+// unmapped that arrives as `internal_error` — the code that means "give
+// up" — carrying "violates foreign key constraint
+// relations_target_id_project_id_fkey", which names neither which of the
+// three parents is gone nor that anything is missing at all. In atomic
+// mode one raced endpoint aborts a whole batch with it. The right answer
+// is the one the lookup would have given a moment earlier, `not_found`
+// naming the parent, because the recovery is the same: go and create the
+// row, then retry.
+//
+// The mapping is on the constraint's column, as actorConstraintViolation
+// is, and the three columns are distinct; RemoveEntityType and
+// RemoveRelationType already catch the same SQLSTATE for the same class
+// of race. The names in the message are the caller's own spellings —
+// there is nothing stored left to read them from, which is precisely the
+// condition being reported.
+func edgeParentViolation(err error, in RelationInput) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return err
+	}
+	switch {
+	case strings.Contains(pgErr.ConstraintName, "relation_type_id"):
+		return fmt.Errorf("%w: no relation type %q in this game", ErrNotFound, in.TypeKey)
+	case strings.Contains(pgErr.ConstraintName, "source_id"):
+		return fmt.Errorf("%w: source: no entity %q of type %q in this game",
+			ErrNotFound, in.Source.Key, in.Source.TypeKey)
+	case strings.Contains(pgErr.ConstraintName, "target_id"):
+		return fmt.Errorf("%w: target: no entity %q of type %q in this game",
+			ErrNotFound, in.Target.Key, in.Target.TypeKey)
+	}
+	return err
 }
 
 // endpoint is a resolved end of an edge: the entity and the type it

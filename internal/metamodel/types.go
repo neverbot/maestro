@@ -185,10 +185,23 @@ func conflictOnEntityTypeKey(ctx context.Context, q *dbq.Queries, projectID uuid
 
 // EntityTypeByKey loads one type by its key, matched without regard to
 // case, as every key in this domain is.
+//
+// A missing key is named rather than reported through the generic
+// notFound helper: the caller supplied this key, so it is the one thing
+// it can act on, and EntityByKey resolves a type through here before it
+// can look at an entity at all — a bare "not_found" from that call would
+// not even say which of its two keys was the wrong one. The write paths
+// have named it since they shipped; this is the same message from the
+// read path. **EntityTypeByID deliberately keeps the bare sentinel**: a
+// caller addressing a row by id already holds the id it sent, and there
+// is no second argument for it to tell apart.
 func (s *Service) EntityTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.EntityType, error) {
 	row, err := s.q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: key})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbq.EntityType{}, fmt.Errorf("%w: no entity type %q in this game", ErrNotFound, key)
+	}
 	if err != nil {
-		return dbq.EntityType{}, notFound(err, "lookup entity type")
+		return dbq.EntityType{}, fmt.Errorf("lookup entity type: %w", err)
 	}
 	return row, nil
 }

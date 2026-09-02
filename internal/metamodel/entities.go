@@ -291,6 +291,12 @@ func conflictOnEntityKey(ctx context.Context, q *dbq.Queries, projectID, typeID 
 }
 
 // EntityByKey loads one entity by type key and entity key.
+//
+// Both misses are named, and for the reason endpointEntity gives about
+// an edge's parents: this call takes two keys, either of them can be the
+// wrong one, and a caller told only "not_found" cannot tell whether the
+// type does not exist or the entity within it does not. The type's own
+// message comes from EntityTypeByKey.
 func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey, key string) (dbq.Entity, error) {
 	typ, err := s.EntityTypeByKey(ctx, projectID, typeKey)
 	if err != nil {
@@ -299,8 +305,12 @@ func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey,
 	row, err := s.q.GetEntityByKey(ctx, dbq.GetEntityByKeyParams{
 		ProjectID: projectID, EntityTypeID: typ.ID, Key: key,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return dbq.Entity{}, fmt.Errorf("%w: no entity %q of type %q in this game",
+			ErrNotFound, key, typ.Key)
+	}
 	if err != nil {
-		return dbq.Entity{}, notFound(err, "lookup entity")
+		return dbq.Entity{}, fmt.Errorf("lookup entity: %w", err)
 	}
 	return row, nil
 }

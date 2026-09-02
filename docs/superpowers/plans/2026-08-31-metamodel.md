@@ -461,7 +461,7 @@ func TestSchemaRejectsEnumWithoutOptions(t *testing.T) {
 ```
 
 The block above is the starting point, not the finished file. The landed
-`validate_test.go` grew to 72 tests as the corrections below went in; every
+`validate_test.go` grew to 84 tests as the corrections below went in; every
 negative test there asserts the exact message *and* path it expects, so it
 can only be satisfied by the failure it names. Read the file, not this
 block, for the full list.
@@ -1304,8 +1304,110 @@ files in the same pass, so what they show is what shipped):
     on the wire**; adding it now is free and adding it later would be a wire
     change.
 
-**Open, deliberately not implemented here** — both are decisions for the
-tasks that first feel them, recorded so they are not rediscovered:
+**Corrections from the re-review** (a third pass over the package, made
+after eight fix commits landed correction 3-14; approved with these
+findings):
+
+15. **Unknown keys in a field declaration were silently dropped — the
+    original bug again, one level up.** `UnmarshalJSON`'s plain
+    `json.Unmarshal` into `fieldJSON` ignored anything it did not know:
+    `[{"key":"a","type":"text","nonsense":42,"defualt":"typo"}]` parsed
+    clean, `Check()` returned nil, and re-encoding lost the typo'd
+    `"defualt"` without a trace — exactly the defect the whole `HasDefault`
+    correction (3 above) existed to fix, now reachable through any other
+    misspelled key. `Validate`'s own doc comment already states the
+    opposite contract for values ("an unknown field is an error, never
+    dropped"); the declaration path was doing the reverse. `UnmarshalJSON`
+    now decodes through a `json.Decoder` with `DisallowUnknownFields`,
+    which also turns a stray `has_default` — plausible from an agent that
+    remembers the pre-correction-3 wire shape — into an explicit error
+    instead of silence. `TestParseSchemaIgnoresHasDefaultOnTheWire` asserted
+    the old, wrong behaviour; it is now
+    `TestParseSchemaRejectsHasDefaultOnTheWire`, alongside
+    `TestParseSchemaRejectsAnUnknownKeyInAFieldDeclaration`. Proved red by
+    reverting to a plain `json.Unmarshal`: both tests failed.
+16. **`ParseSchema`'s decode failure satisfied no sentinel.** A
+    `field_schema` that is not an array, an array of scalars, or truncated
+    JSON returned a bare `fmt.Errorf("decode field schema: %w", …)`, and
+    `errors.Is(err, ErrInvalidSchema)` was false — the sentinel split
+    correction 14 added exists precisely so Task 7 need not match on path
+    spelling, and the commonest wire failure of all fell outside the set.
+    Wrapped with `ErrInvalidSchema` alongside the underlying error. Proved
+    red by reverting the wrap: `TestParseSchemaWrapsAMalformedSchemaAsErrInvalidSchema`
+    failed on all three malformed shapes it covers.
+17. **Non-finite bounds were accepted and silently disabled the bound.**
+    Correction 5 rejects a non-finite *value*; nothing rejected `Min: NaN`
+    or an infinite `Max`. `coerce`'s own comment already gives the
+    reasoning ("NaN compares false against every bound") — it was never
+    applied to the bounds themselves. Unreachable over JSON, since
+    `json.Unmarshal` never produces `NaN`/`Inf`, but reachable from any Go
+    caller building a `Schema` in code, which Tasks 3 and 4 both do.
+    `Check()` now rejects a non-finite `Min` or `Max` with `"min must be
+    finite"` / `"max must be finite"`. Proved red by removing the two new
+    checks: `TestSchemaRejectsANonFiniteMinimum`,
+    `TestSchemaRejectsANonFiniteMaximum` and
+    `TestSchemaRejectsANonFiniteMinimumEvenReachedOnlyFromGo` all failed.
+18. **`MarshalJSON` laundered an invalid schema into a valid one.**
+    `HasDefault: true, Default: nil` encoded with no `"default"` key and
+    re-parsed as `HasDefault: false` — silently turning a state `Check()`
+    rejects into one that round-trips clean, on the premise (stated
+    explicitly by the re-review) that a schema may never have been through
+    `Check()` before it reaches the wire. **Decision: reject it at marshal
+    time.** `MarshalJSON` now returns an error for `HasDefault` set with a
+    nil `Default`, so the round trip's "lossless" claim holds because that
+    state can no longer enter it, rather than merely being untested in the
+    one direction that mattered. Proved red by allowing the encode:
+    `TestFieldMarshalJSONRejectsHasDefaultWithANilDefault` failed.
+19. **Go-native `[]string` defaults were rejected while `[]any` was
+    accepted.** `Default: []string{"x"}` on a `list<text>` field failed
+    `Check()` with `expected a list of text, got []string`, while the same
+    schema after a JSON round trip passed, because a JSON decoder only ever
+    produces `[]any`. `Default: 7` already worked on a number field because
+    `toFloat` widens every numeric shape; lists were the only field kind
+    left with this asymmetry, and a test written with the idiomatic Go
+    literal would hit it. **Decision: accept both.** `coerce`'s
+    `FieldListText` branch now takes a `[]string` fast path alongside its
+    `[]any` path. Proved red by removing the `[]string` branch:
+    `TestSchemaAcceptsAGoNativeStringSliceDefaultOnAListTextField` failed.
+20. **Pinned the untested edges** the re-review named as surviving
+    mutations: `maxKeyLen`'s boundary (`TestMaxKeyLenBoundary`, exactly 64
+    accepted, 65 rejected — pins `>` against a `>=` mutant);
+    `ParseSchema([]byte{})` returning a non-nil `Schema{}`
+    (`TestParseSchemaOfEmptyBytesReturnsAnEmptyNonNilSchema`); a nil
+    `Schema.JSON()` encoding as `[]` rather than `null`
+    (`TestNilSchemaJSONEncodesAsAnEmptyArrayNotNull`, a Task 3 storage
+    concern — a nil-schema write must never store SQL `NULL`); and the two
+    previously-unpinned messages, `"an enum field needs options"`
+    (`TestSchemaRejectsEnumWithoutOptionsMessage`) and the `"default: "`
+    prefix (`TestSchemaRejectsABadDefaultWithTheDefaultPrefix`). None of
+    these needed a code change; they close gaps the re-review found by
+    mutation testing, not behaviour bugs.
+21. **The plan's Task 3 block called the wrong API.** The re-validation
+    sweep at what is now the Step 6 code block still read
+    `if _, err := schema.Validate(values); err != nil {`, while correction
+    13 already says Task 4 must use `CheckValues` — an earlier
+    regeneration pass refreshed the three Task 2 source blocks and missed
+    this one, and Task 3's implementer would have copied the block, not the
+    correction, silently reintroducing the back-fill-on-flag bug correction
+    13 exists to prevent. Fixed to `if err := schema.CheckValues(values);
+    err != nil {`. The rest of the plan's `.Validate(` call sites (Task 4's
+    `CreateEntity` and Task 5's `CreateRelation`, both writes that need the
+    normalised map back) were checked and are correct as written; this was
+    the only re-validation site outside `CheckValues`'s own doc comment and
+    correction 13's prose.
+22. **The key-policy split is recorded as a third open item below, and
+    deliberately not resolved here.** `keyPattern` constrains field keys
+    only; entity keys, entity-type keys and relation-type keys are
+    unconstrained `text` in `internal/db/migrations/0004_metamodel.sql`
+    (lines 34, 65, 94), with `UNIQUE (project_id, lower(key))` indexes — so
+    the database *folds* case for those keys while `Check()` *forbids* it
+    for field keys, and `Key: "Hogger"` / `Key: "hogger"` collide at the
+    database with a raw unique violation and no field path. This is a
+    product decision, not a validator fix, and neither the migration nor
+    `keyPattern` were touched.
+
+**Open, deliberately not implemented here** — decisions for the tasks that
+first feel them, recorded so they are not rediscovered:
 
 - **Schema-evolution classification.** Nothing tells a caller whether an edit
   to a field schema *widens* it (a new optional field, a new enum option, a
@@ -1324,6 +1426,23 @@ tasks that first feel them, recorded so they are not rediscovered:
   reserve a list in `Check()` (cheap, and a breaking change once games exist)
   or keep the namespaces separated by construction wherever flattening
   happens.
+- **Key-policy split between field keys and every other key kind.**
+  `keyPattern` (lower_snake_case ASCII, no case variance) constrains field
+  keys only. Entity keys, entity-type keys and relation-type keys are
+  declared as unconstrained `text` in
+  `internal/db/migrations/0004_metamodel.sql:34,65,94`, and their uniqueness
+  indexes are `UNIQUE (project_id, lower(key))` — so the database *folds*
+  case for those keys while `Check()` *forbids* it for field keys. Two
+  incompatible key policies live in one metamodel: `Key: "Hogger"` and
+  `Key: "hogger"` pass every check this package runs and then collide at
+  the database with a raw unique-violation error and no field path.
+  **This is a Task 3 decision** — whether to extend `keyPattern` (or a
+  variant of it) to entity, entity-type and relation-type keys, fold case
+  in application code before the database ever sees it, or accept the
+  raw-violation failure mode and give it a clean error path instead. Until
+  it is settled, do not extend `keyPattern` to other key kinds and do not
+  change the migration; both are product decisions for the human, not a fix
+  to slip into a validator task.
 
 ---
 
@@ -1782,7 +1901,7 @@ func (s *Service) revalidateEntitiesOfType(ctx context.Context, typ dbq.EntityTy
 			invalid = append(invalid, row.ID)
 			continue
 		}
-		if _, err := schema.Validate(values); err != nil {
+		if err := schema.CheckValues(values); err != nil {
 			invalid = append(invalid, row.ID)
 			continue
 		}

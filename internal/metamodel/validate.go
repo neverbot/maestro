@@ -173,6 +173,18 @@ func coerce(f Field, raw any) (any, error) {
 		return nil, fmt.Errorf("%q is not one of %v", s, f.Options)
 
 	case FieldListText:
+		// []string is accepted alongside []any: it is what a Go caller
+		// writes as the idiomatic literal for a list<text> default (Tasks
+		// 3 and 4 both build schemas in code), and every value that
+		// reaches this branch is going to be a string regardless — []any
+		// is only what a JSON decoder happens to produce.
+		if strs, ok := raw.([]string); ok {
+			out := make([]any, len(strs))
+			for i, s := range strs {
+				out[i] = s
+			}
+			return out, nil
+		}
 		list, ok := raw.([]any)
 		if !ok {
 			return nil, fmt.Errorf("expected a list of text, got %T", raw)

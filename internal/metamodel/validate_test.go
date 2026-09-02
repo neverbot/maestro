@@ -513,16 +513,25 @@ func TestParseSchemaTreatsAnExplicitNullDefaultAsNoDefault(t *testing.T) {
 	}
 }
 
-func TestParseSchemaIgnoresHasDefaultOnTheWire(t *testing.T) {
-	// has_default is not an input key. Accepting it would give the wire two
-	// sources of truth for one fact, which is what caused this bug: the
-	// presence of "default" is the only declaration.
-	back, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","has_default":true}]`))
-	if err != nil {
-		t.Fatalf("ParseSchema: %v", err)
+func TestParseSchemaRejectsHasDefaultOnTheWire(t *testing.T) {
+	// has_default is not an input key. Accepting it silently — even by
+	// ignoring it — would give the wire two sources of truth for one fact,
+	// which is what caused this bug: the presence of "default" is the only
+	// declaration. A stray has_default, which a confused agent may well
+	// send since an earlier iteration accepted it, must be rejected
+	// outright, not swallowed.
+	if _, err := ParseSchema([]byte(`[{"key":"repeatable","type":"bool","has_default":true}]`)); err == nil {
+		t.Fatal("a has_default key on the wire must be rejected, not ignored")
 	}
-	if back[0].HasDefault {
-		t.Fatalf("field = %#v, want has_default on the wire to be ignored", back[0])
+}
+
+func TestParseSchemaRejectsAnUnknownKeyInAFieldDeclaration(t *testing.T) {
+	// Unknown keys must never be silently dropped: that is the original
+	// defect the HasDefault correction existed to fix, and it applies to
+	// every key, not only has_default. A typo like "defualt" must surface
+	// immediately, not lose the declared default in silence.
+	if _, err := ParseSchema([]byte(`[{"key":"a","type":"text","nonsense":42,"defualt":"typo"}]`)); err == nil {
+		t.Fatal("an unknown key in a field declaration must be rejected")
 	}
 }
 
@@ -1013,5 +1022,140 @@ func TestCheckValuesTreatsAMissingFieldWithADefaultAsSatisfied(t *testing.T) {
 	}
 	if err.Error() != "schema_violation: fields.min_level: is required" {
 		t.Fatalf("error = %q, want the required-field message", err)
+	}
+}
+
+// --- Re-review findings ---
+
+func TestParseSchemaWrapsAMalformedSchemaAsErrInvalidSchema(t *testing.T) {
+	// The sentinel split exists precisely so a caller need not match on
+	// path spelling to tell an invalid declaration from a bad row. The
+	// commonest wire failure of all — a field_schema that is not an array,
+	// or truncated JSON — must satisfy ErrInvalidSchema like every other
+	// declaration failure, not fall through as a bare internal error.
+	for name, raw := range map[string][]byte{
+		"not an array":  []byte(`{"not":"a list"}`),
+		"array of ints": []byte(`[1,2,3]`),
+		"truncated":     []byte(`[{"key":"a"`),
+	} {
+		_, err := ParseSchema(raw)
+		if err == nil {
+			t.Fatalf("%s: ParseSchema: want an error", name)
+		}
+		if !errors.Is(err, ErrInvalidSchema) {
+			t.Fatalf("%s: ParseSchema error = %v, want errors.Is(err, ErrInvalidSchema)", name, err)
+		}
+	}
+}
+
+func TestSchemaRejectsANonFiniteMinimum(t *testing.T) {
+	nan := math.NaN()
+	msg := checkProblems(t, Schema{{Key: "a", Type: FieldNumber, Min: &nan}})
+	if !strings.Contains(msg, "must be finite") {
+		t.Fatalf("error = %q, want a finiteness message for a non-finite min", msg)
+	}
+}
+
+func TestSchemaRejectsANonFiniteMaximum(t *testing.T) {
+	inf := math.Inf(1)
+	msg := checkProblems(t, Schema{{Key: "a", Type: FieldNumber, Max: &inf}})
+	if !strings.Contains(msg, "must be finite") {
+		t.Fatalf("error = %q, want a finiteness message for a non-finite max", msg)
+	}
+}
+
+func TestSchemaRejectsANonFiniteMinimumEvenReachedOnlyFromGo(t *testing.T) {
+	// Unreachable over JSON (json.Unmarshal never produces NaN/Inf), but
+	// reachable from any Go caller building a Schema in code — which Tasks
+	// 3 and 4 both do. coerce's own comment gives the reasoning: NaN
+	// compares false against every bound, so an unchecked NaN bound
+	// silently disables itself.
+	nan := math.NaN()
+	schema := Schema{{Key: "a", Type: FieldNumber, Min: &nan}}
+	if err := schema.Check(); err == nil {
+		t.Fatal("Check must reject a NaN minimum")
+	}
+}
+
+func TestFieldMarshalJSONRejectsHasDefaultWithANilDefault(t *testing.T) {
+	// A field with HasDefault set and a nil Default cannot be spelled on
+	// the wire: nil is not a value any field type could hold. The earlier
+	// default fix's premise is that a schema may never have been through
+	// Check() before it is marshalled — MarshalJSON must not launder that
+	// invalid state into a schema that silently round-trips to
+	// HasDefault: false, which is what happened before this fix: encoding
+	// omitted the "default" key entirely and re-parsing came back with
+	// HasDefault false, turning an error into silence.
+	f := Field{Key: "a", Type: FieldBool, HasDefault: true, Default: nil}
+	if _, err := json.Marshal(f); err == nil {
+		t.Fatal("MarshalJSON must reject HasDefault true with a nil Default")
+	}
+}
+
+func TestSchemaAcceptsAGoNativeStringSliceDefaultOnAListTextField(t *testing.T) {
+	// Default: 7 on a number field works because toFloat widens; a Go
+	// caller writing the idiomatic []string{"x"} literal for a list<text>
+	// default must not be the one surprise left standing. []any and
+	// []string must be accepted equally.
+	schema := Schema{{Key: "tags", Type: FieldListText, HasDefault: true, Default: []string{"x", "y"}}}
+	if err := schema.Check(); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	out, err := schema.Validate(map[string]any{})
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	got, ok := out["tags"].([]any)
+	if !ok || len(got) != 2 || got[0] != "x" || got[1] != "y" {
+		t.Fatalf("tags = %#v, want [x y] as []any", out["tags"])
+	}
+}
+
+func TestMaxKeyLenBoundary(t *testing.T) {
+	if err := (Schema{{Key: strings.Repeat("a", maxKeyLen), Type: FieldText}}).Check(); err != nil {
+		t.Fatalf("a key of exactly maxKeyLen characters must be accepted: %v", err)
+	}
+	msg := checkProblems(t, Schema{{Key: strings.Repeat("a", maxKeyLen+1), Type: FieldText}})
+	if !strings.Contains(msg, "key must be at most") {
+		t.Fatalf("error = %q, want the key-length message", msg)
+	}
+}
+
+func TestParseSchemaOfEmptyBytesReturnsAnEmptyNonNilSchema(t *testing.T) {
+	s, err := ParseSchema([]byte{})
+	if err != nil {
+		t.Fatalf("ParseSchema: %v", err)
+	}
+	if s == nil {
+		t.Fatal("ParseSchema([]byte{}) = nil, want a non-nil empty Schema{}")
+	}
+	if len(s) != 0 {
+		t.Fatalf("ParseSchema([]byte{}) = %v, want empty", s)
+	}
+}
+
+func TestNilSchemaJSONEncodesAsAnEmptyArrayNotNull(t *testing.T) {
+	var s Schema
+	raw, err := s.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if string(raw) != "[]" {
+		t.Fatalf("JSON() on a nil schema = %s, want []", raw)
+	}
+}
+
+func TestSchemaRejectsEnumWithoutOptionsMessage(t *testing.T) {
+	msg := checkProblems(t, Schema{{Key: "a", Type: FieldEnum}})
+	if !strings.Contains(msg, "an enum field needs options") {
+		t.Fatalf("error = %q, want the enum-needs-options message", msg)
+	}
+}
+
+func TestSchemaRejectsABadDefaultWithTheDefaultPrefix(t *testing.T) {
+	schema := Schema{{Key: "a", Type: FieldBool, HasDefault: true, Default: "yes"}}
+	msg := checkProblems(t, schema)
+	if !strings.Contains(msg, "default: ") {
+		t.Fatalf("error = %q, want the \"default: \" prefix", msg)
 	}
 }

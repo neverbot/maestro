@@ -1,8 +1,10 @@
 package metamodel
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -74,9 +76,20 @@ type fieldJSON struct {
 // is a default that is silently dropped. An explicit null is not a default:
 // null is how this package spells "not set" everywhere else, and Validate
 // already treats a null value as an absent one.
+//
+// Decoding rejects any key it does not know, via DisallowUnknownFields. The
+// package's own contract for values, stated in Validate's doc comment, is
+// "an unknown field is an error, never dropped" — the declaration path must
+// not do the reverse. Without this, a typo like "defualt" parsed clean and
+// silently lost the declared default: exactly the defect the HasDefault
+// correction existed to fix. This also turns a stray "has_default" — which a
+// confused agent may well send, since an earlier iteration accepted it —
+// into an explicit error instead of silence.
 func (f *Field) UnmarshalJSON(raw []byte) error {
 	var w fieldJSON
-	if err := json.Unmarshal(raw, &w); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&w); err != nil {
 		return err
 	}
 	*f = Field{
@@ -99,10 +112,20 @@ func (f *Field) UnmarshalJSON(raw []byte) error {
 
 // MarshalJSON writes the "default" key only for a field that declares one,
 // so the value round trips back through UnmarshalJSON to the same
-// HasDefault. A field with HasDefault set and a nil Default cannot be
-// spelled on the wire; Check rejects it, since nil is not a value any field
-// type could hold.
+// HasDefault.
+//
+// A field with HasDefault set and a nil Default cannot be spelled on the
+// wire, since nil is not a value any field type could hold — Check rejects
+// it, but a schema built by a Go caller may never have been through Check
+// before it reaches here. Encoding it anyway would launder that invalid
+// state into a valid-looking schema that silently round-trips to
+// HasDefault: false, turning an error into silence. So this is rejected at
+// marshal time instead: the round trip is documented as lossless because
+// this state can never enter it.
 func (f Field) MarshalJSON() ([]byte, error) {
+	if f.HasDefault && f.Default == nil {
+		return nil, fmt.Errorf("field %q: has_default is set with a nil default, which is not a value any field type could hold", f.Key)
+	}
 	w := fieldJSON{
 		Key:      f.Key,
 		Label:    f.Label,
@@ -112,7 +135,7 @@ func (f Field) MarshalJSON() ([]byte, error) {
 		Min:      f.Min,
 		Max:      f.Max,
 	}
-	if f.HasDefault && f.Default != nil {
+	if f.HasDefault {
 		encoded, err := json.Marshal(f.Default)
 		if err != nil {
 			return nil, err
@@ -132,7 +155,12 @@ func ParseSchema(raw []byte) (Schema, error) {
 	}
 	var s Schema
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("decode field schema: %w", err)
+		// Wrapped so errors.Is(err, ErrInvalidSchema) is true: the sentinel
+		// split exists precisely so a caller need not match on path
+		// spelling to tell an invalid declaration from a bad row, and
+		// malformed field_schema JSON — not an array, not an array of
+		// objects, or truncated — is the commonest wire failure of all.
+		return nil, fmt.Errorf("decode field schema: %w: %w", ErrInvalidSchema, err)
 	}
 	return s, nil
 }
@@ -168,6 +196,11 @@ const maxKeyLen = 64
 // The rule is enforced at declaration time, where an agent can still act on
 // the news, rather than being discovered six hundred rows later.
 var keyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// isFinite reports whether v is neither NaN nor an infinity.
+func isFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
 
 // Check validates the schema itself, before anything is stored against it.
 // Every problem in the whole schema is reported in one pass, including
@@ -237,7 +270,19 @@ func (s Schema) Check() error {
 		if f.Type != FieldNumber && (f.Min != nil || f.Max != nil) {
 			problem("min and max apply only to a number field")
 		}
-		if f.Min != nil && f.Max != nil && *f.Min > *f.Max {
+		// A non-finite bound is accepted by no comparison: NaN compares
+		// false against every bound (coerce's own comment gives the
+		// reasoning), silently disabling it, and the infinities are simply
+		// pointless as a bound. Unreachable over JSON, since json.Unmarshal
+		// never produces NaN or Inf, but reachable from any Go caller
+		// building a Schema in code — which Tasks 3 and 4 both do.
+		if f.Min != nil && !isFinite(*f.Min) {
+			problem("min must be finite")
+		}
+		if f.Max != nil && !isFinite(*f.Max) {
+			problem("max must be finite")
+		}
+		if f.Min != nil && f.Max != nil && isFinite(*f.Min) && isFinite(*f.Max) && *f.Min > *f.Max {
 			problem(fmt.Sprintf("min %v is above max %v, so no value is legal", *f.Min, *f.Max))
 		}
 

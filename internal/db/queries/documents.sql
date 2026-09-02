@@ -247,13 +247,20 @@ RETURNING *;
 --
 -- Keyset by version alone, which is unique within a document
 -- (document_versions_key), so there is no tiebreak to add and the page
--- is an index scan. The project filter is load-bearing here and is not
--- defence in depth: this is one of the two calls the file header names
+-- is an index scan. This is one of the two calls the file header names
 -- as being one forgotten join away from serving another game's prose,
--- and it deliberately does not reach the parent document at all.
--- TestReadingAnotherGamesVersionIsNotFound covers it through History,
--- and TestAVersionRowCarriesItsOwnProjectId is what pins that the
--- denormalised column is the one being filtered on.
+-- and it deliberately does not reach the parent document at all -- but
+-- no call markdown.History offers can make this query's own project
+-- filter matter (see markdown.documentForVersions): the document id
+-- only ever reaches here already resolved inside the caller's own game,
+-- and 0007_documents.sql's composite key makes a version row whose
+-- project_id disagrees with its document's unrepresentable
+-- (TestAVersionRowCannotClaimAGameItsDocumentDoesNotBelongTo forces
+-- that refusal). What the project filter separates nothing for is
+-- covered instead by TestAVersionIsAddressedByItsOwnDocument, the
+-- document_id filter, and TestTwoGamesSharingOnePathKeepSeparateHistories
+-- pins that a version row carries its own document's project id in the
+-- first place.
 SELECT id, project_id, document_id, version, title, summary, message, deleted,
        author_user_id, author_token_id, created_at
 FROM document_versions
@@ -267,8 +274,10 @@ LIMIT sqlc.arg('limit')::int;
 -- name: GetDocumentVersion :one
 -- The other call the file header names. Same rule: filtered by
 -- project_id and document_id, never by version alone and never by a
--- join. TestReadingAnotherGamesVersionIsNotFound pins the project
--- filter through ReadVersion.
+-- join -- and the same caveat: no call markdown.ReadVersion offers can
+-- make this query's own project filter matter, for the reason above
+-- ListDocumentVersions. TestReadingAnotherGamesVersionIsNotFound is
+-- refused one join earlier, in markdown.documentForVersions.
 SELECT * FROM document_versions
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND document_id = sqlc.arg('document_id')::uuid

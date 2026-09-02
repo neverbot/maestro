@@ -164,14 +164,21 @@ func TestAMalformedHistoryCursorIsInvalidInputAtItsOwnPath(t *testing.T) {
 			"page from the cursor a previous call returned, or omit it to start")
 }
 
+// TestAHistoryPageAsksForTooMuchAndGetsTheCap does not pin the clamp
+// policy itself -- with only two versions in the fixture, clamping to
+// MaxHistoryPage, folding onto DefaultHistoryPage and applying no bound
+// at all all return the same two rows, so no assertion here can tell
+// them apart. That policy is paging.Size's and is pinned directly, in
+// internal/paging/cursor_test.go's
+// TestSizeClampsRatherThanFoldingOntoTheDefault. What this test does
+// pin: History does not error or truncate below a real page's worth of
+// rows when asked for more than the cap.
 func TestAHistoryPageAsksForTooMuchAndGetsTheCap(t *testing.T) {
 	svc, _, _, pool := newService(t)
 	ctx := context.Background()
 	game := newGame(t, pool, "azeroth")
 	writeVersions(t, svc, game, "bible", 2)
 
-	// Clamped, never folded onto the default: asking for more than the
-	// cap must not return strictly fewer rows than asking for the cap.
 	page, err := svc.History(ctx, game, markdown.HistoryFilter{
 		Path: "bible", Limit: markdown.MaxHistoryPage + 1,
 	})
@@ -514,6 +521,44 @@ func TestRevertingToATombstoneRestoresItsBodyAndLeavesTheDocumentAlive(t *testin
 	}
 	if page.Versions[0].Deleted {
 		t.Fatal("the version a revert writes is live even when its source was a tombstone")
+	}
+}
+
+// TestRevertingADeletedDocumentResurrectsIt pins the case Revert's own
+// doc comment names as following from writeWith rather than being
+// chosen here: the document itself is currently deleted (not merely the
+// version being restored), and a revert brings it back live, the same
+// way a Write to a deleted path does. Delete at version 4 (tombstone
+// lands at 5), then revert to version 1 -- the document comes back live
+// at version 6, its content equal to version 1's, deleted_at cleared.
+func TestRevertingADeletedDocumentResurrectsIt(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	writeVersions(t, svc, game, "bible", 4)
+	if _, err := svc.Delete(ctx, game, markdown.DeleteInput{
+		Path: "bible", ExpectedVersion: ptrInt32(4), Message: "cut",
+	}); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	doc, err := svc.Revert(ctx, game, markdown.RevertInput{
+		Path: "bible", ToVersion: 1, ExpectedVersion: ptrInt32(5),
+	})
+	if err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if doc.DeletedAt.Valid {
+		t.Fatal("reverting a deleted document must resurrect it, deleted_at cleared")
+	}
+	if doc.CurrentVersion != 6 {
+		t.Fatalf("CurrentVersion = %d, want 6 (the tombstone was version 5)", doc.CurrentVersion)
+	}
+	if doc.BodyMd != "v1\n" {
+		t.Fatalf("BodyMd = %q, want version 1's own body", doc.BodyMd)
+	}
+	if _, err := svc.Read(ctx, game, "bible"); err != nil {
+		t.Fatalf("the document must read live after the revert: %v", err)
 	}
 }
 

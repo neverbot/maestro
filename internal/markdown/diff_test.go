@@ -122,6 +122,68 @@ func TestADiffOfAnAddedAndARemovedLineCountsBothSides(t *testing.T) {
 	}
 }
 
+// TestAnAddedDocumentsDiffNumbersTheEmptySideByGNURules and
+// TestADeletedDocumentsDiffNumbersTheEmptySideByGNURules pin hunkRange
+// against GNU diff -U3's own output for the one case that discriminates
+// it from printing the count verbatim: a completely empty side. `diff
+// -U3 empty full` prints "@@ -0,0 +1,3 @@", never "@@ -1,0"; the from
+// side of an empty-to-full diff has no line 1 to be "after", so it is
+// numbered by the line before the range, one lower than the count of
+// lines on that side would otherwise suggest.
+func TestAnAddedDocumentsDiffNumbersTheEmptySideByGNURules(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: "", ExpectedVersion: ptrInt32(0),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: "a\nb\nc\n", ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	got, err := svc.Diff(ctx, game, "bible", 1, 2)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if got.Coarse {
+		t.Fatal("a three-line body is not a coarse case")
+	}
+	if !strings.Contains(got.Unified, "@@ -0,0 +1,3 @@") {
+		t.Fatalf("diff %q must number the empty from-side by GNU's rule (@@ -0,0 +1,3 @@)", got.Unified)
+	}
+}
+
+func TestADeletedDocumentsDiffNumbersTheEmptySideByGNURules(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: "a\nb\nc\n", ExpectedVersion: ptrInt32(0),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: "", ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+	got, err := svc.Diff(ctx, game, "bible", 1, 2)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if got.Coarse {
+		t.Fatal("a three-line body is not a coarse case")
+	}
+	if !strings.Contains(got.Unified, "@@ -1,3 +0,0 @@") {
+		t.Fatalf("diff %q must number the empty to-side by GNU's rule (@@ -1,3 +0,0 @@)", got.Unified)
+	}
+}
+
 // TestADocumentThatDoesNotEndInANewlineDiffsAgainstOneThatDoes pins
 // splitLines' trailing-newline rule: without it the two bodies differ by
 // a phantom empty line and every such pair reads as a two-line change.
@@ -178,6 +240,49 @@ func TestAHugeChangeComesBackCoarseAndSaysSo(t *testing.T) {
 	// there, under one hunk.
 	if strings.Count(got.Unified, "\n-a") != 5000 || strings.Count(got.Unified, "\n+b") != 5000 {
 		t.Fatal("a coarse diff still carries both whole sides")
+	}
+}
+
+// TestACoarseDiffDoesNotReprintItsCommonHeadAndTailAsChanged pins that
+// the coarse fallback does not carry the up-to-three lines of context
+// the fine path's trim backs off. Those lines are genuinely identical on
+// both sides; printing them under both '-' and '+' is arithmetically
+// consistent with a header that counts what it prints, but it is not a
+// change and a coarse hunk does not need context of its own.
+func TestACoarseDiffDoesNotReprintItsCommonHeadAndTailAsChanged(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	commonHead := "ctx1\nctx2\nctx3\n"
+	commonTail := "ctx4\nctx5\nctx6\n"
+	before := commonHead + strings.Repeat("a\n", 5000) + commonTail
+	after := commonHead + strings.Repeat("b\n", 5000) + commonTail
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: before, ExpectedVersion: ptrInt32(0),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: after, ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("second write: %v", err)
+	}
+
+	got, err := svc.Diff(ctx, game, "bible", 1, 2)
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	if !got.Coarse {
+		t.Fatal("a 5,000-line rewrite must report itself coarse rather than pretending")
+	}
+	if strings.Count(got.Unified, "\n-a") != 5000 || strings.Count(got.Unified, "\n+b") != 5000 {
+		t.Fatal("a coarse diff still carries both whole sides")
+	}
+	for _, line := range []string{"ctx1", "ctx2", "ctx3", "ctx4", "ctx5", "ctx6"} {
+		if strings.Contains(got.Unified, "-"+line) || strings.Contains(got.Unified, "+"+line) {
+			t.Fatalf("diff %q reprints the common line %q as changed", got.Unified, line)
+		}
 	}
 }
 

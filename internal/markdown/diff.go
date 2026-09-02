@@ -147,28 +147,64 @@ func unifiedDiff(fromName, toName, fromBody, toBody string) (string, bool) {
 		return b.String(), false
 	}
 
-	// Back the trim off by the context width, so the lines either side
-	// of the change survive into the hunk. Without this the trim eats
-	// exactly the context the format exists to show, and every hunk is
-	// a bare pair of changed lines.
-	head = max(0, head-diffContext)
-	tail = max(0, tail-diffContext)
-	midFrom := from[head : len(from)-tail]
-	midTo := to[head : len(to)-tail]
-
-	if len(midFrom) > lcsLimit || len(midTo) > lcsLimit {
-		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", head+1, len(midFrom), head+1, len(midTo))
-		for _, line := range midFrom {
+	// The coarse fallback below prints its whole range as changed, so it
+	// is checked and rendered against the *raw* trim — head and tail as
+	// they stand, common lines excluded. Backing them off by diffContext
+	// first (as the fine path needs, below) would hand the fallback up
+	// to three genuinely identical lines at each end and it would print
+	// them as both removed and added: arithmetically consistent with a
+	// header that counts what it prints, but a line no one changed has
+	// no business under a '-' or a '+'. A coarse hunk already says "the
+	// whole document was replaced"; it does not need its own context.
+	if len(from)-head-tail > lcsLimit || len(to)-head-tail > lcsLimit {
+		coarseFrom, coarseTo := from[head:len(from)-tail], to[head:len(to)-tail]
+		fmt.Fprintf(&b, "@@ -%s +%s @@\n",
+			hunkRange(head+1, len(coarseFrom)), hunkRange(head+1, len(coarseTo)))
+		for _, line := range coarseFrom {
 			fmt.Fprintf(&b, "-%s\n", line)
 		}
-		for _, line := range midTo {
+		for _, line := range coarseTo {
 			fmt.Fprintf(&b, "+%s\n", line)
 		}
 		return b.String(), true
 	}
 
+	// Back the trim off by the context width, so the lines either side
+	// of the change survive into the hunk. Without this the trim eats
+	// exactly the context the format exists to show, and every hunk is
+	// a bare pair of changed lines. Only the fine path below needs this:
+	// diffOps/writeHunks tell changed lines from context themselves, so
+	// backed-off common lines are printed as context (' '), never as
+	// '-'/'+' the way the coarse path above would have printed them.
+	head = max(0, head-diffContext)
+	tail = max(0, tail-diffContext)
+	midFrom := from[head : len(from)-tail]
+	midTo := to[head : len(to)-tail]
+
 	writeHunks(&b, diffOps(midFrom, midTo), head)
 	return b.String(), false
+}
+
+// hunkRange renders one half of a unified hunk header (the "1,3" or
+// "0,0" in "@@ -1,3 +0,0 @@").
+//
+// **A zero-length range is numbered by the line before it, not the line
+// after.** That is the unified format's own rule — GNU diff writes
+// "@@ -0,0 +1,3 @@" for a file created from nothing, never "@@ -1,0" —
+// and start is always the first line the *non-empty* side would have
+// occupied, one past where a caller trimming context already stands.
+// Printing start verbatim when count is 0 claims the empty range
+// follows a line that does not exist on an empty side (line 1 of a body
+// with no line 1), and anything positioning by that number — patch, a
+// renderer jumping to a hunk — lands one line high.
+// TestAnAddedDocumentsDiffNumbersTheEmptySideByGNURules and
+// TestADeletedDocumentsDiffNumbersTheEmptySideByGNURules pin both
+// directions against GNU diff's own output.
+func hunkRange(start, count int) string {
+	if count == 0 {
+		return fmt.Sprintf("%d,0", start-1)
+	}
+	return fmt.Sprintf("%d,%d", start, count)
 }
 
 // op is one line of the diff: ' ' kept, '-' removed, '+' added.
@@ -257,7 +293,7 @@ func writeHunks(b *strings.Builder, ops []op, offset int) {
 			}
 			i++
 		}
-		fmt.Fprintf(b, "@@ -%d,%d +%d,%d @@\n", startFrom, fromCount, startTo, toCount)
+		fmt.Fprintf(b, "@@ -%s +%s @@\n", hunkRange(startFrom, fromCount), hunkRange(startTo, toCount))
 		for _, o := range ops[start:i] {
 			fmt.Fprintf(b, "%c%s\n", o.kind, o.line)
 		}

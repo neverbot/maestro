@@ -21,8 +21,19 @@ import (
 // Exported for the rule the metamodel established for MaxSearchQuery: a
 // bound a caller cannot read is a bound a caller trips over, and Task
 // 10's docs.history description is built with these values interpolated
-// rather than typed out. TestAHistoryPageAsksForTooMuchAndGetsTheCap
-// pins the clamp through the exported name.
+// rather than typed out.
+//
+// The clamp policy itself -- that a limit above the cap is clamped to
+// the cap rather than folded onto the default -- is pinned in
+// internal/paging/cursor_test.go's
+// TestSizeClampsRatherThanFoldingOntoTheDefault, against paging.Size
+// directly. TestAHistoryPageAsksForTooMuchAndGetsTheCap, in this
+// package, does not: its fixture holds two versions, and clamping to
+// MaxHistoryPage, folding onto DefaultHistoryPage or applying no bound
+// at all all return the same two rows, so it cannot tell the policies
+// apart. What it does pin is that asking for more than the cap does not
+// error and does not silently return fewer rows than the cap would --
+// which is worth having, and is not the same claim.
 const (
 	// DefaultHistoryPage and MaxHistoryPage bound one page of History.
 	DefaultHistoryPage int32 = 50
@@ -300,6 +311,25 @@ type RevertInput struct {
 // A revert is a content operation, and a caller that wants the document
 // gone says so with delete — where the expected version, and therefore
 // the refusal if someone else has since written, is its own.
+//
+// **Reverting a currently-deleted document resurrects it**, live and
+// readable again, the same as Write does. That is a different case from
+// the tombstone-body one above — this one is the document itself sitting
+// deleted, and a caller reverting it to any past version, tombstone or
+// not — and it follows from the same route rather than a separate
+// decision: Revert shares writeWith with Write, and writeWith's own
+// `GetDocumentByPathForUpdate` read carries no deleted_at filter, so a
+// write to a deleted path resurrects it (documents.go's writeWith
+// comment states that for Write; Task 4 made resurrection on write
+// deliberate). Revert never checks `existing.DeletedAt` either, so it
+// inherits the behaviour rather than choosing it, and
+// TestRevertingADeletedDocumentResurrectsIt pins that the document comes
+// back with `deleted_at` cleared and its version advanced past the
+// tombstone, not that anyone decided it should. The published
+// `document.reverted` event carries no field saying so — a subscriber
+// wanting to know already gets the same signal-free event Write's
+// `document.written` sends for the same resurrection, which is the
+// existing precedent and not a gap this task opened.
 func (s *Service) Revert(ctx context.Context, projectID uuid.UUID, in RevertInput) (dbq.Document, error) {
 	// One pass over every argument, as Write and Delete do:
 	// TestEveryProblemWithOneRevertIsReportedInOnePass pins that four

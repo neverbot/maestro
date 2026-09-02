@@ -3,10 +3,13 @@ package metamodel_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -178,14 +181,14 @@ func TestNoEventIsPublishedWhenTheWriteIsRolledBack(t *testing.T) {
 // the wire in that window: a subscriber told now would re-read a database
 // that still holds the old schema and cache that as the new one.
 //
-// What this cannot pin, and what no test in this package can: a publish
-// placed as the very last statement inside withTx's callback, which
-// differs from the correct placement only by the commit that immediately
-// follows it. Only a failing commit tells those two apart, and nothing
-// here can make a commit fail on demand. The invariant is stated on
-// Service.publish; this test covers every earlier placement, which is
-// where a publish actually tends to drift to — next to the write it
-// announces.
+// What this test cannot pin is a publish placed as the very last
+// statement inside withTx's callback, which differs from the correct
+// placement only by the commit that immediately follows it: only a
+// failing commit tells those two apart. That is not out of reach —
+// TestNoEventIsPublishedWhenTheCommitFails makes the commit fail on
+// demand with a deferred constraint — and this test covers every
+// earlier placement, which is where a publish actually tends to drift
+// to: next to the write it announces.
 func TestNothingIsAnnouncedWhileTheTransactionIsStillOpen(t *testing.T) {
 	pool := testutil.NewPool(t)
 	hub := realtime.NewHub()
@@ -277,5 +280,55 @@ func assertIdentityPayload(t *testing.T, who string, e realtime.Event, wantID uu
 	}
 	if got.Key != wantKey {
 		t.Fatalf("%s: payload key = %q, want %q", who, got.Key, wantKey)
+	}
+}
+
+// TestNoEventIsPublishedWhenTheCommitFails is the last placement
+// the two tests above cannot reach: a publish sitting as the very last
+// statement inside withTx's callback, which differs from the correct
+// placement only by the commit that immediately follows it.
+//
+// It is reachable because testutil.NewPool hands every test its own
+// throwaway database, so this test may install a constraint in it that
+// no other test sees. A deferred foreign key from entity_types.id to
+// projects.id is satisfied by nothing — an entity type's id is not a
+// project id — but being DEFERRABLE INITIALLY DEFERRED it is checked at
+// COMMIT and not before, so every statement inside the transaction
+// succeeds and only the commit fails, with SQLSTATE 23503. That is
+// exactly the window a last-statement publish would announce into: the
+// database has accepted every write, and then thrown all of them away.
+//
+// The constraint is added while entity_types is empty, because ADD
+// CONSTRAINT validates the rows already stored.
+func TestNoEventIsPublishedWhenTheCommitFails(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	if _, err := pool.Exec(ctx,
+		`ALTER TABLE entity_types ADD CONSTRAINT zz_fail_at_commit
+		   FOREIGN KEY (id) REFERENCES projects (id) DEFERRABLE INITIALLY DEFERRED`); err != nil {
+		t.Fatalf("install the deferred constraint: %v", err)
+	}
+
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	})
+	if err == nil {
+		t.Fatal("the commit must fail under the deferred constraint")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("err = %v, want a deferred foreign-key violation at commit", err)
+	}
+	requireNothing(t, sub, "the transaction never committed")
+
+	if _, err := svc.EntityTypeByKey(ctx, project, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("EntityTypeByKey = %v, want ErrNotFound: nothing was stored", err)
 	}
 }

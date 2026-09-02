@@ -356,6 +356,46 @@ func TestUpsertEntityTypeRefusesAKeyThatDiffersOnlyByCase(t *testing.T) {
 	}
 }
 
+// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale pins the only job
+// left to the spelling check in the locked pre-read.
+//
+// Correction 15 made the post-write check the actual refusal, and it
+// closes the pre-read's path as well: deleting the pre-read branch
+// leaves every other test in this package green, because in all of them
+// the version matches and the write goes through to be caught after the
+// fact. This is the case where the two disagree. A caller holding both a
+// respelled key *and* a stale version is failing for two reasons at
+// once, and the order decides which one it is told about: the pre-read
+// checks the spelling first, so it hears the respelling — which names
+// both spellings and both remedies — rather than "current version is 1",
+// which would send it to re-read a row it is not even addressing by the
+// stored spelling and to retry with a version that will be refused
+// again for the same reason. Without the pre-read the version check runs
+// first and version_conflict wins.
+func TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "Quest", Label: "Quest", LabelPlural: "Quests",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Something else", LabelPlural: "Something elses",
+		ExpectedVersion: ptrInt32(9),
+	})
+	if errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("err = %v, want the respelling refusal rather than the version conflict", err)
+	}
+	requireFieldError(t, err, "key",
+		`"quest" already exists here spelled "Quest", and keys are matched without regard to case: `+
+			`use "Quest" to update it, or pick a key that differs by more than capitalisation`)
+}
+
 func TestACreationThatLosesTheRaceForItsKeyIsRefused(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)

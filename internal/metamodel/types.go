@@ -85,6 +85,16 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 		})
 		switch {
 		case err == nil:
+			// Checked before the version, and that order is the whole
+			// remaining job of this branch: correction 15's post-write
+			// check catches every respelling this one does, so deleting
+			// these three lines is invisible to every test where the
+			// version also matches. Where it does not, the caller is
+			// failing for two reasons at once and hears the one it can
+			// act on — the message naming both spellings — rather than
+			// "current version is N", which would send it to retry with a
+			// version refused again for the same reason.
+			// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale pins it.
 			if existing.Key != in.Key {
 				return keyRespellingError("key", in.Key, existing.Key)
 			}

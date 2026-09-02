@@ -242,12 +242,32 @@ Three rules the validator enforces at declaration time:
 - A field `key` must match `^[a-z][a-z0-9_]*$` and be at most 64
   characters. Lower snake case with no dots, so `fields.<key>` stays an
   unambiguous error path and two keys can never differ only by case.
-  This rule applies to declared **field** keys only: entity keys and
-  type keys are checked for non-emptiness alone, and are unique per
-  scope case-insensitively. Whether that inconsistency should be closed
-  is an open question, stated once in
-  `2026-09-02-agent-skill-bundle-design.md` §10.5 and its open question
-  9, because that is the document whose teaching depends on the answer.
+  This rule applies to declared **field** keys only. The keys that
+  *address rows* — entity-type keys, relation-type keys and entity keys
+  — have their own rule, `^[A-Za-z0-9][A-Za-z0-9_-]*$`, also capped at
+  64 characters: hyphens and capitals are allowed, and a key may start
+  with a digit.
+
+  **The two rules differ because the mechanism behind them differs, and
+  this is settled, not open.** A field key lives inside a jsonb object,
+  which has no case folding: `Level` and `level` would be two distinct
+  keys in one row and nothing downstream would ever catch the collision,
+  so the rule has to forbid case itself. A row key cannot produce that
+  collision at all — every uniqueness index over these keys is
+  `UNIQUE (project_id, lower(key))`, so the database folds case for
+  them. Both rules therefore deliver the same guarantee, "no two keys
+  differ only by case", through the mechanism each context actually has,
+  and forbidding capitals in row keys would buy nothing while costing
+  what the folding index was chosen for: a game whose own vocabulary
+  capitalises its handles (`Hogger`, `Elwynn_Forest`, `GP_Monaco`) spells
+  them the way its design documents do, and `1999_season` or
+  `500_miles` are ordinary keys for a racing game.
+
+  A write whose key matches a stored key only case-insensitively is
+  **refused**, naming both spellings, rather than silently updating the
+  row under the other spelling or surfacing a raw unique violation.
+  Maestro never folds or rewrites a key on the designer's behalf: the
+  spelling first stored is the one that stands.
 - A default is declared by the **presence of the `"default"` key** in
   the JSON and by nothing else. There is no `has_default` input key,
   and an explicit `"default": null` declares no default. A declared

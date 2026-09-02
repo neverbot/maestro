@@ -20,9 +20,9 @@ Scope: sub-project 7 of the roadmap in
 >   all against the committed validator.
 > - §3 and §4.5 — `invalid_schema` and `schema_violation` are two codes
 >   with two recoveries, not one code.
-> - §4.4 — the "singular, lower snake" key rule is a bundle convention,
->   not a validator rule. New §10.5 and open question 9 record the
->   inconsistency rather than resolving it.
+> - §4.4 — "singular" is a bundle convention; the spelling of a key is
+>   constrained by the server. §10.5 carries the two committed key rules
+>   and open question 9 is closed against them.
 > - §10.1 and §10.2 — both findings were verified and accepted; the
 >   decisions they ask for now live as open questions O2 and O1 in the
 >   core spec, and §11.3–11.4 point there instead of posing them again.
@@ -182,9 +182,10 @@ against `internal/metamodel/` by §8.2:
   applied before the field could be reported missing, so the pair makes
   `required` unreachable.
 - A field `key` must match `^[a-z][a-z0-9_]*$` and be at most 64
-  characters. Entity keys and entity-type keys are **not** constrained
-  this way — see §10.5, which the bundle must teach around rather than
-  flatten into one rule.
+  characters. Entity, entity-type and relation-type keys have a second,
+  wider rule of their own — `^[A-Za-z0-9][A-Za-z0-9_-]*$`, also capped
+  at 64 — see §10.5, which the bundle must teach as two rules rather
+  than flatten into one.
 - Two error codes, not one: `invalid_schema` for a type declaration
   that cannot stand, `schema_violation` for a row of values that does
   not fit a declaration that can. `reference/errors.md` recovers from
@@ -337,15 +338,22 @@ as text. A rename does not rewrite a stored query; it makes it stale.
 
 `modelling/naming.md` gives the rules and the reason for each:
 
-- **Entity type keys are singular, lower snake**: `quest`, not `quests`
-  and not `Quest`. The plural has a home (`label_plural`); a key that is
-  sometimes plural makes every query a guess. Keys are
-  case-insensitively unique per game — `entity_types_key_key` is over
-  `(project_id, lower(key))` — so `Quest` and `quest` collide. Note
-  that this is a *bundle* rule, not a validator rule: the server checks
-  only that a type key or entity key is non-empty, and `Quest` or
-  `main quest 1` is accepted. The narrow `^[a-z][a-z0-9_]*$` rule
-  applies to declared **field** keys only. See §10.5.
+- **Entity type keys are singular**: `quest`, not `quests`. The plural
+  has a home (`label_plural`); a key that is sometimes plural makes
+  every query a guess. This one is a *bundle* rule — the server accepts
+  either.
+- **Lower snake is the bundle's default spelling, not the server's
+  rule.** The server enforces `^[A-Za-z0-9][A-Za-z0-9_-]*$` capped at 64
+  on every key that addresses a row, so `quest`, `Quest` and
+  `quest-line` are all legal, while `main quest 1` and `misión-01` are
+  refused outright (§10.5 gives the rule and the reason it is wider than
+  the field-key rule). Within one game, pick one spelling and keep it:
+  keys are case-insensitively unique — `entity_types_key_key` is over
+  `(project_id, lower(key))` — so `Quest` and `quest` are one key, and
+  writing the second when the first is stored is **refused**, naming
+  both spellings, rather than updating the stored row. A game whose own
+  vocabulary capitalises its handles (`Elwynn_Forest`, `GP_Monaco`) is
+  free to, and should then do it everywhere.
 - **Relation type keys are verb phrases that read source → target**:
   `takes_place_in`, `available_to`, `unlocks`, `connects_to`. Because
   `direction` in a query is literal, a name that does not encode
@@ -871,36 +879,64 @@ database already has cheaply. Recorded as a recommendation rather than a
 requirement; the bundle works without it, just expensively. Open
 question §11.5.
 
-### 10.5 Two key rules, one word
+### 10.5 Two key rules, and why they are not one
 
-The committed validator enforces `^[a-z][a-z0-9_]*$`, capped at 64
-characters, on a declared **field** key, and argues the case well: no
-dots, because `fields.<key>` is the error path; no upper case, so two
-keys cannot differ only by case; ASCII only, so one key has one
-spelling.
+**Resolved.** When this section was first written the surface checked
+row keys for non-emptiness alone, and it asked for a decision before a
+real game was seeded. The decision was taken in the entity-type work and
+is now enforced; what follows is the rule, not a question.
 
-None of that applies to **entity keys, entity type keys or relation type
-keys**, which the surface checks only for non-emptiness. `Quest`,
-`main quest 1` and `misión-01` are all accepted as type or entity keys.
-Uniqueness is case-insensitive — the unique indexes are over
-`lower(key)` — so the case collision is caught, but nothing else is.
+There are two rules, deliberately:
 
-This matters to the bundle specifically because those keys are the API:
-§4.4 teaches "singular, lower snake" as a rule, and it is a rule the
-server does not enforce, so an agent that follows the bundle and an
-agent that does not both succeed, in the same game, forever. It also
-means a type key can contain a character that a future view-query token
-or flattened column name cannot, which is exactly the argument the
-field-key rule makes.
+| what it addresses | rule | cap |
+| --- | --- | --- |
+| declared **field** keys (inside `field_schema`, and inside an entity's `fields`) | `^[a-z][a-z0-9_]*$` | 64 |
+| keys that address **rows** — entity type keys, relation type keys, entity keys | `^[A-Za-z0-9][A-Za-z0-9_-]*$` | 64 |
 
-**Not resolved here.** It is a metamodel decision with three shapes —
-apply the same rule to all keys; apply a looser rule (no whitespace, no
-dots) to type and entity keys; or leave it and let the bundle carry the
-convention. The third is the status quo and the cheapest, and it is also
-the one that guarantees the convention is broken eventually. Open
-question §11.9. It should be decided **before** a real game is seeded:
-tightening a key rule afterwards means renaming keys, and a rename
-breaks every saved view, route and analysis override that named them.
+They differ because the mechanism behind each differs. A field key lives
+inside a jsonb object, which has no case folding at all: `Level` and
+`level` would be two distinct keys in one row and nothing downstream
+would ever catch the collision, so that rule has to forbid case itself.
+A row key cannot produce that collision — every uniqueness index over
+these keys is `UNIQUE (project_id, lower(key))`, so the database folds
+case for them. Both rules therefore deliver the same guarantee, *no two
+keys differ only by case*, through the mechanism each context actually
+has.
+
+Forbidding capitals in row keys as well would buy nothing and cost the
+thing the folding index was chosen for: a game's handles are the game's
+own vocabulary, and `Hogger`, `Elwynn_Forest` and `GP_Monaco` should be
+spellable the way the design documents spell them. A leading digit is
+allowed for the same reason — `1999_season`, `500_miles`.
+
+What the row-key rule does exclude earns its place: no dot, slash, space
+or percent, so a key drops into a REST path segment and a view-query
+token without escaping; no leading punctuation, so no key reads as a
+flag or a relative path; ASCII only, because `lower()` folds case but
+not Unicode normalisation form, so two normalisations of one accented
+word would otherwise coexist as two keys. That last one settles the
+language question open question 8 raises: `mision` is a legal key and
+`misión` is not, in *both* rules, and the reason is the index rather
+than a preference for English.
+
+**What an agent must teach around.** A write whose key matches a stored
+key only case-insensitively is refused — not silently applied to the
+existing row — with a message naming both spellings:
+
+```
+key: "hogger" already exists here spelled "Hogger", and keys are matched
+without regard to case: use "Hogger" to update it, or pick a key that
+differs by more than capitalisation
+```
+
+The recovery is to re-issue the call with the stored spelling, or to
+choose a key that differs by more than capitalisation. A re-seed that
+spells its keys the same way every run never meets this, which is the
+whole population of correct callers — but a bundle that teaches
+re-seeding has to say so, because "the second run used a capital" is
+otherwise an inexplicable failure. Note the error arrives as
+`schema_violation` at path `key`, not `invalid_schema`: the caller is
+writing a row, not declaring a schema.
 
 ## 11. Open questions
 
@@ -941,18 +977,30 @@ breaks every saved view, route and analysis override that named them.
    `personaje`. The bundle should probably say the choice is the game's
    and only ask for consistency within one game. Confirming that is the
    user's call, since it is the one place the language policy touches
-   user data rather than artefacts. Note that it interacts with question
-   9: a key rule of `^[a-z][a-z0-9_]*$` would make `misión` an illegal
-   key while `mision` stayed legal, which is a language decision hiding
-   inside a validation decision.
+   user data rather than artefacts. Question 9, now closed, has already
+   settled half of it and narrowed what is left: the committed key rules
+   are ASCII-only, so `mision` is a legal key and `misión` is not, in
+   both of them. That is a consequence of the case-folding index rather
+   than a preference for English (`lower()` folds case, not Unicode
+   normalisation form), but it lands on a Spanish studio all the same.
+   What remains open is only whether the bundle should say the choice of
+   language is the game's — it should — and how it phrases the accent
+   restriction without reading as a policy about language.
 
-9. **One key rule or two?** (§10.5.) Declared field keys are
-   `^[a-z][a-z0-9_]*$` capped at 64 characters; entity, entity-type and
-   relation-type keys are checked only for non-emptiness. The bundle
-   teaches a convention the server does not enforce. A metamodel
-   decision, and one that gets expensive after a game is seeded, because
-   tightening it later means renames and a rename breaks every saved
-   view, route and analysis override.
+9. ~~**One key rule or two?**~~ **Closed: two, and the split is the
+   answer.** (§10.5.) Declared field keys are `^[a-z][a-z0-9_]*$` capped
+   at 64; entity, entity-type and relation-type keys are
+   `^[A-Za-z0-9][A-Za-z0-9_-]*$` capped at 64, and a spelling that
+   differs from a stored key only by case is refused. The two rules are
+   not an inconsistency: jsonb has no case folding, so the field-key
+   rule must forbid case itself, while the row-key uniqueness index
+   folds case in the database. Both therefore guarantee that no two keys
+   differ only by case. Decided while the entity-type surface was
+   implemented, which is before any real game was seeded, as this
+   question asked for. It also answers the half of question 8 that hid
+   inside it: `misión` is illegal under both rules, because `lower()`
+   folds case and not normalisation form, so two normalisations of one
+   word would otherwise be two keys.
 
 ## 12. What this sub-project deliberately does not do
 

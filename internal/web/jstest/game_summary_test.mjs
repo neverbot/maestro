@@ -61,6 +61,7 @@ async function runCase({ summary, summaryStatus = 200 }) {
     "game-content": fakeElement("section"),
     types: fakeElement("ul"),
     "types-empty": fakeElement("p"),
+    "types-empty-action": fakeElement("span"),
     "relation-types": fakeElement("ul"),
     "relation-types-empty": fakeElement("p"),
     // The picker's own ids, absent on this page.
@@ -175,7 +176,12 @@ async function runCase({ summary, summaryStatus = 200 }) {
 // zeros.
 {
   const { elements } = await runCase({
-    summary: { entity_types: [], relation_types: [], totals: { entities: 0, relations: 0, invalid: 0 } },
+    summary: {
+      entity_types: [],
+      relation_types: [],
+      totals: { entities: 0, relations: 0, invalid: 0 },
+      role: "owner",
+    },
   });
 
   if (elements["types-empty"].hidden || elements["relation-types-empty"].hidden) {
@@ -212,4 +218,31 @@ async function runCase({ summary, summaryStatus = 200 }) {
   }
 }
 
-console.log("ok: game summary page renders counts, empty states and failures");
+// Case 4: the empty state tells its reader what that reader can do.
+// An editor is told how to declare the first type; a viewer, whose
+// request those same routes refuse, is told to ask someone who can
+// rather than to go and do it. The page used to show the editor's
+// sentence to everyone.
+{
+  const empty = { entity_types: [], relation_types: [], totals: { entities: 0, relations: 0, invalid: 0 } };
+
+  const editor = await runCase({ summary: { ...empty, role: "editor" } });
+  const editorAction = editor.elements["types-empty-action"].textContent;
+  if (!editorAction.includes("MCP")) {
+    fail(`an editor is not told how to declare a type: ${JSON.stringify(editorAction)}`);
+  }
+
+  const viewer = await runCase({ summary: { ...empty, role: "viewer" } });
+  const viewerAction = viewer.elements["types-empty-action"].textContent;
+  if (viewerAction === editorAction) {
+    fail("a viewer is shown the editor's sentence, which names two things a viewer cannot do");
+  }
+  if (!viewerAction.includes("viewer")) {
+    fail(`a viewer is not told why they cannot: ${JSON.stringify(viewerAction)}`);
+  }
+  if (viewerAction.includes("You declare")) {
+    fail(`a viewer is still told to declare a type: ${JSON.stringify(viewerAction)}`);
+  }
+}
+
+console.log("ok: game summary page renders counts, empty states, roles and failures");

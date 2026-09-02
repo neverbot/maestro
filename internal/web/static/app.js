@@ -505,6 +505,32 @@ function describeTotals(totals) {
   return parts.join(" · ");
 }
 
+// describeWhoDeclaresTypes writes the second half of the entity-types
+// empty state, which is the half that depends on who is reading.
+//
+// The page used to tell every reader that a type is declared over MCP or
+// over the game's content routes. That is true for an editor and false
+// for a viewer, whose request those same routes refuse — and a page
+// telling someone to do the one thing the server will not let them do is
+// worse than one that says nothing at all. GET /summary carries the
+// caller's role for exactly this sentence.
+//
+// Anything that is not "viewer" gets the editor's sentence: viewer is
+// the only role the content routes refuse, so it is the only one whose
+// reader has to be told something different.
+function describeWhoDeclaresTypes(role) {
+  if (role === "viewer") {
+    return (
+      "Your role in this game is viewer, so this instance will refuse a write from you: " +
+      "an editor, an admin or the owner declares them."
+    );
+  }
+  return (
+    "You declare them through this instance's API, either from an agent over MCP or " +
+    "over the game's content routes. Nothing on this page creates one yet."
+  );
+}
+
 // catalogueRow builds one line of a catalogue. Every string on it comes
 // from the game's own content — a label a designer wrote, a key an agent
 // sent — so every one goes in through textContent and never as markup,
@@ -577,6 +603,13 @@ async function renderGameSummary(gameID) {
   const relationTypes = Array.isArray(summary.relation_types) ? summary.relation_types : [];
   if (summaryEl) {
     summaryEl.textContent = describeTotals(summary.totals ?? {});
+  }
+  const typesAction = document.getElementById("types-empty-action");
+  if (typesAction) {
+    // textContent, like every other string this page writes: the role is
+    // the server's own word, but the rule here is the page's and holds
+    // for every value it renders.
+    typesAction.textContent = describeWhoDeclaresTypes(summary.role);
   }
 
   fillCatalogue(

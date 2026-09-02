@@ -29,3 +29,22 @@ func (s *Server) ScopedToolNamesForTest() []string {
 	}
 	return names
 }
+
+// RegisteredPatternsForTest returns every pattern registered on this
+// server, in registration order. It exists for
+// TestTheProseRoutesAreVisibleToTheConventionTests (api_docs_test.go),
+// which asserts from a server built with no Markdown service that the
+// prose routes are there anyway — the property that keeps
+// TestEveryGameScopedRouteGoesThroughRequireProject from going blind to
+// them.
+func (s *Server) RegisteredPatternsForTest() []string {
+	return append([]string(nil), s.registeredPatterns...)
+}
+
+// ContentPatternsForTest returns every game-content route, reads and
+// writes alike, in registration order. Same caller, same reason:
+// TestEveryContentRouteIsRegisteredAsContent compares against this set,
+// so a route missing from it is a route that test cannot see.
+func (s *Server) ContentPatternsForTest() []string {
+	return append([]string(nil), s.contentPatterns...)
+}

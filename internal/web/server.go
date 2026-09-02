@@ -309,6 +309,34 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)
 	s.registerContentRoute("GET /api/games/{game}/summary", s.handleGameSummary)
 
+	// The prose surface (api_docs.go), mirroring the eleven docs.* MCP
+	// tools plus the two things an agent never needs: a rendered reading
+	// view and a rendered comparison. A document path travels as a query
+	// parameter and never as a URL segment — see api_docs.go's header
+	// for why, and for what that buys over the metamodel's by-key/by-id
+	// discriminators.
+	//
+	// Registered unconditionally, like the game-content block above and
+	// unlike the MCP tools, which newMCPServer gates on
+	// MCPDeps.Markdown. requireProseService's doc comment argues why the
+	// difference is deliberate: a gate here would make every one of
+	// these routes invisible to TestEveryGameScopedRouteGoesThrough
+	// RequireProject and TestEveryContentRouteIsRegisteredAsContent,
+	// both of which build their server from stubOptions.
+	s.registerContentRoute("GET /api/games/{game}/docs", s.handleListDocs)
+	s.registerContentRoute("POST /api/games/{game}/docs", s.handleWriteDoc)
+	s.registerContentRoute("GET /api/games/{game}/docs/one", s.handleReadDoc)
+	s.registerContentRoute("DELETE /api/games/{game}/docs/one", s.handleDeleteDoc)
+	s.registerContentRoute("GET /api/games/{game}/docs/history", s.handleDocHistory)
+	s.registerContentRoute("GET /api/games/{game}/docs/version", s.handleReadDocVersion)
+	s.registerContentRoute("POST /api/games/{game}/docs/revert", s.handleRevertDoc)
+	s.registerContentRoute("GET /api/games/{game}/docs/diff", s.handleDocDiff)
+	s.registerContentRoute("GET /api/games/{game}/docs/links", s.handleListDocLinks)
+	s.registerContentRoute("POST /api/games/{game}/docs/links", s.handleAddDocLink)
+	s.registerContentRoute("DELETE /api/games/{game}/docs/links", s.handleRemoveDocLink)
+	s.registerContentRoute("GET /api/games/{game}/docs/rendered", s.handleRenderDoc)
+	s.registerContentRoute("GET /api/games/{game}/docs/comparison", s.handleCompareDoc)
+
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call
 	// is its own independently-authenticated HTTP request rather than a

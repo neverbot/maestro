@@ -759,6 +759,40 @@ func queryLimit(w http.ResponseWriter, r *http.Request) (int32, bool) {
 	return int32(value), true
 }
 
+// queryVersion reads a version-shaped query parameter: absent is
+// (nil, true), present and well-formed is (&v, true), present and
+// malformed is a 400 at that parameter's own path.
+//
+// It exists rather than reusing queryLimit because the two report
+// different paths and because a version is a *int32 — absent and zero
+// are different things for expected_version, where zero means "create".
+// Sharing queryLimit and mapping its zero would be exactly the guess the
+// whole expected_version design refuses.
+//
+// Its only callers are the prose surface's (api_docs.go): DELETE
+// /docs/one, whose method has no body to carry expected_version in, and
+// requiredVersion, which adds the "absent is refused" half the three
+// version arguments MCP marks `required` need.
+func queryVersion(w http.ResponseWriter, r *http.Request, name string) (*int32, bool) {
+	raw, present, ok := queryPresentValue(w, r, name)
+	if !ok || !present {
+		return nil, ok
+	}
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil {
+		problem := "is not a number"
+		if errors.Is(err, strconv.ErrRange) {
+			problem = fmt.Sprintf("must be a whole number between %d and %d, not %s",
+				math.MinInt32, math.MaxInt32, raw)
+		}
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, name+" "+problem,
+			map[string]any{"fields": []map[string]string{{"path": name, "message": problem}}})
+		return nil, false
+	}
+	v := int32(value)
+	return &v, true
+}
+
 // relatedToParts names the four query parameters that spell the one-hop
 // traversal, in the order a refusal lists them. They are dotted so one
 // query string can carry a nested filter without inventing an encoding.

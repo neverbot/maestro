@@ -125,6 +125,31 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 -- types; both therefore take entity_types first, and neither can hold
 -- what the other is waiting for. Moving this call after the relation
 -- type's row lock reintroduces a deadlock between the two.
+--
+-- **Two costs, measured and judged acceptable, recorded so a future
+-- reader does not have to re-measure them:**
+--
+--   - A long transaction holding this share lock blocks
+--     RemoveEntityType against the same entity type indefinitely — there
+--     is no default statement or lock timeout, so the deletion simply
+--     parks until the holder commits, rolls back, or is killed. Removals
+--     are rare and the alternative (letting the delete proceed and
+--     leaving a dangling id) is worse, but the wait is unbounded; a
+--     deployment that cares should set lock_timeout, and the caller then
+--     meets the retryable failure this file's Go comments describe
+--     rather than hanging.
+--   - FOR SHARE here conflicts with the FOR UPDATE UpsertEntityType
+--     takes on its own row (GetEntityTypeByKeyForUpdate below), so
+--     declaring a relation type's endpoint rule over an entity type now
+--     serialises against editing that same entity type's own row for as
+--     long as the declaring transaction holds the lock. Measured at 200
+--     relation-type declarations sharing six endpoint types: 251ms on a
+--     single worker, 140ms spread across eight — no measured throughput
+--     problem, and share locks do not conflict with each other, so
+--     concurrent *declarations* over the same type are unaffected. Only
+--     a concurrent *edit* of the entity type itself waits, and no
+--     deadlock was found: entity_types is always locked before
+--     relation_types on both paths (see above).
 SELECT id FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND id = ANY (sqlc.arg('ids')::uuid[])

@@ -404,3 +404,84 @@ func TestAPrunedEndpointListIsAnnouncedToTheRowsOwnSubscribers(t *testing.T) {
 
 	requireNothing(t, sub, "the relation type that never named zone was not touched")
 }
+
+// TestPrunedEndpointListsArePublishedInSortOrderNotDatabaseOrder closes
+// the locking verification's finding 2: RemoveEntityType's
+// `sort.Slice(pruned, …)` over `pruned[i].Key < pruned[j].Key` is
+// defensive against RETURNING order the database does not promise, but
+// nothing pinned it — the whole suite, including the test correction 23
+// wrote for it, passes with the sort deleted, because
+// PruneEntityTypeFromEndpointLists' actual plan today is an index scan
+// on relation_types_key_key, which already returns rows in the order
+// that index stores them.
+//
+// That index order is not this sort's order, either, which is the
+// second half of the finding: the index orders by `lower(key)`, and this
+// sort compares raw `Key` in byte order. Both are deterministic, so
+// nothing here is a bug, but they disagree whenever a folded-lowercase
+// and a byte-order comparison would put two keys in different places —
+// exactly what an uppercase-led key next to a lowercase one guarantees.
+// "AppleQuest" and "zone_rule" fold to "applequest" < "zone_rule" but
+// compare raw as "AppleQuest" < "zone_rule" is also true — deliberately
+// not the pair used here. This test instead uses "Zone_rel" and
+// "apple_rel": raw byte order puts capital "Z" (0x5A) before lowercase
+// "a" (0x61), so sort.Slice orders them [Zone_rel, apple_rel]; folded
+// order reverses them, [apple_rel, Zone_rel], and a probe against this
+// suite's own database confirmed the index scan's RETURNING arrives in
+// exactly that folded order. The two are opposite sequences, so this
+// test fails the moment either the sort is removed (the database's own
+// order, folded, comes through instead) or the sort is changed to fold
+// case (it would then agree with the database and stop proving the sort
+// does anything). Removing `sort.Slice(pruned, …)` from RemoveEntityType
+// was verified to turn this test red.
+func TestPrunedEndpointListsArePublishedInSortOrderNotDatabaseOrder(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	})
+	if err != nil {
+		t.Fatalf("seed zone: %v", err)
+	}
+
+	// Declared in the order that would, if RemoveEntityType published
+	// PruneEntityTypeFromEndpointLists' own RETURNING order unsorted,
+	// arrive apple_rel-then-Zone_rel — the reverse of what the sort
+	// guarantees.
+	zoneRel, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "Zone_rel", Label: "Zone_rel", TargetTypeIDs: []uuid.UUID{zone.ID},
+	})
+	if err != nil {
+		t.Fatalf("seed Zone_rel: %v", err)
+	}
+	appleRel, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "apple_rel", Label: "apple_rel", TargetTypeIDs: []uuid.UUID{zone.ID},
+	})
+	if err != nil {
+		t.Fatalf("seed apple_rel: %v", err)
+	}
+
+	sub := hub.Subscribe(project, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	if err := svc.RemoveEntityType(ctx, project, zone.ID, true); err != nil {
+		t.Fatalf("RemoveEntityType: %v", err)
+	}
+
+	removed := receive(t, sub)
+	if removed.Kind != "type.removed" {
+		t.Fatalf("first event = %q, want type.removed", removed.Kind)
+	}
+
+	// Byte order, not folded order: "Zone_rel" sorts before "apple_rel"
+	// because 'Z' < 'a' as raw bytes, and RemoveEntityType's sort must
+	// publish in that order for this to pass.
+	first := receive(t, sub)
+	assertIdentityPayload(t, "first prune event", first, zoneRel.ID, "Zone_rel")
+	second := receive(t, sub)
+	assertIdentityPayload(t, "second prune event", second, appleRel.ID, "apple_rel")
+}

@@ -285,6 +285,18 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // visible in the row a designer reads and is one edit away from being
 // narrowed again, where the dangling id was neither visible nor
 // repairable.
+//
+// **Two costs of the share lock that closes the concurrent path, judged
+// acceptable and recorded rather than rediscovered.** A transaction
+// holding checkEndpointTypes' FOR SHARE against an entity type this call
+// is deleting parks this delete indefinitely — there is no default
+// timeout, and removals are rare enough that unbounded is the accepted
+// trade against the dangling id the alternative produces. And that same
+// FOR SHARE now serialises against UpsertEntityType's FOR UPDATE on its
+// own row, so declaring a relation type over an entity type blocks an
+// edit of that entity type for as long as the declaration's transaction
+// holds the lock, and the reverse. See LockEndpointEntityTypes
+// (metamodel.sql) for the measurements.
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
 	var removedKey string
 	var pruned []dbq.PruneEntityTypeFromEndpointListsRow
@@ -362,6 +374,26 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 	// another route. Announcing them one by one is affordable here in a
 	// way the per-edge cascade is not: a game has a handful of relation
 	// types and thousands of edges.
+	//
+	// **Defensive against a plan `RETURNING` gives no promise on, and
+	// pinned rather than merely asserted.** `PruneEntityTypeFromEndpointLists`
+	// is a single `UPDATE`; Postgres documents no ordering for its
+	// `RETURNING` at all, so a query planner free to prefer a sequential
+	// scan on a larger table is free to hand this back in any order. This
+	// sort is raw `Key` in byte order — not `lower(key)`, the order the
+	// unique index (`relation_types_key_key`) actually keeps, since
+	// stored keys permit uppercase. Both orders are deterministic, so
+	// picking one over the other changes nothing about correctness, but
+	// they are not the same order, and this line is the one that is
+	// contractual: what a caller sees is whatever this comparison says,
+	// never whatever the statement above happened to return.
+	// TestPrunedEndpointListsArePublishedInSortOrderNotDatabaseOrder
+	// (events_test.go) is built to fail if this line is deleted: it
+	// prunes two relation types whose keys disagree between byte order
+	// and folded order, so the database's own natural `RETURNING`
+	// sequence — today, an index scan ordered by `lower(key)` — is the
+	// exact reverse of what this sort demands, and removing the sort was
+	// verified to turn that test red.
 	sort.Slice(pruned, func(i, j int) bool { return pruned[i].Key < pruned[j].Key })
 	for _, row := range pruned {
 		s.publish(projectID, eventRelationTypeUpserted, relationTypeEventMinRole,

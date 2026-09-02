@@ -29,9 +29,19 @@ const noVersion int32 = -1
 // it is still passed as the guard on the upsert's DO UPDATE, because a
 // caller that believes it is creating may in fact be racing a creator, and
 // the guard is the only thing standing between the loser of that race and
-// a silent overwrite. A seeding script may therefore pass the same value
-// on every run, but a value it did not read from this service is not a
-// free pass — it is a claim about a row, checked as one.
+// a silent overwrite.
+//
+// What it is *not*, on that path, is a claim this service checks. If no
+// row exists when the write runs — because none ever did, or because a
+// rival deleted the one this caller held a version of — the insert lands
+// and the guard is never evaluated: a fresh row appears under a new id,
+// with version 1, and the call returns nil. Nothing is overwritten, and
+// nothing is silent either: this type is addressed by (project, key) and
+// not by id, the input carries no id to be surprised about, and a
+// returned Version of 1 is the caller's own signal that it created
+// rather than updated. Refusing instead was considered and rejected —
+// TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing
+// records the argument and pins the outcome.
 type EntityTypeInput struct {
 	Key             string
 	Label           string

@@ -1238,3 +1238,62 @@ func TestAnUnrecognisedCodeMatchesNoSentinel(t *testing.T) {
 		t.Fatal("an unset Code must still read as a schema violation")
 	}
 }
+
+// TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing pins
+// the decided reading of an ExpectedVersion that reaches the insert path.
+//
+// A rival deletes Quest v1 while a caller holds that version; the
+// caller's upsert then finds nothing to lock, takes the creation path,
+// and its version claim is checked against nothing. A brand-new row
+// appears under a new id, and the call returns nil.
+//
+// That is deliberate, and the alternative — refusing a non-nil
+// ExpectedVersion that reaches the insert path — was considered and
+// rejected. Three reasons, in order of weight. Nothing is overwritten,
+// so this is not the lost update correction 4 closed. The contract's
+// identity is (project, key) and not the uuid: EntityTypeInput carries
+// no ID field at all, so a caller cannot address a row this could
+// surprise it about, and the returned row says Version 1, which is the
+// caller's own signal that it created rather than updated. And refusing
+// would make correction 15's post-write spelling check unreachable —
+// every remaining path into the guarded DO UPDATE with a real expected
+// version would come from the locked pre-read, which has already
+// compared spellings — retiring a defence the same review round spent
+// three commits hardening, in exchange for hard-failing the one caller
+// who wants this most: a re-seed restoring a game's vocabulary after a
+// botched delete.
+//
+// What the alternative would have bought is honesty in a doc comment,
+// and the doc comment was simply narrowed instead.
+func TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	first, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.RemoveEntityType(ctx, project, first.ID, false); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	again, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		ExpectedVersion: ptrInt32(1),
+	})
+	if err != nil {
+		t.Fatalf("a version claim against a deleted type re-creates it: %v", err)
+	}
+	if again.ID == first.ID {
+		t.Fatal("the deleted row cannot have come back; this is a new one")
+	}
+	// The caller's own signal that it created rather than updated: an
+	// update of the version it claimed would have returned 2.
+	if again.Version != 1 {
+		t.Fatalf("Version = %d, want 1 — the new row starts over", again.Version)
+	}
+}

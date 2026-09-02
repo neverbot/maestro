@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/roles"
 )
 
@@ -177,6 +178,15 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 	}
 	var conflict *metamodel.VersionConflictError
 	switch {
+	// Unreachable through a route today — requireProject resolves the
+	// game before any handler here runs, so a missing game is a 404 long
+	// before a domain call is made. It is here because mcpErrorFor's
+	// first arm is this one, and "arm for arm" is a claim this file
+	// makes about itself: a shared core that grows a project lookup of
+	// its own would otherwise report a missing game as internal_error on
+	// one surface and not_found on the other.
+	case errors.Is(err, projects.ErrProjectNotFound):
+		writeCodedError(w, http.StatusNotFound, errCodeNotFound, "no such game", nil)
 	case errors.As(err, &conflict):
 		writeCodedError(w, http.StatusConflict, errCodeVersionConflict, err.Error(),
 			map[string]any{"current_version": conflict.Current})
@@ -199,8 +209,15 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 		// wants to know which lock. Same split mcpErrorFor makes.
 		slog.WarnContext(r.Context(), "game-content request hit database contention",
 			"path", r.URL.Path, "error", err)
+		// The second sentence is Task 7's, and it is not decoration:
+		// 57014 is also what an operator's statement_timeout raises on a
+		// request that is simply too expensive, and that one fails every
+		// time it is resent. A browser client gets the same advice an
+		// agent does — mcpErrorFor's own comment argues the case.
 		writeCodedError(w, http.StatusServiceUnavailable, errCodeRetryable,
-			"the database refused this over contention; send the same request again", nil)
+			"the database refused this over contention; send the same request again. "+
+				"If it keeps failing, the request is too expensive as written rather than "+
+				"unlucky: ask for less rather than resending it again", nil)
 	default:
 		slog.ErrorContext(r.Context(), "game-content request failed",
 			"path", r.URL.Path, "error", err)

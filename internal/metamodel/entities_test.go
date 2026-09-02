@@ -1,0 +1,992 @@
+package metamodel_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/testutil"
+)
+
+// seedQuestType declares a Quest type with a required numeric field.
+func seedQuestType(t *testing.T, svc *metamodel.Service, project uuid.UUID) {
+	t.Helper()
+	_, err := svc.UpsertEntityType(context.Background(), project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: metamodel.Schema{
+			{Key: "min_level", Type: metamodel.FieldNumber, Required: true},
+			{Key: "summary", Type: metamodel.FieldLongText},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed quest type: %v", err)
+	}
+}
+
+// entityMatches reports whether the row's stored search vector matches a
+// term. It reads the column through a query rather than the returned row
+// because tsvector is what the column holds and what Task 6's search will
+// query; asserting on anything else would pass while the index is empty.
+func entityMatches(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, term string) bool {
+	t.Helper()
+	var hit bool
+	err := pool.QueryRow(context.Background(),
+		`SELECT search @@ plainto_tsquery('simple', $2) FROM entities WHERE id = $1`,
+		id, term).Scan(&hit)
+	if err != nil {
+		t.Fatalf("read search vector: %v", err)
+	}
+	return hit
+}
+
+func TestUpsertEntityValidatesAgainstItsType(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+		Fields: map[string]any{"min_level": float64(10), "summary": "Kill Hogger."},
+	})
+	if err != nil {
+		t.Fatalf("UpsertEntity: %v", err)
+	}
+	if row.Version != 1 {
+		t.Fatalf("Version = %d, want 1", row.Version)
+	}
+
+	_, err = svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "broken", Name: "Broken",
+		Fields: map[string]any{"min_level": "ten"},
+	})
+	if !errors.Is(err, metamodel.ErrSchemaViolation) {
+		t.Fatalf("err = %v, want ErrSchemaViolation", err)
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "broken"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("a refused row must store nothing, got %v", err)
+	}
+}
+
+func TestUpsertEntityReportsAnUnknownType(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	project := newProject(t, pool)
+
+	_, err := svc.UpsertEntity(context.Background(), project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+	})
+	if !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	// The message has to name the type, because "not_found" alone leaves a
+	// seeding agent unable to tell a missing type from a missing entity.
+	if !strings.Contains(err.Error(), `no entity type "quest"`) {
+		t.Fatalf("err = %v, want it to name the missing type", err)
+	}
+}
+
+func TestUpsertEntityIsIdempotentAndBumpsVersion(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	in := metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}
+	first, err := svc.UpsertEntity(ctx, project, in)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+
+	in.ExpectedVersion = ptrInt32(1)
+	in.Name = "Wanted: Hogger (revised)"
+	second, err := svc.UpsertEntity(ctx, project, in)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatal("a re-seed created a duplicate row")
+	}
+	if second.Version != 2 {
+		t.Fatalf("Version = %d, want 2", second.Version)
+	}
+	if second.Name != "Wanted: Hogger (revised)" {
+		t.Fatalf("Name = %q, want the revised one", second.Name)
+	}
+}
+
+func TestUpsertEntityRejectsStaleVersion(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger again",
+		Fields:          map[string]any{"min_level": float64(11)},
+		ExpectedVersion: ptrInt32(99),
+	})
+	var conflict *metamodel.VersionConflictError
+	if !errors.As(err, &conflict) || conflict.Current != 1 {
+		t.Fatalf("err = %v, want a *VersionConflictError carrying version 1", err)
+	}
+
+	// A missing ExpectedVersion against an existing row is the blind
+	// overwrite optimistic concurrency exists to stop, not an insert.
+	_, err = svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger blindly",
+		Fields: map[string]any{"min_level": float64(12)},
+	})
+	if !errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("err = %v, want ErrVersionConflict", err)
+	}
+
+	stored, err := svc.EntityByKey(ctx, project, "quest", "hogger")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	if stored.Name != "Hogger" || stored.Version != 1 {
+		t.Fatalf("a refused upsert changed the row: %+v", stored)
+	}
+}
+
+// TestUpsertEntityRefusesARespelledKey is the entity flavour of the
+// entity-type rule: entities_key_key folds case, so "hogger" addresses
+// the row stored as "Hogger" and updating it under the other spelling is
+// refused rather than silently overwriting a handle other rows and
+// documents refer to.
+func TestUpsertEntityRefusesARespelledKey(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "Hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "MINE",
+		Fields:          map[string]any{"min_level": float64(1)},
+		ExpectedVersion: ptrInt32(1),
+	})
+	requireFieldError(t, err, "key",
+		`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
+			`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("a respelled key must read as invalid_input, got %v", err)
+	}
+
+	stored, err := svc.EntityByKey(ctx, project, "quest", "HOGGER")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	if stored.Key != "Hogger" || stored.Name != "Hogger" || stored.Version != 1 {
+		t.Fatalf("the refused upsert changed the row: %+v", stored)
+	}
+}
+
+// TestARespelledEntityKeyIsNamedEvenWhenTheVersionIsAlsoStale pins the
+// one job left to the spelling check inside the locked pre-read.
+//
+// The check on the row the upsert returns catches every respelling this
+// one does, so deleting these lines is invisible wherever the version
+// also matches. This is the case where the two disagree: a caller
+// holding both a respelled key and a stale version is failing for two
+// reasons at once, and the pre-read's order decides which it is told
+// about. It hears the respelling — which names both spellings and both
+// remedies — rather than "current version is 1", which would send it to
+// retry with a version refused again for the same reason.
+func TestARespelledEntityKeyIsNamedEvenWhenTheVersionIsAlsoStale(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "Hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "MINE",
+		Fields:          map[string]any{"min_level": float64(1)},
+		ExpectedVersion: ptrInt32(9),
+	})
+	if errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("err = %v, want the respelling refusal rather than the version conflict", err)
+	}
+	requireFieldError(t, err, "key",
+		`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
+			`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
+}
+
+// TestARaceThatWouldLandAnEntityUnderAnotherSpellingIsRefused is the hole
+// the locked pre-read cannot close, for entities.
+//
+// The pre-read runs before the write and only ever sees a row that is
+// already committed. On the creation path there is nothing to lock, so a
+// writer racing a creator — carrying an ExpectedVersion that happens to
+// match the version the winner lands on — sails through both the read and
+// the guard on the DO UPDATE and updates a row it never saw, stored under
+// a different spelling, returning no error at all. Only the check on the
+// row the upsert returns catches it.
+//
+// The interleaving is driven by an open rival transaction rather than a
+// second goroutine, so it is the test's to choose and not the scheduler's.
+func TestARaceThatWouldLandAnEntityUnderAnotherSpellingIsRefused(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	typ, err := svc.EntityTypeByKey(ctx, project, "quest")
+	if err != nil {
+		t.Fatalf("EntityTypeByKey: %v", err)
+	}
+
+	rival, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	if _, err := rival.Exec(ctx,
+		`INSERT INTO entities (project_id, entity_type_id, key, name, fields)
+		 VALUES ($1, $2, 'Hogger', 'Hogger', '{"min_level": 10}'::jsonb)`,
+		project, typ.ID); err != nil {
+		t.Fatalf("rival insert: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "MINE",
+			Fields:          map[string]any{"min_level": float64(1)},
+			ExpectedVersion: ptrInt32(1),
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("the upsert returned %v before the rival committed; it should have blocked", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := rival.Commit(ctx); err != nil {
+		t.Fatalf("rival commit: %v", err)
+	}
+
+	select {
+	case err := <-result:
+		requireFieldError(t, err, "key",
+			`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
+				`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upsert never returned after the rival committed")
+	}
+
+	// The refusal has to roll the write back, not merely report it.
+	row, err := svc.EntityByKey(ctx, project, "quest", "hogger")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	if row.Key != "Hogger" || row.Name != "Hogger" || row.Version != 1 {
+		t.Fatalf("the losing writer changed the row: %+v", row)
+	}
+}
+
+// TestAnEntityCreationThatLosesTheRaceForItsKeyIsRefused pins the
+// compare-and-set in the upsert's own DO UPDATE.
+//
+// A writer creating a key it has never seen has no version to expect and
+// there is no row yet to lock, so its read cannot see the rival write at
+// all — and here both writers spell the key the same way, so the
+// post-write spelling check has nothing to catch either. The guard on
+// the DO UPDATE is the only thing left between the loser of the race and
+// a silent overwrite of content it never read.
+func TestAnEntityCreationThatLosesTheRaceForItsKeyIsRefused(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	typ, err := svc.EntityTypeByKey(ctx, project, "quest")
+	if err != nil {
+		t.Fatalf("EntityTypeByKey: %v", err)
+	}
+
+	rival, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	if _, err := rival.Exec(ctx,
+		`INSERT INTO entities (project_id, entity_type_id, key, name, fields)
+		 VALUES ($1, $2, 'hogger', 'Theirs', '{"min_level": 10}'::jsonb)`,
+		project, typ.ID); err != nil {
+		t.Fatalf("rival insert: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: "hogger", Name: "Mine",
+			Fields: map[string]any{"min_level": float64(1)},
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("the upsert returned %v before the rival committed; it should have blocked", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := rival.Commit(ctx); err != nil {
+		t.Fatalf("rival commit: %v", err)
+	}
+
+	select {
+	case err := <-result:
+		var conflict *metamodel.VersionConflictError
+		if !errors.As(err, &conflict) || conflict.Current != 1 {
+			t.Fatalf("err = %v, want a *VersionConflictError carrying version 1", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upsert never returned after the rival committed")
+	}
+
+	row, err := svc.EntityByKey(ctx, project, "quest", "hogger")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	if row.Name != "Theirs" || row.Version != 1 {
+		t.Fatalf("the losing writer overwrote the row: %+v", row)
+	}
+}
+
+// TestAMalformedEntityArgumentIsInvalidInput pins which wire code a row's
+// own arguments are published under: a bad key reported as
+// schema_violation sends an agent to inspect entity *values*, and a bad
+// key falling through failureFor's default arm reports internal_error,
+// which tells it nothing at all.
+func TestAMalformedEntityArgumentIsInvalidInput(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "main quest", Name: "",
+		Fields: map[string]any{"min_level": float64(1)},
+	})
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if errors.Is(err, metamodel.ErrSchemaViolation) {
+		t.Fatalf("err = %v must not also read as a schema violation", err)
+	}
+	// Both problems in one pass: an agent fixing a seed script must not
+	// learn about the name only after the key is fixed.
+	if err.Error() != "invalid_input: key: must be letters, digits, underscores or hyphens, "+
+		"starting with a letter or a digit; name: is required" {
+		t.Fatalf("err = %v, want the key and the name reported together", err)
+	}
+
+	// And the same fault inside a bulk batch carries the same code, not
+	// internal_error.
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "main quest", Name: "A",
+			Fields: map[string]any{"min_level": float64(1)}},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+	if len(result.Failed) != 1 || result.Failed[0].Code != "invalid_input" {
+		t.Fatalf("failures = %+v, want one invalid_input", result.Failed)
+	}
+}
+
+func TestUpsertEntityRejectsAnOverlongName(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	_, err := svc.UpsertEntity(context.Background(), project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: strings.Repeat("é", 201),
+		Fields: map[string]any{"min_level": float64(1)},
+	})
+	requireFieldError(t, err, "name", "must be at most 200 characters")
+
+	// Exactly at the cap, counted in runes: an accented name must not be
+	// cut shorter than a plain one.
+	if _, err := svc.UpsertEntity(context.Background(), project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: strings.Repeat("é", 200),
+		Fields: map[string]any{"min_level": float64(1)},
+	}); err != nil {
+		t.Fatalf("a 200-rune name must be accepted: %v", err)
+	}
+}
+
+// TestUpsertEntityWritesAndRewritesTheSearchVector pins the one column no
+// database mechanism maintains.
+//
+// entities.search is application-computed — it is derived from
+// user-declared jsonb whose text fields only the Go validator can pick
+// out — so it is written by UpsertEntity and by nothing else. A write
+// path that changes name or fields without rewriting it leaves the row
+// indexed under its old words, and Task 6's search then silently fails to
+// find content that is plainly there.
+func TestUpsertEntityWritesAndRewritesTheSearchVector(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+		Fields: map[string]any{"min_level": float64(10), "summary": "Riverpaw gnolls"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !entityMatches(t, pool, row.ID, "Hogger") {
+		t.Fatal("the name is not in the search vector")
+	}
+	if !entityMatches(t, pool, row.ID, "gnolls") {
+		t.Fatal("a text field's words are not in the search vector")
+	}
+
+	// An update rewrites it: the old words must go and the new ones must
+	// arrive, on the DO UPDATE arm as much as on the insert.
+	updated, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger the Gnoll",
+		Fields:          map[string]any{"min_level": float64(10), "summary": "Elwynn Forest"},
+		ExpectedVersion: ptrInt32(1),
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if entityMatches(t, pool, updated.ID, "gnolls") {
+		t.Fatal("the replaced field's words are still indexed")
+	}
+	if !entityMatches(t, pool, updated.ID, "Elwynn") {
+		t.Fatal("the new field's words were not indexed")
+	}
+}
+
+func TestBulkPartialLandsTheGoodRowsAndReportsTheRest(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "Alpha",
+			Fields: map[string]any{"min_level": float64(1), "summary": "alpha-secret"}},
+		{TypeKey: "quest", Key: "b", Name: "Beta", Fields: map[string]any{"min_level": "nope"}},
+		{TypeKey: "quest", Key: "c", Name: "Gamma",
+			Fields: map[string]any{"min_level": float64(3), "summary": "gamma-secret"}},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+	if len(result.Succeeded) != 2 {
+		t.Fatalf("succeeded = %d, want 2", len(result.Succeeded))
+	}
+	if len(result.Failed) != 1 {
+		t.Fatalf("failed = %d, want 1", len(result.Failed))
+	}
+	failure := result.Failed[0]
+	if failure.Index != 1 {
+		t.Fatalf("the failure must carry its index, got %d", failure.Index)
+	}
+	if failure.Key != "b" {
+		t.Fatalf("the failure must carry its own key, got %q", failure.Key)
+	}
+	if failure.Code != "schema_violation" {
+		t.Fatalf("code = %q, want schema_violation for a bad value", failure.Code)
+	}
+	// The message names the offending path so the caller can retry that
+	// item alone, and names nothing belonging to the items around it: a
+	// batch report is the one place a row's content can leak into a
+	// neighbour's error.
+	if !strings.Contains(failure.Message, "fields.min_level") {
+		t.Fatalf("message = %q, want it to name fields.min_level", failure.Message)
+	}
+	for _, leaked := range []string{"alpha-secret", "gamma-secret", "Alpha", "Gamma"} {
+		if strings.Contains(failure.Message, leaked) {
+			t.Fatalf("message = %q leaks %q from another item", failure.Message, leaked)
+		}
+	}
+	// The row after the failure must still have landed: item 200 landing
+	// cannot depend on item 3.
+	if _, err := svc.EntityByKey(ctx, project, "quest", "c"); err != nil {
+		t.Fatalf("the row after the failure must still have landed: %v", err)
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "b"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the failed row must not have landed, got %v", err)
+	}
+}
+
+func TestBulkAtomicRollsBackEverythingOnOneFailure(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": "nope"}},
+	}, metamodel.BulkAtomic)
+	if err == nil {
+		t.Fatal("an atomic batch with a bad row must fail as a whole")
+	}
+	// The failing item is named, and the code survives the wrapping: an
+	// agent must be able to tell which row it has to fix and how.
+	if !errors.Is(err, metamodel.ErrSchemaViolation) {
+		t.Fatalf("err = %v, want it to still read as a schema violation", err)
+	}
+	if !strings.Contains(err.Error(), `item 1 ("b")`) {
+		t.Fatalf("err = %v, want it to name the failing item", err)
+	}
+	if len(result.Succeeded) != 0 || len(result.Failed) != 0 {
+		t.Fatalf("a failed atomic batch reports nothing as done: %+v", result)
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "a"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the good row of a failed atomic batch must have been rolled back, got %v", err)
+	}
+}
+
+func TestBulkAtomicLandsEveryRowTogether(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": float64(2)}},
+	}, metamodel.BulkAtomic)
+	if err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+	if len(result.Succeeded) != 2 || len(result.Failed) != 0 {
+		t.Fatalf("result = %+v, want two rows and no failures", result)
+	}
+	for _, key := range []string{"a", "b"} {
+		if _, err := svc.EntityByKey(ctx, project, "quest", key); err != nil {
+			t.Fatalf("entity %q: %v", key, err)
+		}
+	}
+}
+
+// TestBulkRejectsAnUnknownMode keeps an unrecognised mode from meaning
+// "partial".
+//
+// Task 7 builds the mode straight from an agent-supplied string, so a
+// typo — "atomic ", "all-or-nothing" — would otherwise be read as the
+// permissive mode and land rows a caller asked to have rolled back. A
+// silent downgrade of a durability request is exactly the failure a
+// caller cannot see, so it is refused at its own path instead.
+func TestBulkRejectsAnUnknownMode(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	_, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+	}, metamodel.BulkMode("atomic "))
+	requireFieldError(t, err, "mode", `must be "partial" or "atomic"`)
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput", err)
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "a"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("a refused batch must write nothing, got %v", err)
+	}
+
+	// The empty mode is the documented default and stays partial: an
+	// omitted argument is not a typo.
+	if _, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+	}, ""); err != nil {
+		t.Fatalf("an omitted mode must default to partial: %v", err)
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "a"); err != nil {
+		t.Fatalf("the default batch did not land: %v", err)
+	}
+}
+
+// TestBulkPartialStopsWhenTheCallerIsGone pins the one thing a partial
+// batch owes a cancelled caller.
+//
+// Every item is its own transaction, so nothing stops the loop on its
+// own: without the check, a cancelled context turns a 500-row batch into
+// 500 failed round trips whose report nobody is left to read, and the
+// call still returns a nil error, which reads as "the batch ran". The
+// error is returned alongside whatever had already landed, because in
+// partial mode rows landing before the cancellation is the mode's
+// contract, not a bug to hide.
+func TestBulkPartialStopsWhenTheCallerIsGone(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": float64(2)}},
+	}, metamodel.BulkPartial)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(result.Failed) != 0 {
+		t.Fatalf("a cancelled batch reports no per-item failures, got %+v", result.Failed)
+	}
+	if _, err := svc.EntityByKey(context.Background(), project, "quest", "a"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("nothing may be written after the caller is gone, got %v", err)
+	}
+}
+
+// TestNoEntityEventIsPublishedForARolledBackBatch pins publish-after-
+// commit on the path where it is easiest to get wrong: the atomic batch
+// writes and commits in different functions, so a publish placed beside
+// the write would announce rows that are about to vanish.
+func TestNoEntityEventIsPublishedForARolledBackBatch(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	sub := hub.Subscribe(project, "viewer", true)
+	defer hub.Unsubscribe(sub)
+	// The type declaration above published its own event before the
+	// subscription existed, so the channel starts empty here.
+
+	if _, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": "nope"}},
+	}, metamodel.BulkAtomic); err == nil {
+		t.Fatal("the batch must fail")
+	}
+	requireNothing(t, sub, "the atomic batch rolled back")
+
+	// The subscriber is a viewer *and* a token caller: the gating stated
+	// in events.go excludes neither, so a passing write reaches it.
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if got := receive(t, sub); got.Kind != "entity.upserted" {
+		t.Fatalf("Kind = %q, want entity.upserted", got.Kind)
+	}
+}
+
+// TestABulkBatchAnnouncesEveryRowItLanded covers the partial path's own
+// publication: one identity event per row that landed, and none for the
+// row that did not. A subscriber's only correct reaction to an entity
+// event is to re-read the row it names, so a batch announcing a count —
+// or announcing rows it rejected — tells it to re-read the wrong thing.
+func TestABulkBatchAnnouncesEveryRowItLanded(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	sub := hub.Subscribe(project, "viewer", true)
+	defer hub.Unsubscribe(sub)
+
+	if _, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "B", Fields: map[string]any{"min_level": "nope"}},
+		{TypeKey: "quest", Key: "c", Name: "C", Fields: map[string]any{"min_level": float64(3)}},
+	}, metamodel.BulkPartial); err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+
+	for _, wantKey := range []string{"a", "c"} {
+		got := receive(t, sub)
+		if got.Kind != "entity.upserted" {
+			t.Fatalf("Kind = %q, want entity.upserted", got.Kind)
+		}
+		if key := payloadField(t, got, "key"); key != wantKey {
+			t.Fatalf("payload key = %q, want %q", key, wantKey)
+		}
+	}
+	requireNothing(t, sub, "the rejected row landed nothing")
+}
+
+// TestEntityEventsCarryTheStoredIdentity pins whose spelling an event
+// reports. Keys are matched without regard to case, so a caller may
+// address type "Quest" as "quest"; the event must carry the identity as
+// stored, because a subscriber uses it to re-read a row and the stored
+// spelling is the one every other reader sees.
+func TestEntityEventsCarryTheStoredIdentity(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "Quest", Label: "Quest", LabelPlural: "Quests",
+	}); err != nil {
+		t.Fatalf("declare type: %v", err)
+	}
+
+	sub := hub.Subscribe(project, "viewer", true)
+	defer hub.Unsubscribe(sub)
+
+	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "Hogger", Name: "Hogger",
+	})
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	got := receive(t, sub)
+	if got.Kind != "entity.upserted" {
+		t.Fatalf("Kind = %q, want entity.upserted", got.Kind)
+	}
+	assertIdentityPayload(t, "viewer", got, row.ID, "Hogger")
+	if key := payloadField(t, got, "type_key"); key != "Quest" {
+		t.Fatalf("payload type_key = %q, want the stored spelling %q", key, "Quest")
+	}
+
+	// A removal declares the same fields, so it has to fill them: an
+	// event carrying "" tells a client a row keyed empty string is gone.
+	if err := svc.RemoveEntity(ctx, project, row.ID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	got = receive(t, sub)
+	if got.Kind != "entity.removed" {
+		t.Fatalf("Kind = %q, want entity.removed", got.Kind)
+	}
+	assertIdentityPayload(t, "viewer", got, row.ID, "Hogger")
+	if key := payloadField(t, got, "type_key"); key != "Quest" {
+		t.Fatalf("removal payload type_key = %q, want %q", key, "Quest")
+	}
+}
+
+func TestRemoveEntity(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := svc.RemoveEntity(ctx, project, row.ID); err != nil {
+		t.Fatalf("RemoveEntity: %v", err)
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound after removal", err)
+	}
+	if err := svc.RemoveEntity(ctx, project, uuid.New()); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("removing an unknown id: err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestSchemaChangeFlagsAnEntityWrittenThroughTheService is the sweep seen
+// from the other side. TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem
+// pins what the sweep must not touch, over rows written straight to the
+// database; this one pins that a row written through UpsertEntity — whose
+// values have been through Validate and back out of jsonb — is judged by
+// the same sweep when a new required field appears.
+func TestSchemaChangeFlagsAnEntityWrittenThroughTheService(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}); err != nil {
+		t.Fatalf("seed entity: %v", err)
+	}
+
+	// Add a required field: the stored row no longer satisfies the schema.
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: metamodel.Schema{
+			{Key: "min_level", Type: metamodel.FieldNumber, Required: true},
+			{Key: "summary", Type: metamodel.FieldLongText},
+			{Key: "faction", Type: metamodel.FieldText, Required: true},
+		},
+		ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("evolve schema: %v", err)
+	}
+
+	row, err := svc.EntityByKey(ctx, project, "quest", "hogger")
+	if err != nil {
+		t.Fatalf("EntityByKey: %v", err)
+	}
+	if !row.Invalid {
+		t.Fatal("the row should be flagged invalid after the schema change")
+	}
+	if row.Name != "Hogger" {
+		t.Fatal("the row's data must not have been altered")
+	}
+
+	// Writing the row again with the missing value clears the flag: the
+	// upsert resets invalid because it has just judged these values.
+	fixed, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields:          map[string]any{"min_level": float64(10), "faction": "Alliance"},
+		ExpectedVersion: ptrInt32(1),
+	})
+	if err != nil {
+		t.Fatalf("fix the row: %v", err)
+	}
+	if fixed.Invalid {
+		t.Fatal("a row that has just been validated must not stay flagged")
+	}
+}
+
+func TestEntitiesAreScopedToTheirProject(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine, theirs := newProject(t, pool), newProject(t, pool)
+	seedQuestType(t, svc, mine)
+	seedQuestType(t, svc, theirs)
+
+	row, err := svc.UpsertEntity(ctx, mine, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if _, err := svc.EntityByKey(ctx, theirs, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("an entity must not be visible from another project, got %v", err)
+	}
+	// Holding the id is not authority either.
+	if err := svc.RemoveEntity(ctx, theirs, row.ID); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("an entity must not be removable from another project, got %v", err)
+	}
+	if _, err := svc.EntityByKey(ctx, mine, "quest", "hogger"); err != nil {
+		t.Fatalf("the owning project lost its entity: %v", err)
+	}
+
+	// The same key in two games is two entities, not a collision.
+	if _, err := svc.UpsertEntity(ctx, theirs, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+	}); err != nil {
+		t.Fatalf("the other project must be free to use the same key: %v", err)
+	}
+}
+
+// TestAnEntityActorFromAnotherGameIsNamed covers the database's own
+// backstop on entities: the composite
+// FOREIGN KEY (updated_by_token_id, project_id) refuses a token scoped to
+// another game, and the refusal has to say so rather than surface a raw
+// SQLSTATE 23503 into a log nobody can act on.
+func TestAnEntityActorFromAnotherGameIsNamed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine, theirs := newProject(t, pool), newProject(t, pool)
+	seedQuestType(t, svc, mine)
+
+	foreign := newToken(t, pool, theirs)
+	_, err := svc.UpsertEntity(ctx, mine, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+		Actor:  metamodel.Actor{TokenID: &foreign},
+	})
+	if !errors.Is(err, metamodel.ErrActorNotInGame) {
+		t.Fatalf("err = %v, want ErrActorNotInGame", err)
+	}
+	if _, err := svc.EntityByKey(ctx, mine, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the refused write must store nothing, got %v", err)
+	}
+
+	// A token writing to its own game is an ordinary write, and the actor
+	// is recorded: the mapping cannot be refusing token actors in general.
+	own := newToken(t, pool, mine)
+	row, err := svc.UpsertEntity(ctx, mine, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(10)},
+		Actor:  metamodel.Actor{TokenID: &own},
+	})
+	if err != nil {
+		t.Fatalf("a token writing to its own game: %v", err)
+	}
+	if row.UpdatedByTokenID == nil || *row.UpdatedByTokenID != own {
+		t.Fatalf("UpdatedByTokenID = %v, want %v", row.UpdatedByTokenID, own)
+	}
+}
+
+// payloadField reads one string field of an event payload through its
+// JSON shape, which is the only thing a client ever sees.
+func payloadField(t *testing.T, e realtime.Event, field string) string {
+	t.Helper()
+	raw, err := json.Marshal(e.Payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode payload %s: %v", raw, err)
+	}
+	value, ok := got[field].(string)
+	if !ok {
+		t.Fatalf("payload %s carries no string %q", raw, field)
+	}
+	return value
+}

@@ -45,6 +45,24 @@ func (q *Queries) DeleteEntitiesOfType(ctx context.Context, arg DeleteEntitiesOf
 	return err
 }
 
+const deleteEntity = `-- name: DeleteEntity :execrows
+DELETE FROM entities
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type DeleteEntityParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) DeleteEntity(ctx context.Context, arg DeleteEntityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteEntity, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteEntityType = `-- name: DeleteEntityType :execrows
 DELETE FROM entity_types
 WHERE project_id = $1::uuid AND id = $2::uuid
@@ -61,6 +79,112 @@ func (q *Queries) DeleteEntityType(ctx context.Context, arg DeleteEntityTypePara
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getEntityByID = `-- name: GetEntityByID :one
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type GetEntityByIDParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) GetEntityByID(ctx context.Context, arg GetEntityByIDParams) (Entity, error) {
+	row := q.db.QueryRow(ctx, getEntityByID, arg.ProjectID, arg.ID)
+	var i Entity
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.EntityTypeID,
+		&i.Key,
+		&i.Name,
+		&i.Fields,
+		&i.Invalid,
+		&i.Version,
+		&i.Search,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getEntityByKey = `-- name: GetEntityByKey :one
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND entity_type_id = $2::uuid
+  AND lower(key) = lower($3::text)
+`
+
+type GetEntityByKeyParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID uuid.UUID
+	Key          string
+}
+
+func (q *Queries) GetEntityByKey(ctx context.Context, arg GetEntityByKeyParams) (Entity, error) {
+	row := q.db.QueryRow(ctx, getEntityByKey, arg.ProjectID, arg.EntityTypeID, arg.Key)
+	var i Entity
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.EntityTypeID,
+		&i.Key,
+		&i.Name,
+		&i.Fields,
+		&i.Invalid,
+		&i.Version,
+		&i.Search,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getEntityByKeyForUpdate = `-- name: GetEntityByKeyForUpdate :one
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND entity_type_id = $2::uuid
+  AND lower(key) = lower($3::text)
+FOR UPDATE
+`
+
+type GetEntityByKeyForUpdateParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID uuid.UUID
+	Key          string
+}
+
+// FOR UPDATE, for the reason GetEntityTypeByKeyForUpdate records: without
+// the lock the read runs against the transaction's snapshot, so a caller
+// racing an in-flight edit is told to merge onto a version that is
+// already stale by the time it retries, and retries into the same refusal
+// forever. What the lock buys is not the refusal -- the guarded DO UPDATE
+// refuses on its own -- but the *number* the caller is told to merge onto.
+func (q *Queries) GetEntityByKeyForUpdate(ctx context.Context, arg GetEntityByKeyForUpdateParams) (Entity, error) {
+	row := q.db.QueryRow(ctx, getEntityByKeyForUpdate, arg.ProjectID, arg.EntityTypeID, arg.Key)
+	var i Entity
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.EntityTypeID,
+		&i.Key,
+		&i.Name,
+		&i.Fields,
+		&i.Invalid,
+		&i.Version,
+		&i.Search,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
 }
 
 const getEntityTypeByID = `-- name: GetEntityTypeByID :one
@@ -276,6 +400,98 @@ func (q *Queries) MarkEntitiesOfTypeInvalid(ctx context.Context, arg MarkEntitie
 		arg.Ids,
 	)
 	return err
+}
+
+const upsertEntity = `-- name: UpsertEntity :one
+INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
+                      updated_by_user_id, updated_by_token_id)
+VALUES ($1::uuid, $2::uuid,
+        $3::text, $4::text, $5::jsonb,
+        to_tsvector('simple', $4::text || ' ' || $6::text),
+        $7::uuid, $8::uuid)
+ON CONFLICT (project_id, entity_type_id, lower(key)) DO UPDATE
+SET name                = excluded.name,
+    fields              = excluded.fields,
+    search              = excluded.search,
+    invalid             = false,
+    version             = entities.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE entities.version = $9::integer
+RETURNING id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id
+`
+
+type UpsertEntityParams struct {
+	ProjectID        uuid.UUID
+	EntityTypeID     uuid.UUID
+	Key              string
+	Name             string
+	Fields           []byte
+	SearchText       string
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+	ExpectedVersion  int32
+}
+
+// The same shape as UpsertEntityType, for the same reasons, and that
+// statement's comment carries the full argument. In short:
+//
+//   - The DO UPDATE is guarded by the caller's expected version, so the
+//     whole compare-and-set is one statement and two writers cannot both
+//     read version 1 and both succeed. A creating caller passes
+//     noVersion, which no stored version can equal.
+//   - The key column is deliberately not in the SET list. The first
+//     spelling stored stands, and the returned row therefore still
+//     carries it -- which is what lets Go refuse a respelling *after* the
+//     write, closing the creation-race hole.
+//   - No write sets updated_at: 0004_metamodel.sql puts a set_updated_at
+//     trigger on all four tables, and a clause here would be a second
+//     mechanism behind one column.
+//   - The audit columns are carried, so the composite
+//     FOREIGN KEY (updated_by_token_id, project_id) catches a token
+//     scoped to another game.
+//
+// search is written by this statement and by nothing else, on both arms
+// of the upsert. It cannot be a generated column: it is derived from
+// user-declared jsonb whose *text* fields are the only ones worth
+// indexing, and which of a row's fields those are is known only to the
+// Go validator that has just read the type's schema. So every write path
+// that changes name or fields must come through here, or the row stays
+// indexed under its previous words and a search stops finding it with
+// nothing to signal why.
+//
+// invalid is reset to false because the caller has just validated these
+// values against the type's current schema; a row that is being written
+// is a row that has been judged.
+func (q *Queries) UpsertEntity(ctx context.Context, arg UpsertEntityParams) (Entity, error) {
+	row := q.db.QueryRow(ctx, upsertEntity,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.Key,
+		arg.Name,
+		arg.Fields,
+		arg.SearchText,
+		arg.UpdatedByUserID,
+		arg.UpdatedByTokenID,
+		arg.ExpectedVersion,
+	)
+	var i Entity
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.EntityTypeID,
+		&i.Key,
+		&i.Name,
+		&i.Fields,
+		&i.Invalid,
+		&i.Version,
+		&i.Search,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
 }
 
 const upsertEntityType = `-- name: UpsertEntityType :one

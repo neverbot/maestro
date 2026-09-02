@@ -110,6 +110,26 @@ func checkDescriptors(label, labelPlural, description, color, icon string) []Fie
 	return problems
 }
 
+// checkName is the entity flavour of checkDescriptors. An entity carries
+// one descriptive column and it obeys the label rule — required, capped
+// at maxLabelLen, counted in runes — at its own wire path, so an agent
+// sees "name", not "label", for the argument it actually sent.
+//
+// It is a second function rather than a call to checkDescriptors with
+// empty descriptors because the *path* has to differ: checkDescriptors
+// reports at "label", and an agent that sent `name` must be told about
+// `name`. Rows whose descriptive columns really are label-shaped —
+// relation types, Task 5 — call checkDescriptors directly instead.
+func checkName(name string) []FieldError {
+	var problems []FieldError
+	if name == "" {
+		problems = append(problems, FieldError{Path: "name", Message: "is required"})
+	} else {
+		tooLong("name", name, maxLabelLen, &problems)
+	}
+	return problems
+}
+
 // tooLong records an over-length descriptor and reports whether it did.
 // The length is counted in runes, not bytes: a cap measured in bytes
 // makes an accented label shorter than an unaccented one for no reason a

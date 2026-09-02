@@ -62,6 +62,45 @@ const (
 	// reason a designer has the page open.
 	eventTypeUpserted = "type.upserted"
 	eventTypeRemoved  = "type.removed"
+
+	// eventEntityUpserted and eventEntityRemoved fire from UpsertEntity,
+	// UpsertEntities and RemoveEntity once their transaction has
+	// committed.
+	//
+	// The gating lands on the same two values as the type events, and the
+	// reasoning is restated rather than inherited because the two are not
+	// the same fact. A type is a game's vocabulary; an entity is the
+	// content itself, which is a much larger and much noisier stream.
+	//
+	// MinRole is empty — every member of the game, viewer included.
+	// Nothing about reading entities is role-gated: a viewer's browser
+	// renders the entity list, and gating the change above viewer would
+	// leave exactly the reader who cannot re-fetch on demand watching a
+	// list that silently drifts. A viewer who may read a row on demand
+	// loses no confidentiality by being told it moved, and the payload
+	// carries no value beyond the identity they could already fetch.
+	//
+	// HumanOnly is false. Task 7 mounts entities.list and entities.upsert
+	// on MCP for agents, so an agent may already read every one of these
+	// rows whenever it likes; withholding the push buys nothing. It also
+	// costs the most here of anywhere in this package: a seeding agent's
+	// next write is judged against a schema and a key space another
+	// writer may just have moved, and the failure it gets instead is a
+	// schema_violation or a version_conflict it cannot explain. This is
+	// the opposite case from internal/web's member, token and invite
+	// events, which set HumanOnly true because each mirrors a REST
+	// listing requireHumanCaller refuses a token caller outright.
+	//
+	// **The known consequence, recorded rather than gated around.** These
+	// events fire once per row, so a 400-row seed puts 400 events on
+	// every subscription — the same volume a partial batch's own
+	// per-item commits produce, and the reason UpsertEntities publishes
+	// identities rather than a count. Role gating would not fix that; it
+	// would only starve the viewer this decision exists to serve.
+	// Coalescing a burst belongs to the transport, where the subscriber
+	// and its backlog are visible, and Tasks 6 and 7 own it.
+	eventEntityUpserted = "entity.upserted"
+	eventEntityRemoved  = "entity.removed"
 )
 
 // typeEventMinRole and typeEventHumanOnly are the gating decided above,
@@ -70,4 +109,14 @@ const (
 const (
 	typeEventMinRole   = roles.Role("")
 	typeEventHumanOnly = false
+)
+
+// entityEventMinRole and entityEventHumanOnly are the gating decided
+// above for entity.upserted and entity.removed. They are their own
+// constants rather than an alias of the type-event pair: the two
+// decisions happen to agree today, and naming one in terms of the other
+// would make a later change to either silently change both.
+const (
+	entityEventMinRole   = roles.Role("")
+	entityEventHumanOnly = false
 )

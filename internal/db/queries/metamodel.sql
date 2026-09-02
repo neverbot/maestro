@@ -123,3 +123,78 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 SELECT * FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
 FOR UPDATE;
+
+-- name: UpsertEntity :one
+-- The same shape as UpsertEntityType, for the same reasons, and that
+-- statement's comment carries the full argument. In short:
+--
+--   * The DO UPDATE is guarded by the caller's expected version, so the
+--     whole compare-and-set is one statement and two writers cannot both
+--     read version 1 and both succeed. A creating caller passes
+--     noVersion, which no stored version can equal.
+--   * The key column is deliberately not in the SET list. The first
+--     spelling stored stands, and the returned row therefore still
+--     carries it -- which is what lets Go refuse a respelling *after* the
+--     write, closing the creation-race hole.
+--   * No write sets updated_at: 0004_metamodel.sql puts a set_updated_at
+--     trigger on all four tables, and a clause here would be a second
+--     mechanism behind one column.
+--   * The audit columns are carried, so the composite
+--     FOREIGN KEY (updated_by_token_id, project_id) catches a token
+--     scoped to another game.
+--
+-- search is written by this statement and by nothing else, on both arms
+-- of the upsert. It cannot be a generated column: it is derived from
+-- user-declared jsonb whose *text* fields are the only ones worth
+-- indexing, and which of a row's fields those are is known only to the
+-- Go validator that has just read the type's schema. So every write path
+-- that changes name or fields must come through here, or the row stays
+-- indexed under its previous words and a search stops finding it with
+-- nothing to signal why.
+--
+-- invalid is reset to false because the caller has just validated these
+-- values against the type's current schema; a row that is being written
+-- is a row that has been judged.
+INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
+                      updated_by_user_id, updated_by_token_id)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('entity_type_id')::uuid,
+        sqlc.arg('key')::text, sqlc.arg('name')::text, sqlc.arg('fields')::jsonb,
+        to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text),
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
+ON CONFLICT (project_id, entity_type_id, lower(key)) DO UPDATE
+SET name                = excluded.name,
+    fields              = excluded.fields,
+    search              = excluded.search,
+    invalid             = false,
+    version             = entities.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE entities.version = sqlc.arg('expected_version')::integer
+RETURNING *;
+
+-- name: GetEntityByKey :one
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+  AND lower(key) = lower(sqlc.arg('key')::text);
+
+-- name: GetEntityByKeyForUpdate :one
+-- FOR UPDATE, for the reason GetEntityTypeByKeyForUpdate records: without
+-- the lock the read runs against the transaction's snapshot, so a caller
+-- racing an in-flight edit is told to merge onto a version that is
+-- already stale by the time it retries, and retries into the same refusal
+-- forever. What the lock buys is not the refusal -- the guarded DO UPDATE
+-- refuses on its own -- but the *number* the caller is told to merge onto.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+  AND lower(key) = lower(sqlc.arg('key')::text)
+FOR UPDATE;
+
+-- name: GetEntityByID :one
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: DeleteEntity :execrows
+DELETE FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;

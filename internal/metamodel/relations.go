@@ -651,7 +651,7 @@ func (s *Service) RemoveRelation(ctx context.Context, projectID, id uuid.UUID) e
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
 		row, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: projectID, ID: id})
 		if err != nil {
-			return notFound(err, "lookup relation")
+			return notFoundByID(err, "relation", id, "lookup relation")
 		}
 		// The generic helper is right here, unlike on every by-key
 		// accessor: this id comes from the row just read, not from the
@@ -682,7 +682,7 @@ func (s *Service) RemoveRelation(ctx context.Context, projectID, id uuid.UUID) e
 			return fmt.Errorf("delete relation: %w", err)
 		}
 		if rows == 0 {
-			return ErrNotFound
+			return missingByID("relation", id)
 		}
 		return nil
 	})

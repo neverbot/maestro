@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
@@ -175,7 +176,7 @@ func bulkPartial[In, Out any](
 		// over it would throw away the other three hundred rows, which
 		// is the failure this mode exists to prevent.
 		if problem, ok := repeats[i]; ok {
-			failed = append(failed, failureFor(i, spec.key(in),
+			failed = append(failed, failureFor(ctx, i, spec.key(in),
 				&ValidationError{Code: codeInvalidInput, Fields: []FieldError{problem}}))
 			continue
 		}
@@ -201,7 +202,7 @@ func bulkPartial[In, Out any](
 			if stopped := ctx.Err(); stopped != nil {
 				return rows, failed, fmt.Errorf("bulk upsert stopped at item %d: %w", i, stopped)
 			}
-			failed = append(failed, failureFor(i, spec.key(in), err))
+			failed = append(failed, failureFor(ctx, i, spec.key(in), err))
 			continue
 		}
 		rows = append(rows, written)
@@ -338,7 +339,36 @@ func repeatedIdentities[In any](
 // possible advice about a row that will be refused again. Checking it
 // last also means it only ever intercepts errors that were heading for
 // internal_error, which is exactly the set it exists to rescue.
-func failureFor(index int, key string, err error) BulkFailure {
+// The two messages a bulk failure states rather than quotes.
+//
+// **Review finding M2.** `failureFor` used to set `Message: err.Error()`
+// unconditionally, before the switch, so the two codes whose text
+// describes the server rather than the caller carried the database's own
+// words: `canceling statement due to lock timeout (SQLSTATE 55P03)`,
+// `relation "entities_secret" does not exist (SQLSTATE 42P01)`, a
+// constraint name from a foreign-key violation. `mcpErrorFor`
+// (internal/web/mcp_errors.go) withholds exactly that on the single-row
+// path, and a test there asserts it — but a batch is where contention
+// was actually observed, so this was the likelier route out, not the
+// rarer one. The leak also undercut `retryable` itself: the message an
+// agent read beside the code was the raw text the design says it must
+// not see.
+//
+// Every other arm keeps `err.Error()`, because every other code names
+// something the caller sent and the message is the half it acts on.
+const (
+	retryableFailureMessage = "the database refused this item over contention; send it again, " +
+		"and send fewer rows at a time if a batch keeps producing these"
+	internalFailureMessage = "internal error"
+)
+
+// It takes a context only to log those two arms. Withholding a message
+// from the caller must not lose it: `mcpErrorFor` pairs the same
+// withholding with a `slog` line so an operator seeing a run of these
+// knows which lock or which broken statement, and a batch failure that
+// vanished into a fixed string with nothing written down would be
+// strictly worse than the leak it replaced.
+func failureFor(ctx context.Context, index int, key string, err error) BulkFailure {
 	f := BulkFailure{Index: index, Key: key, Message: err.Error()}
 	switch {
 	case errors.Is(err, ErrInvalidInput):
@@ -357,8 +387,13 @@ func failureFor(index int, key string, err error) BulkFailure {
 		f.Code = "in_use"
 	case IsRetryable(err):
 		f.Code = "retryable"
+		f.Message = retryableFailureMessage
+		slog.WarnContext(ctx, "bulk item hit database contention",
+			"index", index, "key", key, "error", err)
 	default:
 		f.Code = "internal_error"
+		f.Message = internalFailureMessage
+		slog.ErrorContext(ctx, "bulk item failed", "index", index, "key", key, "error", err)
 	}
 	return f
 }

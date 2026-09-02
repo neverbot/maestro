@@ -2,8 +2,11 @@ package web_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -630,4 +633,147 @@ func callOK(t *testing.T, session *mcp.ClientSession, name string, args map[stri
 		t.Fatalf("CallTool(%s) reported an error: %+v", name, result.Content)
 	}
 	return result
+}
+
+// TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire closes review
+// findings H1 and H2 at the layer where both were wrong: the wire.
+//
+// H1: `entities.list`'s description claimed the `related_to` traversal
+// was not paged, never set `next_cursor`, and silently dropped every
+// neighbour past `MaxEntityPage`. All three clauses were false —
+// `listRelated` has always used the same `pageSize`, cursor and `pageOf`
+// as the plain listing — and the description sent an agent to
+// `relations.list` as the escape hatch for a case that does not exist.
+// An agent believing it would have stopped at the first page holding a
+// whole neighbourhood it had only part of. The domain side was already
+// pinned by TestATraversalPagesLikeEveryOtherListing (internal/metamodel);
+// what was missing was a guard at the wire, where the sentence lives.
+//
+// H2: `direction` was `omitempty`, so the served input schema left it
+// out of `required`, and the description called "outgoing" its default —
+// while `listRelated` refused an absent one outright. The domain's
+// refusal is the right call; this test pins that the schema now says so
+// too, and that omitting the field cannot produce a listing.
+func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+	ctx := context.Background()
+
+	session := connectMCP(t, httpSrv.URL, f.token)
+
+	tools, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var list *mcp.Tool
+	for _, tool := range tools.Tools {
+		if tool.Name == "entities.list" {
+			list = tool
+		}
+	}
+	if list == nil {
+		t.Fatal("entities.list is not served")
+	}
+	// InputSchema crosses the wire as raw JSON, so the served schema is
+	// read as JSON rather than as a Go type — which is also the shape an
+	// agent's client sees.
+	raw, err := json.Marshal(list.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal input schema: %v", err)
+	}
+	var served struct {
+		Properties struct {
+			RelatedTo struct {
+				Required []string `json:"required"`
+			} `json:"related_to"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &served); err != nil {
+		t.Fatalf("decode input schema: %v", err)
+	}
+	if !slices.Contains(served.Properties.RelatedTo.Required, "direction") {
+		t.Fatalf("related_to.required = %v, want direction among them: %s",
+			served.Properties.RelatedTo.Required, raw)
+	}
+
+	var questType, zoneType struct {
+		ID string `json:"id"`
+	}
+	decodeStructured(t, callOK(t, session, "types.upsert", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests",
+	}), &questType)
+	decodeStructured(t, callOK(t, session, "types.upsert", map[string]any{
+		"key": "zone", "label": "Zone", "label_plural": "Zones",
+	}), &zoneType)
+	callOK(t, session, "relation_types.upsert", map[string]any{
+		"key": "takes_place_in", "label": "takes place in",
+	})
+
+	items := []any{map[string]any{"type_key": "zone", "key": "elwynn", "name": "Elwynn Forest"}}
+	edges := []any{}
+	for i := range 3 {
+		key := fmt.Sprintf("quest-%d", i)
+		items = append(items, map[string]any{
+			"type_key": "quest", "key": key, "name": fmt.Sprintf("Quest %d", i),
+		})
+		edges = append(edges, map[string]any{
+			"type_key": "takes_place_in",
+			"source":   map[string]any{"type_key": "quest", "key": key},
+			"target":   map[string]any{"type_key": "zone", "key": "elwynn"},
+		})
+	}
+	callOK(t, session, "entities.upsert", map[string]any{"items": items})
+	callOK(t, session, "relations.upsert", map[string]any{"items": edges})
+
+	anchor := func(extra map[string]any) map[string]any {
+		rel := map[string]any{
+			"relation_type_key": "takes_place_in",
+			"entity_type_key":   "zone",
+			"entity_key":        "elwynn",
+			"direction":         "incoming",
+		}
+		args := map[string]any{"related_to": rel, "limit": 2}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
+
+	var page struct {
+		Items []struct {
+			Key string `json:"key"`
+		} `json:"items"`
+		NextCursor string `json:"next_cursor"`
+	}
+	decodeStructured(t, callOK(t, session, "entities.list", anchor(nil)), &page)
+	if len(page.Items) != 2 || page.NextCursor == "" {
+		t.Fatalf("first traversal page = %+v, want two neighbours and a cursor", page)
+	}
+
+	seen := []string{page.Items[0].Key, page.Items[1].Key}
+	decodeStructured(t, callOK(t, session, "entities.list",
+		anchor(map[string]any{"cursor": page.NextCursor})), &page)
+	if len(page.Items) != 1 {
+		t.Fatalf("second traversal page = %+v, want the remaining neighbour", page.Items)
+	}
+	seen = append(seen, page.Items[0].Key)
+	if want := []string{"quest-0", "quest-1", "quest-2"}; !slices.Equal(seen, want) {
+		t.Fatalf("paged over %v, want %v", seen, want)
+	}
+
+	// Omitting direction cannot answer with a listing. Whether it is the
+	// SDK's own schema validation or the domain's refusal that stops it
+	// is not this test's business — that it is stopped, is.
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "entities.list",
+		Arguments: map[string]any{"related_to": map[string]any{
+			"relation_type_key": "takes_place_in",
+			"entity_type_key":   "zone",
+			"entity_key":        "elwynn",
+		}},
+	})
+	if err == nil && !result.IsError {
+		t.Fatalf("a traversal with no direction was answered: %+v", result.StructuredContent)
+	}
 }

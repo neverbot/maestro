@@ -185,6 +185,57 @@ func notFound(err error, what string) error {
 	return fmt.Errorf("%s: %w", what, err)
 }
 
+// missingByID is what a removal says when the id it was given names no
+// row of this game — review finding L4.
+//
+// The four removals used to answer with a bare ErrNotFound, whose
+// message is the sentinel's own name, so an agent read
+// `{"error":"not_found","message":"not_found"}`: the code repeated as
+// prose, with nothing to distinguish "this id was never a thing" from
+// "somebody removed it a moment ago", and nothing to check the id
+// against. Every by-key accessor in this package has named its miss
+// since Task 4 (`no entity type "quest" in this game`); this is the same
+// rule applied to an address that is an id rather than a key.
+//
+// It names the id back because that is the only part of the call a
+// caller can compare against what it holds: an agent that removed the
+// row already and re-sent, and an agent that pasted the wrong id, need
+// to tell those apart, and the id in the message is what does it.
+func missingByID(what string, id uuid.UUID) error {
+	return fmt.Errorf("%w: this game has no %s with id %s", ErrNotFound, what, id)
+}
+
+// notFoundByID is notFound for a lookup addressed by a caller-supplied
+// id: no-rows becomes a named ErrNotFound rather than the bare
+// sentinel, and anything else keeps its context.
+func notFoundByID(err error, what string, id uuid.UUID, doing string) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return missingByID(what, id)
+	}
+	return fmt.Errorf("%s: %w", doing, err)
+}
+
+// stillInUse is what a removal without cascade says when rows still
+// point at the type — the other half of finding L4.
+//
+// `{"error":"in_use","message":"in_use"}` told an agent nothing it did
+// not already have from the code. What it needs is which type, how much
+// content stands behind the refusal, and that `cascade` is the way
+// through — the last of which is the actual recovery and was nowhere in
+// the answer.
+//
+// holders is spelled by the caller rather than counted here because the
+// two removals count different things and one of them cannot count at
+// all: the race arm catches a row written between the count and the
+// delete, where the number is unknown and unstable by definition.
+func stillInUse(what, key, holders string) error {
+	return fmt.Errorf("%w: the %s %q still has %s; remove them first, "+
+		"or pass cascade to remove them along with it", ErrInUse, what, key, holders)
+}
+
 // retryableSQLStates are the SQLSTATEs IsRetryable admits.
 //
 // They are listed rather than matched by class prefix. Class 40 also
@@ -205,6 +256,20 @@ func notFound(err error, what string) error {
 //     this decision was left open.
 //   - 57014 query_canceled — statement_timeout fired, or someone
 //     cancelled the query.
+//
+// **57014 is the one entry that is not contention by construction, and
+// it stays — review finding L3.** The first three can only arise from
+// two transactions meeting; `query_canceled` also covers a query an
+// operator's `statement_timeout` cut off for being too expensive, and
+// that one fails identically every time it is run, so "change nothing
+// and resend" is wrong advice for it. Dropping it was the alternative
+// and it is worse: a lock wait that runs into `statement_timeout`
+// rather than into `lock_timeout` is exactly the contention this code
+// exists for, and it would report as `internal_error` — a caller told
+// the server broke when the recovery was to wait a moment. So the code
+// is kept and the *advice beside it* was completed instead: every tool
+// description and `mcpErrorFor`'s own message now say what to do when
+// resending stops helping, which is to ask for less.
 var retryableSQLStates = map[string]bool{
 	"40001": true,
 	"40P01": true,

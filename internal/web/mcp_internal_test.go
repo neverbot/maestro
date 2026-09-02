@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/neverbot/maestro/internal/metamodel"
 )
 
 // TestRequireScopeRefusesASessionCaller pins that a session caller —
@@ -130,6 +133,49 @@ func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
 			// move, and mcpErrorFor logs it instead.
 			if strings.Contains(body.Message, "canceling statement") {
 				t.Fatalf("message = %q leaks the database's own text", body.Message)
+			}
+		})
+	}
+}
+
+// TestADomainCodeOutranksAContentionSQLSTATE closes review finding L2 on
+// this side of the boundary.
+//
+// `mcpErrorFor`'s doc comment argues at length that `IsRetryable` must
+// be checked *last* — a domain code is what a caller can act on, and
+// "resend unchanged" is the worst possible advice about a call that will
+// be refused again — and nothing pinned it: moving the arm to the front
+// of the switch left the whole suite green. The pairing test for
+// `failureFor` is TestABulkFailureNeverCarriesTheDatabasesOwnWords
+// (internal/metamodel), because the two switches state the same
+// ordering for the same reason and a change to one is a change to both.
+func TestADomainCodeOutranksAContentionSQLSTATE(t *testing.T) {
+	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())
+
+	for _, tc := range []struct {
+		name, want string
+		sentinel   error
+	}{
+		{"a refusal", errCodeNotFound, metamodel.ErrNotFound},
+		{"a bad argument", errCodeInvalidInput, metamodel.ErrInvalidInput},
+		{"a rule the values break", errCodeSchemaViolation, metamodel.ErrSchemaViolation},
+		{"a type still in use", errCodeInUse, metamodel.ErrInUse},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			both := errors.Join(tc.sentinel, &pgconn.PgError{Code: "40001"})
+			result := mcpErrorFor(context.Background(), "entities.upsert", caller, both)
+			text, ok := result.Content[0].(*mcp.TextContent)
+			if !ok {
+				t.Fatalf("content[0] = %T, want *mcp.TextContent", result.Content[0])
+			}
+			var body struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(text.Text), &body); err != nil {
+				t.Fatalf("decode %q: %v", text.Text, err)
+			}
+			if body.Error != tc.want {
+				t.Fatalf("error = %q, want %q", body.Error, tc.want)
 			}
 		})
 	}

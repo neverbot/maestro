@@ -1,6 +1,7 @@
 package metamodel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -30,7 +31,7 @@ func TestAValueTooLargeToIndexIsCallerFixable(t *testing.T) {
 	if !errors.Is(mapped, ErrInvalidInput) {
 		t.Fatalf("mapped = %v, want it to match ErrInvalidInput", mapped)
 	}
-	if code := failureFor(0, "lore", mapped).Code; code != codeInvalidInput {
+	if code := failureFor(context.Background(), 0, "lore", mapped).Code; code != codeInvalidInput {
 		t.Fatalf("bulk code = %q, want %q", code, codeInvalidInput)
 	}
 	if !errors.Is(mapped, raised) {

@@ -309,7 +309,7 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		// reading one cannot tell "not carried" from "empty".
 		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
 		if err != nil {
-			return notFound(err, "lookup entity type")
+			return notFoundByID(err, "entity type", id, "lookup entity type")
 		}
 		removedKey = typ.Key
 
@@ -328,7 +328,8 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 				return fmt.Errorf("count entities: %w", err)
 			}
 			if count > 0 {
-				return ErrInUse
+				return stillInUse("entity type", typ.Key,
+					fmt.Sprintf("%d entities", count))
 			}
 		} else if err := q.DeleteEntitiesOfType(ctx, dbq.DeleteEntitiesOfTypeParams{
 			ProjectID: projectID, EntityTypeID: id,
@@ -344,12 +345,13 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 			// apart from the ordinary case.
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-				return ErrInUse
+				return stillInUse("entity type", typ.Key,
+					"entities, one of them written while it was being removed")
 			}
 			return fmt.Errorf("delete entity type: %w", err)
 		}
 		if rows == 0 {
-			return ErrNotFound
+			return missingByID("entity type", id)
 		}
 
 		// The type is gone; nothing in the schema takes its id out of the

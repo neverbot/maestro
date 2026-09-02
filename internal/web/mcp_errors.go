@@ -147,8 +147,22 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 		// seeing a run of these wants to know which lock.
 		slog.WarnContext(ctx, "mcp tool call hit database contention",
 			"tool", toolName, "user_id", caller.UserID, "token_id", caller.TokenID, "error", err)
+		// The second sentence is review finding L3. Three of the four
+		// SQLSTATEs IsRetryable admits are contention by construction;
+		// 57014 is not — `query_canceled` is also what an operator's
+		// statement_timeout raises on a query that is simply too
+		// expensive, and that one fails every time it is run. The code
+		// stays, because it still names the one recovery all four share
+		// and dropping 57014 would report a lock wait that ran into
+		// statement_timeout as a server fault. What was missing is the
+		// next step when resending does not help, and on every tool
+		// here there is one: ask for less. `entities.upsert`'s
+		// description carries the write-side version (send fewer rows),
+		// and each read tool's carries the read-side version.
 		return mcpErrorResult(errCodeRetryable,
-			"the database refused this over contention; send the same call again", nil)
+			"the database refused this over contention; send the same call again. "+
+				"If it keeps failing, the call is too expensive as written rather than "+
+				"unlucky: ask for less rather than resending it again", nil)
 	default:
 		slog.ErrorContext(ctx, "mcp tool call failed",
 			"tool", toolName, "user_id", caller.UserID, "token_id", caller.TokenID, "error", err)

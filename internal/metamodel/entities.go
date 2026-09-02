@@ -372,7 +372,7 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
 		row, err := q.GetEntityByID(ctx, dbq.GetEntityByIDParams{ProjectID: projectID, ID: id})
 		if err != nil {
-			return notFound(err, "lookup entity")
+			return notFoundByID(err, "entity", id, "lookup entity")
 		}
 		// The generic helper, deliberately: this id comes from the row
 		// just read and not from the caller, so there is no key to name.
@@ -397,7 +397,7 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 			return fmt.Errorf("delete entity: %w", err)
 		}
 		if rows == 0 {
-			return ErrNotFound
+			return missingByID("entity", id)
 		}
 		return nil
 	})

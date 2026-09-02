@@ -438,8 +438,14 @@ func pageOf(rows []dbq.Entity, limit int32, fingerprint string) EntityPage {
 // justify them.
 const (
 	// DefaultEntityPage and MaxEntityPage bound one page of
-	// ListEntities, and MaxEntityPage doubles as the cap on the
-	// neighbour set a one-hop traversal will return.
+	// ListEntities, in both of its shapes: a one-hop traversal is paged
+	// by the same pageSize, the same cursor and the same pageOf as the
+	// plain listing (see listRelated), so these two numbers describe a
+	// page there too and not a cap on the neighbour set. An earlier
+	// comment here, and the tool description built from it, said the
+	// traversal returned up to MaxEntityPage neighbours and stopped;
+	// review finding H1 caught it, and TestATraversalPagesLikeEveryOther
+	// Listing had already been pinning the truth.
 	DefaultEntityPage = defaultEntityPage
 	MaxEntityPage     = maxEntityPage
 

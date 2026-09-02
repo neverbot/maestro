@@ -65,8 +65,13 @@ func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 // hearing it — which is the only thing this hub's payloads let it do —
 // would read the state before the change and cache it as the state
 // after. The hub itself cannot enforce that; the metamodel's own tests
-// pin it (TestNoEventIsPublishedWhenTheWriteIsRolledBack and
-// TestNothingIsAnnouncedWhileTheTransactionIsStillOpen).
+// pin it, including the last placement — a publish as the final
+// statement inside fn, which differs from the correct one only by the
+// commit that follows: TestNoEventIsPublishedWhenTheCommitFails installs
+// a deferred constraint in the test's own throwaway database so the
+// commit, and only the commit, fails. The other two are
+// TestNoEventIsPublishedWhenTheWriteIsRolledBack and
+// TestNothingIsAnnouncedWhileTheTransactionIsStillOpen.
 func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role, humanOnly bool, payload any) {
 	if s.hub == nil {
 		return

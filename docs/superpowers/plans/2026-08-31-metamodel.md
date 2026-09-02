@@ -2476,11 +2476,13 @@ correction adds a helper, the helper is written once here for all three.)
     the transaction open on purpose — a rival takes a row lock on one of
     the type's entities and the re-validation sweep's `UPDATE` blocks on
     it — and proves nothing is on the wire in that window. Proved red by
-    moving `s.publish` next to the write inside the transaction. What no
-    test in the package can pin, and the invariant is therefore stated on
-    `Service.publish` instead: a publish placed as the *very last*
+    moving `s.publish` next to the write inside the transaction. This
+    correction originally closed by saying that one placement could be
+    pinned by no test in the package — a publish as the *very last*
     statement inside `withTx`'s callback, which differs from the correct
-    placement only by the commit that immediately follows it.
+    placement only by the commit that immediately follows it — and left
+    the invariant stated on `Service.publish` instead. **That was wrong.
+    Correction 29 pins it.**
 20. **Three project filters were presented as the isolation mechanism and
     are not.** `metamodel.sql`'s header said "every statement in this file
     filters on the resolved project id" as though that were what isolates
@@ -2530,13 +2532,16 @@ correction adds a helper, the helper is written once here for all three.)
       optional. Counted in *runes*, not bytes: a byte cap makes an
       accented label shorter than an unaccented one for no reason a
       designer could guess.
-    - `color` must be `#rgb` or `#rrggbb` when set. Named CSS colours and
+    - `color` must be a CSS hex colour when set. Named CSS colours and
       `rgb()` were rejected because Maestro's own renderers derive
-      contrasting tones arithmetically from three channels, and a form
+      contrasting tones arithmetically from the channels, and a form
       they cannot decompose is a colour some views honour and others drop.
+      (**Correction 34** widened this to all four hex forms; as first
+      shipped it took only `#rgb` and `#rrggbb`.)
     - `icon` must be a lower-case icon *name*, at most 64 characters.
       Emoji are deliberately excluded for now — they would make the column
       two things at once — and the pending visual-identity spec owns that.
+      (**Correction 34** added `_` to the pattern.)
 
     Maestro validates the *shape* of a descriptor and never its content:
     it is the game's own prose. This is not the escaping strategy either;
@@ -2588,6 +2593,192 @@ correction adds a helper, the helper is written once here for all three.)
     because only Task 8 knows which segments exist. Reserving words here
     would guess wrong, and tightening a key rule after a game is seeded
     costs renames.
+
+
+**Second re-review, 2026-09-02.** The high finding from the previous
+round — a respelled key landing as a silent overwrite — was re-attacked
+four ways and held. Corrections 27-35 close what the re-review found
+instead. Read them as one theme: *a fix that does not chase its own
+consequence is half a fix.* Three of the nine are a previous correction's
+own text going stale within two commits of being written.
+
+27. **Correction 25 changed a wire code and left the agent-facing spec
+    saying the old one.** `2026-09-02-agent-skill-bundle-design.md` §10.5
+    closed with "the error arrives as `schema_violation` at path `key`,
+    not `invalid_schema`" — written by correction 17, invalidated by
+    correction 25 two commits later, and proved false live: it arrives as
+    `invalid_input`. Correction 17's own summary claimed "its examples are
+    now ones that work". §10.5 now names `invalid_input` and says why it
+    is neither of the other two. Both specs were swept for anything else
+    correction 25 invalidated; nothing else asserted a code for a key.
+
+    This is the defect the project keeps producing, and the reason the
+    spec is the place it hurts most: the bundle *is* what an agent is
+    taught, so a stale code here is not a stale comment, it is a wrong
+    recovery in every game seeded from it.
+28. **`invalid_input` was documented nowhere.** `errors.go` says the
+    sentinels "match the wire codes the MCP surface returns", and the
+    core spec's canonical **Error shapes** list enumerated seven codes
+    without it, while the bundle's error-recovery table taught two. Every
+    malformed key, label, plural, description, colour or icon on
+    `types.upsert` returned a code no spec named. Both now carry it as
+    the third code, with its recovery — fix the argument, re-issue the
+    same call — and with the rule that a `Code` that is set but
+    unrecognised matches no sentinel and therefore surfaces as
+    `internal_error` (correction 32).
+
+    The descriptor rules from correction 23 were undocumented too:
+    neither spec said `label` was required, what the caps were, that
+    `color` must be hex or that `icon` must be a bare name. The core
+    spec's "Metamodel" section and the bundle's new §10.6 now state them
+    once each, flagged as shared by every table in the domain, because
+    Task 4's entity `name` and Task 5's relation-type `label` inherit
+    them.
+29. **The "untestable" invariant was testable, and correction 19 said
+    otherwise in three places.** `events_test.go`, the plan, and
+    `Service.publish` all claimed no test could make a commit fail on
+    demand, so a publish sitting as the *last* statement inside `withTx`'s
+    callback could only be pinned by a comment. False: `testutil.NewPool`
+    gives every test its own throwaway database, so a test can install a
+    constraint nothing else sees —
+
+    ```sql
+    ALTER TABLE entity_types ADD CONSTRAINT zz_fail_at_commit
+      FOREIGN KEY (id) REFERENCES projects (id) DEFERRABLE INITIALLY DEFERRED;
+    ```
+
+    An entity type's id is not a project id, so this is satisfied by
+    nothing; being `DEFERRABLE INITIALLY DEFERRED` it is checked at
+    `COMMIT` and not before, so every statement inside the transaction
+    succeeds and only the commit fails, with SQLSTATE 23503. It is added
+    while the table is empty, because `ADD CONSTRAINT` validates the rows
+    already stored.
+
+    `TestNoEventIsPublishedWhenTheCommitFails` asserts the commit failed,
+    that nothing was published, and that nothing was stored. Proved red by
+    moving `s.publish` to the last statement inside the callback: the
+    other four event tests stayed green and this one failed with "the
+    transaction never committed, but `type.upserted` was published". The
+    false claim is corrected in the comment, on `Service.publish` and in
+    correction 19. **Tasks 4-6 copy this invariant**, and now they can
+    copy a test for it too.
+30. **Tasks 4, 5 and 6's plan blocks re-introduced everything Task 3
+    fixed.** They were written before the review and never refreshed, so
+    their implementer would have copied, in Task 4 alone: a `failureFor`
+    matching `ErrSchemaViolation` and falling to `default:
+    internal_error`, so a `ValidationError{Code: invalid_input}` matched
+    *neither* arm and a malformed key in a bulk upsert reported
+    `internal_error` to an agent; `s.publish(projectID,
+    "entity.upserted", …)`, the three-argument signature correction 19
+    removed, stating no gating at all; payloads hand-built as JSON
+    *strings* with `in.TypeKey` and `row.Key` interpolated unescaped — an
+    SSE frame injection the Core already closed once, carrying values the
+    rule now stated in `events.go` forbids in a payload at all; an
+    `UpsertEntity` with no `WHERE entities.version = expected_version`
+    guard on the `DO UPDATE`, which is the lost update correction 4
+    closed, plus the `updated_at = now()` correction 5 removed in favour
+    of the trigger; no post-write `row.Key != in.Key` check, no
+    `rowKeyProblems`, no descriptor check, and a missing-key
+    `ValidationError` with no `Code`. Task 5 carried the same list for
+    relation types, plus a `RemoveRelationType` whose count and delete
+    were not in one transaction. Task 6 writes nothing, so it carried
+    only `newProject(t, svc)` and a malformed cursor reported as a bare
+    untyped error.
+
+    All three are rewritten against the files that shipped, each defect
+    annotated with the correction it comes from. Two shapes are new and
+    stated rather than implied: `checkName`, because an entity's one
+    descriptive column is `name` and an agent must be told about the path
+    it sent; and the fact that `relations` has **no version column**, so
+    `RelationInput` has no `ExpectedVersion` and the last writer of an
+    edge wins by design — a decision, recorded, not an omission.
+
+    A plan whose code blocks are stale is worse than a plan with no code
+    blocks, because it is copied rather than read.
+31. **The pre-read spelling check was dead to the suite.** Deleting
+    `types.go`'s three-line `existing.Key != in.Key` branch left the whole
+    package green, the re-review's new tests included, because correction
+    15's post-write check catches every respelling the pre-read does —
+    whenever the version also matches. Its remaining job is the *order*:
+    a caller failing for two reasons at once (a respelled key and a stale
+    version) must hear the one it can act on, because "current version is
+    1" sends it to retry with a version that will be refused again for
+    the same reason. `TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale`
+    pins that; proved red by deleting the branch (`version_conflict:
+    current version is 1`). The branch now carries the reason.
+32. **`code()` and `Is` disagreed, and the disagreement defaulted to the
+    most-taught recovery.** An unrecognised `Code` fell through `Is`'s
+    `default` arm to `ErrSchemaViolation`, so
+    `&ValidationError{Code: "invalid_inptu"}` printed the typo and still
+    satisfied `errors.Is(err, ErrSchemaViolation)` — a typo silently
+    landing on the one code the skill bundle teaches an agent to spend
+    round trips on. `Is` now switches on both known codes and matches
+    nothing otherwise, so an unrecognised code is unmapped in
+    `mcp_errors.go` and surfaces as `internal_error`: the honest report
+    for a code no spec documents. The zero value still means
+    `schema_violation`, which is the default the value validator relies
+    on and not a fallback for anything else; both halves are pinned by
+    `TestAnUnrecognisedCodeMatchesNoSentinel`.
+33. **`events.go` claimed a precedent did not exist.** It said
+    `HumanOnly: false` was "the one place in the codebase where that is
+    the considered answer rather than the default". False:
+    `internal/web/api_projects.go`'s `handleDeleteGame` publishes
+    `eventGameDeleted` with exactly this gating and `publish.go` argues it
+    at length — no REST listing to mirror, and no reason to withhold from
+    a connection the one signal it will ever get. Both conditions hold
+    here. Citing it strengthens the argument rather than weakening it: the
+    project already refuses the member-event inertia where the reasoning
+    does not apply, so this is the second instance of a rule, not a
+    one-off exception.
+34. **Two descriptor rules were narrower than their own arguments.**
+    - `iconPattern` was `^[a-z0-9][a-z0-9-]*$`, which forbids `_` and so
+      rejects `local_fire_department`. Material Symbols names every icon
+      in snake_case, and no icon set has been chosen — the visual-identity
+      spec is pending — so a kebab-only rule silently pre-committed that
+      spec to a set spelling its names with hyphens. It was also the only
+      one of the project's three key-shaped rules (`keyPattern`,
+      `rowKeyPattern`, this) that forbade `_`, which was the tell.
+      Underscores are now allowed.
+    - `colorPattern` was `#RGB` or `#RRGGBB`, over a comment calling those
+      "the two CSS hex forms". CSS Color 4 defines four; `#RGBA` and
+      `#RRGGBBAA` were rejected. The argument for excluding named colours
+      and `rgb()` is sound and stands — the renderers decompose channels
+      arithmetically — but it does not exclude the alpha forms, which are
+      the same channels plus one and decompose just as easily, and a
+      translucent overlay colour is an ordinary thing for a game to want.
+      All four are accepted and the comment is true.
+
+    Both messages changed with the rules, so an agent is told what is
+    actually allowed.
+35. **What an `ExpectedVersion` claims on the insert path is now
+    stated.** Update racing delete resurrects a type under a new id with
+    `err = nil`: row `Quest` v1 exists, a rival deletes it, the service
+    upserts `quest` with `ExpectedVersion: 1`, and a brand-new row
+    appears. Nothing is overwritten, so this is not the high finding — but
+    `EntityTypeInput`'s doc said a version "is a claim about a row,
+    checked as one", and on the insert path it is a documented no-op.
+
+    **The call: narrow the comment, do not refuse the write.** Refusing a
+    non-nil `ExpectedVersion` that reaches the insert path was the
+    alternative and it loses on three counts. Nothing is overwritten, so
+    the lost update correction 4 closed is not in play. The contract's
+    identity is `(project, key)` and not the uuid — `EntityTypeInput`
+    carries no id field at all, so a caller cannot address a row this
+    could surprise it about, and the returned `Version` of 1 *is* the
+    caller's own signal that it created rather than updated. And refusing
+    would make correction 15's post-write check unreachable: with the
+    insert path closed to a real expected version, every remaining route
+    into the guarded `DO UPDATE` comes from the locked pre-read, which has
+    already compared spellings — retiring a defence this same review round
+    spent three commits hardening, to hard-fail the caller who wants this
+    most, a re-seed restoring a game's vocabulary after a botched delete.
+
+    What refusing would have bought was honesty in a doc comment, and the
+    doc comment was narrowed instead.
+    `TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing`
+    records the argument and pins the outcome, so the behaviour is decided
+    rather than incidental. **Tasks 4 and 5 inherit it**, and say so on
+    their own inputs.
 
 ### Task 4: Entities, single and bulk
 

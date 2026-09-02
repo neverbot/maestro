@@ -4,6 +4,7 @@ services:
       context: .
       args:
         VERSION: dev
+    image: maestro:dev
     environment:
       DATABASE_URL: postgres://maestro:maestro@db:5432/maestro?sslmode=disable
       FIRST_ADMIN_EMAIL: admin@example.com
@@ -18,13 +19,21 @@ services:
       # across every restart, sessions included.
       REGISTRATION_MODE: invite_only
     ports:
-      - "${MAESTRO_HOST_PORT:-8080}:8080"
+      - "${MAESTRO_HOST_PORT:-8090}:8080"
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
 
   db:
     image: postgres:16
+    # Mapped for psql from the host while developing. The defaults avoid
+    # the ports a sibling stack and the test container already hold:
+    # 8090 rather than 8080, and 5433 rather than 5432 or the 55432 the
+    # Go tests use. Override either with MAESTRO_HOST_PORT and
+    # MAESTRO_DB_HOST_PORT.
+    ports:
+      - "${MAESTRO_DB_HOST_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: maestro
       POSTGRES_PASSWORD: maestro
@@ -36,6 +45,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
 volumes:
   db-data:

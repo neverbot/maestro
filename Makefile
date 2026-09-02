@@ -1,7 +1,7 @@
 GO ?= go
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: build test fmt vet lint check run tools sqlc sqlc-check
+.PHONY: build test fmt vet lint check run tools sqlc sqlc-check dev dev-down dev-logs dev-psql
 
 build:
 	$(GO) build -ldflags "-X github.com/neverbot/maestro/internal/version.Version=$(VERSION)" -o bin/maestro ./cmd/maestro
@@ -44,3 +44,22 @@ sqlc:
 
 sqlc-check:
 	sqlc diff
+
+# A local instance in Docker: the binary and its own Postgres, separate
+# from the container the Go tests use. `dev` rebuilds and waits for
+# health, so it is also how you pick up a code change. The stack keeps
+# its data in a named volume across restarts; `dev-down` stops it and
+# leaves that volume alone, which is deliberate — a game you seeded to
+# try something out survives until you remove the volume yourself.
+dev:
+	docker compose up --build -d
+	@echo "Maestro on http://localhost:$${MAESTRO_HOST_PORT:-8090} (admin@example.com / change-me-please)"
+
+dev-down:
+	docker compose down
+
+dev-logs:
+	docker compose logs -f maestro
+
+dev-psql:
+	docker compose exec db psql -U maestro -d maestro

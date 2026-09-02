@@ -896,3 +896,176 @@ func TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet(t *testing.T) {
 		t.Fatal("the upsert never returned after the rival committed")
 	}
 }
+
+// TestUpsertEntityTypeRequiresALabel pins the one descriptive column that
+// is not optional. ListEntityTypes orders by label, so an unlabelled type
+// sorts to the front of every list a designer sees and names itself
+// nothing; before descriptors.go existed it was accepted silently.
+func TestUpsertEntityTypeRequiresALabel(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+
+	_, err := svc.UpsertEntityType(context.Background(), newProject(t, pool),
+		metamodel.EntityTypeInput{Key: "quest", LabelPlural: "Quests"})
+	requireFieldError(t, err, "label", "is required")
+}
+
+// TestUpsertEntityTypeRejectsMalformedDescriptors walks each descriptive
+// column's own rule. Every case here was accepted before descriptors.go:
+// a 5000-character colour, an icon of markup, a label longer than any
+// storage or listing wants.
+func TestUpsertEntityTypeRejectsMalformedDescriptors(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	project := newProject(t, pool)
+
+	base := func() metamodel.EntityTypeInput {
+		return metamodel.EntityTypeInput{Key: "quest", Label: "Quest", LabelPlural: "Quests"}
+	}
+	cases := []struct {
+		name       string
+		mutate     func(*metamodel.EntityTypeInput)
+		path, want string
+	}{
+		{"overlong label", func(in *metamodel.EntityTypeInput) {
+			in.Label = strings.Repeat("q", 201)
+		}, "label", "must be at most 200 characters"},
+		{"overlong plural", func(in *metamodel.EntityTypeInput) {
+			in.LabelPlural = strings.Repeat("q", 201)
+		}, "label_plural", "must be at most 200 characters"},
+		{"overlong description", func(in *metamodel.EntityTypeInput) {
+			in.Description = strings.Repeat("q", 4001)
+		}, "description", "must be at most 4000 characters"},
+		{"colour that is prose", func(in *metamodel.EntityTypeInput) {
+			in.Color = "crimson"
+		}, "color", "must be a hex colour such as #c41e3a or #c13"},
+		{"colour that is a payload", func(in *metamodel.EntityTypeInput) {
+			in.Color = strings.Repeat("#c41e3a", 800)
+		}, "color", "must be a hex colour such as #c41e3a or #c13"},
+		{"icon that is markup", func(in *metamodel.EntityTypeInput) {
+			in.Icon = "<script>alert(1)</script>"
+		}, "icon", "must be an icon name: lower-case letters, digits or hyphens, " +
+			"starting with a letter or a digit"},
+		{"overlong icon", func(in *metamodel.EntityTypeInput) {
+			in.Icon = strings.Repeat("s", 65)
+		}, "icon", "must be at most 64 characters"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base()
+			tc.mutate(&in)
+			_, err := svc.UpsertEntityType(context.Background(), project, in)
+			requireFieldError(t, err, tc.path, tc.want)
+		})
+	}
+}
+
+// TestUpsertEntityTypeAcceptsTheDescriptorsAGameActuallyWrites is the
+// other half: every optional column may be omitted entirely, both hex
+// forms are colours, an icon name is a name, and a label is a game's own
+// prose in a game's own language — including accents, which the rune
+// count must not make shorter than an unaccented label.
+func TestUpsertEntityTypeAcceptsTheDescriptorsAGameActuallyWrites(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "bare", Label: "Bare",
+	}); err != nil {
+		t.Fatalf("every column but the label is optional: %v", err)
+	}
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "short-hex", Label: "Misión de la Reina", LabelPlural: "Misiones",
+		Color: "#c13", Icon: "scroll-2",
+	}); err != nil {
+		t.Fatalf("a three-digit colour and a hyphenated icon are ordinary: %v", err)
+	}
+	// Exactly at each cap, counted in runes: an accented label must not be
+	// cut shorter than a plain one, so the cap cannot drift to bytes.
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "at-the-cap", Label: strings.Repeat("é", 200),
+		Description: strings.Repeat("é", 4000), Icon: strings.Repeat("i", 64),
+	}); err != nil {
+		t.Fatalf("a label of exactly 200 runes must be accepted: %v", err)
+	}
+}
+
+// TestUpsertEntityTypeReportsEveryProblemAtOnce pins the reason
+// rowKeyProblems hands back a slice instead of a wrapped error: an agent
+// fixing a seed script should see the key and the label in one answer,
+// not learn about the label only after the key is fixed.
+func TestUpsertEntityTypeReportsEveryProblemAtOnce(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+
+	_, err := svc.UpsertEntityType(context.Background(), newProject(t, pool),
+		metamodel.EntityTypeInput{Key: "main quest", Color: "crimson"})
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("err = %v, want a *metamodel.ValidationError", err)
+	}
+	var paths []string
+	for _, f := range invalid.Fields {
+		paths = append(paths, f.Path)
+	}
+	if strings.Join(paths, ",") != "key,label,color" {
+		t.Fatalf("paths = %v, want key,label,color reported together", paths)
+	}
+}
+
+// TestAnActorFromAnotherGameIsNamed covers the database's own backstop.
+//
+// 0004_metamodel.sql gives entity_types a composite
+// FOREIGN KEY (updated_by_token_id, project_id) REFERENCES
+// api_tokens (id, project_id), so a token belonging to another game
+// cannot be recorded as the editor of this one's type. That constraint
+// worked already; what did not was the reporting, which surfaced the
+// SQLSTATE verbatim ("upsert entity type: ... violates foreign key
+// constraint ... (SQLSTATE 23503)") into whatever log or handler caught
+// it. Nothing about that string tells an operator a token was scoped to
+// the wrong game.
+func TestAnActorFromAnotherGameIsNamed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine, theirs := newProject(t, pool), newProject(t, pool)
+
+	foreign := newToken(t, pool, theirs)
+	_, err := svc.UpsertEntityType(ctx, mine, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Actor: metamodel.Actor{TokenID: &foreign},
+	})
+	if !errors.Is(err, metamodel.ErrActorNotInGame) {
+		t.Fatalf("err = %v, want ErrActorNotInGame", err)
+	}
+	if _, err := svc.EntityTypeByKey(ctx, mine, "quest"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the refused write must store nothing, got %v", err)
+	}
+
+	// The same token against its own game is an ordinary write, so the
+	// mapping cannot be refusing token actors in general.
+	if _, err := svc.UpsertEntityType(ctx, theirs, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Actor: metamodel.Actor{TokenID: &foreign},
+	}); err != nil {
+		t.Fatalf("a token writing to its own game: %v", err)
+	}
+}
+
+// newToken inserts an api_tokens row scoped to one project, so a write
+// can record an agent actor.
+func newToken(t *testing.T, pool *pgxpool.Pool, project uuid.UUID) uuid.UUID {
+	t.Helper()
+	user := newUser(t, pool)
+	var id uuid.UUID
+	err := pool.QueryRow(context.Background(),
+		`INSERT INTO api_tokens (project_id, user_id, label, token_hint, token_hash)
+		 VALUES ($1, $2, 'seeder', 'abcd', $3) RETURNING id`,
+		project, user, []byte(uuid.NewString())).Scan(&id)
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	return id
+}

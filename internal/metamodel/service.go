@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
@@ -109,6 +111,31 @@ func decodeFields(raw []byte) (map[string]any, error) {
 		return nil, fmt.Errorf("decode fields: %w", err)
 	}
 	return out, nil
+}
+
+// actorConstraintViolation recognises a write refused because its Actor
+// does not belong to the project being written to, and returns
+// ErrActorNotInGame; every other error passes through unchanged.
+//
+// It matches on the constraint's column rather than its full generated
+// name (entity_types_updated_by_token_id_project_id_fkey today) so that
+// Tasks 4, 5 and 6 get the same mapping for entities, relation types and
+// relations without four near-identical name lists to keep in step: every
+// table in 0004_metamodel.sql carries the same two audit columns under
+// the same two constraint shapes. A missing updated_by_user_id is folded
+// in with it — a user id that resolves to no row is the same class of
+// fault, an actor this instance cannot vouch for, arriving from the same
+// place.
+func actorConstraintViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return err
+	}
+	if strings.Contains(pgErr.ConstraintName, "updated_by_token_id") ||
+		strings.Contains(pgErr.ConstraintName, "updated_by_user_id") {
+		return ErrActorNotInGame
+	}
+	return err
 }
 
 // notFound maps pgx's no-rows sentinel onto the domain's, leaving every

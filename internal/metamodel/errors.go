@@ -19,6 +19,31 @@ var (
 	ErrInvalidSchema        = errors.New("invalid_schema")
 )
 
+// ErrActorNotInGame is what the database's own backstop against a
+// cross-game actor is reported as.
+//
+// It is deliberately *not* in the block above, and deliberately not a
+// wire code. Every error up there is something a caller can act on by
+// changing what it sent; this one is not. An Actor is never
+// caller-supplied content — internal/web resolves it from the credential
+// the request authenticated with, and a token is scoped to exactly one
+// game (ProjectScope, api_projects.go) — so a token id arriving against
+// another game's project id means the scope resolution above this package
+// is wrong, not that a designer typed something. 0004_metamodel.sql's
+// composite FOREIGN KEY (updated_by_token_id, project_id) catches it
+// regardless, which is the point of putting it in the schema; what this
+// sentinel adds is that the refusal says what happened instead of
+// surfacing "violates foreign key constraint ... (SQLSTATE 23503)" into
+// a log nobody can act on.
+//
+// Unmapped in internal/web/mcp_errors.go, it therefore reaches an agent
+// as internal_error and reaches an operator as a legible log line, which
+// is the correct pairing for a condition an agent cannot fix. **Task 7
+// decides whether it earns a wire code of its own**; until something can
+// be done about it from the outside, one would only invite a caller to
+// retry.
+var ErrActorNotInGame = errors.New("the actor recorded on this write does not belong to this game")
+
 // FieldError is one problem with one field.
 type FieldError struct {
 	Path    string

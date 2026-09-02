@@ -57,8 +57,11 @@ type entityTypeEvent struct {
 // on every entity already stored against it change together, so a schema
 // edit can never land with its instances left judged by the old schema.
 func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in EntityTypeInput) (dbq.EntityType, error) {
-	if err := checkRowKey("key", in.Key); err != nil {
-		return dbq.EntityType{}, err
+	problems := rowKeyProblems("key", in.Key)
+	problems = append(problems,
+		checkDescriptors(in.Label, in.LabelPlural, in.Description, in.Color, in.Icon)...)
+	if len(problems) > 0 {
+		return dbq.EntityType{}, &ValidationError{Fields: problems}
 	}
 	if err := in.Schema.Check(); err != nil {
 		return dbq.EntityType{}, err
@@ -113,6 +116,9 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 			return conflictOnEntityTypeKey(ctx, q, projectID, in.Key)
 		}
 		if err != nil {
+			if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
 			return fmt.Errorf("upsert entity type: %w", err)
 		}
 		// The locked read above cannot be the only place the spelling is

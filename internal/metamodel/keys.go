@@ -56,26 +56,34 @@ const maxRowKeyLen = 64
 // not otherwise impose.
 var rowKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
-// checkRowKey validates a key that addresses a row, reporting the problem
-// at the caller's path ("key") so an agent sees where it is.
+// rowKeyProblems validates a key that addresses a row, reporting the
+// problem at the caller's path ("key") so an agent sees where it is.
 //
 // A key problem is a ValidationError, not a SchemaError: the caller is
 // writing a row, not declaring a schema, and the sentinel split states
 // exactly that difference (see SchemaError's doc comment).
-func checkRowKey(path, key string) error {
+//
+// It hands back the problems rather than a wrapped error so that a caller
+// checking a key *and* a row's descriptive columns reports both in one
+// ValidationError, rather than making an agent fix the key, call again,
+// and only then learn the label was empty too. At most one problem is
+// ever reported for a single key: the three conditions are ordered from
+// most to least fundamental, and telling a caller their empty key is also
+// not a handle helps nobody.
+func rowKeyProblems(path, key string) []FieldError {
 	switch {
 	case key == "":
-		return &ValidationError{Fields: []FieldError{{Path: path, Message: "is required"}}}
+		return []FieldError{{Path: path, Message: "is required"}}
 	case len(key) > maxRowKeyLen:
-		return &ValidationError{Fields: []FieldError{{
+		return []FieldError{{
 			Path:    path,
 			Message: fmt.Sprintf("must be at most %d characters", maxRowKeyLen),
-		}}}
+		}}
 	case !rowKeyPattern.MatchString(key):
-		return &ValidationError{Fields: []FieldError{{
+		return []FieldError{{
 			Path:    path,
 			Message: "must be letters, digits, underscores or hyphens, starting with a letter or a digit",
-		}}}
+		}}
 	}
 	return nil
 }

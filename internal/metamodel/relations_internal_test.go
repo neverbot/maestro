@@ -236,3 +236,36 @@ func TestTheGenericNotFoundIsNotUsedWhereACallerSuppliedAKey(t *testing.T) {
 		})
 	}
 }
+
+// TestARelationPageAsksForTooMuchAndGetsTheCap pins relationPageSize's
+// two arms apart.
+//
+// The interesting values are neither 0 nor 100. `501` used to yield 100
+// — less than `500` yields — because "nothing asked for" and "more than
+// the cap" shared one arm, and no caller can have meant that. The
+// boundaries either side of the cap are here for the same reason: a
+// clamp written with the wrong comparison passes at 501 and fails at
+// exactly 500.
+func TestARelationPageAsksForTooMuchAndGetsTheCap(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   int32
+		want int32
+	}{
+		{"nothing asked for", 0, defaultRelationPage},
+		{"a negative limit is still no opinion", -7, defaultRelationPage},
+		{"one row", 1, 1},
+		{"a page nobody would round to a bound", 37, 37},
+		{"the default asked for explicitly", defaultRelationPage, defaultRelationPage},
+		{"one below the cap", maxRelationPage - 1, maxRelationPage - 1},
+		{"the cap itself", maxRelationPage, maxRelationPage},
+		{"one above the cap", maxRelationPage + 1, maxRelationPage},
+		{"far above the cap", 1 << 20, maxRelationPage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := relationPageSize(tc.in); got != tc.want {
+				t.Fatalf("relationPageSize(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}

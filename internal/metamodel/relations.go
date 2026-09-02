@@ -34,6 +34,34 @@ type Ref struct {
 // first, silently. Giving edges the same compare-and-set the other three
 // tables have would need a migration adding the column; Task 7 owns that
 // call if the MCP surface wants edge concurrency.
+//
+// **This decision and UpsertRelation's refusal of parallel edges are one
+// pair, and must be revisited as a pair.** Read alone each is defensible
+// and neither is being reversed here; read together they compound.
+// Forbidding two edges of one type between one ordered pair *pushes
+// multiplicity into an edge's fields* — that is the escape hatch
+// UpsertRelation offers by name, `passages: ["door", "vent"]` on a
+// single `connects_to` — and this decision then leaves exactly those
+// fields with no concurrency protection at all. A list two designers
+// extend at the same time is the textbook lost update, and it is the
+// example the other decision leans on. Verified, not reasoned about:
+// two upserts of the same triple with `{"note":"A"}` then `{"note":"B"}`
+// hit one row id, the second wins whole, no error is raised and the two
+// `relation.upserted` events are indistinguishable, so nothing in the
+// system — not the caller, not a subscriber, not the row — records that
+// a write was lost. Entity fields never had this exposure: they have
+// `version`, and an entity is where multiplicity would otherwise have
+// gone.
+//
+// So the escape hatch is real but lossy under concurrent editing, which
+// is a smaller claim than the one the other doc comment makes on its
+// own. **Task 7 owns the migration** if it wants edge concurrency, and
+// whoever opens either question should read the other first: adding
+// `version` here makes the parallel-edge refusal cost what it was
+// assumed to cost, and relaxing the uniqueness index instead would make
+// this decision moot. Neither is a Task 5 change — one is a migration,
+// the other rewrites the ON CONFLICT target that makes a re-seed
+// idempotent.
 type RelationInput struct {
 	TypeKey string
 	Source  Ref
@@ -108,7 +136,12 @@ func (u upsertedRelation) event() relationEvent {
 // put the multiplicity in the edge's own fields, which is what edge
 // fields are for — one `connects_to` from room A to room B carrying
 // `passages: ["door", "vent"]` rather than two identical edges nothing
-// tells apart. **Self-loops are allowed**: source and target may be the
+// tells apart. **That second escape hatch is qualified by RelationInput's
+// decision that edges carry no version**: the list it hands the problem
+// to is unprotected against a concurrent extension, and the loss is
+// silent. The two decisions are recorded there as one pair, because
+// changing either changes what the other costs; both stand, and Task 7
+// owns any migration. **Self-loops are allowed**: source and target may be the
 // same entity, and the index permits it. A championship that counts
 // towards itself is a modelling mistake a designer should be able to
 // make and then see; Maestro is not the arbiter of a game's graph, and
@@ -135,6 +168,14 @@ func (s *Service) UpsertRelation(ctx context.Context, projectID uuid.UUID, in Re
 // agent seeding entities and the edges between them in one call needs to
 // see rows the same transaction has just written. Nothing in here
 // publishes.
+//
+// **No public caller reaches that yet.** UpsertRelations writes edges and
+// nothing else, so an atomic batch's endpoints are always already
+// committed and every lookup here could be routed through the pool
+// without a single external test noticing; Task 9's seeding of a whole
+// game in one call is where the claim gets a public path. Until then it
+// is pinned at the only level where it is true, by the package's own
+// TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction.
 func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, in RelationInput) (upsertedRelation, error) {
 	relType, err := q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{
 		ProjectID: projectID, Key: in.TypeKey,
@@ -388,10 +429,7 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 		ProjectID: projectID,
 		SourceID:  f.SourceID,
 		TargetID:  f.TargetID,
-		Limit:     f.Limit,
-	}
-	if params.Limit <= 0 || params.Limit > maxRelationPage {
-		params.Limit = defaultRelationPage
+		Limit:     relationPageSize(f.Limit),
 	}
 	if f.TypeKey != "" {
 		relType, err := s.RelationTypeByKey(ctx, projectID, f.TypeKey)
@@ -409,12 +447,41 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 }
 
 // The bounds on one relation listing. There is no cursor here — Task 6
-// owns pagination — so a caller asking for more than the cap, or for
-// nothing at all, gets the default rather than the whole table.
+// owns pagination — so a caller that asks for nothing at all gets the
+// default rather than the whole table.
 const (
 	defaultRelationPage int32 = 100
 	maxRelationPage     int32 = 500
 )
+
+// relationPageSize turns a caller's requested limit into the one this
+// listing will use.
+//
+// **Asking for nothing and asking for too much are two different
+// requests, and they now get two different answers.** A zero or negative
+// limit is "no opinion" and gets the default. A limit above the cap is
+// an opinion — a caller that wants as many rows as it is allowed — and
+// gets the cap. Folding both onto the default meant `Limit: 501`
+// silently returned 100 rows while `Limit: 500` returned 500: asking for
+// slightly too much gave strictly less than asking for the maximum,
+// which is the one answer no caller can have meant, and it is silent, so
+// a caller that trusted it under-read the game's graph without ever
+// being told. Clamping is what every other paginated API in reach does
+// and what a caller writing `Limit: math.MaxInt32` to mean "everything"
+// expects.
+//
+// Task 6 owns the cursor, and when it arrives this stays the per-page
+// bound; nothing here is a promise about how many pages exist.
+func relationPageSize(limit int32) int32 {
+	switch {
+	case limit <= 0:
+		return defaultRelationPage
+	case limit > maxRelationPage:
+		return maxRelationPage
+	default:
+		return limit
+	}
+}
 
 // RemoveRelation deletes one edge, reading it and its type first so that
 // relation.removed declares the same identity relation.upserted does. A
@@ -428,6 +495,13 @@ func (s *Service) RemoveRelation(ctx context.Context, projectID, id uuid.UUID) e
 		if err != nil {
 			return notFound(err, "lookup relation")
 		}
+		// The generic helper is right here, unlike on every by-key
+		// accessor: this id comes from the row just read, not from the
+		// caller, so there is no key to name and nothing for a caller to
+		// fix. `relations.relation_type_id` is `ON DELETE RESTRICT` and
+		// this runs in the same transaction as the read, so no-rows is
+		// unreachable rather than merely unlikely; if it ever fires, the
+		// schema is inconsistent and `not_found` is a thin report of it.
 		typ, err := q.GetRelationTypeByID(ctx, dbq.GetRelationTypeByIDParams{
 			ProjectID: projectID, ID: row.RelationTypeID,
 		})

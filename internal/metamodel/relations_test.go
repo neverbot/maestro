@@ -1,6 +1,7 @@
 package metamodel_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -828,6 +829,16 @@ func TestListRelationsFiltersByTypeAndEndpoint(t *testing.T) {
 		{"by source", metamodel.RelationFilter{SourceID: &kobold.ID}, 1},
 		{"by target", metamodel.RelationFilter{TargetID: &hogger.ID}, 2},
 		{"by type and target", metamodel.RelationFilter{TypeKey: "connects_to", TargetID: &hogger.ID}, 1},
+		// A limit the caller chose is the limit it gets: neither 0 nor
+		// the default, so a listing that ignored Limit or folded every
+		// value onto a bound would return all three.
+		{"an explicit limit below the default", metamodel.RelationFilter{Limit: 2}, 2},
+		// Over the cap clamps to the cap, not to the default. There are
+		// three edges here, so what this pins is that asking for too much
+		// still returns everything there is rather than nothing extra;
+		// the arithmetic either side of the bound is
+		// TestARelationPageAsksForTooMuchAndGetsTheCap's.
+		{"over the cap", metamodel.RelationFilter{Limit: 501}, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows, err := svc.ListRelations(ctx, project, tc.filter)
@@ -1582,5 +1593,96 @@ func TestRemovingAnEntityTypePrunesItFromEveryEndpointList(t *testing.T) {
 		Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
 	}); err != nil {
 		t.Fatalf("an edge was refused against a rule nothing could satisfy: %v", err)
+	}
+}
+
+// TestConcurrentEditsToOneEdgesFieldsAreLostSilently pins, deliberately,
+// what the two linked decisions on RelationInput and UpsertRelation cost
+// together.
+//
+// Neither is being reversed and this test is not a bug report: it is the
+// evidence for a doc comment that would otherwise be an assertion. An
+// edge carries no `version`, so there is no compare-and-set to refuse a
+// stale write; and an edge's uniqueness index forbids parallel edges,
+// which is what sends a game's multiplicity into the edge's own fields —
+// the `passages: ["door", "vent"]` that UpsertRelation offers by name.
+// Put together, the field a designer was told to use for multiplicity is
+// the one field in the metamodel with no protection at all.
+//
+// Two writers extend one list here. What the test asserts is the whole
+// loss: one row, the second write whole, no error, and two events a
+// subscriber cannot tell apart — so nothing anywhere in the system
+// records that a write was lost. If Task 7 adds `version` to `relations`
+// this test goes red, which is the correct outcome: the decision it pins
+// will have been reversed, and both doc comments need rewriting with it.
+func TestConcurrentEditsToOneEdgesFieldsAreLostSilently(t *testing.T) {
+	pool := testutil.NewPool(t)
+	hub := realtime.NewHub()
+	svc := metamodel.New(pool, hub)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "connects_to", Label: "connects to",
+		Schema: metamodel.Schema{{Key: "passages", Type: metamodel.FieldText}},
+	}); err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+
+	sub := hub.Subscribe(project, "viewer", false)
+	defer hub.Unsubscribe(sub)
+
+	edge := func(passages string) metamodel.RelationInput {
+		return metamodel.RelationInput{
+			TypeKey: "connects_to",
+			Source:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			Fields:  map[string]any{"passages": passages},
+		}
+	}
+
+	// The designer who wrote "door" first.
+	first, err := svc.UpsertRelation(ctx, project, edge("door"))
+	if err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	firstEvent := receive(t, sub)
+
+	// The designer who was extending the same list at the same time, and
+	// never read the first write. There is no ExpectedVersion to send.
+	second, err := svc.UpsertRelation(ctx, project, edge("vent"))
+	if err != nil {
+		t.Fatalf("second write was refused, so edges are no longer last-writer-wins: %v", err)
+	}
+	secondEvent := receive(t, sub)
+
+	if first.ID != second.ID {
+		t.Fatalf("two row ids (%s, %s): parallel edges are no longer refused, and the "+
+			"decision that pushes multiplicity into edge fields no longer holds", first.ID, second.ID)
+	}
+	if got, want := string(second.Fields), `{"passages": "vent"}`; got != want {
+		t.Fatalf("fields = %s, want %s — the second write did not take the row whole", got, want)
+	}
+
+	// The silence is the point: the two events are identical, so a
+	// subscriber watching this edge sees "it changed" twice and has
+	// nothing that says the first change was overwritten unread.
+	if firstEvent.Kind != secondEvent.Kind {
+		t.Fatalf("kinds = %q, %q — a lost update is now announced differently",
+			firstEvent.Kind, secondEvent.Kind)
+	}
+	firstJSON, err := json.Marshal(firstEvent.Payload)
+	if err != nil {
+		t.Fatalf("marshal first payload: %v", err)
+	}
+	secondJSON, err := json.Marshal(secondEvent.Payload)
+	if err != nil {
+		t.Fatalf("marshal second payload: %v", err)
+	}
+	if !bytes.Equal(firstJSON, secondJSON) {
+		t.Fatalf("payloads differ (%s, %s): something now distinguishes the write that "+
+			"was overwritten, and the doc comments claiming the loss is silent are stale",
+			firstJSON, secondJSON)
 	}
 }

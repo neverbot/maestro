@@ -409,8 +409,21 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 	// string can carry a nested filter without inventing an encoding:
 	// related_to.relation_type_key, .entity_type_key, .entity_key,
 	// .direction. Any one of them present turns the listing into the
-	// traversal, and the domain refuses an incomplete one at its own
-	// path — including a missing direction, which it will not default.
+	// traversal, and the domain refuses an incomplete one rather than
+	// quietly answering with the whole game — including a missing
+	// direction, which it will not default.
+	//
+	// Three of the four one-part permutations name the missing part at
+	// its own field path. The fourth does not, and that is recorded
+	// rather than papered over: given only a direction, the domain
+	// resolves the relation type first and answers `not_found: no
+	// relation type "" in this game`, naming the lookup that failed
+	// instead of the three parts that were absent. The MCP surface
+	// answers identically — the core is shared — so this is a property
+	// of the domain's ordering and not a divergence between the two
+	// surfaces.
+	// TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame
+	// pins all four answers as they actually are.
 	if hasRelatedTo(r) {
 		in.RelatedTo = &RelatedToInput{
 			RelationTypeKey: r.URL.Query().Get("related_to.relation_type_key"),

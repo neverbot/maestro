@@ -999,17 +999,31 @@ func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testi
 	f := newRESTFixture(t)
 	invalidAndValidQuests(t, f)
 
-	for _, query := range []string{
-		"?related_to.entity_key=hogger",
-		"?related_to.entity_type_key=quest",
-		"?related_to.relation_type_key=takes_place_in",
-		"?related_to.direction=outgoing",
+	// Three of the four permutations come back at the missing part's own
+	// field path. The fourth is recorded here rather than fixed: with
+	// only a direction, the domain resolves the relation type first and
+	// answers 404 for the empty key, so the refusal names the type it
+	// could not find instead of the parts that were missing. It is the
+	// same answer the MCP surface gives — the two share the core — so
+	// parity holds and the honest statement is "refused, at its own path
+	// in three cases out of four".
+	for _, tc := range []struct {
+		query  string
+		status int
+		code   string
+		path   string
+	}{
+		{"?related_to.entity_key=hogger", http.StatusBadRequest, "invalid_input", "related_to.direction"},
+		{"?related_to.entity_type_key=quest", http.StatusBadRequest, "invalid_input", "related_to.direction"},
+		{"?related_to.relation_type_key=takes_place_in", http.StatusBadRequest, "invalid_input", "related_to.direction"},
+		{"?related_to.direction=outgoing", http.StatusNotFound, "not_found", ""},
 	} {
-		rec := f.as(t, http.MethodGet, "/entities"+query, nil)
+		rec := f.as(t, http.MethodGet, "/entities"+tc.query, nil)
 		if rec.Code == http.StatusOK {
-			t.Errorf("%s = 200 with %s, want a refusal rather than the whole game",
-				query, rec.Body.String())
+			t.Fatalf("%s = 200 with %s, want a refusal rather than the whole game",
+				tc.query, rec.Body.String())
 		}
+		assertError(t, rec, tc.status, tc.code, tc.path)
 	}
 }
 

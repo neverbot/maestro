@@ -21,6 +21,51 @@ type ApiToken struct {
 	TokenHint  string
 }
 
+type Document struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Path             string
+	Kind             string
+	Title            string
+	Summary          string
+	BodyMd           string
+	Frontmatter      []byte
+	CurrentVersion   int32
+	DeletedAt        pgtype.Timestamptz
+	Search           pgtype.TSVector
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+}
+
+type DocumentLink struct {
+	ID         uuid.UUID
+	ProjectID  uuid.UUID
+	DocumentID uuid.UUID
+	EntityID   uuid.UUID
+	Role       string
+	CreatedAt  pgtype.Timestamptz
+}
+
+type DocumentVersion struct {
+	ID            uuid.UUID
+	ProjectID     uuid.UUID
+	DocumentID    uuid.UUID
+	Version       int32
+	Title         string
+	Summary       string
+	BodyMd        string
+	Frontmatter   []byte
+	Message       string
+	Deleted       bool
+	AuthorUserID  *uuid.UUID
+	AuthorTokenID *uuid.UUID
+	CreatedAt     pgtype.Timestamptz
+}
+
 type Entity struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID

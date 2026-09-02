@@ -523,15 +523,11 @@ const (
 //
 // Task 6 owns the cursor, and when it arrives this stays the per-page
 // bound; nothing here is a promise about how many pages exist.
+// The rule itself is pageSize, in list.go, shared with the entity
+// listing so the two cannot drift apart; what stays here is this
+// listing's own two bounds and the argument for the shape.
 func relationPageSize(limit int32) int32 {
-	switch {
-	case limit <= 0:
-		return defaultRelationPage
-	case limit > maxRelationPage:
-		return maxRelationPage
-	default:
-		return limit
-	}
+	return pageSize(limit, defaultRelationPage, maxRelationPage)
 }
 
 // RemoveRelation deletes one edge, reading it and its type first so that

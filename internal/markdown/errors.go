@@ -47,6 +47,15 @@ func invalidInput(path, message string) error {
 	}
 }
 
+// invalidInputProblems is invalidInput for a call that found several
+// problems at once, so a caller fixes all of them in one round trip
+// instead of discovering them one call apart. Write is its first caller,
+// and TestEveryProblemWithOneWriteIsReportedInOnePass is what pins that
+// two problems arrive as two fields of one refusal.
+func invalidInputProblems(problems []metamodel.FieldError) error {
+	return &metamodel.ValidationError{Code: metamodel.CodeInvalidInput, Fields: problems}
+}
+
 // MissingError is a not_found that names *which address* was not found.
 //
 // The spec proposed a separate `entity_not_found` wire code for this,
@@ -77,6 +86,18 @@ func (e *MissingError) Is(target error) bool { return target == metamodel.ErrNot
 // path.
 func (e *MissingError) Fields() []metamodel.FieldError {
 	return []metamodel.FieldError{{Path: e.Path, Message: e.Message}}
+}
+
+// missingDocument is what every by-path miss says. It names the path
+// back because that is the only part of the call a caller can compare
+// against what it holds. Read and Write are its first callers
+// (TestReadingAnotherGamesDocumentIsNotFound and
+// TestExpectingAVersionOfADocumentThatDoesNotExistIsNotFound).
+func missingDocument(path string) error {
+	return &MissingError{
+		Path:    "path",
+		Message: fmt.Sprintf("this game has no document at %q", path),
+	}
 }
 
 // ConflictError is a version_conflict that carries the current document

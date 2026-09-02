@@ -1,9 +1,12 @@
 package markdown
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/neverbot/maestro/internal/metamodel"
 )
 
 // MaxPathLen bounds a document path, in bytes.
@@ -104,4 +107,25 @@ func CheckPath(path string) error {
 		}
 	}
 	return nil
+}
+
+// pathProblems is CheckPath in the shape a caller collecting several
+// problems at once needs: the field errors rather than a wrapped error,
+// so a write refusing both its path and its kind reports both in one
+// answer instead of making an agent fix one, call again, and learn about
+// the other. Write is its only caller;
+// TestEveryProblemWithOneWriteIsReportedInOnePass pins the shape.
+//
+// CheckPath only ever answers with a *metamodel.ValidationError built by
+// invalidInput, so the assertion below cannot fail; a nil v would panic
+// here rather than silently drop the problem, which is the right way
+// round for an invariant this package owns on both sides.
+func pathProblems(path string) []metamodel.FieldError {
+	err := CheckPath(path)
+	if err == nil {
+		return nil
+	}
+	var v *metamodel.ValidationError
+	_ = errors.As(err, &v)
+	return v.Fields
 }

@@ -216,8 +216,12 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 		writeCodedError(w, http.StatusUnprocessableEntity, errCodeEndpointTypeMismatch, err.Error(), nil)
 	case errors.Is(err, metamodel.ErrInUse):
 		writeCodedError(w, http.StatusConflict, errCodeInUse, err.Error(), nil)
+	// fieldDetails, not nil, for the reason mcpErrorFor's twin of this
+	// arm gives: a *markdown.MissingError names which address missed and
+	// this is the only arm it reaches, while the metamodel's plain
+	// sentinels answer nil from fieldDetails and are unaffected.
 	case errors.Is(err, metamodel.ErrNotFound):
-		writeCodedError(w, http.StatusNotFound, errCodeNotFound, err.Error(), nil)
+		writeCodedError(w, http.StatusNotFound, errCodeNotFound, err.Error(), fieldDetails(err))
 	case metamodel.IsRetryable(err):
 		// Logged, not carried: the database's own "canceling statement
 		// due to lock timeout" describes this server's internals, not

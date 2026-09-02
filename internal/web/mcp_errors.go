@@ -151,8 +151,17 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 		return mcpErrorResult(errCodeEndpointTypeMismatch, err.Error(), nil)
 	case errors.Is(err, metamodel.ErrInUse):
 		return mcpErrorResult(errCodeInUse, err.Error(), nil)
+	// fieldDetails, not nil: a *markdown.MissingError names *which* of a
+	// call's two addresses missed, and this arm is the only one it ever
+	// reaches. Passing nil here is what made that discrimination dead
+	// code — docs.links.add with a mistyped entity key answered a flat
+	// not_found and an agent had to parse prose. The metamodel's plain
+	// sentinels carry no field list and fieldDetails answers nil for
+	// them, so nothing else on this arm changes.
+	// TestANamedMissPublishesItsPath and TestAPlainNotFoundCarriesNoFieldList
+	// pin both halves.
 	case errors.Is(err, metamodel.ErrNotFound):
-		return mcpErrorResult(errCodeNotFound, err.Error(), nil)
+		return mcpErrorResult(errCodeNotFound, err.Error(), fieldDetails(err))
 
 	case metamodel.IsRetryable(err):
 		// Checked before the default arm and after every mapping that
@@ -227,7 +236,10 @@ func fieldDetails(err error) map[string]any {
 	// (`entity_not_found`) for: one flat not_found from docs.links.add
 	// cannot say whether the document path or the entity key was
 	// typo'd, and this one is not flat — it carries the path as data.
-	// TestANamedMissPublishesItsPath pins it.
+	// It reaches here through the not_found arm of mcpErrorFor and of
+	// writeDomainError, both of which pass fieldDetails(err) rather than
+	// nil for exactly this type; TestANamedMissPublishesItsPath drives
+	// both of those and would fail if either went back to nil.
 	case errors.As(err, &missing):
 		problems = missing.Fields()
 	default:

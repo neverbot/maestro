@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/markdown"
+	"github.com/neverbot/maestro/internal/metamodel"
 )
 
 // decodeMCPError pulls the JSON body out of a tool result, which is the
@@ -145,12 +147,74 @@ func TestAConflictOnADeletedDocumentSaysSoOnTheWire(t *testing.T) {
 }
 
 // TestANamedMissPublishesItsPath asserts the discrimination the spec
-// wanted a separate `entity_not_found` code for arrives as data.
+// wanted a separate `entity_not_found` code for arrives as data, **on
+// both surfaces and through the mappers a real call goes through**.
+//
+// The first version of this test called fieldDetails directly. It
+// passed, and it guarded nothing: neither mcpErrorFor's not_found arm
+// nor writeDomainError's passed the error to fieldDetails at all, so a
+// real docs.links.add with a mistyped entity key answered a flat
+// not_found with no details and an agent holding two addresses had to
+// parse prose to learn which one missed. A helper test cannot see that.
+// This one drives the error through both mappers, so either arm
+// regressing to nil details fails it.
 func TestANamedMissPublishesItsPath(t *testing.T) {
-	details := fieldDetails(&markdown.MissingError{Path: "entity_key", Message: "no such quest"})
-	fields, ok := details["fields"].([]map[string]string)
-	if !ok || len(fields) != 1 || fields[0]["path"] != "entity_key" {
-		t.Fatalf("details = %v, want one field problem at entity_key", details)
+	missing := &markdown.MissingError{Path: "entity_key", Message: "no such quest"}
+
+	body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.links.add", Caller{}, missing))
+	if body["error"] != errCodeNotFound {
+		t.Fatalf("error = %v, want %v", body["error"], errCodeNotFound)
+	}
+	details, ok := body["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("no details in %v: a named miss must publish which address missed", body)
+	}
+	fields, ok := details["fields"].([]any)
+	if !ok || len(fields) != 1 {
+		t.Fatalf("details = %v, want one field problem", details)
+	}
+	field, _ := fields[0].(map[string]any)
+	if field["path"] != "entity_key" {
+		t.Fatalf("field = %v, want the path entity_key", field)
+	}
+
+	srv := NewServer(stubOptions("test"))
+	rec := httptest.NewRecorder()
+	srv.writeDomainError(rec,
+		httptest.NewRequest(http.MethodPost, "/api/games/x/documents/lore/links", nil), missing)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	var rest struct {
+		Error   string         `json:"error"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rest); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	restFields, ok := rest.Details["fields"].([]any)
+	if !ok || len(restFields) != 1 {
+		t.Fatalf("details = %v, want one field problem on the REST surface", rest.Details)
+	}
+	restField, _ := restFields[0].(map[string]any)
+	if restField["path"] != "entity_key" {
+		t.Fatalf("field = %v, want the path entity_key", restField)
+	}
+}
+
+// TestAPlainNotFoundCarriesNoFieldList is the other half of the arm
+// above: passing fieldDetails into the not_found arms must not invent an
+// empty "fields" on the metamodel's plain sentinels, which name no
+// argument at all. "There were no field problems" and "this kind of
+// error has no field problems" are different statements.
+func TestAPlainNotFoundCarriesNoFieldList(t *testing.T) {
+	body := decodeMCPError(t, mcpErrorFor(context.Background(), "entities.get", Caller{},
+		fmt.Errorf("no such entity: %w", metamodel.ErrNotFound)))
+	if body["error"] != errCodeNotFound {
+		t.Fatalf("error = %v, want %v", body["error"], errCodeNotFound)
+	}
+	if _, present := body["details"]; present {
+		t.Fatalf("body = %v, want no details on a sentinel that names no argument", body)
 	}
 }
 

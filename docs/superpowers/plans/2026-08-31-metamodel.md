@@ -8150,6 +8150,18 @@ than on what was planned).
     straight into it, and the picker's remembered-game shortcut already
     covers the second one; this task only had to not break either.
 
+15. **A token caller may use the REST content routes for its own game.**
+    `mcp.go` claimed "the REST surface is deliberately closed to token
+    callers", and that was only ever true of the routes that decide who
+    holds standing in the product — games, membership, tokens, invites,
+    all gated by `requireHumanCaller`. A token *is* a credential for
+    exactly one game's content, so refusing it on the content mirror
+    would deny over REST what the same token already does over MCP, for
+    no security gained. The binding still holds, in `requireProject`:
+    the game in the URL must be the game the token is bound to
+    (`TestATokenMayReadItsOwnGamesContentAndNoOthers`). The stale
+    sentence in `mcp.go` now names which routes it means.
+
 **Proved by breaking the code under them.** Every test named above was
 watched fail with the fix removed, not merely watched pass: the project
 filter stripped out of `ListEntitiesByIDs` (another game's entity

@@ -3787,6 +3787,164 @@ rather than on what was planned):
     NULL `search`, so any test that expects to *find* a row must create
     it through the service.
 
+**Corrections made after the Task 4 review** (a second pass, over the
+same landed package, closing the findings of the review that read it
+end to end; the design itself was approved — the partial-failure
+contract held under attack, no isolation hole was reachable, and the
+no-leakage claim survived probing with secret-marked neighbours):
+
+12. **A cancelled batch no longer fabricates an `internal_error`.** The
+    loop's `ctx.Err()` guard only ran *between* two items. A
+    cancellation reaching the item in flight failed that item inside its
+    own transaction, `failureFor` filed it under the default arm, and
+    one cancellation surfaced twice: as the stop error and as a
+    `{Index: n, Code: internal_error, Message: "begin: context
+    canceled"}` against an item whose only problem was that nobody was
+    left to hear about it — precisely what `failureFor`'s own comment
+    reserves for "something nobody planned for". The cancellation can
+    also land between the write and the commit, where from inside the
+    item the two are indistinguishable. The failure arm now re-checks
+    `ctx.Err()` before appending.
+    `TestBulkPartialStopsWhenTheCallerIsGone` cancels before item 0 and
+    could never see this, so
+    `TestACancelledBatchDoesNotReportTheItemInFlightAsAServerFault`
+    stops the batch *inside* item 1 — a rival transaction holds that
+    row's lock, so the interleaving is the test's and not the
+    scheduler's — and asserts the stop error names item 1 and that
+    `Failed` is empty. Proved red: before the fix it reported the stop
+    at item 2 and filed item 1 as `internal_error`.
+13. **`list<text>` values reach the search index, and the comment names
+    what does not.** `searchTextOf` collected `values[k].(string)` only,
+    so a quest with `tags: ["elite", "dungeon"]` matched neither word —
+    and tags and aliases are the archetypal thing a designer searches
+    for. Its comment justified the omission as "numbers, booleans and
+    dates are found by filtering on the jsonb", naming a `date` type
+    this package does not have and not naming the one text-bearing type
+    actually excluded. Both are fixed: list elements are indexed, and
+    the comment now names what is left out (number and bool, the two
+    types carrying no words) and why. `TestAListOfTextIsSearchable`
+    pins it on both arms of the upsert. Task 6 inherits a search that
+    finds tags.
+14. **All three write paths pin the stored type-key spelling in their
+    events.** Correction 2 claimed to pin this; it pinned the single
+    path. Rewriting either bulk path as
+    `entityEvent{TypeKey: in.TypeKey, …}` — the exact shape correction 2
+    calls wrong — left the whole suite green, because
+    `TestEntityEventsCarryTheStoredIdentity` exercises `UpsertEntity`
+    alone and the bulk event test asserted the *entity* key, which the
+    database returns however the caller spelled it.
+    `TestBulkEventsCarryTheStoredIdentity` runs both modes against a
+    type stored as `Quest` and addressed as `quest`, proved red by that
+    mutation on each path in turn.
+15. **`conflictOnEntityKey`'s respelling arm has a test.** Replacing the
+    whole `row.Key != key` branch with the version conflict was green:
+    both entity race tests end at the *post-write* spelling check, since
+    their guard passes and the upsert returns the rival's row. The
+    branch is reachable — a rival commits `"Hogger"` while our writer
+    holds a version that row does not have, so the guarded `DO UPDATE`
+    matches nothing and the re-read is the only thing left that can name
+    the respelling.
+    `TestAnEntityLosingItsKeyToAnotherSpellingIsNamedAsARespelling` is
+    the entity twin of Task 3's
+    `TestACreationThatLosesItsKeyToAnotherSpellingIsNamedAsARespelling`,
+    proved red by that replacement.
+16. **`FOR UPDATE` on `GetEntityByKeyForUpdate` is pinned.** Deleting it
+    left the suite green: both race tests block on the unique index
+    inside the `INSERT`, not on this lock, and the guarded `DO UPDATE`
+    refuses every lost update on its own. What the lock buys is the
+    *number* the caller is told to merge onto, which is a specific,
+    testable claim the SQL comment makes.
+    `TestTheReportedCurrentEntityVersionIsTheOneTheWriteWouldHaveMet` is
+    the entity twin of Task 3's
+    `TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet`, proved
+    red by removing `FOR UPDATE` and regenerating.
+17. **The entity isolation filters are pinned one by one, and the SQL
+    header says which are load-bearing.** Dropping `project_id` from
+    `GetEntityByID` or from `DeleteEntity` was green in each case
+    alone — their only caller is `RemoveEntity`, which reads the row,
+    then its type, then deletes, so the three filters mask each other
+    and only the three-way mutation turned
+    `TestEntitiesAreScopedToTheirProject` red. That is no pin at all: it
+    says the three together are load-bearing without saying any one is.
+    `TestTheEntityQueriesThatAddressARowByIDAreScopedToTheProject`
+    asserts each filter over the query itself, through `dbq`, and each
+    was proved red on its own by neutralising that filter
+    (`(project_id = … OR true)`, which keeps the parameter and so keeps
+    the generated signature). `GetEntityByKey`, `GetEntityByKeyForUpdate`
+    and `UpsertEntity` are genuinely unobservable — the composite
+    `FOREIGN KEY (entity_type_id, project_id)` already determines an
+    entity's project from its type's — so the file header now lists them
+    beside the three type-scoped statements it already covered, as
+    defence in depth rather than as the mechanism.
+18. **A key repeated inside one batch is diagnosed as such.**
+    `{Index: 1, Key: "dup", Code: version_conflict, Message: "current
+    version is 1"}` was the report for a caller that never claimed a
+    version — which sends an agent to re-read the row and retry with the
+    version it is handed, at which point its own second item quietly
+    overwrites its first. In atomic mode it was worse than a
+    misdiagnosis: two items chaining the versions the other leaves
+    behind both commit, so `Succeeded` came back holding the same row id
+    twice and the caller was told two rows landed where one exists. A
+    seeding agent producing an accidental duplicate from a file is the
+    ordinary case, and the batch is the only place the real diagnosis
+    exists. `repeatedKeys` now finds them up front, keyed on
+    (type key, key) both folded — one key under two types is two rows,
+    and `strings.ToLower` is exact because `rowKeyPattern` admits ASCII
+    only — and reports `invalid_input` naming both indices.
+
+    **The modes answer it differently, and deliberately.** In
+    `BulkPartial` the later occurrence is a per-item failure and nothing
+    else changes: the first occurrence is a perfectly good item, and
+    refusing the batch over one repeated key would throw away the other
+    three hundred rows, which is the failure partial mode exists to
+    prevent. In `BulkAtomic` the whole batch is refused *before anything
+    is written*: a batch naming one row twice cannot be satisfied as
+    submitted — the caller asked for n rows and at most n-1 can exist —
+    there is no per-item answer to give in a mode that lands everything
+    or nothing, and refusing up front makes the report deterministic
+    instead of dependent on which of the two items ran first.
+    `TestABatchThatRepeatsAKeyIsDiagnosedAsSuch` covers partial with
+    both an exact repeat and a differently-capitalised one, and
+    `TestAnAtomicBatchThatRepeatsAKeyIsRefusedWhole` covers atomic
+    including the version-chained pair, and that one key under two types
+    is not a repetition. Both were proved red against the landed code.
+19. **Two comments that overclaimed.** `searchTextOf`'s key sort is now
+    pinned by `TestTheSearchVectorIsTheSameForTheSameValues`, which
+    writes six rows from identical values and requires the stored
+    `search::text` — positions included — to match; proved red by
+    deleting `sort.Strings`, which shuffles the positions and changes
+    nothing about search results, exactly as the comment argues. And
+    `BulkFailure`'s doc no longer says a message "is a path and a rule":
+    `not_found: no entity type "nosuch" in this game` is neither, so it
+    now says what a message actually holds, keeping only the claim that
+    holds without exception — never another item's values.
+20. **What Tasks 6 and 7 inherit, recorded here so neither reads the
+    event decision as finished.**
+
+    *Coalescing is what makes the stated benefit real.* The per-row
+    event decision is safer than this plan admitted, for a reason it did
+    not give: `realtime.Hub` buffers 64 events per subscription
+    (`subscriberBuffer`) and drops the rest, each drop leaves a gap in
+    that subscription's own `Seq`, and `internal/web/events.go` already
+    turns the gap into a synthetic `resync`. A 400-event burst therefore
+    degrades to "refetch your state" rather than to silent loss. But
+    that cuts against `events.go`'s own argument: the seeding agent it
+    names as the subscriber with the most to lose is exactly the one
+    whose burst overflows the buffer, so what it receives is a resync,
+    not the per-row warning the comment promised. The warning is real
+    for a subscriber watching someone else's burst and for the
+    designer's browser; for the agent driving the batch it becomes real
+    only once the bursts are coalesced. The comment now says so, and
+    **Tasks 6 and 7 own coalescing as the thing that makes the benefit
+    true, not as polish.**
+
+    *A successful batch currently tells an agent nothing.*
+    `BulkResult.Succeeded` is `json:"-"` — correctly, since `dbq.Entity`
+    is a database row and not a wire shape — so a marshalled result
+    reports failures and nothing else. **Task 7 must decide what a
+    successful batch tells an agent**: how many rows landed, under which
+    keys, at which versions. Recorded on the struct as well.
+
 **The partial-failure contract, stated once.** In `BulkPartial` each item
 is its own transaction: the rows that fit land, the ones that do not come
 back in `Failed` with their index, their key and their code, and the
@@ -3796,9 +3954,12 @@ depended on item 3. The call returns a nil error, because the failures
 and the call returns an error naming the failing item
 (`item 1 ("b"): schema_violation: …`, with the sentinel still matchable
 through the wrapping) and an empty result, because nothing was done. A
-failure message is a path and a rule, never another item's values: a
-batch report is the one place a row's content could leak into a
-neighbour's error, and
+failure message is the item's own error — a field path and a rule where
+the item's own arguments or values are at fault, and otherwise the plain
+reason it was refused, which may name nothing of the item at all
+(`not_found: no entity type "quest" in this game`) — and never another
+item's values: a batch report is the one place a row's content could leak
+into a neighbour's error, and
 `TestBulkPartialLandsTheGoodRowsAndReportsTheRest` asserts the failing
 item's message names `fields.min_level` and none of the names or values
 of the items around it.
@@ -3816,7 +3977,9 @@ than gated around: these events fire once per row, so a 400-row seed puts
 400 events on every subscription. Role gating would not fix that and
 would only starve the viewer the decision exists to serve; coalescing a
 burst belongs to the transport, where the subscriber and its backlog are
-visible, and **Tasks 6 and 7 own it**.
+visible, and **Tasks 6 and 7 own it** — see correction 20 for what
+actually reaches a subscriber from a burst that size, and why coalescing
+is what makes the benefit claimed here true rather than a polish item.
 
 ---
 

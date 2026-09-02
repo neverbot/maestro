@@ -24,9 +24,17 @@ const (
 	// eventTypeUpserted and eventTypeRemoved fire from UpsertEntityType
 	// and RemoveEntityType once their transaction has committed.
 	//
-	// **HumanOnly is false, deliberately, and this is the one place in
-	// the codebase where that is the considered answer rather than the
-	// default.** internal/web's member, token and invite events all set
+	// **HumanOnly is false, deliberately, and it is the considered
+	// answer here rather than the default.** There is a precedent, and
+	// it is the strongest part of the argument: internal/web's
+	// eventGameDeleted (publish.go, published from api_projects.go's
+	// handleDeleteGame) sets exactly this gating, and argues it at
+	// length — a token subscriber gets that event regardless of role and
+	// regardless of HumanOnly because there is no REST listing it
+	// mirrors and no reason to withhold from a connection the one signal
+	// it will ever get. The same two conditions hold here. What follows
+	// is why they hold, since the rest of internal/web goes the other
+	// way. Its member, token and invite events all set
 	// it true, because each mirrors a REST listing that requireHumanCaller
 	// refuses a token caller outright — a token subscriber learning about
 	// membership churn would be reading, over the stream, a fact it
@@ -40,7 +48,9 @@ const (
 	// schema that just moved, so withholding the invalidation buys no
 	// confidentiality and costs a round of schema_violation errors an
 	// agent cannot explain. Copying the member-event shape here would
-	// have been inertia, not a rule.
+	// have been inertia, not a rule — and eventGameDeleted shows the
+	// project already refuses that inertia where the reasoning does not
+	// apply.
 	//
 	// MinRole is empty — every member of the game, viewer included.
 	// Reading types is not role-gated anywhere: a viewer's browser

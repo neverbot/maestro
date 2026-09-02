@@ -84,12 +84,27 @@ type ValidationError struct {
 	Fields []FieldError
 }
 
+// The two wire codes a ValidationError is published under. They live
+// together, and beside the sentinels they name, because a code and its
+// sentinel are one decision: codeInvalidInput is every problem with a
+// row's own arguments — its key, its label, its colour — and
+// codeSchemaViolation is what an unset Code means, so the value
+// validator needs no change. See ValidationError.Code.
+const (
+	codeSchemaViolation = "schema_violation"
+	codeInvalidInput    = "invalid_input"
+)
+
 // code is the wire code these problems belong under, defaulting to
 // schema_violation so the value validator, which predates the split and
 // reports nothing else, needs no change.
+//
+// The default covers the *unset* code and nothing else. A code that is
+// set but unrecognised stays as written, so Error and Is agree on it:
+// see Is.
 func (e *ValidationError) code() string {
 	if e.Code == "" {
-		return "schema_violation"
+		return codeSchemaViolation
 	}
 	return e.Code
 }
@@ -105,12 +120,24 @@ func (e *ValidationError) Error() string {
 // Is makes errors.Is true against the sentinel this error's own code
 // names, and false against the other — so a caller matching
 // ErrSchemaViolation never catches a malformed key, and vice versa.
+//
+// An unrecognised code matches *nothing*, deliberately. Falling back to
+// ErrSchemaViolation would make Error and Is disagree — a typo'd
+// `Code: "invalid_inptu"` printed the typo and still read as a schema
+// violation — and it would resolve that disagreement towards the
+// recovery the skill bundle teaches most loudly, sending an agent to fix
+// entity values over a fault that has nothing to do with them. Matching
+// nothing leaves the error unmapped in mcp_errors.go, so it surfaces as
+// internal_error: the honest report for a code no spec documents, and
+// one an operator can find in a log.
 func (e *ValidationError) Is(target error) bool {
 	switch e.code() {
+	case codeSchemaViolation:
+		return target == ErrSchemaViolation
 	case codeInvalidInput:
 		return target == ErrInvalidInput
 	default:
-		return target == ErrSchemaViolation
+		return false
 	}
 }
 

@@ -978,14 +978,17 @@ func TestUpsertEntityTypeRejectsMalformedDescriptors(t *testing.T) {
 		}, "description", "must be at most 4000 characters"},
 		{"colour that is prose", func(in *metamodel.EntityTypeInput) {
 			in.Color = "crimson"
-		}, "color", "must be a hex colour such as #c41e3a or #c13"},
+		}, "color", "must be a hex colour such as #c41e3a, #c13, #c41e3a80 or #c13f"},
+		{"colour with the wrong number of digits", func(in *metamodel.EntityTypeInput) {
+			in.Color = "#c41e3"
+		}, "color", "must be a hex colour such as #c41e3a, #c13, #c41e3a80 or #c13f"},
 		{"colour that is a payload", func(in *metamodel.EntityTypeInput) {
 			in.Color = strings.Repeat("#c41e3a", 800)
-		}, "color", "must be a hex colour such as #c41e3a or #c13"},
+		}, "color", "must be a hex colour such as #c41e3a, #c13, #c41e3a80 or #c13f"},
 		{"icon that is markup", func(in *metamodel.EntityTypeInput) {
 			in.Icon = "<script>alert(1)</script>"
-		}, "icon", "must be an icon name: lower-case letters, digits or hyphens, " +
-			"starting with a letter or a digit"},
+		}, "icon", "must be an icon name: lower-case letters, digits, underscores or " +
+			"hyphens, starting with a letter or a digit"},
 		{"overlong icon", func(in *metamodel.EntityTypeInput) {
 			in.Icon = strings.Repeat("s", 65)
 		}, "icon", "must be at most 64 characters"},
@@ -1021,6 +1024,27 @@ func TestUpsertEntityTypeAcceptsTheDescriptorsAGameActuallyWrites(t *testing.T) 
 		Color: "#c13", Icon: "scroll-2",
 	}); err != nil {
 		t.Fatalf("a three-digit colour and a hyphenated icon are ordinary: %v", err)
+	}
+	// The alpha forms are the same three channels plus a fourth, so the
+	// renderers that decompose #rrggbb decompose these too, and a
+	// translucent overlay colour is an ordinary thing for a game to want.
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "alpha-hex", Label: "Overlay", Color: "#c41e3a80",
+	}); err != nil {
+		t.Fatalf("an eight-digit colour is a CSS hex colour: %v", err)
+	}
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "short-alpha-hex", Label: "Overlay short", Color: "#c13f",
+	}); err != nil {
+		t.Fatalf("a four-digit colour is a CSS hex colour: %v", err)
+	}
+	// Material Symbols names every icon in snake_case, and the pending
+	// visual-identity spec has not chosen an icon set: a rule forbidding
+	// underscores would silently pre-commit it to a kebab-case one.
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "snake-icon", Label: "Fire", Icon: "local_fire_department",
+	}); err != nil {
+		t.Fatalf("a snake_case icon name is what an icon set actually ships: %v", err)
 	}
 	// Exactly at each cap, counted in runes: an accented label must not be
 	// cut shorter than a plain one, so the cap cannot drift to bytes.
@@ -1173,5 +1197,44 @@ func TestAMalformedKeyIsInvalidInputNotASchemaViolation(t *testing.T) {
 		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = false", err)
 	} else if errors.Is(err, metamodel.ErrInvalidInput) {
 		t.Fatalf("err = %v must not read as invalid_input", err)
+	}
+}
+
+// TestAnUnrecognisedCodeMatchesNoSentinel pins that ValidationError.Is
+// and ValidationError.Error cannot disagree about what an error is.
+//
+// The zero Code means schema_violation, because the value validator
+// predates the split and sets none. A *misspelled* code is not that: it
+// used to fall into the same branch, so &ValidationError{Code:
+// "invalid_inptu"} printed the typo and still satisfied
+// errors.Is(err, ErrSchemaViolation) — silently defaulting a typo to the
+// most-taught recovery, which is the one recovery an agent will spend
+// round trips on. Matching nothing is the honest answer: an unmapped
+// error reaches an agent as internal_error, which is what an unreachable
+// code deserves.
+func TestAnUnrecognisedCodeMatchesNoSentinel(t *testing.T) {
+	typo := &metamodel.ValidationError{
+		Code:   "invalid_inptu",
+		Fields: []metamodel.FieldError{{Path: "key", Message: "is required"}},
+	}
+	if got := typo.Error(); got != "invalid_inptu: key: is required" {
+		t.Fatalf("Error() = %q, want the code as written", got)
+	}
+	for name, sentinel := range map[string]error{
+		"ErrSchemaViolation": metamodel.ErrSchemaViolation,
+		"ErrInvalidInput":    metamodel.ErrInvalidInput,
+		"ErrInvalidSchema":   metamodel.ErrInvalidSchema,
+	} {
+		if errors.Is(typo, sentinel) {
+			t.Fatalf("errors.Is(%v, %s) = true, want no sentinel to match", typo, name)
+		}
+	}
+
+	// The zero value still means schema_violation, and still matches it:
+	// that is the default the value validator relies on, not a fallback
+	// for anything unrecognised.
+	zero := &metamodel.ValidationError{Fields: []metamodel.FieldError{{Path: "fields.x", Message: "bad"}}}
+	if !errors.Is(zero, metamodel.ErrSchemaViolation) {
+		t.Fatal("an unset Code must still read as a schema violation")
 	}
 }

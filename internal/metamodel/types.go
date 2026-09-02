@@ -229,6 +229,43 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // RemoveEntityType deletes a type. Without cascade, a type that still has
 // entities is refused: silently deleting a game's content is never the
 // right reading of "remove this type".
+//
+// **It also prunes the type's id out of every relation type's endpoint
+// lists, in the same transaction.** `source_type_ids` and
+// `target_type_ids` are plain `uuid[]`, and Postgres has no foreign key
+// from an array element, so without this the id outlives the type it
+// names and Task 5's correction 6 — endpoint lists that always name a
+// type of this game — holds only until the first removal. What it leaves
+// behind is worse than untidy: the relation type holds a rule nothing can
+// satisfy, a designer who recreates the key gets a fresh id and is
+// refused with `entity type "zone" cannot be the target of relation type
+// "takes_place_in"` while `zone` visibly *is* the declared target, and
+// the type cannot be repaired through its own API at all, because
+// re-declaring it with the list it currently holds is refused as
+// `invalid_input`.
+//
+// **Pruning here rather than a real referential constraint**, and that is
+// the choice rather than the cheap way out of it. A referential
+// constraint over these lists does not exist in Postgres: it would mean
+// replacing both columns with junction tables carrying a composite
+// `ON DELETE CASCADE` key, which is a migration plus a rewrite of every
+// read and write of an endpoint rule, and it changes the shape
+// `RelationTypeInput` presents to an agent. That may well be the right
+// end state — it would also give the lists an index and let a view join
+// on them — but it is a schema decision, and Task 5's job is to close the
+// invariant Task 5 created. This is exact for the only way an id can go
+// dangling today: `DeleteEntityType` is the sole path by which an entity
+// type disappears, since deleting a project cascades the relation types
+// with it.
+//
+// **One consequence, recorded because it is a widening.** Pruning the
+// last id of a list leaves it empty, and an empty list means "any type"
+// rather than "no type" (see `endpointList`). A relation type that
+// accepted only `zone` at its target therefore accepts anything once
+// `zone` is removed. That is the lesser of the two: the widening is
+// visible in the row a designer reads and is one edit away from being
+// narrowed again, where the dangling id was neither visible nor
+// repairable.
 func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
 	var removedKey string
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
@@ -282,7 +319,12 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		if rows == 0 {
 			return ErrNotFound
 		}
-		return nil
+
+		// The type is gone; nothing in the schema takes its id out of the
+		// relation types that named it. See PruneEntityTypeFromEndpointLists.
+		return q.PruneEntityTypeFromEndpointLists(ctx, dbq.PruneEntityTypeFromEndpointListsParams{
+			ProjectID: projectID, EntityTypeID: id,
+		})
 	})
 	if err != nil {
 		return err

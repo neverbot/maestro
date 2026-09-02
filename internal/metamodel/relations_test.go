@@ -1478,3 +1478,98 @@ func TestTheRelationQueriesThatAddressARowByIDAreScopedToTheProject(t *testing.T
 		t.Fatalf("the owning game cannot delete its own relation type: %d rows, %v", rows, err)
 	}
 }
+
+// TestRemovingAnEntityTypePrunesItFromEveryEndpointList closes the
+// invariant Task 5 created.
+//
+// source_type_ids and target_type_ids are plain uuid[] with no foreign
+// key, so an id in them survives the entity type it names. All three
+// consequences are checked here, because they are exactly the failure
+// correction 6 claims to have fixed: the rule becomes unsatisfiable, the
+// refusal a designer then meets names the wrong problem — "entity type
+// \"zone\" cannot be the target" while zone visibly is the declared
+// target, because the stored id is the *old* zone's — and the relation
+// type cannot be repaired through its own API, since re-declaring it with
+// the list it currently holds is refused as invalid_input.
+func TestRemovingAnEntityTypePrunesItFromEveryEndpointList(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	quest, err := svc.EntityTypeByKey(ctx, project, "quest")
+	if err != nil {
+		t.Fatalf("quest type: %v", err)
+	}
+	zone, err := svc.EntityTypeByKey(ctx, project, "zone")
+	if err != nil {
+		t.Fatalf("zone type: %v", err)
+	}
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+		SourceTypeIDs: []uuid.UUID{quest.ID},
+		TargetTypeIDs: []uuid.UUID{zone.ID},
+	}); err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+
+	// Cascade, because the seeded world has a zone entity: this is the
+	// ordinary "I got the vocabulary wrong, start that type again" move.
+	if err := svc.RemoveEntityType(ctx, project, zone.ID, true); err != nil {
+		t.Fatalf("RemoveEntityType: %v", err)
+	}
+
+	stored, err := svc.RelationTypeByKey(ctx, project, "takes_place_in")
+	if err != nil {
+		t.Fatalf("RelationTypeByKey: %v", err)
+	}
+	for _, id := range stored.TargetTypeIds {
+		if id == zone.ID {
+			t.Fatal("the removed entity type is still declared as a target")
+		}
+	}
+	// The source list names a type that still exists and must be left
+	// exactly as it was: pruning is not a licence to empty the row.
+	if len(stored.SourceTypeIds) != 1 || stored.SourceTypeIds[0] != quest.ID {
+		t.Fatalf("source_type_ids = %v, want [%v]", stored.SourceTypeIds, quest.ID)
+	}
+
+	// The type is repairable through its own API. Re-declaring it with
+	// the list it currently holds must be accepted; while the dangling id
+	// was there this was refused as invalid_input, so the only way to fix
+	// the row was to know the new type's id out of band.
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+		SourceTypeIDs:   stored.SourceTypeIds,
+		TargetTypeIDs:   stored.TargetTypeIds,
+		ExpectedVersion: &stored.Version,
+	}); err != nil {
+		t.Fatalf("a relation type could not be re-declared with the list it holds: %v", err)
+	}
+
+	// And the rule it holds can be satisfied again. A designer who
+	// recreates zone and wires an edge is not refused with a message
+	// naming a type that is visibly declared.
+	newZone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	})
+	if err != nil {
+		t.Fatalf("re-create zone: %v", err)
+	}
+	if newZone.ID == zone.ID {
+		t.Fatal("the recreated type reused the removed type's id; this test proves nothing")
+	}
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest",
+	}); err != nil {
+		t.Fatalf("UpsertEntity: %v", err)
+	}
+	if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "takes_place_in",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+	}); err != nil {
+		t.Fatalf("an edge was refused against a rule nothing could satisfy: %v", err)
+	}
+}

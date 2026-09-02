@@ -705,6 +705,29 @@ func (q *Queries) MarkEntitiesOfTypeInvalid(ctx context.Context, arg MarkEntitie
 	return err
 }
 
+const pruneEntityTypeFromEndpointLists = `-- name: PruneEntityTypeFromEndpointLists :exec
+UPDATE relation_types
+SET source_type_ids = array_remove(source_type_ids, $1::uuid),
+    target_type_ids = array_remove(target_type_ids, $1::uuid)
+WHERE project_id = $2::uuid
+  AND $1::uuid = ANY (source_type_ids || target_type_ids)
+`
+
+type PruneEntityTypeFromEndpointListsParams struct {
+	EntityTypeID uuid.UUID
+	ProjectID    uuid.UUID
+}
+
+// Removes a deleted entity type's id from every relation type's endpoint
+// lists. source_type_ids and target_type_ids are plain uuid[]: Postgres
+// has no foreign key from an array element, so nothing but this
+// statement keeps them from outliving the type they name. It runs in the
+// same transaction as the type's own delete.
+func (q *Queries) PruneEntityTypeFromEndpointLists(ctx context.Context, arg PruneEntityTypeFromEndpointListsParams) error {
+	_, err := q.db.Exec(ctx, pruneEntityTypeFromEndpointLists, arg.EntityTypeID, arg.ProjectID)
+	return err
+}
+
 const upsertEntity = `-- name: UpsertEntity :one
 INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
                       updated_by_user_id, updated_by_token_id)

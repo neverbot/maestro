@@ -106,6 +106,18 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 DELETE FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
+-- name: PruneEntityTypeFromEndpointLists :exec
+-- Removes a deleted entity type's id from every relation type's endpoint
+-- lists. source_type_ids and target_type_ids are plain uuid[]: Postgres
+-- has no foreign key from an array element, so nothing but this
+-- statement keeps them from outliving the type they name. It runs in the
+-- same transaction as the type's own delete.
+UPDATE relation_types
+SET source_type_ids = array_remove(source_type_ids, sqlc.arg('entity_type_id')::uuid),
+    target_type_ids = array_remove(target_type_ids, sqlc.arg('entity_type_id')::uuid)
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND sqlc.arg('entity_type_id')::uuid = ANY (source_type_ids || target_type_ids);
+
 -- name: DeleteEntitiesOfType :exec
 DELETE FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid

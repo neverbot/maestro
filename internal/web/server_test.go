@@ -131,11 +131,25 @@ func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
 // registerProjectRoute instead, which would compile, serve, and let a
 // viewer write.
 //
-// The rule is the path: everything under /api/games/{game}/ whose next
-// segment names game content. Membership, tokens, invites and the game
-// itself are deliberately not on that list — they are the product's own
-// standing routes, gated by owner/admin checks of their own, not by
-// requireEditor.
+// The rule is inverted from the one this test used to apply, and the
+// inversion is the point. It used to hold a hand-written list of the
+// segments that name game content and check only those, so a route
+// registered through the wrong function under a segment nobody had
+// added to the list — `views`, which api_metamodel.go's own header and
+// app.js both already name as the next thing built on this surface —
+// passed both convention tests and let a viewer write. A review proved
+// exactly that. The `checked == 0` guard below catches a list gone
+// wholly stale, never a single missing entry.
+//
+// So the allowlist is the other set, and that one is closed: under
+// /api/games/{game}/ the product has four standing sub-resources of its
+// own — members, tokens, invites, events — gated by owner/admin checks
+// of their own rather than by requireEditor, plus the bare game itself,
+// which carries no trailing segment and so never reaches the check.
+// Everything else under that prefix is game content by default and must
+// go through registerContentRoute. A new sub-resource that genuinely is
+// not game content is added to notContent here, deliberately, in the
+// same commit that registers it.
 func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 	s := NewServer(stubOptions("test"))
 
@@ -147,9 +161,8 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 		t.Fatal("no content patterns were recorded — this test would pass vacuously")
 	}
 
-	contentSegments := map[string]bool{
-		"types": true, "relation-types": true, "entities": true,
-		"relations": true, "search": true, "summary": true,
+	notContent := map[string]bool{
+		"members": true, "tokens": true, "invites": true, "events": true,
 	}
 	checked := 0
 	for _, pattern := range s.registeredPatterns {
@@ -162,16 +175,17 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 			continue
 		}
 		segment, _, _ := strings.Cut(rest, "/")
-		if !contentSegments[segment] {
+		if notContent[segment] {
 			continue
 		}
 		checked++
 		if !content[pattern] {
-			t.Errorf("pattern %q is a game-content route but was not registered through registerContentRoute", pattern)
+			t.Errorf("pattern %q sits under /api/games/{game}/ and names none of this instance's standing sub-resources, "+
+				"so it is game content and must be registered through registerContentRoute", pattern)
 		}
 	}
 	if checked == 0 {
-		t.Fatal("matched no game-content pattern — the segment list has gone stale")
+		t.Fatal("matched no game-content pattern — every route under /api/games/{game}/ was read as a standing sub-resource")
 	}
 }
 

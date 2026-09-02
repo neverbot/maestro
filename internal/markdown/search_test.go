@@ -468,20 +468,44 @@ func TestASearchLimitDefaultsAndIsHonoured(t *testing.T) {
 // bound the database had stopped applying — the "documentation claiming
 // more than the code does" defect this plan's header names first.
 //
-// The body carries a distinctive word on each side of exactly that
-// offset. The earlier one is findable, the later one is not, and the
-// whole body — the unfindable word included — reads back through Read.
-// The tail is stored; it is only unsearchable.
+// **The bound is pinned from both sides, not just the "too far" one.**
+// A first version of this test placed one word at offset zero and one
+// at exactly MaxIndexedChars, and asserted the first findable and the
+// second not — which is only the "the constant is not too large" half.
+// Shrinking 0007_documents.sql's `left(body_md, 131072)` to
+// `left(body_md, 1000)` left that version green: nothing in it ever
+// asked whether a word placed deep inside the claimed bound, past a
+// tighter one the migration might have drifted to, is still findable.
+// `boundary` closes that side: its last character sits at index
+// MaxIndexedChars-1, the tightest position "just inside the bound" can
+// mean, and it must be findable for the constant and the migration's
+// literal to actually agree. `early` and `late` are unchanged and still
+// pin the other side: the earlier one findable, the later one not, and
+// the whole body — the unfindable word included — reads back through
+// Read. The tail is stored; it is only unsearchable.
 func TestAWordPastTheIndexBoundIsStoredButNotFindable(t *testing.T) {
 	svc, _, _, pool := newService(t)
 	ctx := context.Background()
 	game := newGame(t, pool, "azeroth")
 
-	const early, late = "azerothian-cartography", "outlandish-cartography"
+	const early, boundary, late = "azerothian-cartography", "borderland-cartography", "outlandish-cartography"
 	// One ASCII character per rune, so the migration's bound in
 	// characters and this fixture's arithmetic in bytes agree.
 	filler := strings.Repeat("x ", markdown.MaxIndexedChars)
-	body := early + " " + filler[:markdown.MaxIndexedChars-len(early)-1] + late + "\n"
+	prefix := early + " "
+	// boundary is placed so its last character lands on index
+	// MaxIndexedChars-1 exactly — the last character `left(…, N)` keeps.
+	// The "- 1" reserves one byte for an explicit separator space before
+	// it: filler[:fillerLen] can end mid-pair on an "x" with no trailing
+	// space (strings.Repeat("x ", …) sliced at an odd length), and
+	// without a separator that "x" fuses onto boundary's own first
+	// character, so the tsvector never contains the exact token this
+	// test searches for.
+	fillerLen := markdown.MaxIndexedChars - len(prefix) - len(boundary) - 1
+	if fillerLen < 0 {
+		t.Fatalf("the fixture's prefix and boundary word together exceed MaxIndexedChars")
+	}
+	body := prefix + filler[:fillerLen] + " " + boundary + " " + late + "\n"
 	if len(body) <= markdown.MaxIndexedChars {
 		t.Fatalf("the fixture is %d characters, which does not reach the bound", len(body))
 	}
@@ -497,6 +521,15 @@ func TestAWordPastTheIndexBoundIsStoredButNotFindable(t *testing.T) {
 	}
 	if len(found) != 1 {
 		t.Fatalf("%d hits for a word inside the bound, want 1", len(found))
+	}
+	edge, err := svc.SearchDocuments(ctx, game, boundary, "", 0)
+	if err != nil {
+		t.Fatalf("SearchDocuments: %v", err)
+	}
+	if len(edge) != 1 {
+		t.Fatalf("%d hits for a word ending exactly at MaxIndexedChars-1, want 1: the constant "+
+			"and the migration's own left(…, N) claim more headroom than the database gives",
+			len(edge))
 	}
 	missed, err := svc.SearchDocuments(ctx, game, late, "", 0)
 	if err != nil {

@@ -168,6 +168,19 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 			`narrows document hits and cannot be combined with kind "entity"; `+
 				`use type_key to narrow entities`)
 	}
+	// An explicit kind "document" against an instance with no markdown
+	// service is refused rather than answered with an empty list. kind
+	// "" (both) still degrades to entities alone — that arm's own
+	// comment below explains why that half is deliberate — but a caller
+	// who asked only for documents and got zero back cannot tell "this
+	// game holds no matching prose" from "this instance serves no prose
+	// at all" unless told which one happened.
+	if in.Kind == searchKindDocument && deps.Markdown == nil {
+		return SearchOutput{}, &MCPError{
+			Code:    errCodeNotFound,
+			Message: "this instance serves no document search; the markdown domain is not configured",
+		}
+	}
 
 	limit := metamodel.SearchLimit(in.Limit)
 	// Items is built with make so an empty answer marshals as [] rather
@@ -199,11 +212,15 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 		}
 	}
 
-	// An instance built without the markdown domain answers with
+	// An instance built without the markdown domain answers kind "" with
 	// entities alone rather than failing: MCPDeps.Markdown is optional
 	// exactly as MCPDeps.Metamodel is, and cmd/maestro always builds
 	// one. No test pins this arm — it is the shape of the dependency,
-	// not a behaviour a caller can ask for.
+	// not a behaviour a caller can ask for. kind "document" against the
+	// same nil service never reaches this arm at all — the guard above
+	// refuses it before this point, rather than answering it with an
+	// empty list that reads as "no matching prose" instead of "no prose
+	// service".
 	if in.Kind != searchKindEntity && deps.Markdown != nil {
 		hits, err := deps.Markdown.SearchDocuments(ctx, projectID, in.Query, in.DocKind, limit)
 		if err != nil {
@@ -231,14 +248,27 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 	// name then id for entities, title then id for documents — survive
 	// into the merged order and two identical calls answer identically.
 	//
-	// **The stability is a choice this suite does not pin**, and that is
-	// said here rather than left to be assumed: sort.Slice passes every
-	// test in mcp_search_test.go, because each side arrives already
-	// ordered by the key this comparator uses, so the concatenation is
-	// never out of order and pdqsort has nothing to reorder.
-	// TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls pins the
-	// weaker thing that is checkable — that two identical calls answer
-	// identically — and its own comment carries the measurement.
+	// **This is load-bearing, not a defensive choice with nothing to
+	// pin.** An earlier version of this comment claimed sort.Slice was
+	// equally safe, on the theory that each side arrives already ordered
+	// by the key this comparator uses, so the concatenation is always
+	// non-decreasing and pdqsort has nothing to reorder. That holds only
+	// when the entity block happens to rank above the document block. It
+	// does not have to:
+	// TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks builds
+	// twenty entities and twenty documents that only *mention* the query
+	// (name_match false on both sides), scored by the two differently
+	// built vectors at 0.396 and 0.649 respectively — so the entity
+	// block, appended first, ranks *below* the document block appended
+	// after it. The concatenation is then descending-out-of-order across
+	// its full length, sort.Slice really does partition, and it destroys
+	// both queries' own title-then-id and name-then-id tie-breaks — the
+	// same fixture is red against sort.Slice, proved by hand, and green
+	// against sort.SliceStable, which is what ships.
+	// TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls records the
+	// narrower case — same-kind ties only — where sort.Slice does still
+	// pass, and says why that fixture alone cannot tell the two sorts
+	// apart.
 	sort.SliceStable(out.Items, func(i, j int) bool {
 		a, b := out.Items[i], out.Items[j]
 		if a.NameMatch != b.NameMatch {

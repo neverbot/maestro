@@ -308,20 +308,17 @@ func TestSearchRanksANamedHitAboveAMentionAcrossKinds(t *testing.T) {
 // iteration, say.
 //
 // **What it does not catch, recorded rather than implied: replacing
-// sort.SliceStable with sort.Slice in searchContent leaves it green**,
-// and so does every other test in this file. Both were run, at
-// -count=20 and -count=5. The reason is structural rather than a fixture
-// weakness: each side of the merge arrives already ordered by the exact
-// key the merge sorts on, so the concatenated slice is always
-// non-decreasing, and Go's pdqsort does not move a run it never has to
-// reorder — nor does it move anything for an array whose elements all
-// compare equal. The only input that could tell the two apart is an
-// entity hit and a document hit of *identical* (name_match, rank) with
-// a differently-ranked hit between them, which depends on two ts_rank
-// values from two differently-built vectors landing on the same float.
-// sort.SliceStable stays because the stable order is the one the two
-// queries' own tie-breaks (name then id; title then id) were written to
-// produce, but this suite does not pin the choice.
+// sort.SliceStable with sort.Slice in searchContent leaves *this* test
+// green**, at -count=20 and -count=5. All its ties are same-kind
+// (document vs. document), so the input this fixture hands the merge is
+// already in the order the merge produces, and pdqsort moves nothing. A
+// fixture that ties *across* kinds does catch it —
+// TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks, whose own
+// comment carries the measurement and is red against sort.Slice, proved
+// by hand. sort.SliceStable stays because the stable order is the one
+// the two queries' own tie-breaks (name then id; title then id) were
+// written to produce, and that other test is what actually pins the
+// choice — this one only pins the narrower, same-kind case.
 func TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
@@ -586,5 +583,139 @@ func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
 	}
 	if len(roomy.Items) != 2 || roomy.Truncated {
 		t.Fatalf("two hits under a limit of five = %+v, truncated %v", roomy.Items, roomy.Truncated)
+	}
+}
+
+// TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks is the
+// fixture the "unpinnable" claim on sort.SliceStable's call site did not
+// have, and does not survive: that comment said the concatenation the
+// merge sorts is always non-decreasing because "each side arrives
+// already ordered by the exact key the merge sorts on", which only
+// holds when the entity block happens to rank above the document block.
+//
+// It does not here. Twenty entities that only mention the query in a
+// field (name_match false) rank at 0.39641288; twenty documents that
+// only mention it in their body (name_match false too) rank at
+// 0.648798 — a single identical mention sentence, scored differently by
+// the two vectors (see the tool description's own note on that). Search
+// appends the entity block first and the document block second
+// (searchContent's own order), so the concatenation this hands to the
+// merge is [rank 0.396 x20][rank 0.649 x20]: the exact reverse of the
+// order the merge produces, and about as unsorted as a same-length
+// slice can be — every element has to cross every element of the other
+// block.
+//
+// That is real work for the sort, and it is where the claim breaks:
+// with sort.Slice in place of sort.SliceStable, this is red — proved by
+// hand, not asserted here, because the break is nondeterministic across
+// runs and pdqsort's internals are not this suite's to pin. What this
+// test pins is the promise that survives *because* the sort is stable:
+// documents.sql promises document ties break by title then id, and
+// metamodel.sql promises entity ties break by name then id, and both
+// tie-break orders — set by each query's own ORDER BY — must still hold
+// after the merge despite the full reversal above.
+func TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+
+	if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "camp", Label: "Camp", LabelPlural: "Camps",
+		Schema: []web.FieldInput{{Key: "summary", Type: "longtext"}},
+	}); err != nil {
+		t.Fatalf("MCPTypesUpsert: %v", err)
+	}
+
+	const mention = "A gnoll pack raider was seen nearby."
+	const groupSize = 20
+
+	items := make([]web.EntityItemInput, 0, groupSize)
+	for i := 0; i < groupSize; i++ {
+		items = append(items, web.EntityItemInput{
+			TypeKey: "camp", Key: fmt.Sprintf("camp-%02d", i), Name: fmt.Sprintf("Camp %02d", i),
+			Fields: map[string]any{"summary": mention},
+		})
+	}
+	if _, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game, web.EntitiesUpsertInput{
+		Items: items,
+	}); err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+	for i := 0; i < groupSize; i++ {
+		if _, err := f.markdown.Write(ctx, f.game, markdown.WriteInput{
+			Path:            fmt.Sprintf("lore/note-%02d", i),
+			Content:         fmt.Sprintf("# Note %02d\n\n%s\n", i, mention),
+			ExpectedVersion: ptrInt32Web(0),
+		}); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+	}
+
+	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
+		web.SearchInput{Query: "gnoll pack", Limit: 2 * groupSize})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	if len(out.Items) != 2*groupSize {
+		t.Fatalf("%d hits, want both groups in full: %+v", len(out.Items), out.Items)
+	}
+
+	// The higher-ranked block (documents, 0.649) must lead the
+	// lower-ranked one (entities, 0.396): the reversal is real, not just
+	// a same-order coincidence.
+	for i, item := range out.Items[:groupSize] {
+		if item.Kind != "document" || item.Document == nil {
+			t.Fatalf("item %d = %+v, want a document (the higher-ranked block)", i, item)
+		}
+		wantTitle := fmt.Sprintf("Note %02d", i)
+		if item.Document.Title != wantTitle {
+			t.Fatalf("document block[%d].Title = %q, want %q: title-then-id tie-break not "+
+				"preserved across the merge", i, item.Document.Title, wantTitle)
+		}
+	}
+	for i, item := range out.Items[groupSize:] {
+		if item.Kind != "entity" || item.Entity == nil {
+			t.Fatalf("item %d = %+v, want an entity (the lower-ranked block)", groupSize+i, item)
+		}
+		wantName := fmt.Sprintf("Camp %02d", i)
+		if item.Entity.Name != wantName {
+			t.Fatalf("entity block[%d].Name = %q, want %q: name-then-id tie-break not "+
+				"preserved across the merge", i, item.Entity.Name, wantName)
+		}
+	}
+}
+
+// TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService is
+// review finding L4 on Task 9: kind "document" against an instance
+// built with a metamodel service and no markdown one used to answer 200
+// with an empty items list — "this game holds no matching prose" — when
+// the true statement is "this instance serves no prose at all". kind ""
+// (both) still degrades to entities alone, which is deliberate and
+// unchanged; only an explicit request for documents that cannot be
+// served is refused. cmd/maestro always builds both services, so this
+// shape is unreachable in the shipped binary today — it is pinned ahead
+// of Task 10, which registers eleven more tools behind the same
+// optional field, and Task 11, which mirrors them over REST.
+func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+
+	noMarkdown := f.deps
+	noMarkdown.Markdown = nil
+
+	_, err := web.MCPSearch(ctx, noMarkdown, f.caller, f.game,
+		web.SearchInput{Query: "gnoll", Kind: "document"})
+	var domainErr *web.MCPError
+	if !errors.As(err, &domainErr) || domainErr.Code != "not_found" {
+		t.Fatalf("MCPSearch(kind=document, no markdown service) = %v, want a not_found MCPError", err)
+	}
+
+	// kind "" is unaffected: it still degrades to entities alone rather
+	// than failing.
+	both, err := web.MCPSearch(ctx, noMarkdown, f.caller, f.game, web.SearchInput{Query: "gnoll"})
+	if err != nil {
+		t.Fatalf("MCPSearch(kind=\"\", no markdown service): %v", err)
+	}
+	if len(both.Items) != 0 {
+		t.Fatalf("no entities matched \"gnoll\", got %+v", both.Items)
 	}
 }

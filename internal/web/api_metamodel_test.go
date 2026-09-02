@@ -691,7 +691,7 @@ func TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue(t *testing.T) {
 	}
 }
 
-// TestTheGameSummaryCountsTheRowsAScemaEditInvalidated is the one number
+// TestTheGameSummaryCountsTheRowsASchemaEditInvalidated is the one number
 // on the home page a designer has to act on: an entity whose values no
 // longer fit its type is kept, marked, and counted here, per type and in
 // the total.

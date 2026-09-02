@@ -353,6 +353,14 @@ func TestSearchAnswersAnOverLargeLimitWithMoreThanTheDefault(t *testing.T) {
 // caller of Search has to know that the stored row does not show: a
 // value longer than searchTextLimit is stored and re-read whole, and
 // findable only by the words in its first 128 KiB.
+//
+// **The bound is pinned from both sides, not just the "too far" one** —
+// the same gap markdown.MaxIndexedChars' own test had (Task 9's review):
+// a word at offset zero and one past the bound proves the constant is
+// not too large, but says nothing about whether it is smaller than the
+// code that enforces it claims. `boundary`'s last byte sits at index
+// searchTextLimit-1, the tightest position "just inside the bound" can
+// mean, and it must still be findable.
 func TestOnlyTheIndexedHeadOfALongFieldIsSearchable(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
@@ -360,9 +368,21 @@ func TestOnlyTheIndexedHeadOfALongFieldIsSearchable(t *testing.T) {
 	project := newProject(t, pool)
 	seedSearchableType(t, svc, project)
 
-	// One word at the front, a great deal of filler, one word past the
-	// bound. "padding " is eight bytes, so 20,000 of them clear 128 KiB.
-	lore := "gnoll " + strings.Repeat("padding ", 20000) + "murloc"
+	// One word at the front, a great deal of filler, a boundary word
+	// ending exactly at the bound, then one word past it. "padding " is
+	// eight bytes, so 20,000 of them clear 128 KiB on their own; fillerN
+	// below trims that back to leave exact room for `boundary`.
+	const prefix, boundary, tail = "gnoll ", "borderland", " murloc"
+	filler := strings.Repeat("padding ", 20000)
+	// Reserve one byte for the separator space before boundary, for the
+	// same reason markdown's version of this fixture does: filler can
+	// end mid-word with no trailing space, and without a separator that
+	// fuses onto boundary's own first character.
+	fillerN := metamodel.MaxIndexedText - len(prefix) - len(boundary) - 1
+	if fillerN < 0 || fillerN > len(filler) {
+		t.Fatalf("fixture arithmetic is out of range: fillerN=%d", fillerN)
+	}
+	lore := prefix + filler[:fillerN] + " " + boundary + tail
 	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 		TypeKey: "quest", Key: "lore", Name: "The Long Story",
 		Fields: map[string]any{"min_level": float64(1), "summary": lore},
@@ -377,6 +397,14 @@ func TestOnlyTheIndexedHeadOfALongFieldIsSearchable(t *testing.T) {
 	}
 	if got := searchKeys(found); !equalStrings(got, []string{"lore"}) {
 		t.Fatalf("the head of the field found %v, want the row", got)
+	}
+	edge, err := svc.Search(ctx, project, "borderland", "", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if got := searchKeys(edge); !equalStrings(got, []string{"lore"}) {
+		t.Fatalf("a word ending exactly at searchTextLimit-1 found %v, want the row: the "+
+			"constant claims more headroom than the code that truncates gives", got)
 	}
 	missed, err := svc.Search(ctx, project, "murloc", "", 10)
 	if err != nil {

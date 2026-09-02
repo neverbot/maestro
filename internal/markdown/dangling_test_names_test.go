@@ -77,6 +77,14 @@ var renamedAwayTestNames = map[string]string{
 // coverage had drifted from where this domain's citations actually live
 // from that point on, and it is widened here rather than left for
 // Task 8, which adds more of both.
+//
+// **internal/web was added here for the same reason, in Task 9's
+// review.** mcp_search.go and mcp_metamodel.go both cite this domain's
+// own tests by name — every one of them resolved, checked by hand, but
+// only because a reviewer looked — and Task 10's mcp_docs.go is about to
+// carry far more of that citation traffic than search.go alone does.
+// Widening the scan now, rather than after Task 10 lands, is cheaper
+// than finding a dangler by hand a second time.
 func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 	root := moduleRoot(t)
 	defined := definedTestNames(t, root)
@@ -85,6 +93,7 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 	for _, dir := range []string{
 		filepath.Join(root, "internal", "markdown"),
 		filepath.Join(root, "internal", "metamodel"),
+		filepath.Join(root, "internal", "web"),
 		filepath.Join(root, "internal", "db", "queries"),
 	} {
 		entries, err := os.ReadDir(dir)

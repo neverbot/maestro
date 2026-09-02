@@ -1424,8 +1424,12 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"both indexes and across them. name_match is on the wire so you can see the "+
 				"grouping the order is built from; `rank` only orders within a group, and "+
 				"re-sorting by rank alone undoes the guarantee. The two indexes' ranks are "+
-				"comparable because both are scored the same way over the same text-search "+
-				"configuration.\n\n"+
+				"comparable because both are ts_rank over the same `simple` text-search "+
+				"configuration and the same default weights — not because the two vectors "+
+				"are built alike: an entity's B weight carries its name a second time "+
+				"alongside its fields, a document's does not, so within name_match false a "+
+				"document mentioning a phrase in its body can outrank an entity mentioning "+
+				"the same phrase in a field.\n\n"+
 				"**Narrowing.** kind is \"entity\", \"document\", or omitted for both; "+
 				"type_key narrows entity hits and doc_kind narrows document hits, and "+
 				"neither may be combined with the other kind. Anything else at kind is "+

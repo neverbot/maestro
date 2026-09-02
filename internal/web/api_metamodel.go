@@ -96,6 +96,12 @@ func (s *Server) requireContentService(w http.ResponseWriter) bool {
 // deliberate), but a session caller's role is real, and a viewer is
 // someone who may read a game and not change it.
 //
+// No handler in this file calls it. registerContentRoute (server.go)
+// applies it to every non-GET route on this surface, so a write is gated
+// because it is a write rather than because its handler remembered — a
+// review stripped this call from five of the eight handlers when they
+// each made it themselves, and nothing failed.
+//
 // The message names the caller's actual role, because "forbidden" alone
 // leaves a designer who was quietly demoted with nothing to act on.
 func requireEditor(w http.ResponseWriter, scope ProjectScope) bool {
@@ -252,7 +258,7 @@ func (s *Server) handleListTypes(w http.ResponseWriter, r *http.Request, caller 
 // time. The answer carries the row's version, which is what a client
 // actually needs to know what happened and what to send next.
 func (s *Server) handleUpsertType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	var in TypesUpsertInput
@@ -280,7 +286,7 @@ func (s *Server) handleGetType(w http.ResponseWriter, r *http.Request, caller Ca
 }
 
 func (s *Server) handleRemoveType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	out, err := typesRemove(r.Context(), s.deps(), caller, scope.ProjectID, TypesRemoveInput{
@@ -308,7 +314,7 @@ func (s *Server) handleListRelationTypes(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handleUpsertRelationType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	var in RelationTypesUpsertInput
@@ -337,7 +343,7 @@ func (s *Server) handleGetRelationType(w http.ResponseWriter, r *http.Request, c
 }
 
 func (s *Server) handleRemoveRelationType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	out, err := relationTypesRemove(r.Context(), s.deps(), caller, scope.ProjectID, RelationTypesRemoveInput{
@@ -399,7 +405,7 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 }
 
 func (s *Server) handleUpsertEntities(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	var in EntitiesUpsertInput
@@ -434,7 +440,7 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request, caller 
 }
 
 func (s *Server) handleRemoveEntity(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	out, err := entitiesRemove(r.Context(), s.deps(), caller, scope.ProjectID,
@@ -471,7 +477,7 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 }
 
 func (s *Server) handleUpsertRelations(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	var in RelationsUpsertInput
@@ -487,7 +493,7 @@ func (s *Server) handleUpsertRelations(w http.ResponseWriter, r *http.Request, c
 }
 
 func (s *Server) handleRemoveRelation(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
-	if !s.requireContentService(w) || !requireEditor(w, scope) {
+	if !s.requireContentService(w) {
 		return
 	}
 	out, err := relationsRemove(r.Context(), s.deps(), caller, scope.ProjectID,

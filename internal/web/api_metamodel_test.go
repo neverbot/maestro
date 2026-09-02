@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -372,11 +373,17 @@ func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
 	}
 }
 
-// TestRESTWritesAreRefusedToAViewer pins the one thing the REST surface
-// has to decide that the MCP surface never faced: a token is
+// TestEveryContentWriteRouteRefusesAViewer pins the one thing the REST
+// surface has to decide that the MCP surface never faced: a token is
 // editor-equivalent by construction, but a session caller's role is real
 // and a viewer must not be able to write a game's content.
-func TestRESTWritesAreRefusedToAViewer(t *testing.T) {
+//
+// It drives *every* write route the server actually registered, read
+// back from the routing table rather than typed out here, because the
+// hand-written version of this test covered three of the eight and a
+// review stripped the check from five handlers without failing anything.
+// A write route added tomorrow appears in this table on its own.
+func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 	f := newRESTFixture(t)
 	ctx := context.Background()
 	questType(t, f)
@@ -392,26 +399,47 @@ func TestRESTWritesAreRefusedToAViewer(t *testing.T) {
 	}
 	cookie := loginAs(t, f.srv, "viewer@studio.com")
 
+	// A viewer still reads: the refusal below has to be about writing,
+	// not about being shut out of the game.
 	if rec := f.call(t, cookie, http.MethodGet, f.path("/types"), nil); rec.Code != http.StatusOK {
 		t.Fatalf("viewer list = %d: %s", rec.Code, rec.Body.String())
 	}
-	for _, call := range []struct {
-		method, suffix string
-		body           any
-	}{
-		{http.MethodPost, "/types", map[string]any{"key": "zone", "label": "Zone", "label_plural": "Zones"}},
-		{http.MethodPost, "/entities", map[string]any{"items": []any{
-			map[string]any{"type_key": "quest", "key": "hogger", "name": "Hogger"}}}},
-		{http.MethodDelete, "/types/by-id/" + uuid.NewString(), nil},
-	} {
-		rec := f.call(t, cookie, call.method, f.path(call.suffix), call.body)
-		assertError(t, rec, http.StatusForbidden, "forbidden", "")
-		if !strings.Contains(rec.Body.String(), "viewer") {
-			t.Fatalf("%s %s said %q, want it to name the role that cannot write",
-				call.method, call.suffix, rec.Body.String())
+
+	writes := f.srv.ContentWritePatternsForTest()
+	if len(writes) == 0 {
+		t.Fatal("the server registered no content write routes — this test would pass vacuously")
+	}
+	for _, pattern := range writes {
+		method, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			t.Fatalf("pattern %q names no method", pattern)
 		}
+		// A body that would be perfectly acceptable from an editor, so
+		// the refusal cannot be blamed on the request itself. Every
+		// wildcard but {game} is filled with a value that resolves to
+		// nothing: the check has to happen before any of it is read.
+		path = strings.ReplaceAll(path, "{game}", f.game.String())
+		path = wildcards.ReplaceAllString(path, uuid.NewString())
+		var body any
+		if method != http.MethodDelete {
+			body = map[string]any{"key": "zone", "label": "Zone", "label_plural": "Zones",
+				"items": []any{map[string]any{"type_key": "quest", "key": "hogger", "name": "Hogger"}}}
+		}
+
+		// A subtest per route, so a run reports every write a viewer
+		// got through rather than stopping at the first.
+		t.Run(pattern, func(t *testing.T) {
+			rec := f.call(t, cookie, method, path, body)
+			assertError(t, rec, http.StatusForbidden, "forbidden", "")
+			if !strings.Contains(rec.Body.String(), "viewer") {
+				t.Errorf("%s said %q, want it to name the role that cannot write", pattern, rec.Body.String())
+			}
+		})
 	}
 }
+
+// wildcards matches a ServeMux path wildcard, for the table above.
+var wildcards = regexp.MustCompile(`\{[^}]+\}`)
 
 // TestAStatedProjectIDMustAgreeWithTheURL mirrors ScopedArgs's own rule
 // onto this surface. A body naming a different game than the URL is a

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -149,6 +150,21 @@ type Server struct {
 	registeredPatterns    []string
 	projectScopedPatterns map[string]bool
 
+	// contentPatterns and contentWritePatterns record the game-content
+	// surface (api_metamodel.go) the way registeredPatterns records the
+	// whole routing table, and for the same reason: a test, not
+	// discipline, is what enforces the convention.
+	// registerContentRoute records every content route here and
+	// registerContentRoute's own write branch records the subset it
+	// wrapped in requireEditor.
+	// TestEveryContentRouteIsRegisteredAsContent walks the first list
+	// and fails on a content path registered any other way;
+	// TestEveryContentWriteRouteRefusesAViewer drives the second list
+	// against a real viewer. See registerContentRoute for why the wrap
+	// is decided there rather than in each handler.
+	contentPatterns      []string
+	contentWritePatterns []string
+
 	// mcpScopedTools records every MCP tool registered through
 	// addScopedTool (mcp.go), which is the only registration path that
 	// enforces the caller's game binding.
@@ -266,23 +282,23 @@ func NewServer(opts Options) *Server {
 	// MCP tools. Every row addressed by key or id sits behind a fixed
 	// by-key/by-id segment; see that file's header for why the obvious
 	// /types/{key} shape was rejected.
-	s.registerProjectRoute("GET /api/games/{game}/types", s.handleListTypes)
-	s.registerProjectRoute("POST /api/games/{game}/types", s.handleUpsertType)
-	s.registerProjectRoute("GET /api/games/{game}/types/by-key/{key}", s.handleGetType)
-	s.registerProjectRoute("DELETE /api/games/{game}/types/by-id/{id}", s.handleRemoveType)
-	s.registerProjectRoute("GET /api/games/{game}/relation-types", s.handleListRelationTypes)
-	s.registerProjectRoute("POST /api/games/{game}/relation-types", s.handleUpsertRelationType)
-	s.registerProjectRoute("GET /api/games/{game}/relation-types/by-key/{key}", s.handleGetRelationType)
-	s.registerProjectRoute("DELETE /api/games/{game}/relation-types/by-id/{id}", s.handleRemoveRelationType)
-	s.registerProjectRoute("GET /api/games/{game}/entities", s.handleListEntities)
-	s.registerProjectRoute("POST /api/games/{game}/entities", s.handleUpsertEntities)
-	s.registerProjectRoute("GET /api/games/{game}/entities/by-key/{type}/{key}", s.handleGetEntity)
-	s.registerProjectRoute("DELETE /api/games/{game}/entities/by-id/{id}", s.handleRemoveEntity)
-	s.registerProjectRoute("GET /api/games/{game}/relations", s.handleListRelations)
-	s.registerProjectRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
-	s.registerProjectRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
-	s.registerProjectRoute("GET /api/games/{game}/search", s.handleSearch)
-	s.registerProjectRoute("GET /api/games/{game}/summary", s.handleGameSummary)
+	s.registerContentRoute("GET /api/games/{game}/types", s.handleListTypes)
+	s.registerContentRoute("POST /api/games/{game}/types", s.handleUpsertType)
+	s.registerContentRoute("GET /api/games/{game}/types/by-key/{key}", s.handleGetType)
+	s.registerContentRoute("DELETE /api/games/{game}/types/by-id/{id}", s.handleRemoveType)
+	s.registerContentRoute("GET /api/games/{game}/relation-types", s.handleListRelationTypes)
+	s.registerContentRoute("POST /api/games/{game}/relation-types", s.handleUpsertRelationType)
+	s.registerContentRoute("GET /api/games/{game}/relation-types/by-key/{key}", s.handleGetRelationType)
+	s.registerContentRoute("DELETE /api/games/{game}/relation-types/by-id/{id}", s.handleRemoveRelationType)
+	s.registerContentRoute("GET /api/games/{game}/entities", s.handleListEntities)
+	s.registerContentRoute("POST /api/games/{game}/entities", s.handleUpsertEntities)
+	s.registerContentRoute("GET /api/games/{game}/entities/by-key/{type}/{key}", s.handleGetEntity)
+	s.registerContentRoute("DELETE /api/games/{game}/entities/by-id/{id}", s.handleRemoveEntity)
+	s.registerContentRoute("GET /api/games/{game}/relations", s.handleListRelations)
+	s.registerContentRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
+	s.registerContentRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
+	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)
+	s.registerContentRoute("GET /api/games/{game}/summary", s.handleGameSummary)
 
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call
@@ -315,6 +331,44 @@ func (s *Server) route(pattern string, h http.Handler) {
 // http.ServeMux.HandleFunc's own shape.
 func (s *Server) routeFunc(pattern string, h http.HandlerFunc) {
 	s.route(pattern, h)
+}
+
+// registerContentRoute registers one route of the game-content surface
+// (api_metamodel.go). It is registerProjectRoute plus the one thing a
+// route on this surface must never forget: a write goes through
+// requireEditor.
+//
+// That check used to be a line each write handler wrote for itself, and
+// a review proved what that costs — the check was stripped from five of
+// the eight write handlers and the whole package's tests stayed green,
+// because the one test that covered it exercised three routes by hand.
+// Deciding it here, from the pattern's own method, makes forgetting
+// impossible rather than merely tested: a route registered through this
+// function is gated because it is a write, not because whoever wrote the
+// handler remembered. The paired convention test
+// (TestEveryContentRouteIsRegisteredAsContent) closes the other half —
+// registering a content route through registerProjectRoute directly.
+//
+// GET is the only method read as a read. A pattern that names no method
+// panics rather than being guessed at: an unmethoded pattern matches
+// every method, so it would silently register writes with no gate.
+func (s *Server) registerContentRoute(pattern string, h func(http.ResponseWriter, *http.Request, Caller, ProjectScope)) {
+	method, _, ok := strings.Cut(pattern, " ")
+	if !ok || method == "" {
+		panic("web: a game-content route pattern must name its method: " + pattern)
+	}
+	s.contentPatterns = append(s.contentPatterns, pattern)
+	if method != http.MethodGet {
+		s.contentWritePatterns = append(s.contentWritePatterns, pattern)
+		write := h
+		h = func(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+			if !requireEditor(w, scope) {
+				return
+			}
+			write(w, r, caller, scope)
+		}
+	}
+	s.registerProjectRoute(pattern, h)
 }
 
 // registerProjectRoute registers pattern through

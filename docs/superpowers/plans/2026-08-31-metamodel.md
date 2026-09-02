@@ -8078,7 +8078,10 @@ than on what was planned).
    real, and `requireEditor` gates every write on the REST surface,
    naming the caller's actual role in the refusal so a quietly demoted
    designer has something to act on. `TestRESTWritesAreRefusedToAViewer`
-   covers all three write shapes.
+   covers three of the eight write routes — which a Round 3 review found
+   was three too few, and which correction 16 replaces with a mechanism
+   and a test over every write route the server registers. Read this
+   paragraph as the intent; correction 16 is what shipped.
 
 8. **A `project_id` in a REST body is a confirmation, exactly as
    `ScopedArgs` says it is on the MCP surface.** Disagreeing with the

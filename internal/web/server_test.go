@@ -123,3 +123,75 @@ func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryContentRouteIsRegisteredAsContent is the other half of
+// registerContentRoute's guarantee. That function makes the editor check
+// impossible to forget *for the routes registered through it*; this test
+// is what stops a game-content route being registered through
+// registerProjectRoute instead, which would compile, serve, and let a
+// viewer write.
+//
+// The rule is the path: everything under /api/games/{game}/ whose next
+// segment names game content. Membership, tokens, invites and the game
+// itself are deliberately not on that list — they are the product's own
+// standing routes, gated by owner/admin checks of their own, not by
+// requireEditor.
+func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
+	s := NewServer(stubOptions("test"))
+
+	content := map[string]bool{}
+	for _, pattern := range s.contentPatterns {
+		content[pattern] = true
+	}
+	if len(content) == 0 {
+		t.Fatal("no content patterns were recorded — this test would pass vacuously")
+	}
+
+	contentSegments := map[string]bool{
+		"types": true, "relation-types": true, "entities": true,
+		"relations": true, "search": true, "summary": true,
+	}
+	checked := 0
+	for _, pattern := range s.registeredPatterns {
+		_, path, ok := strings.Cut(pattern, " ")
+		if !ok {
+			continue
+		}
+		rest, ok := strings.CutPrefix(path, "/api/games/{game}/")
+		if !ok {
+			continue
+		}
+		segment, _, _ := strings.Cut(rest, "/")
+		if !contentSegments[segment] {
+			continue
+		}
+		checked++
+		if !content[pattern] {
+			t.Errorf("pattern %q is a game-content route but was not registered through registerContentRoute", pattern)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("matched no game-content pattern — the segment list has gone stale")
+	}
+}
+
+// TestStatusForCodeDefaultsToUnprocessable pins the choice
+// statusForCode's own doc comment argues: an *MCPError is by
+// construction a refusal this server chose to make about the caller's
+// request, so an unmapped code must not be reported as a server fault.
+// Every code the parsing layer produces today is mapped explicitly, so
+// the default arm is unreachable through a request — which is exactly
+// why it needs pinning here rather than through one.
+func TestStatusForCodeDefaultsToUnprocessable(t *testing.T) {
+	for code, want := range map[string]int{
+		errCodeInvalidInput:    http.StatusBadRequest,
+		errCodeScopeViolation:  http.StatusForbidden,
+		errCodeNotFound:        http.StatusNotFound,
+		errCodeUnauthorized:    http.StatusUnauthorized,
+		"a_code_no_spec_names": http.StatusUnprocessableEntity,
+	} {
+		if got := statusForCode(code); got != want {
+			t.Errorf("statusForCode(%q) = %d, want %d", code, got, want)
+		}
+	}
+}

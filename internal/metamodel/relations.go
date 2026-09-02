@@ -190,31 +190,39 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		return upsertedRelation{}, fmt.Errorf("lookup relation type: %w", err)
 	}
 
-	// Both ends are resolved before either is reported, and that is the
-	// same argument checkEndpointTypes makes twenty lines from here about
-	// the two endpoint *lists*: an agent holding two bad endpoints fixes
-	// the one it was told about, resends, and is told about the other.
-	// Returning on the source cost a round trip per bad end and made the
-	// two halves of one decision disagree. The price is the two lookups
-	// the target end costs on an item that was going to fail anyway; the
-	// success path always paid them.
+	// Both ends are judged before either is reported — resolved *and*
+	// checked against the endpoint rule — and that is the same argument
+	// checkEndpointTypes makes about the two endpoint *lists*: an agent
+	// holding two bad ends fixes the one it was told about, resends, and
+	// is told about the other. Failing on the source cost a round trip
+	// per bad end and made the two halves of one decision disagree.
+	//
+	// Stopping at resolution would have left the worse half of it in
+	// place: a caller with one missing end and one wrongly-typed end
+	// heard only the not_found, and the mismatch waited for the next
+	// attempt. The price is the two lookups the target end costs on an
+	// item that was going to fail anyway; the success path always paid
+	// them. bothEndpoints says which code wins when the two halves
+	// disagree.
 	source, sourceErr := endpointEntity(ctx, q, projectID, "source", in.Source)
 	target, targetErr := endpointEntity(ctx, q, projectID, "target", in.Target)
-	if err := bothEndpoints(sourceErr, targetErr); err != nil {
-		return upsertedRelation{}, err
-	}
 
 	// The stored key of the endpoint's own type, not the caller's
-	// spelling: this message is read beside the game's type list.
-	if !endpointAllowed(relType.SourceTypeIds, source.typ.ID) {
-		return upsertedRelation{}, fmt.Errorf(
+	// spelling: this message is read beside the game's type list. An end
+	// that did not resolve has no type to judge, and its own failure is
+	// the one that stands.
+	if sourceErr == nil && !endpointAllowed(relType.SourceTypeIds, source.typ.ID) {
+		sourceErr = fmt.Errorf(
 			"%w: source: entity type %q cannot be the source of relation type %q",
 			ErrEndpointTypeMismatch, source.typ.Key, relType.Key)
 	}
-	if !endpointAllowed(relType.TargetTypeIds, target.typ.ID) {
-		return upsertedRelation{}, fmt.Errorf(
+	if targetErr == nil && !endpointAllowed(relType.TargetTypeIds, target.typ.ID) {
+		targetErr = fmt.Errorf(
 			"%w: target: entity type %q cannot be the target of relation type %q",
 			ErrEndpointTypeMismatch, target.typ.Key, relType.Key)
+	}
+	if err := bothEndpoints(sourceErr, targetErr); err != nil {
+		return upsertedRelation{}, err
 	}
 
 	schema, err := ParseSchema(relType.FieldSchema)
@@ -295,24 +303,57 @@ func edgeParentViolation(err error, in RelationInput) error {
 	return err
 }
 
-// bothEndpoints folds the two endpoint resolutions into the one answer
+// bothEndpoints folds the two endpoint verdicts into the one answer
 // their caller returns.
 //
 // Two failures are joined with "; " rather than through errors.Join,
 // whose newline would put a batch report's Message on two lines, and each
-// half keeps its own sentinel: both %w verbs are wrapped, so errors.Is
-// still matches whichever of the two the caller asks about and
-// failureFor still files the item under not_found.
+// half keeps its own sentinel: both are wrapped, so errors.Is matches
+// whichever of the two the caller asks about.
+//
+// **Which code the joined error carries when the halves disagree.** The
+// two ends can now fail for different reasons — one missing, one wrongly
+// typed — and failureFor picks by asking errors.Is in its own order,
+// which puts ErrNotFound above ErrEndpointTypeMismatch. That is the
+// answer a caller can act on, and it is the right way round rather than
+// an accident of the switch: an end that does not exist cannot be judged
+// against the endpoint rule at all, and creating it is what decides which
+// type it will have. The mismatch travels in the message, so the retry
+// already knows about it.
 func bothEndpoints(sourceErr, targetErr error) error {
 	switch {
 	case sourceErr != nil && targetErr != nil:
-		return fmt.Errorf("%w; %w", sourceErr, targetErr)
+		return &joinedEndpointError{source: sourceErr, target: targetErr}
 	case sourceErr != nil:
 		return sourceErr
 	case targetErr != nil:
 		return targetErr
 	}
 	return nil
+}
+
+// joinedEndpointError carries both ends' failures. It exists instead of
+// fmt.Errorf("%w; %w", …) for the message alone: two ends failing the
+// same way printed the sentinel twice — "not_found: source: …;
+// not_found: target: …" — where the second copy names a code the reader
+// has already been given. Unwrap returns both, so errors.Is answers for
+// either and failureFor files the item exactly as it did.
+type joinedEndpointError struct{ source, target error }
+
+func (e *joinedEndpointError) Unwrap() []error { return []error{e.source, e.target} }
+
+func (e *joinedEndpointError) Error() string {
+	first := e.source.Error()
+	second := e.target.Error()
+	// The prefix is dropped only when the two halves agree on it; when
+	// they name different codes both are kept, because then the second
+	// code is news.
+	if i := strings.Index(first, ": "); i >= 0 {
+		if prefix := first[:i+2]; strings.HasPrefix(second, prefix) {
+			second = second[len(prefix):]
+		}
+	}
+	return first + "; " + second
 }
 
 // endpoint is a resolved end of an edge: the entity and the type it

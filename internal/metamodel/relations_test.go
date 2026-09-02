@@ -344,7 +344,7 @@ func TestEachMissingPieceOfAnEdgeIsNamed(t *testing.T) {
 				Source: metamodel.Ref{TypeKey: "nosuch", Key: "hogger"},
 				Target: metamodel.Ref{TypeKey: "quest", Key: "nosuch"}},
 			want: `not_found: source: no entity type "nosuch" in this game; ` +
-				`not_found: target: no entity "nosuch" of type "quest" in this game`,
+				`target: no entity "nosuch" of type "quest" in this game`,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1685,4 +1685,101 @@ func TestConcurrentEditsToOneEdgesFieldsAreLostSilently(t *testing.T) {
 			"was overwritten, and the doc comments claiming the loss is silent are stale",
 			firstJSON, secondJSON)
 	}
+}
+
+// TestBothBadEndsOfAnEdgeAreAnsweredInOnePass extends the one-pass rule
+// from resolution to the endpoint *rule*.
+//
+// Reporting both missing ends together was only half the claim
+// `upsertRelationWith` made: the two `endpointAllowed` checks still
+// returned one at a time, so two wrongly-typed ends cost two round trips,
+// and — worse — a caller with one missing end and one wrongly-typed end
+// heard only the `not_found`, fixed it, resent, and only then heard the
+// mismatch. That is the hidden second hop the comment claimed had been
+// removed, inside the code the comment sits on.
+//
+// **Which code wins when the two halves disagree**: `not_found`. A
+// caller cannot act on the mismatch first — the entity it names does not
+// exist, and creating it is the step that decides which type the end
+// will even have — so `not_found` is the code that describes the work to
+// do next, and the mismatch travels with it in the message so the second
+// attempt already knows about it. `failureFor` orders `ErrNotFound`
+// above `ErrEndpointTypeMismatch` and both halves are wrapped, so that
+// falls out of the existing switch rather than needing a rule of its
+// own; this test is what pins it there.
+func TestBothBadEndsOfAnEdgeAreAnsweredInOnePass(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	quest, err := svc.EntityTypeByKey(ctx, project, "quest")
+	if err != nil {
+		t.Fatalf("quest type: %v", err)
+	}
+	zone, err := svc.EntityTypeByKey(ctx, project, "zone")
+	if err != nil {
+		t.Fatalf("zone type: %v", err)
+	}
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+		SourceTypeIDs: []uuid.UUID{quest.ID},
+		TargetTypeIDs: []uuid.UUID{zone.ID},
+	}); err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+
+	t.Run("two wrongly typed ends", func(t *testing.T) {
+		_, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+			TypeKey: "takes_place_in",
+			Source:  metamodel.Ref{TypeKey: "class", Key: "mage"},
+			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		})
+		if !errors.Is(err, metamodel.ErrEndpointTypeMismatch) {
+			t.Fatalf("err = %v, want ErrEndpointTypeMismatch", err)
+		}
+		want := `endpoint_type_mismatch: source: entity type "class" cannot be the source of relation type "takes_place_in"; ` +
+			`target: entity type "quest" cannot be the target of relation type "takes_place_in"`
+		if err.Error() != want {
+			t.Fatalf("message = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("one missing end and one wrongly typed end", func(t *testing.T) {
+		in := metamodel.RelationInput{
+			TypeKey: "takes_place_in",
+			Source:  metamodel.Ref{TypeKey: "quest", Key: "nosuch"},
+			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		}
+		_, err := svc.UpsertRelation(ctx, project, in)
+		want := `not_found: source: no entity "nosuch" of type "quest" in this game; ` +
+			`endpoint_type_mismatch: target: entity type "quest" cannot be the target of relation type "takes_place_in"`
+		if err == nil || err.Error() != want {
+			t.Fatalf("message = %v, want %q", err, want)
+		}
+		// Both halves stay reachable, so a caller asking about either
+		// sentinel is answered truthfully.
+		if !errors.Is(err, metamodel.ErrNotFound) || !errors.Is(err, metamodel.ErrEndpointTypeMismatch) {
+			t.Fatalf("err = %v, want it to match both sentinels", err)
+		}
+
+		// The wire code an agent branches on, through the only path that
+		// exposes it. not_found wins: the missing row is the one piece of
+		// work that has to happen first.
+		result, err := svc.UpsertRelations(ctx, project, []metamodel.RelationInput{in},
+			metamodel.BulkPartial)
+		if err != nil {
+			t.Fatalf("UpsertRelations: %v", err)
+		}
+		if len(result.Failed) != 1 {
+			t.Fatalf("Failed = %+v, want one failure", result.Failed)
+		}
+		if result.Failed[0].Code != "not_found" {
+			t.Fatalf("Code = %q, want not_found", result.Failed[0].Code)
+		}
+		if result.Failed[0].Message != want {
+			t.Fatalf("bulk message = %q, want %q", result.Failed[0].Message, want)
+		}
+	})
 }

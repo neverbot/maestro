@@ -4665,6 +4665,137 @@ corrections themselves.)
     race reaches to save a round trip only a rarer race costs.
     `edgeParentViolation`'s comment now says so. Commit `5478acc`.
 
+**Corrections from the locking verification of Task 5** (a fourth pass,
+made after `FOR SHARE` landed, that held a real lock with a real
+`lock_timeout` against it rather than reading the code. Two findings
+closed, one recorded because it was never a bug: the sort correction 22's
+own re-review left unpinned survives with the pin removed, and it does so
+because the two orders it is defensive against — a plan flip, and
+`lower(key)` versus raw byte order — had never been made to disagree in a
+test.)
+
+27. **A lock timeout on the endpoint check was reported as
+    `invalid_input`, telling an agent not to do the one thing that would
+    have worked.** `checkEndpointTypes` turned any error from
+    `LockEndpointEntityTypes` — including one this transaction had no way
+    to satisfy — into `FieldError{Message: "could not be checked: " +
+    err.Error()}`, and `UpsertRelationType` wrapped that as
+    `ValidationError{Code: codeInvalidInput}`. Verified live with
+    `lock_timeout = '300ms'` held against a conflicting row lock: the
+    caller got `invalid_input: target_type_ids: could not be checked:
+    ERROR: canceling statement due to lock timeout (SQLSTATE 55P03)`, and
+    `errors.Is(err, metamodel.ErrInvalidInput)` was true. This path was
+    unreachable before correction 22 — the old per-id
+    `GetEntityTypeByID` took no lock and could not be cancelled by
+    `lock_timeout` — so `FOR SHARE` is what opened it: any deployment
+    setting `lock_timeout` or `statement_timeout` now has a retryable
+    contention event on this call reported as the one code that tells an
+    agent resending its input unchanged is pointless, when resending
+    unchanged is exactly the correct recovery. `FieldError.Message` also
+    flattened the error to a string, so nothing downstream could recover
+    the SQLSTATE either — `errors.As` for `*pgconn.PgError` returned
+    nothing.
+
+    **The fix returns the error instead of a field problem.**
+    `checkEndpointTypes` now returns `([]FieldError, error)`; a failure
+    to read is the second return, propagates out of `UpsertRelationType`
+    untouched, and reaches the caller wrapped only enough (`fmt.Errorf`
+    with `%w`) to keep `*pgconn.PgError` reachable through `errors.As`
+    — its SQLSTATE intact. It matches none of the package's domain
+    sentinels, so it lands on `failureFor`'s and `mcpErrorFor`'s existing
+    default arm, `internal_error`: an honest "something on the server
+    side went wrong" rather than a caller-fixable field problem.
+
+    **Whether 55P03 and 57014 earn a fourth wire code, so an agent is
+    told to retry rather than merely told the call failed, is left
+    open.** None of the three field-shaped codes (`invalid_input`,
+    `schema_violation`, `invalid_schema`) nor the three others this
+    package's sentinels carry (`not_found`, `version_conflict`,
+    `endpoint_type_mismatch`, `in_use`) say "retryable" — a caller
+    reading `internal_error` learns nothing about whether trying again
+    would help. `internal_error` is still the more honest of the two
+    options on the table today, which is why it is what ships here: it
+    does not claim the input is wrong, which `invalid_input` did and was
+    false. A dedicated code is a wire-contract decision for whichever
+    task maps this package's errors onto MCP — mcp_errors.go's own doc
+    comment already names that mapping as unbuilt — and this fix
+    forecloses nothing: the SQLSTATE survives on the error precisely so
+    that mapping can switch on it later without another trip through the
+    database layer.
+
+    **No other site in the package flattens a database read error into a
+    FieldError this way.** Every other `FieldError{..., Message: ... +
+    err.Error()}` construction (`validate.go`, `schema.go`) reports a
+    *value* or *schema* problem the caller supplied — a bad default, an
+    invalid regex — not a failure to read the database at all.
+
+    `TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput`
+    (relations_test.go) gives every connection in a pool of its own a
+    real `SET lock_timeout = '300ms'`, holds a conflicting `FOR UPDATE`
+    on the endpoint's own row from a separate connection, and asserts the
+    resulting error is neither a `*ValidationError` nor
+    `errors.Is(err, ErrInvalidInput)`, while `errors.As` still recovers a
+    `*pgconn.PgError` with `Code == "55P03"`. It was watched fail with
+    the exact message quoted above before this fix, against the code on
+    `relation_types.go` as it stood after correction 22. Commit
+    `f3f8aca`.
+
+28. **Correction 22's own defensive sort survived deletion, because
+    nothing had forced its two orders to disagree.** `RemoveEntityType`'s
+    `sort.Slice(pruned, func(i, j int) bool { return pruned[i].Key <
+    pruned[j].Key })` is correct and was added because `RETURNING` on
+    `PruneEntityTypeFromEndpointLists`' single `UPDATE` promises no order
+    at all — but with it removed, the whole suite stayed green, this
+    task's own `TestAPrunedEndpointListIsAnnouncedToTheRowsOwnSubscribers`
+    included. A probe against this suite's live database explains why:
+    the statement's actual plan today is an index scan on
+    `relation_types_key_key`, so `RETURNING` already arrives ordered by
+    that index — `lower(key)` — before Go ever sorts it, and every prior
+    test used keys whose byte order and folded order happened to agree.
+
+    A second, independent gap sits under the first: the Go sort compares
+    raw `Key` in byte order, and the index it happens to ride orders by
+    `lower(key)`; stored keys permit uppercase, so the two orders are not
+    the same order. Both are deterministic — nothing here was ever a
+    correctness bug — but a comment claiming the sort's order matched the
+    database's own would have been as false as correction 24's "cannot
+    fire."
+
+    **Pinned rather than merely documented**, because the disagreement is
+    reproducible without forcing a plan flip: two relation types keyed
+    `Zone_rel` and `apple_rel` (capital `Z` = 0x5A sorts before lowercase
+    `a` = 0x61 in bytes, but `zone_rel` folds after `apple_rel`) give the
+    Go sort and the index's natural order the exact opposite sequence.
+    `TestPrunedEndpointListsArePublishedInSortOrderNotDatabaseOrder`
+    (events_test.go) prunes both, in one `RemoveEntityType` call, and
+    asserts the `relation_type.upserted` events arrive `Zone_rel` before
+    `apple_rel` — the sort's order, and the reverse of the index scan's.
+    It was watched fail with `sort.Slice` removed (the events arrived
+    `apple_rel` first) and pass with it restored. The sort's own comment
+    now names both orders explicitly and points at the test.
+
+29. **Two costs of the same lock, measured during this verification and
+    written down rather than left for the next reader to rediscover.**
+    Neither changes behaviour; both are now on `LockEndpointEntityTypes`
+    (metamodel.sql) and `RemoveEntityType`'s own doc comment.
+    - A transaction holding the endpoint's `FOR SHARE` parks
+      `RemoveEntityType` against the same entity type with nothing to
+      release it and no default timeout. Accepted: removals are rare and
+      the alternative is the dangling id correction 22 closes, but the
+      wait is unbounded and worth a deployment's own `lock_timeout` if it
+      cares — which is the other half of finding 27.
+    - `FOR SHARE` here conflicts with `UpsertEntityType`'s `FOR UPDATE`
+      on its own row, so declaring a relation type's endpoint rule over
+      an entity type now serialises against editing that entity type
+      while the declaration's transaction holds the lock, and the
+      reverse. Measured at 200 relation-type declarations sharing six
+      endpoint types: 251ms on one worker, 140ms spread across eight —
+      no measured throughput problem, since share locks do not conflict
+      with each other, and no deadlock, since both call paths take
+      `entity_types` before `relation_types`. Only a genuinely concurrent
+      *edit* of the shared entity type pays this, and it was not
+      previously written down anywhere. Commit `b4516d1`.
+
 - [x] **Step 1: Add the queries**
 
 Append to `internal/db/queries/metamodel.sql`:

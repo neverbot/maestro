@@ -55,21 +55,30 @@ const maxRowKeyLen = 64
 // rename their content to satisfy an identifier convention Maestro does
 // not otherwise impose.
 //
-// What this rule reasons about is path *escaping*, not path *collision*,
-// and the difference is deliberate. "new", "index", "id", "null",
-// "select", "games" and "types" are all valid keys today and nothing
-// breaks, because no route addresses a type by key yet. Task 8 introduces
-// /games/<slug>/types/<key>, and the moment it does, a key colliding with
-// a sibling route segment (a /types/new create page, say) is a real
-// conflict — and it is Task 8's to resolve, because only Task 8 knows
-// which segments exist. Reserving a word list here, ahead of the routes,
-// would either guess wrong or forbid "new" to a game that has a perfectly
-// good reason to name a type that. **Task 8 decides**, and its options
-// are a reserved-word list checked here, a route shape that cannot
-// collide (/types/-/<key>, or the key in a query parameter), or accepting
-// the collision and resolving it in the router. Recorded rather than
-// pre-empted; a key rule tightened after a game is seeded costs renames,
-// so the choice wants to be made once, with the routes in front of it.
+// What this rule reasons about is path *escaping*, not path
+// *collision*, and the difference is deliberate. "new", "index", "id",
+// "null", "select", "games" and "types" are all valid keys, and none of
+// them collides with anything.
+//
+// **Task 8 decided this, and it chose the route shape over a word list
+// here.** Its three options were a reserved-word list checked in this
+// file, a route shape that cannot collide, or accepting the collision
+// and resolving it in the router. The REST surface addresses every row
+// behind a fixed discriminator — /api/games/{game}/types/by-key/{key},
+// .../types/by-id/{id}, .../entities/by-key/{type}/{key} — so a key
+// never occupies a segment a literal could also claim, and "by-key" and
+// "by-id" are themselves perfectly legal keys, because the discriminator
+// sits one segment earlier than any key ever does. A word list was
+// rejected for the reason this comment already gave: it would forbid
+// "new" to a game with a perfectly good reason to name a type that, and
+// a key rule tightened after a game is seeded costs renames. Resolving
+// in the router was rejected because Go's ServeMux prefers a literal
+// segment over a wildcard silently — a /types/new page added later would
+// take an existing type offline with nothing failing anywhere. See
+// internal/web/api_metamodel.go's header, and
+// TestARouteShapedKeyIsStillAddressable, which declares a type for each
+// of the dangerous words and addresses it both ways.
+
 var rowKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // rowKeyProblems validates a key that addresses a row, reporting the

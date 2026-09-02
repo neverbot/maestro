@@ -7957,6 +7957,211 @@ git add internal/web cmd/maestro/main.go
 git commit -m "feat: rest mirror for types and entities, and the game home page"
 ```
 
+**Corrections made during implementation** (a pass over the landed
+surface, written as Task 8 shipped so Task 9 builds on what exists rather
+than on what was planned).
+
+**The three decisions earlier tasks recorded as Task 8's, settled.**
+
+1. **Route-shaped keys: the route shape changed, the key rule did not.**
+   Task 5's `keys.go` recorded three options — a reserved-word list in
+   the domain, a route shape that cannot collide, or resolving the
+   ambiguity in the router — and left the choice here. **The route shape
+   wins.** Every row is addressed behind a fixed discriminator:
+   `/api/games/{game}/types/by-key/{key}`, `.../types/by-id/{id}`,
+   `.../entities/by-key/{type}/{key}`, `.../entities/by-id/{id}`, and the
+   same for relation types and relations. No key ever occupies a segment
+   a literal could also claim, so `new`, `index`, `id`, `null`, `games`,
+   `types`, `search` — and `by-key` and `by-id` themselves — are all
+   ordinary keys. `TestARouteShapedKeyIsStillAddressable` declares a type
+   for each of those words, reads it back by key, and removes it by id.
+
+   The word list was rejected because it forbids `new` to a game with a
+   perfectly good reason to name a type that, and because a key rule
+   tightened after a game is seeded costs renames — `keys.go` argued that
+   itself. **Resolving in the router was rejected because it fails
+   silently**, which is worth stating precisely: Go's `ServeMux` prefers
+   a literal segment over a wildcard with no error and no warning
+   (confirmed directly — a mux holding both `GET /types/{key}` and `GET
+   /types/new` routes `/types/new` to the literal and `/types/quest` to
+   the wildcard), so a `/types/new` page added a year from now would take
+   an existing type offline with nothing failing anywhere. `keys.go` now
+   records the decision instead of the question.
+
+2. **Reserved keys: nothing is reserved, because nothing flattens.**
+   Task 2's open list and Task 3's correction block both named this as a
+   Task 3/8 decision, with two options: reserve `key`, `name`, `id`,
+   `type`, `version` in `Check()`, or keep the two namespaces separated
+   by construction wherever flattening happens. **The second.** A game's
+   values live in their own `fields` object at every layer — the jsonb
+   column, `EntityOutput.Fields` on the MCP wire, the same field on the
+   REST wire, and the page, which renders counts and never a row's
+   fields at all. There is no flattening anywhere in this task, so there
+   is no collision to prevent, and no game is told to rename a field it
+   legitimately calls `name`.
+   `TestAGameFieldNamedLikeARowColumnNeverShadowsIt` declares a type
+   whose six fields are named after six row columns (`id`, `key`, `name`,
+   `version`, `invalid`, `type_key`), writes an entity whose values for
+   all six are lies about the row, and reads it back to prove the row's
+   own identity is untouched and every value came back under `fields`.
+
+   This is a constraint on future work, not a closed question: the day a
+   view *does* flatten a row into a table column or an export, that
+   surface owns the collision, and the answer there is a prefix or a
+   two-level shape — not a reservation retrofitted onto games that are
+   already seeded.
+
+3. **`relations.list` now answers with refs as well as ids, on both
+   surfaces.** Task 7's finding 18 shipped endpoint ids honestly
+   documented, for want of a bulk entity-by-ids read, and named this task
+   as where the fix was cheapest. It is: `ListEntitiesByIDs`
+   (`internal/db/queries/metamodel.sql`) and `Service.EntitiesByIDs` are
+   that read — one query per page, project-filtered in SQL like every
+   other statement — and `endpointRefs` (`mcp_metamodel.go`) joins it
+   onto a page of edges. `RelationOutput` carries `source_id`/`target_id`
+   *and* `source`/`target` (`type_key`, `key`, `name`), because the ids
+   are still what a removal and the endpoint filters address.
+
+   Three things went with it, because a fix that closes one path and
+   leaves the same hole one step along is this project's third standing
+   lesson: the MCP tool's description, which said the opposite of what
+   the tool now does; the hand-written `relationsListOutputSchema`, which
+   would otherwise have advertised a shape the tool no longer returns
+   (`TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs` pins
+   both); and the REST mirror, which faces the same question for the
+   graph view and answers it from the same code.
+
+   A missing endpoint is reported as an *absent* ref, not an empty one:
+   the endpoint read happens after the page was listed, so an entity
+   removed in between leaves an edge whose endpoint no longer resolves,
+   and a ref with empty strings in it would render as a row named "".
+
+**What else changed from the plan.**
+
+4. **The plan's own `schema_violation` test asserted the wrong code.**
+   Its `TestRESTSchemaViolationReturns422` declares a field schema with
+   an optionless `enum` and expects `schema_violation`. That is
+   `invalid_schema` — Task 3's correction 25 split the three codes
+   precisely so a caller knows whether to fix the declaration, the
+   values, or the argument, and an optionless enum is a broken
+   declaration. Both halves are now pinned separately
+   (`TestRESTDeclaringABrokenSchemaIsInvalidSchema` and
+   `TestRESTAValueThatDoesNotFitItsSchemaIsSchemaViolation`), each
+   asserting the code *and* the field path, never only the status.
+
+5. **The REST handlers call the MCP tools' own implementations.** The
+   plan's snippet had them call `s.opts.Metamodel` directly and build
+   their own payloads, which would have been a second copy of every
+   input conversion and every output shape — the drift this project has
+   found in nine consecutive tasks, invited in by construction. Instead
+   each of the sixteen `MCP*` functions was split in two: the exported
+   one does `requireScope` and delegates; the unexported core does the
+   work. REST decodes into the same input struct, calls the same core,
+   and answers with the same output struct. One implementation, one wire
+   vocabulary, two admission checks — `requireScope` for a token,
+   `requireProject` for a person — because those are the only thing the
+   two surfaces do differently.
+
+6. **`writeDomainError` maps more than the plan listed, and never
+   reports something fixable as `internal_error`.** The plan's version
+   had no arm for `invalid_schema`, `invalid_input` or `retryable`, and
+   sent `ErrScopeViolation` — which is a `*MCPError`, not a sentinel —
+   through `errors.Is`. It is now the REST twin of `mcpErrorFor`, arm for
+   arm and matched the same way: 400 for `invalid_input`, 422 for
+   `invalid_schema`/`schema_violation`/`endpoint_type_mismatch`, 409 for
+   `version_conflict` (carrying `current_version`) and `in_use`, 404 for
+   `not_found`, 503 for `retryable`, 500 only for what nobody planned
+   for — and that arm logs.
+
+7. **A viewer cannot write.** The MCP surface never had to decide this: a
+   token is editor-equivalent by construction. A session caller's role is
+   real, and `requireEditor` gates every write on the REST surface,
+   naming the caller's actual role in the refusal so a quietly demoted
+   designer has something to act on. `TestRESTWritesAreRefusedToAViewer`
+   covers all three write shapes.
+
+8. **A `project_id` in a REST body is a confirmation, exactly as
+   `ScopedArgs` says it is on the MCP surface.** Disagreeing with the
+   URL, the call is refused with `scope_violation`; agreeing, it is
+   accepted; absent, nothing happens. Silently letting the URL win would
+   tell a client that had lost track of which game it was editing that
+   its write succeeded — in the other game.
+
+9. **A game-content body gets its own 4 MiB bound.** `decodeJSONBody`'s
+   16 KiB is right for a login and refuses an ordinary seed batch as
+   malformed. `decodeJSONBodyLimit` shares the media-type check, the
+   `MaxBytesReader` and both refusals, so the two surfaces cannot answer
+   a too-large body differently.
+
+10. **Upserts answer 200, not 201.** The route is idempotent by key and
+    the same request may create or edit, so a status claiming "created"
+    would be wrong half the time; the answer carries the row's version,
+    which is what a client actually needs. A partial batch also answers
+    200 with its report — nineteen of twenty rows landing is not a failed
+    request, and the failures are in the body with their index, key and
+    code.
+
+11. **The home page is a catalogue with counts, and that is a bound
+    rather than a stage.** `GET /api/games/{game}/summary` answers with
+    one row per declared type — the game's vocabulary, a handful of
+    hand-written rows — each carrying its entity or relation count, plus
+    three totals. Four queries, none of which grows with the game's
+    content: the two type listings and two grouped counts
+    (`CountEntitiesPerType`, `CountRelationsPerType`). So a game holding
+    four hundred entities renders exactly as fast, and as small, as one
+    holding four, and the page never has a page-boundary problem to
+    solve. Paging content belongs to the views sub-project.
+
+    The plan's own snippet for `game.html` listed the type keys with no
+    counts and re-fetched `GET /api/games` to find the game's name; the
+    name lookup stayed (there is still no server-side slug resolution on
+    `/g/{slug}`), the bare key list did not.
+
+    **What a new game shows:** the game's name, "No content yet.", and
+    two empty states — one explaining that a game declares its own entity
+    types and that an agent over MCP is what declares them today, one
+    saying the same for relation types. Both say plainly that nothing on
+    this page creates one, because nothing does. **What a game with four
+    hundred entities shows:** the same page, with one row per type
+    carrying its label, its key and its count, and a totals line reading
+    e.g. "401 entities · 12 relations · 3 no longer fit their type" —
+    the last clause only when there are any, so the one number that asks
+    a designer to do something is never buried in a permanent zero.
+
+12. **`entity_types` and `relation_types` are always arrays, never
+    `null`.** A page iterating "the types this game has" must not have to
+    tell "none" from "the server said nothing" — the same rule Task 7's
+    correction 19 applied to batch answers.
+
+13. **A third Node harness covers the page itself.**
+    `jstest/game_summary_test.mjs` drives the real, unmodified `app.js`
+    through a stubbed DOM and a stubbed `fetch`, and pins four things a
+    Go test of the API underneath cannot see: a crafted label reaches the
+    DOM as text and never as markup; a count of one is spelled in the
+    singular; an empty game gets its empty states rather than two blank
+    lists; a failed summary leaves the server's own message on screen
+    rather than an empty catalogue that reads exactly like a game with
+    nothing in it. It also asserts the page issues exactly two requests
+    and that neither is a listing, which is the property that makes the
+    page a summary at all.
+
+14. **Single-game navigation needed nothing.** `handleRoot`
+    (`api_projects.go`) already redirects a caller with exactly one game
+    straight into it, and the picker's remembered-game shortcut already
+    covers the second one; this task only had to not break either.
+
+**Proved by breaking the code under them.** Every test named above was
+watched fail with the fix removed, not merely watched pass: the project
+filter stripped out of `ListEntitiesByIDs` (another game's entity
+resolved); `endpointRefs`' source dropped (the ref came back nil);
+`requireEditor` lowered to `roles.Viewer` (a viewer wrote a type);
+`checkStatedProject`'s comparison loosened (another game's id was
+accepted); the `FILTER (WHERE invalid)` replaced with `0` (the invalid
+count went to zero); the two `make(...)` calls in the summary removed
+(the arrays came back `null`); `countLabel`'s singular removed ("1
+entities"); and the failed-summary message suppressed (the page went
+blank).
+
 ---
 
 ### Task 9: End-to-end seeding of a real game

@@ -8165,6 +8165,105 @@ than on what was planned).
     (`TestATokenMayReadItsOwnGamesContentAndNoOthers`). The stale
     sentence in `mcp.go` now names which routes it means.
 
+**Round 3 review (the REST mirror and the game home page).** Seven
+findings and one thing recorded rather than fixed. Every test below was
+watched fail before its fix landed.
+
+16. **Role enforcement is a mechanism now, not a convention.**
+    `requireEditor` was a line each write handler had to remember, and
+    the review proved what that costs: the call was stripped from five of
+    the eight write handlers and `go test ./internal/web/` stayed green,
+    because correction 7's `TestRESTWritesAreRefusedToAViewer` exercised
+    three routes by hand. The content surface now registers through
+    `registerContentRoute` (`server.go`), which reads the method out of
+    the pattern and wraps every non-GET route in `requireEditor` itself;
+    no handler in `api_metamodel.go` calls it any more. Two tests close
+    both halves: `TestEveryContentWriteRouteRefusesAViewer` drives a real
+    viewer at every write route the server registered, read back from the
+    routing table with a subtest each, so a route added tomorrow is
+    covered without anyone editing the test; and
+    `TestEveryContentRouteIsRegisteredAsContent` fails on a content path
+    registered through `registerProjectRoute` instead — the same shape as
+    `TestEveryGameScopedRouteGoesThroughRequireProject`, which is what
+    the Core did with the analogous problem.
+
+17. **An unrecognised `invalid` filter is refused, not inverted.**
+    `?invalid=maybe` returned only the *valid* rows — the exact opposite
+    of what the page's invalid count sends a designer looking for.
+    `queryBool`'s leniency rests on a flag having exactly two meanings,
+    and `invalid` has three (absent, true, false), so it now goes through
+    `queryTriState`, which accepts both spellings of both sides and
+    refuses anything else as `invalid_input` at path `invalid`.
+    `TestTheInvalidFilterIsTriStateAndRefusesAnythingElse` pins the
+    refusal and both directions of the parsing; nothing had tested either.
+
+18. **The `project_id` confirmation is one rule shared by both surfaces.**
+    Correction 8 claimed the REST check was "exactly as `ScopedArgs` says
+    it is" and it was not: `{"project_id":"not-a-uuid"}` answered
+    `403 scope_violation` with "names a different game than the URL",
+    which is false — it names no game — and `{"project_id":""}` was
+    accepted outright where MCP refuses it. `statedProjectProblem`
+    (`mcp.go`) is now the single judgement both surfaces call; each still
+    writes its own message, because "this token is bound to another game"
+    means nothing to a designer holding a session cookie.
+    `TestAStatedProjectIDIsJudgedTheWayTheMCPSurfaceJudgesIt` pins all
+    four cases.
+
+19. **A wrong-typed field is named.** `{"items":"not-an-array"}` answered
+    `bad_request` / "malformed JSON body" — false, since the JSON parsed,
+    and unactionable, since the caller learned neither which field nor
+    what was expected, on a surface where every other refusal carries its
+    path. `decodeJSONBodyLimit` now reads `*json.UnmarshalTypeError` and
+    answers with the field and the JSON type it wanted, in the same
+    `{"fields":[{"path","message"}]}` shape the domain's own errors use.
+    A genuinely malformed body still says so.
+
+20. **`writeDomainError` is the twin it claims to be.** It had no
+    `projects.ErrProjectNotFound` arm (unreachable through a route, but
+    the claim was still false), and its retryable message dropped the
+    second sentence Task 7 added on purpose, so a browser client was told
+    to keep resending a request that will fail every time.
+    `TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor` now runs every error
+    through *both* functions and fails if the codes differ, and
+    `TestTheRetryableAdviceIsTheSameOnBothSurfaces` pins the advice.
+
+21. **Four argued decisions are pinned.** Each of these mutations had
+    survived the whole suite: `maxContentRequestBodyBytes` cut to 16 KiB
+    (`TestASeedSizedBatchIsAccepted` sends a 45 KB seed and checks every
+    row landed); `hasRelatedTo` inverted to "all four"
+    (`TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame`
+    — under the mutation a one-part traversal answered 200 with the whole
+    game, exactly what that function's comment argues against); `in_use`
+    answering 400 (`TestRemovingATypeStillInUseIsAConflict`, which also
+    removes the type with `?cascade=true` so the conflict is about the
+    entities and not the route); and `statusForCode`'s default lowered to
+    500 (`TestStatusForCodeDefaultsToUnprocessable`, a direct unit test,
+    because every code the parsing layer produces today is mapped
+    explicitly and the default arm is unreachable through a request).
+
+22. **Two page nits.** `styles.css` had `#a4262c` typed twice, in the
+    forms' `.error` and in the home page's invalid-row line, while its
+    own comment said the second was "the error colour the forms use, not
+    a colour of its own"; both now read `var(--danger)`. And
+    `game.html`'s empty state said an MCP agent "is what declares them
+    today", which correction 15 had already made untrue — the REST
+    content routes take tokens and sessions — so the UI was implying
+    something the code contradicts, in front of a designer. It now says
+    types are declared through the instance's API, from an agent over MCP
+    or over the game's content routes, and that nothing on this page
+    creates one yet.
+
+23. **Recorded, not fixed: one traversal permutation does not name its
+    own path.** `?related_to.direction=outgoing` alone answers
+    `404 not_found: no relation type "" in this game`, because the domain
+    resolves the relation type before it checks anything else. The other
+    three one-part permutations answer `400 invalid_input` at
+    `related_to.direction`. The MCP surface answers identically — the
+    core is shared — so this is the domain's ordering rather than a
+    divergence between surfaces. `handleListEntities`' comment used to
+    claim all four came back at their own path; it now says what is true,
+    and the test pins all four answers as they are.
+
 **Proved by breaking the code under them.** Every test named above was
 watched fail with the fix removed, not merely watched pass: the project
 filter stripped out of `ListEntitiesByIDs` (another game's entity
@@ -8176,6 +8275,22 @@ count went to zero); the two `make(...)` calls in the summary removed
 (the arrays came back `null`); `countLabel`'s singular removed ("1
 entities"); and the failed-summary message suppressed (the page went
 blank).
+
+Round 3's own mutations, each watched red and then reverted: the
+`requireEditor` wrap removed from `registerContentRoute` (all eight write
+subtests failed, where the old three-route test had caught nothing when
+five handlers lost the check); one content route re-registered through
+`registerProjectRoute` (the convention test named it); `"false"` parsed
+as true and the unrecognised-value refusal replaced by `false` (the
+tri-state test failed on each); `checkStatedProject`'s `bad_request` arm
+removed; the wrong-typed-field arm disabled; the
+`projects.ErrProjectNotFound` arm disabled and the retryable second
+sentence reworded; `maxContentRequestBodyBytes` cut to 16 KiB;
+`hasRelatedTo` inverted to "all four"; `in_use` answering 400; and
+`statusForCode`'s default lowered to 500.
+
+Every run of every test above had `TEST_DATABASE_URL` set, confirmed by
+counting skips: 0 with it, 183 without.
 
 ---
 

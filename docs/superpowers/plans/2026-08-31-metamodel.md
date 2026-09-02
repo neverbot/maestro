@@ -5723,7 +5723,161 @@ svc)` (the helper takes the pool) and a malformed cursor reported with no
 code at all, which correction 25 says is an `invalid_input` — it is the
 caller's own argument, at a path, fixable in place.
 
-- [ ] **Step 1: Add the listing and search queries**
+**Implemented 2026-09-02, with the decisions and departures below.** The
+code blocks printed under Steps 1 and 4 are a starting point, not what
+shipped; where they differ, the reason is here.
+
+1. **The cursor is a keyset on `(name, id)` carrying a fingerprint of
+   its own filter.** The position half is the plan's. The fingerprint is
+   not, and it closes a hole the position alone cannot see: every filter
+   of this listing shares one sort order, so a cursor issued for the
+   quest listing pages perfectly into the zone listing and answers with
+   zones — a wrong answer to a call nobody meant to make, with nothing in
+   it to say so. `fingerprintOf` digests the *resolved* filter (the
+   entity type id, the invalid flag, and a traversal's relation type,
+   anchor and direction), length-prefixed the way `foldedIdentity` is, so
+   two filters whose parts divide differently cannot collide. A mismatch
+   is an `invalid_input` at path `cursor` distinct from the malformed
+   one, and the malformed check runs first — a truncated cursor reported
+   as belonging to another listing sends a caller to inspect its filter,
+   which is not where the problem is.
+
+   **It is explicitly not a capability and not signed**, and `cursor`'s
+   doc comment says so rather than letting a reader assume otherwise. It
+   is base64 of JSON; a caller can rewrite the position and recompute the
+   fingerprint from values it already holds. That buys nothing, because
+   the position only ever becomes a `>` comparison inside a statement
+   already filtered by the caller's own project id — the worst a forged
+   cursor does is skip the caller's own rows.
+   `TestAForgedCursorCannotReachAnotherGamesRows` feeds one listing a
+   position lifted from another game and pins that the answer is still
+   the caller's own rows.
+
+2. **The keyset compares uuid to uuid, not `id::text`.** The plan's block
+   compares `(name, id::text)` against two nargs while ordering by
+   `(name, id)`, which makes the comparison's agreement with its own sort
+   depend on the database's text collation. Measured before changing it:
+   over 300,000 random pairs under this project's `en_US.utf8`, `a < b`
+   and `a::text < b::text` never disagreed, so the cast was not a live
+   bug — it was a correctness resting on a setting the deployment
+   chooses, for nothing gained. The narg is now `after_id::uuid` and
+   guards the clause alone; `after_name` is read only when it is set,
+   because a row comparison against a NULL half yields NULL and would
+   return an empty page rather than a refusal.
+
+3. **`ListEntitiesRelatedTo` gained the same keyset, and the plan's
+   truncate-in-Go was dropped.** The block under Step 4 slices the
+   neighbour set to the limit and returns no cursor, which makes every
+   neighbour past the limit unreachable with nothing in the answer to say
+   so — the exact defect class this read surface is most exposed to. The
+   keyset is on the query, so a traversal pages like every other listing.
+   Its own `NextCursor` is fingerprinted to the traversal, so it cannot
+   be carried over to the plain listing of the same entity type.
+
+4. **`ListRelations` was paginated too** (finding recorded in the task
+   brief as "disclose or fix"). It had a clamped `LIMIT` and no cursor,
+   so a game with more edges than the cap could not be read past it. The
+   keyset is on `(created_at, id)` — this listing's own sort order, and a
+   value nothing edits, so its page boundary cannot move the way a
+   renamed entity moves an entity listing's. `RelationFilter` gains
+   `Cursor` and the method now returns a `RelationPage`; the
+   `relations_project_idx` on `(project_id, created_at)` already serves
+   the seek.
+
+5. **An unrecognised traversal direction is refused, not defaulted.** The
+   plan's `listRelated` silently rewrites anything that is not
+   `"incoming"` to `"outgoing"`. Both that and passing it through — where
+   it would match no arm of the query and return an empty page — answer a
+   question the caller did not ask. It is an `invalid_input` at
+   `related_to.direction` naming both spellings.
+
+6. **There is no `"both"` direction, deliberately.** Two entities joined
+   by one edge each way would appear twice in a listing whose rows are
+   entities, and collapsing the pair discards the one thing the caller
+   asked about. Two calls answer it, and the caller knows which half each
+   row came from. The views sub-project, whose rows are edges, is where an
+   undirected walk belongs.
+
+7. **A self-loop appears once, and it is the anchor itself.** The join's
+   two arms are written so that exactly one can hold for a given
+   (entity, edge) pair, so the anchor comes back in its own neighbour
+   list once under either direction. Nothing filters it out: the edge
+   exists and it does point there, and the analysis sub-project is where
+   a self-reference is reported as a modelling problem.
+   `TestASelfLoopAppearsOnceInItsOwnNeighbourList` pins both directions.
+
+8. **An edge whose relation type was deleted contributes nothing,
+   because there is no such edge.** `relations.relation_type_id` is
+   `ON DELETE RESTRICT` and `RemoveRelationType(cascade)` deletes the
+   edges first, so the two ways a type goes away either refuse or take
+   the edges with them. Pinned by
+   `TestAnEdgeCannotOutliveItsRelationType` rather than asserted, and
+   nothing in the query filters for a case that cannot arise.
+
+9. **`TypeKey` and `Invalid` apply to a traversal as well as to a plain
+   listing.** The plan's `listRelated` ignores both — it takes only the
+   limit — so "which quests happen in Elwynn" would have answered with
+   the classes too, silently. Both are nargs on
+   `ListEntitiesRelatedTo` now, and each half of the claim has a test
+   whose failure was watched with the corresponding clause removed.
+
+10. **Search refuses a query with no word in it.**
+    `plainto_tsquery('simple', …)` turns `""`, `"   "` and `"..."` into
+    an empty tsquery, which matches nothing, so every one of them came
+    back as a clean empty answer indistinguishable from "this game has no
+    such content" — which an agent acts on by seeding a duplicate. It is
+    an `invalid_input` at path `query`. The test is "does the query hold
+    a letter or a digit", and that is tied to the `simple` configuration,
+    which has no stopword list: under `english` a query of pure stopwords
+    would pass this check and still match nothing, so whoever changes the
+    configuration changes `checkSearchQuery` with it.
+
+11. **Search ranks by `ts_rank` over an unweighted vector, and says so.**
+    A row whose *name* is the query does **not** outrank one that merely
+    mentions it in a paragraph, because `entities.search` is one flat
+    vector built by `UpsertEntity`. Fixing that means `setweight` in a
+    *write* statement plus a rewrite of every stored row, which this
+    read-only task declined to take on its own; **Task 7 owns the call**
+    when it decides what the search tool promises.
+    `TestSearchRanksTheStrongerMatchFirst` pins the ranking as it is, and
+    is the test that would change. Ties break by name then id, so two
+    identical calls answer identically.
+
+12. **Search is not paginated, and the 128 KiB index bound is stated
+    where a caller reads it.** The answer is the top `limit` rows by
+    rank; a rank is not a position a caller can resume from, and the
+    recovery for too many hits is a narrower query. `searchTextLimit`
+    means the tail of a very long field is stored and re-read whole but
+    is not findable — `TestOnlyTheIndexedHeadOfALongFieldIsSearchable`
+    pins both halves, and `Search`'s doc comment says it.
+
+13. **An over-large limit clamps to the cap on every listing**, matching
+    `ListRelations`. The plan's `ListEntities` and `Search` blocks fold
+    both "nothing asked for" and "too much" onto the default, which is
+    the bug `relationPageSize` already fixed once: `Limit: 501` returning
+    strictly fewer rows than `Limit: 500`, silently. `pageSize` is now
+    one shared helper and `relationPageSize` calls it, so the three
+    listings cannot drift apart. The search test seeds sixty rows —
+    above the default of fifty, below the cap of two hundred — because
+    with fewer rows than the default in the game, clamping and folding
+    return the same answer and a test built that way passes either way.
+
+14. **What the SQL header claims about project filters was checked, not
+    assumed.** `ListEntitiesPage` and `SearchEntities` carry
+    load-bearing project filters — their positions and query text name no
+    parent whose composite key could scope them — and dropping either was
+    watched to fail its scoping test. `ListEntitiesRelatedTo`'s two
+    filters are *not* the mechanism: its anchor and relation type are
+    resolved from keys inside the project by the Go caller, and the
+    composite keys put an edge, its type and both endpoints in one game,
+    so removing both filters was watched to leave the whole traversal
+    suite green — including its own scoping test. The comment says
+    exactly that rather than claiming an isolation it does not provide.
+
+15. **`ListEntitiesOfType` stays dropped**, as the plan says: still no
+    caller.
+
+- [x] **Step 1: Add the listing and search queries**
 
 `ListEntitiesPage` is printed in Task 4's Step 1 but was **not** added
 there: nothing in Task 4 calls it, and a query landing a task ahead of
@@ -5772,7 +5926,7 @@ LIMIT sqlc.arg('limit')::int;
 
 Run: `make sqlc`
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 `internal/metamodel/list_test.go`:
 
@@ -5943,12 +6097,12 @@ func TestSearchFindsByNameAndTextField(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 Run: `go test ./internal/metamodel/ -run 'TestList|TestOneHop|TestSearch' -v`
 Expected: FAIL, `undefined: metamodel.EntityFilter`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 `internal/metamodel/list.go`:
 
@@ -6144,12 +6298,12 @@ func (s *Service) Search(ctx context.Context, projectID uuid.UUID, query, typeKe
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `go test ./internal/metamodel/ -v`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/db/queries internal/db/dbq internal/metamodel

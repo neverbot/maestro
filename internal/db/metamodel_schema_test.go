@@ -444,3 +444,45 @@ func TestDeletingATokenClearsOnlyTheTokenColumn(t *testing.T) {
 		t.Fatalf("project_id = %q, want %q; the SET NULL must not touch it", projectID, f.projectA)
 	}
 }
+
+// TestTheSearchBackfillIsExact pins the one claim
+// 0006_weighted_entity_search.sql rests on and that nothing else would
+// catch: the vector its UPDATE builds from a row's *old, unweighted*
+// column is identical to the vector UpsertEntity writes for the same row
+// from now on. If it were not, a game seeded before the migration would
+// rank differently from the same game re-seeded after it, silently and
+// with nothing to signal why.
+//
+// The two expressions are written out here rather than imported, because
+// the point is to compare them: the left is the migration's, applied to
+// the pre-migration expression, and the right is the one in
+// UpsertEntity (metamodel.sql). Change either and this test says so.
+func TestTheSearchBackfillIsExact(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+
+	for _, tc := range []struct{ name, fields string }{
+		{"a row with text fields", "A gnoll camp led by a gnoll chieftain."},
+		{"a row whose fields carry no text at all", ""},
+		{"a row whose fields repeat its own name", "Gnoll gnoll gnoll"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var same bool
+			err := pool.QueryRow(ctx, `
+				WITH old AS (
+					SELECT to_tsvector('simple', $1::text || ' ' || $2::text) AS v
+				)
+				SELECT (setweight(to_tsvector('simple', $1::text), 'A') || setweight(old.v, 'B'))
+				     = (setweight(to_tsvector('simple', $1::text), 'A')
+				        || setweight(to_tsvector('simple', $1::text || ' ' || $2::text), 'B'))
+				FROM old`, "Gnoll", tc.fields).Scan(&same)
+			if err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if !same {
+				t.Fatal("the migration's backfilled vector differs from what UpsertEntity now writes")
+			}
+		})
+	}
+}

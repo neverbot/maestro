@@ -231,7 +231,14 @@ FOR UPDATE;
 --     scoped to another game.
 --
 -- search is written by this statement and by nothing else, on both arms
--- of the upsert. It cannot be a generated column: it is derived from
+-- of the upsert. **It is weighted**: the name goes in twice, once alone
+-- under label A and once as the head of the whole text under label B, so
+-- that ts_rank puts a row the query names above a row that merely
+-- mentions the word. 0006_weighted_entity_search.sql records why the B
+-- half carries the name rather than the fields alone — it is what makes
+-- that migration's backfill an exact function of the vector this
+-- statement used to write, so a migrated row and a re-seeded row rank
+-- the same. It cannot be a generated column: it is derived from
 -- user-declared jsonb whose *text* fields are the only ones worth
 -- indexing, and which of a row's fields those are is known only to the
 -- Go validator that has just read the type's schema. So every write path
@@ -246,7 +253,8 @@ INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
                       updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('entity_type_id')::uuid,
         sqlc.arg('key')::text, sqlc.arg('name')::text, sqlc.arg('fields')::jsonb,
-        to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text),
+        setweight(to_tsvector('simple', sqlc.arg('name')::text), 'A')
+          || setweight(to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text), 'B'),
         sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, entity_type_id, lower(key)) DO UPDATE
 SET name                = excluded.name,

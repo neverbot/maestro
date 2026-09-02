@@ -177,15 +177,22 @@ func TestASearchWithNoWordInItIsRefused(t *testing.T) {
 	}
 }
 
-// TestSearchRanksTheStrongerMatchFirst pins that the answer is ordered
-// by ts_rank and not by name or insertion order.
+// TestSearchRanksTheNameMatchFirst pins the ranking Task 7 settled: a
+// row whose **name** is the query outranks a row that merely mentions
+// the word in a field, however often it mentions it.
 //
-// It also pins what that ranking is *not*: the row that carries the word
-// twice wins, and it wins over a row whose own name is the query. Search
-// documents that limitation and names the fix (setweight in
-// UpsertEntity, plus a rewrite of stored rows); this test is what would
-// have to change when Task 7 takes that decision.
-func TestSearchRanksTheStrongerMatchFirst(t *testing.T) {
+// This is the test Task 6 said would have to change, and this is the
+// change. It used to be TestSearchRanksTheStrongerMatchFirst and it
+// asserted the opposite order — "mentioned" first, because the vector
+// was unweighted and the row carrying the word three times simply
+// matched more often. UpsertEntity now builds the vector as
+// setweight(name, 'A') || setweight(name || fields, 'B'), and ts_rank's
+// default weights (A=1.0, B=0.4) put the named row first.
+//
+// The mentioned row here carries the word three times against the named
+// row's once, so the assertion cannot pass on frequency: the weights are
+// the only thing that can produce this order.
+func TestSearchRanksTheNameMatchFirst(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
@@ -212,11 +219,46 @@ func TestSearchRanksTheStrongerMatchFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if got := searchKeys(rows); !equalStrings(got, []string{"mentioned", "named"}) {
-		t.Fatalf("ranking = %v, want the row matching more often first", got)
+	if got := searchKeys(rows); !equalStrings(got, []string{"named", "mentioned"}) {
+		t.Fatalf("ranking = %v, want the row the query names first", got)
 	}
 	if rows[0].Rank <= rows[1].Rank {
-		t.Fatalf("ranks are %v and %v, want the first strictly higher", rows[0].Rank, rows[1].Rank)
+		t.Fatalf("ranks are %v and %v, want the named row strictly higher", rows[0].Rank, rows[1].Rank)
+	}
+}
+
+// TestSearchStillFindsAWordOnlyAFieldCarries pins that weighting the
+// name did not turn search into a name lookup: a word that appears
+// nowhere but in a field is still found, and still found alone.
+func TestSearchStillFindsAWordOnlyAFieldCarries(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedSearchableType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "named", Name: "Gnoll",
+		Fields: map[string]any{"min_level": float64(1)},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "mentioned", Name: "Wanted: Hogger",
+		Fields: map[string]any{
+			"min_level": float64(1),
+			"summary":   "A gnoll camp led by a gnoll chieftain, gnoll banners everywhere.",
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	rows, err := svc.Search(ctx, project, "chieftain", "", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if got := searchKeys(rows); !equalStrings(got, []string{"mentioned"}) {
+		t.Fatalf("found %v, want only the row whose field carries the word", got)
 	}
 }
 

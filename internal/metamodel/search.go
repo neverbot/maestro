@@ -74,17 +74,23 @@ const MaxSearchQuery = 4 << 10
 // query side was unlimited, which is exactly what it used to be.
 //
 // **What it ranks by.** `ts_rank` over that column, which scores by how
-// many of the query's lexemes a row matches and how often. It is
-// *unweighted*: the column is one flat vector, so a row whose **name**
-// is the query does not outrank a row that merely mentions it in a
-// paragraph. That is a real limitation and not a decision this task
-// could make on its own — fixing it means `setweight` in UpsertEntity's
-// own statement, which is a write path, plus a rewrite of every row
-// already stored, since existing vectors carry no weights at all. **Task
-// 7 owns that call** when it decides what the search tool promises an
-// agent; until then the ranking is honest about being frequency-based,
-// and ties break by name and then id so two identical calls answer
-// identically.
+// many of the query's lexemes a row matches, how often, and — since
+// Task 7 settled this — under which weight. UpsertEntity writes the
+// name under label A and the whole text under label B, so **a row the
+// query names outranks a row that merely mentions the word in a
+// paragraph**, however often that paragraph repeats it. Task 6 shipped
+// this column unweighted and said so; 0006_weighted_entity_search.sql
+// is the migration that changed it and records why its backfill is an
+// exact function of the vectors that were already stored.
+//
+// The weights themselves come from `ts_rank`'s default array
+// ({D:0.1, C:0.2, B:0.4, A:1.0}); nothing here passes one. Ties break by
+// name and then id, so two identical calls answer identically.
+//
+// What this is *not* is a name lookup. A word that appears nowhere but
+// in a field is still found — TestSearchStillFindsAWordOnlyAFieldCarries
+// pins it — it simply ranks below a row that carries the word in its
+// name.
 //
 // **It matches across entity types**, which is the point: an agent
 // looking for "Hogger" does not know whether the game modelled him as a

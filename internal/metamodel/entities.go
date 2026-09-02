@@ -15,19 +15,6 @@ import (
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
 
-// BulkMode decides how a batch behaves when one item fails.
-type BulkMode string
-
-// The two bulk modes.
-const (
-	// BulkPartial lands the valid items and reports the rest. Default,
-	// because a first seeding pass always has a few bad rows and losing the
-	// other four hundred helps nobody.
-	BulkPartial BulkMode = "partial"
-	// BulkAtomic runs the whole batch in one transaction.
-	BulkAtomic BulkMode = "atomic"
-)
-
 // EntityInput is an upsert request, addressed by type key plus entity key.
 //
 // ExpectedVersion carries exactly the meaning EntityTypeInput's does, and
@@ -79,27 +66,6 @@ func (u upsertedEntity) event() entityEvent {
 	return entityEvent{ID: u.row.ID, TypeKey: u.typeKey, Key: u.row.Key}
 }
 
-// BulkFailure is one rejected item of a batch.
-//
-// Index and Key are what let a caller retry only what failed: an agent
-// seeding four hundred rows re-sends the handful named here rather than
-// the batch. Message is the item's own error, and what it holds depends
-// on the fault: a field path and a rule where the item's own arguments
-// or values are wrong (`schema_violation: fields.min_level: expected
-// number, got string`), and otherwise the plain reason the item was
-// refused, which may name nothing of the item at all (`not_found: no
-// entity type "quest" in this game`). What it never holds is another
-// item's values: a batch report is the one place a row's content could
-// leak into a neighbour's error, and
-// TestBulkPartialLandsTheGoodRowsAndReportsTheRest pins that it does
-// not.
-type BulkFailure struct {
-	Index   int    `json:"index"`
-	Key     string `json:"key"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
-
 // BulkResult reports what a batch did.
 //
 // Succeeded is `json:"-"` because a dbq.Entity is a database row and not
@@ -131,26 +97,20 @@ func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in Enti
 
 // UpsertEntities writes a batch in the requested mode.
 //
-// **The partial-failure contract, which is the whole point of the two
-// modes.** In BulkPartial every item is its own transaction: item 200
-// landing does not depend on item 3, the rows that fit are stored, and
-// the ones that do not come back in Failed with their index, their key
-// and the code that says how to fix them. The caller retries the named
-// items and nothing else. In BulkAtomic one bad row rolls the whole batch
-// back and the call returns an error naming the item that failed; nothing
-// is reported as done, because nothing was.
+// The batch machinery itself — the two modes and what each promises, the
+// per-item loop, the cancellation contract, the up-front duplicate check
+// and the mapping to a wire code — is bulk.go's, shared with every other
+// bulk write in this package. What is entity-shaped and stays here is
+// entityBulkSpec: what identifies an entity, what to say when a batch
+// names one twice, how one is written, and what is announced once it
+// lands.
 //
-// A partial batch therefore returns a nil error even when items failed —
-// the failures are the result, not an error — and an atomic batch returns
-// an error with an empty result. The one case that returns both is a
-// cancelled context: see the loop below.
-//
-// **A key repeated inside one batch** is refused by repeatedKeys before
-// it can be misdiagnosed, and the two modes answer it differently for
-// the reason each mode exists: in partial the later occurrence is a
-// per-item invalid_input failure and the rest of the batch is
-// undisturbed, and in atomic the whole batch is refused before anything
-// is written. Both arguments are at their call sites.
+// **A key repeated inside one batch** is refused before it can be
+// misdiagnosed, and the two modes answer it differently for the reason
+// each mode exists: in partial the later occurrence is a per-item
+// invalid_input failure and the rest of the batch is undisturbed, and in
+// atomic the whole batch is refused before anything is written. Both
+// arguments are at their call sites in bulk.go.
 //
 // In partial mode the later occurrence is refused **whether or not the
 // first one lands**: `[{key x, min_level: "not a number"}, {key x,
@@ -162,183 +122,62 @@ func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in Enti
 // other item's mistakes. Recorded in the core design's "Bulk writes"
 // too, because it costs an agent a round trip it can avoid by folding
 // repeated keys before it sends.
-//
-// Both modes publish only after their transaction has committed, and
-// publish one identity event per row that landed rather than one event
-// carrying a count: a count is a value, not an identity, and a
-// subscriber's only correct reaction to an entity event is to re-read the
-// rows it names.
 func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items []EntityInput, mode BulkMode) (BulkResult, error) {
-	switch mode {
-	case BulkAtomic:
-		return s.upsertEntitiesAtomic(ctx, projectID, items)
-	case BulkPartial, "":
-		// The empty mode is the documented default. An omitted argument is
-		// not a typo, and the spec names partial as the default.
-	default:
-		// Anything else is refused rather than read as partial. Task 7
-		// builds this value straight from an agent-supplied string, so a
-		// typo would otherwise silently downgrade an all-or-nothing
-		// request into one that lands rows the caller asked to have
-		// rolled back — a failure the caller has no way of seeing.
-		return BulkResult{}, &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
-			Path:    "mode",
-			Message: fmt.Sprintf("must be %q or %q", BulkPartial, BulkAtomic),
-		}}}
+	written, failed, err := bulkUpsert(ctx, s, items, mode, s.entityBulkSpec(projectID))
+	// The rows travel through the batch paired with their type key —
+	// upsertedEntity's whole reason for existing, so that a caller
+	// assembling events after its transaction has committed cannot pair a
+	// row with the wrong type key by getting an index wrong. The pairing
+	// has done its work by here, and what the caller is owed is rows.
+	var rows []dbq.Entity
+	for _, w := range written {
+		rows = append(rows, w.row)
 	}
-
-	repeats := repeatedKeys(items)
-	var result BulkResult
-	for i, in := range items {
-		// Before anything else this loop does with an item, including
-		// the faults it can diagnose without touching the database.
-		// Nothing else stops this loop: every item has its own
-		// transaction, so a cancelled caller would otherwise turn a
-		// 500-row batch into 500 failed round trips whose report nobody
-		// is left to read, and the call would still return nil, which
-		// reads as "the batch ran". The repeat check below used to run
-		// first and `continue` without consulting the context at all, so
-		// a batch whose trailing item was a repeat returned that nil
-		// after the caller had gone — the exact failure this guard
-		// exists to prevent, escaping through the one arm that never
-		// asked. Whatever had already landed is returned with the error,
-		// because rows landing before the cancellation is partial mode's
-		// contract rather than a fact to hide.
-		if err := ctx.Err(); err != nil {
-			return result, fmt.Errorf("bulk upsert stopped at item %d: %w", i, err)
-		}
-
-		// A repeated key is the item's own fault and needs no round trip
-		// to diagnose. In partial mode it fails alone: the first
-		// occurrence is a perfectly good item, and refusing the batch
-		// over it would throw away the other three hundred rows, which
-		// is the failure this mode exists to prevent.
-		if problem, ok := repeats[i]; ok {
-			result.Failed = append(result.Failed, failureFor(i, in.Key,
-				&ValidationError{Code: codeInvalidInput, Fields: []FieldError{problem}}))
-			continue
-		}
-
-		var written upsertedEntity
-		err := s.withTx(ctx, func(q *dbq.Queries) error {
-			var err error
-			written, err = s.upsertEntityWith(ctx, q, projectID, in)
-			return err
-		})
-		if err != nil {
-			// The guard above only catches a cancellation that lands
-			// *between* two items. The ordinary case is the other one:
-			// the caller goes away while an item is in flight, that
-			// item's own transaction fails with the cancellation, and
-			// failureFor would file it as internal_error — the code
-			// reserved for what nobody planned for. One cancellation
-			// would then surface twice, once as this stop error and once
-			// as a server fault against an item whose only problem was
-			// that nobody was left to hear about it. The cancellation
-			// can also land between the write and the commit, where the
-			// two are indistinguishable from in here.
-			if stopped := ctx.Err(); stopped != nil {
-				return result, fmt.Errorf("bulk upsert stopped at item %d: %w", i, stopped)
-			}
-			result.Failed = append(result.Failed, failureFor(i, in.Key, err))
-			continue
-		}
-		result.Succeeded = append(result.Succeeded, written.row)
-		s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly, written.event())
-	}
-	return result, nil
+	return BulkResult{Succeeded: rows, Failed: failed}, err
 }
 
-func (s *Service) upsertEntitiesAtomic(ctx context.Context, projectID uuid.UUID, items []EntityInput) (BulkResult, error) {
-	// Refused before anything is written, and refused whole. An atomic
-	// batch that names one row twice cannot be satisfied as submitted —
-	// the caller asked for n rows and at most n-1 can exist — and there
-	// is no per-item answer to give in a mode that lands everything or
-	// nothing. Doing it up front also makes the report deterministic:
-	// left to the writes, a repetition surfaces as whichever conflict
-	// the two items' versions happen to produce, and two items chaining
-	// the versions the other will leave behind both commit, so
-	// Succeeded comes back carrying the same row id twice and the caller
-	// is told two rows landed where one exists.
-	if repeats := repeatedKeys(items); len(repeats) > 0 {
-		fields := make([]FieldError, 0, len(repeats))
-		for i := range items {
-			if problem, ok := repeats[i]; ok {
-				fields = append(fields, problem)
-			}
-		}
-		return BulkResult{}, &ValidationError{Code: codeInvalidInput, Fields: fields}
-	}
-
-	var (
-		rows   []dbq.Entity
-		events []entityEvent
-	)
-	err := s.withTx(ctx, func(q *dbq.Queries) error {
-		rows, events = nil, nil
-		for i, in := range items {
-			written, err := s.upsertEntityWith(ctx, q, projectID, in)
-			if err != nil {
-				// The index and the key name the item to fix, and %w keeps
-				// the code — schema_violation, invalid_input, whichever —
-				// matchable through the wrapping.
-				return fmt.Errorf("item %d (%q): %w", i, in.Key, err)
-			}
-			rows = append(rows, written.row)
-			events = append(events, written.event())
-		}
-		return nil
-	})
-	if err != nil {
-		return BulkResult{}, err
-	}
-	for _, event := range events {
-		s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly, event)
-	}
-	return BulkResult{Succeeded: rows}, nil
-}
-
-// repeatedKeys finds the items of a batch that address a row an earlier
-// item already addressed, keyed by index and carrying the problem to
-// report.
-//
-// A seeding agent building a batch from a file produces this by
-// accident, and it is the one fault a batch can hold that the database
-// cannot diagnose: the two items are one row, so the second is refused
-// as a version conflict against a caller that never claimed a version —
-// which sends an agent to re-read the row and retry with the version it
-// is handed, at which point its own second item quietly overwrites its
-// first. The real answer is that the key appears twice, and only the
-// batch can see that.
+// entityBulkSpec is the entity half of a bulk write: everything bulk.go
+// deliberately does not know.
 //
 // Identity is (type key, key), both folded, because that is what the
 // unique index folds: one key under two types is two rows. Folding with
 // strings.ToLower is exact here — rowKeyPattern admits ASCII only, so
 // there is no case where it and the index's lower() can disagree — and
 // an item whose key is malformed enough to escape that is refused on its
-// own arguments anyway.
-func repeatedKeys(items []EntityInput) map[int]FieldError {
-	type identity struct{ typeKey, key string }
-	first := make(map[identity]int, len(items))
-	var repeats map[int]FieldError
-	for i, in := range items {
-		id := identity{strings.ToLower(in.TypeKey), strings.ToLower(in.Key)}
-		if at, seen := first[id]; seen {
-			if repeats == nil {
-				repeats = make(map[int]FieldError)
-			}
-			repeats[i] = FieldError{
+// own arguments anyway. The two parts are joined length-prefixed rather
+// than with a separator: bulk.go folds an item to one string, a type key
+// is not validated here at all — an unknown one is answered by the
+// lookup, not by a pattern — and no character can be assumed absent from
+// it, so ("ab", "c") and ("a", "bc") must not be able to meet in the
+// middle and have one refused as a repetition of the other.
+//
+// The message names both indices and the case-folding rule, because the
+// caller cannot see either from what it sent: a batch built from a file
+// repeats a key by accident, and the two spellings need not match.
+func (s *Service) entityBulkSpec(projectID uuid.UUID) bulkSpec[EntityInput, upsertedEntity] {
+	return bulkSpec[EntityInput, upsertedEntity]{
+		identity: func(in EntityInput) string {
+			typeKey := strings.ToLower(in.TypeKey)
+			return fmt.Sprintf("%d:%s:%s", len(typeKey), typeKey, strings.ToLower(in.Key))
+		},
+		key: func(in EntityInput) string { return in.Key },
+		repeated: func(i, first int, in EntityInput) FieldError {
+			return FieldError{
 				Path: fmt.Sprintf("items[%d].key", i),
 				Message: fmt.Sprintf(
 					"%q is already addressed by item %d of this batch, and keys are matched "+
 						"without regard to case: give one of the two items a different key, "+
-						"or merge them into one", in.Key, at),
+						"or merge them into one", in.Key, first),
 			}
-			continue
-		}
-		first[id] = i
+		},
+		write: func(ctx context.Context, q *dbq.Queries, in EntityInput) (upsertedEntity, error) {
+			return s.upsertEntityWith(ctx, q, projectID, in)
+		},
+		publish: func(written upsertedEntity) {
+			s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly,
+				written.event())
+		},
 	}
-	return repeats
 }
 
 // upsertEntityWith does the work against any queries handle, so the same
@@ -595,40 +434,4 @@ func searchTextOf(values map[string]any) string {
 		write(values[k])
 	}
 	return b.String()
-}
-
-// failureFor maps a domain error to the wire shape of a bulk failure.
-//
-// Every wire code in errors.go has an arm here. The default arm is
-// internal_error, which is the honest answer for something nobody
-// planned for — and precisely the wrong answer for a malformed key, so
-// ErrInvalidInput is matched explicitly: it is a caller's own argument,
-// at a path, fixable in place, and reporting it as internal_error tells
-// an agent to give up on a call it could have fixed.
-//
-// ErrActorNotInGame is deliberately *not* given an arm. It is not a wire
-// code, for the reason errors.go records — the actor is never
-// caller-supplied, so an agent can do nothing about it — and
-// internal_error is the correct report for a fault it cannot fix.
-func failureFor(index int, key string, err error) BulkFailure {
-	f := BulkFailure{Index: index, Key: key, Message: err.Error()}
-	switch {
-	case errors.Is(err, ErrInvalidInput):
-		f.Code = "invalid_input"
-	case errors.Is(err, ErrSchemaViolation):
-		f.Code = "schema_violation"
-	case errors.Is(err, ErrInvalidSchema):
-		f.Code = "invalid_schema"
-	case errors.Is(err, ErrVersionConflict):
-		f.Code = "version_conflict"
-	case errors.Is(err, ErrNotFound):
-		f.Code = "not_found"
-	case errors.Is(err, ErrEndpointTypeMismatch):
-		f.Code = "endpoint_type_mismatch"
-	case errors.Is(err, ErrInUse):
-		f.Code = "in_use"
-	default:
-		f.Code = "internal_error"
-	}
-	return f
 }

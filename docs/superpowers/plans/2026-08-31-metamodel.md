@@ -4045,6 +4045,45 @@ ordering-and-wording fixes, and two things the plan was not saying):
     pins it so the claim stays true, proved red by disabling the partial
     path's repeat arm.
 
+26. **The batch machinery is extracted, before Task 5 copies it.** The
+    bulk loop, the two modes and their dispatch, the cancellation
+    contract, the up-front duplicate check and `failureFor` all lived in
+    `entities.go` and were all entity-shaped. Relations fold on
+    (relation type, source, target) rather than on (type key, key), so
+    Task 5 writing its own would have produced a second duplicate
+    detector, a second context guard and a second copy of every finding
+    the last three review rounds closed — three of them the cancellation
+    guard alone — to be reviewed and fixed twice from then on.
+
+    `internal/metamodel/bulk.go` now holds `BulkMode`, `BulkFailure`,
+    `failureFor`, `bulkUpsert` and its two mode arms, and
+    `repeatedIdentities`. What differs per kind is a `bulkSpec`: the
+    identity two items are folded to, the `FieldError` to report when two
+    share it, the name a failure carries, the per-item write, and the
+    publish that runs only after the commit. `entityBulkSpec` supplies
+    the entity half, and `UpsertEntities` is now the spec plus the
+    unwrapping of `upsertedEntity` into the rows a caller is owed.
+    `BulkResult` stays in `entities.go` with `Succeeded []dbq.Entity`:
+    making it generic would have changed a public type every caller and
+    test names, and the batch driver does not need it.
+
+    **No test changed, which was the acceptance test for the
+    extraction.** Every existing assertion passed against the extracted
+    code unedited, and the seam was re-mutated afterwards to confirm the
+    old tests still reach it: dropping either cancellation check, the
+    atomic repeat refusal, moving the atomic publish inside the
+    transaction, reading an unknown mode as partial, and dropping
+    `failureFor`'s `invalid_input` arm each turned the suite red, naming
+    the same tests as before.
+
+    **Task 5's printed blocks predate this file.** Where they show a
+    relation batch reproducing the loop, the loop is `bulkUpsert`'s and
+    what Task 5 writes is a `bulkSpec` — its own identity (relation
+    type, source, target, folded as that unique index folds), its own
+    repetition message (the advice "give one of the two a different key"
+    says nothing about a pair of edges sharing their endpoints), its own
+    write and its own publish.
+
 **The partial-failure contract, stated once.** In `BulkPartial` each item
 is its own transaction: the rows that fit land, the ones that do not come
 back in `Failed` with their index, their key and their code, and the

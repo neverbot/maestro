@@ -1278,10 +1278,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"Full-text search over a game's entities, across every type unless type_key "+
 				"narrows it — an agent looking for a name rarely knows whether the game "+
 				"modelled it as a quest, a creature or a place.\n\n"+
-				"**Ranking.** A row whose *name* matches the query outranks a row that only "+
-				"mentions the word in a field, however often it mentions it; below that, rank "+
-				"goes by how many of the query's words a row matches and how often. Ties break "+
-				"by name.\n\n"+
+				"**Ranking.** Every row whose *name* satisfies the query comes before every "+
+				"row that only mentions the words in a field, however often it mentions them "+
+				"— that is a guarantee and not a tendency. Within each of those two groups, "+
+				"rank goes by how many of the query's words a row matches and how often. Ties "+
+				"break by name.\n\n"+
 				"**What is indexed.** A row's name plus the text its values carry: text, "+
 				"longtext, the chosen option of an enum, and the elements of a list<text>. "+
 				"Numbers and booleans are not — filter for those with entities.list. Only the "+

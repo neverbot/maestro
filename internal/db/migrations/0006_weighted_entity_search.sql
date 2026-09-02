@@ -34,6 +34,14 @@
 -- (metamodel.sql) and nowhere else; the weights stored here are just
 -- labels.
 --
+-- **The weights are not what keeps a named row on top, and this
+-- migration alone never did that.** `ts_rank` saturates as a lexeme
+-- repeats, so the A weight wins for a single word and loses for a
+-- multi-word query against a field that repeats it a few times (review
+-- finding M1). SearchEntities leads its ORDER BY with a predicate over
+-- the A half of this column, which is what makes the promise hold; the
+-- labels written here are what that predicate reads.
+--
 -- `coalesce` because `entities.search` is nullable: every row written
 -- through UpsertEntity has one, but `NULL || anything` is NULL and a
 -- migration must not be the thing that empties an index.

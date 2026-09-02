@@ -179,51 +179,73 @@ func TestASearchWithNoWordInItIsRefused(t *testing.T) {
 
 // TestSearchRanksTheNameMatchFirst pins the ranking Task 7 settled: a
 // row whose **name** is the query outranks a row that merely mentions
-// the word in a field, however often it mentions it.
+// the words in a field, however often it mentions them.
 //
-// This is the test Task 6 said would have to change, and this is the
-// change. It used to be TestSearchRanksTheStrongerMatchFirst and it
-// asserted the opposite order — "mentioned" first, because the vector
-// was unweighted and the row carrying the word three times simply
-// matched more often. UpsertEntity now builds the vector as
-// setweight(name, 'A') || setweight(name || fields, 'B'), and ts_rank's
-// default weights (A=1.0, B=0.4) put the named row first.
+// This is the test Task 6 said would have to change. It used to be
+// TestSearchRanksTheStrongerMatchFirst and it asserted the opposite
+// order — "mentioned" first, because the vector was unweighted and the
+// row carrying the word three times simply matched more often.
 //
-// The mentioned row here carries the word three times against the named
-// row's once, so the assertion cannot pass on frequency: the weights are
-// the only thing that can produce this order.
+// **It covered only the single-word case, and the promise was false for
+// every other one — review finding M1.** Weights alone do not deliver
+// it: `ts_rank` saturates towards 1.0 as a lexeme repeats, so one word
+// under the A weight wins comfortably, but a multi-word query is a
+// weighted sum of several saturating terms and the frequency side
+// overtakes the name side. Four repetitions of a two-word phrase in a
+// lore field were enough to rank that row above the entity actually
+// named the phrase. SearchEntities now leads its ORDER BY with a
+// name-match predicate over the A-weighted half of the vector, which
+// makes the promise a guarantee instead of a tendency, and rank still
+// orders within each group. The SQL comment argues the choice.
+//
+// The mentioned row carries the query far more often than the named row
+// does in every case below, so no assertion here can pass on frequency.
 func TestSearchRanksTheNameMatchFirst(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
-	project := newProject(t, pool)
-	seedSearchableType(t, svc, project)
 
-	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
-		TypeKey: "quest", Key: "named", Name: "Gnoll",
-		Fields: map[string]any{"min_level": float64(1)},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
-		TypeKey: "quest", Key: "mentioned", Name: "Wanted: Hogger",
-		Fields: map[string]any{
-			"min_level": float64(1),
-			"summary":   "A gnoll camp led by a gnoll chieftain, gnoll banners everywhere.",
-		},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	for _, tc := range []struct {
+		name, entityName, query string
+		repeats                 int
+	}{
+		{"one word", "Gnoll", "gnoll", 3},
+		// The reviewer's case, and then far past where it broke: the
+		// old ranking lost this at four repetitions.
+		{"two words", "Gnoll Pack", "gnoll pack", 4},
+		{"two words, repeated until the field dwarfs the name", "Gnoll Pack", "gnoll pack", 500},
+		{"three words", "Riverpaw Gnoll Pack", "riverpaw gnoll pack", 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			project := newProject(t, pool)
+			seedSearchableType(t, svc, project)
 
-	rows, err := svc.Search(ctx, project, "gnoll", "", 10)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if got := searchKeys(rows); !equalStrings(got, []string{"named", "mentioned"}) {
-		t.Fatalf("ranking = %v, want the row the query names first", got)
-	}
-	if rows[0].Rank <= rows[1].Rank {
-		t.Fatalf("ranks are %v and %v, want the named row strictly higher", rows[0].Rank, rows[1].Rank)
+			if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+				TypeKey: "quest", Key: "named", Name: tc.entityName,
+				Fields: map[string]any{"min_level": float64(1)},
+			}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+				TypeKey: "quest", Key: "mentioned", Name: "Wanted: Hogger",
+				Fields: map[string]any{
+					"min_level": float64(1),
+					"summary": strings.TrimSpace(strings.Repeat(
+						"A "+tc.entityName+" camp led by a "+tc.entityName+" chieftain. ",
+						tc.repeats)),
+				},
+			}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+
+			rows, err := svc.Search(ctx, project, tc.query, "", 10)
+			if err != nil {
+				t.Fatalf("Search: %v", err)
+			}
+			if got := searchKeys(rows); !equalStrings(got, []string{"named", "mentioned"}) {
+				t.Fatalf("ranking = %v, want the row the query names first", got)
+			}
+		})
 	}
 }
 

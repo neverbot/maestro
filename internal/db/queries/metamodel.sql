@@ -232,9 +232,12 @@ FOR UPDATE;
 --
 -- search is written by this statement and by nothing else, on both arms
 -- of the upsert. **It is weighted**: the name goes in twice, once alone
--- under label A and once as the head of the whole text under label B, so
--- that ts_rank puts a row the query names above a row that merely
--- mentions the word. 0006_weighted_entity_search.sql records why the B
+-- under label A and once as the head of the whole text under label B.
+-- The A half is what SearchEntities' leading sort key reads to put a row
+-- the query names above a row that merely mentions the words — see its
+-- own comment for why that is a sort key and not a weight — and the
+-- weights order the rows within each of those two groups.
+-- 0006_weighted_entity_search.sql records why the B
 -- half carries the name rather than the fields alone — it is what makes
 -- that migration's backfill an exact function of the vector this
 -- statement used to write, so a migrated row and a re-seeded row rank
@@ -530,6 +533,34 @@ LIMIT sqlc.arg('limit')::int;
 -- neither rank nor name is unique, and an order that can tie reshuffles
 -- its ties between two identical calls.
 --
+-- **name_match leads the ordering, and it is what makes the ranking
+-- promise true rather than usually true — review finding M1.** The
+-- promise the tool description and Search's doc comment both make is
+-- that a row the query *names* outranks a row that only mentions the
+-- words in a field, however often it mentions them. Weights alone do
+-- not deliver that. `ts_rank` saturates towards 1.0 as a lexeme
+-- repeats, so for a single word the A weight wins comfortably, but for
+-- a multi-word query the weighted sum of several saturating terms
+-- overtakes it: four repetitions of a two-word phrase in a lore field
+-- were enough to beat the entity actually named that phrase. An
+-- explicit weight array only moves the number of repetitions it takes,
+-- because the shape of the curve is the problem and not its scale.
+--
+-- `ts_filter(e.search, '{a}')` keeps only the A-weighted lexemes, which
+-- 0006_weighted_entity_search.sql and UpsertEntity both build from the
+-- row's name and nothing else, so this predicate asks exactly the
+-- question the promise is about: does the *name* satisfy the query. As
+-- a leading sort key it is a guarantee rather than a tendency — no
+-- amount of repetition in a field can lift a row past one whose name
+-- matches — and `rank` still orders within each of the two groups, so
+-- the weights keep doing the work they were introduced for.
+--
+-- After 0006's Down arm `strip` has removed every weight, so this
+-- predicate is uniformly false and the ordering falls back to rank
+-- alone. That is the same degradation that migration already documents
+-- for a downgraded database: search works, it just ranks the old way
+-- until its rows are rewritten.
+--
 -- The tsquery is built twice, in the projection and in the predicate,
 -- because a WHERE cannot refer to an output column's alias. **The
 -- planner does not fold the two into one**, which this comment used to
@@ -551,10 +582,12 @@ LIMIT sqlc.arg('limit')::int;
 -- correct selectivity estimate on every search for 0.8 ms on the largest
 -- accepted query is the wrong way round; whoever raises MaxSearchQuery
 -- should measure both again.
-SELECT e.*, ts_rank(e.search, plainto_tsquery('simple', sqlc.arg('query')::text)) AS rank
+SELECT e.*,
+       ts_rank(e.search, plainto_tsquery('simple', sqlc.arg('query')::text)) AS rank,
+       ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', sqlc.arg('query')::text) AS name_match
 FROM entities e
 WHERE e.project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('entity_type_id')::uuid IS NULL OR e.entity_type_id = sqlc.narg('entity_type_id')::uuid)
   AND e.search @@ plainto_tsquery('simple', sqlc.arg('query')::text)
-ORDER BY rank DESC, e.name, e.id
+ORDER BY name_match DESC, rank DESC, e.name, e.id
 LIMIT sqlc.arg('limit')::int;

@@ -73,19 +73,35 @@ const MaxSearchQuery = 4 << 10
 // together because a caller reading only the index one would think the
 // query side was unlimited, which is exactly what it used to be.
 //
-// **What it ranks by.** `ts_rank` over that column, which scores by how
-// many of the query's lexemes a row matches, how often, and — since
-// Task 7 settled this — under which weight. UpsertEntity writes the
-// name under label A and the whole text under label B, so **a row the
-// query names outranks a row that merely mentions the word in a
-// paragraph**, however often that paragraph repeats it. Task 6 shipped
-// this column unweighted and said so; 0006_weighted_entity_search.sql
-// is the migration that changed it and records why its backfill is an
-// exact function of the vectors that were already stored.
+// **What it ranks by.** Two keys, in this order.
 //
-// The weights themselves come from `ts_rank`'s default array
-// ({D:0.1, C:0.2, B:0.4, A:1.0}); nothing here passes one. Ties break by
-// name and then id, so two identical calls answer identically.
+// First, whether the row's *name* satisfies the query. UpsertEntity
+// writes the name under label A and the whole text under label B, and
+// SearchEntities leads its ORDER BY with `ts_filter(search, '{a}') @@
+// query` — the A half is the name and nothing else, so this asks
+// exactly the question the promise is about. **A row the query names
+// therefore outranks a row that merely mentions the words in a
+// paragraph, however often that paragraph repeats them**, and that is a
+// guarantee rather than a tendency.
+//
+// It has to be a sort key and not a weight, which is review finding M1.
+// `ts_rank` saturates towards 1.0 as a lexeme repeats, so with the
+// weights alone one word under label A wins comfortably but a
+// multi-word query does not: it is a weighted sum of several saturating
+// terms, and four repetitions of a two-word phrase in a lore field were
+// enough to beat the entity actually named that phrase. An explicit
+// weight array only moves the number of repetitions it takes. Task 6
+// shipped this column unweighted and said so; 0006_weighted_entity_
+// search.sql weighted it and records why its backfill is an exact
+// function of the vectors that were already stored.
+//
+// Second, `ts_rank` over the whole column, which scores by how many of
+// the query's lexemes a row matches, how often, and under which weight.
+// It orders within each of the two groups, which is the work the
+// weights were introduced for. The weights come from `ts_rank`'s
+// default array ({D:0.1, C:0.2, B:0.4, A:1.0}); nothing here passes one.
+// Ties break by name and then id, so two identical calls answer
+// identically.
 //
 // What this is *not* is a name lookup. A word that appears nowhere but
 // in a field is still found — TestSearchStillFindsAWordOnlyAFieldCarries

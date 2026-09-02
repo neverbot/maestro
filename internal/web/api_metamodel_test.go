@@ -777,3 +777,121 @@ func TestATokenMayReadItsOwnGamesContentAndNoOthers(t *testing.T) {
 	assertError(t, send("/api/games/"+other.ID.String()+"/types"),
 		http.StatusForbidden, "scope_violation", "")
 }
+
+// invalidAndValidQuests declares the quest type, writes two rows, then
+// narrows the schema so exactly one of them stops fitting. It returns
+// the key of the row that is now invalid and the key of the one that is
+// still valid.
+func invalidAndValidQuests(t *testing.T, f restFixture) (invalid, valid string) {
+	t.Helper()
+	questType(t, f)
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
+		map[string]any{"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger"},
+		map[string]any{"type_key": "quest", "key": "kobolds", "name": "Kobolds",
+			"fields": map[string]any{"min_level": 5}},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("seed = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests", "expected_version": 1,
+		"field_schema": []any{map[string]any{"key": "min_level", "type": "number", "required": true}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("narrow = %d: %s", rec.Code, rec.Body.String())
+	}
+	return "hogger", "kobolds"
+}
+
+// entityKeys lists entities under the given query string and returns
+// their keys.
+func entityKeys(t *testing.T, f restFixture, query string) []string {
+	t.Helper()
+	rec := f.as(t, http.MethodGet, "/entities"+query, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list %q = %d: %s", query, rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Items []struct {
+			Key string `json:"key"`
+		} `json:"items"`
+	}
+	decodeBody(t, rec, &page)
+	keys := make([]string, 0, len(page.Items))
+	for _, item := range page.Items {
+		keys = append(keys, item.Key)
+	}
+	return keys
+}
+
+// TestTheInvalidFilterIsTriStateAndRefusesAnythingElse pins the filter
+// that decides whether a designer sees the rows the home page told them
+// to fix. `invalid` has three states — absent, true, false — so the
+// leniency the flag parameters get does not apply to it: an unrecognised
+// spelling has no "other meaning" to fall back on, and reading it as
+// false answers "show me the broken rows" with exactly the rows that are
+// fine. It is refused at its own path instead.
+func TestTheInvalidFilterIsTriStateAndRefusesAnythingElse(t *testing.T) {
+	f := newRESTFixture(t)
+	invalid, valid := invalidAndValidQuests(t, f)
+
+	if got := entityKeys(t, f, "?type_key=quest"); len(got) != 2 {
+		t.Fatalf("unfiltered = %v, want both rows", got)
+	}
+	if got := entityKeys(t, f, "?type_key=quest&invalid=true"); len(got) != 1 || got[0] != invalid {
+		t.Fatalf("invalid=true = %v, want only %q", got, invalid)
+	}
+	if got := entityKeys(t, f, "?type_key=quest&invalid=false"); len(got) != 1 || got[0] != valid {
+		t.Fatalf("invalid=false = %v, want only %q", got, valid)
+	}
+	// The other accepted spellings of each side, so the parsing is
+	// pinned and not only the two canonical words.
+	if got := entityKeys(t, f, "?type_key=quest&invalid=1"); len(got) != 1 || got[0] != invalid {
+		t.Fatalf("invalid=1 = %v, want only %q", got, invalid)
+	}
+	if got := entityKeys(t, f, "?type_key=quest&invalid=0"); len(got) != 1 || got[0] != valid {
+		t.Fatalf("invalid=0 = %v, want only %q", got, valid)
+	}
+
+	for _, raw := range []string{"maybe", "nope", "sometimes", "2"} {
+		rec := f.as(t, http.MethodGet, "/entities?type_key=quest&invalid="+raw, nil)
+		assertError(t, rec, http.StatusBadRequest, "invalid_input", "invalid")
+	}
+}
+
+// TestAStatedProjectIDIsJudgedTheWayTheMCPSurfaceJudgesIt closes the two
+// divergences a review found between checkStatedProject and the rule
+// ScopedArgs states, both of which this surface used to get wrong: a
+// project_id that is not a uuid names no game at all, so calling it "a
+// different game than the URL" is false and `scope_violation` is the
+// wrong code; and an empty project_id is not the same as no project_id —
+// the MCP surface refuses it, and accepting it here made the field's
+// presence mean nothing.
+func TestAStatedProjectIDIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
+	f := newRESTFixture(t)
+	declare := func(projectID any) *httptest.ResponseRecorder {
+		return f.as(t, http.MethodPost, "/types", map[string]any{
+			"project_id": projectID,
+			"key":        "quest", "label": "Quest", "label_plural": "Quests",
+		})
+	}
+
+	// Not a uuid: the caller's own argument, not a scope violation.
+	body := assertError(t, declare("not-a-uuid"), http.StatusBadRequest, "bad_request", "")
+	if !strings.Contains(body.Message, "uuid") {
+		t.Errorf("message = %q, want it to say the value is not a uuid", body.Message)
+	}
+
+	// Empty: present and unparseable, which is the same refusal. The
+	// field is a confirmation, and an empty confirmation confirms
+	// nothing.
+	assertError(t, declare(""), http.StatusBadRequest, "bad_request", "")
+
+	// And the rule the field exists for still holds in both directions.
+	other, err := f.proj.Create(context.Background(), "monza", "Monza", f.ownerID)
+	if err != nil {
+		t.Fatalf("Create other game: %v", err)
+	}
+	assertError(t, declare(other.ID.String()), http.StatusForbidden, "scope_violation", "")
+	if rec := declare(f.game.String()); rec.Code != http.StatusOK {
+		t.Fatalf("agreeing project_id = %d: %s", rec.Code, rec.Body.String())
+	}
+}

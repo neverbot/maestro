@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/roles"
 )
@@ -129,17 +127,24 @@ func decodeContentBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // and it is the dangerous one: a client that has lost track of which
 // game it is editing would be told its write succeeded, in the other
 // game, which is exactly the mistake the field exists to catch.
+//
+// The judgement itself is statedProjectProblem's (mcp.go), which both
+// surfaces call, so "the same rule" is a shared function and not two
+// switches that agreed when they were written. Only the message is this
+// surface's own: the caller here holds a session, not a token, and the
+// URL is what it disagreed with.
 func checkStatedProject(w http.ResponseWriter, scope ProjectScope, in scopedInput) bool {
-	stated := in.requestedProjectID()
-	if stated == nil || *stated == "" {
-		return true
+	switch statedProjectProblem(in.requestedProjectID(), scope.ProjectID) {
+	case errCodeBadRequest:
+		writeError(w, http.StatusBadRequest, errCodeBadRequest,
+			"project_id must be a valid uuid")
+		return false
+	case errCodeScopeViolation:
+		writeError(w, http.StatusForbidden, errCodeScopeViolation,
+			"the project_id in this request names a different game than the URL")
+		return false
 	}
-	if id, err := uuid.Parse(*stated); err == nil && id == scope.ProjectID {
-		return true
-	}
-	writeError(w, http.StatusForbidden, errCodeScopeViolation,
-		"the project_id in this request names a different game than the URL")
-	return false
+	return true
 }
 
 // writeDomainError maps a domain error onto an HTTP status and the same
@@ -378,10 +383,11 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 		Limit:   limit,
 		Verbose: queryBool(r, "verbose"),
 	}
-	if raw := r.URL.Query().Get("invalid"); raw != "" {
-		invalid := queryBool(r, "invalid")
-		in.Invalid = &invalid
+	invalid, ok := queryTriState(w, r, "invalid")
+	if !ok {
+		return
 	}
+	in.Invalid = invalid
 	// related_to is spelled with dotted parameter names so one query
 	// string can carry a nested filter without inventing an encoding:
 	// related_to.relation_type_key, .entity_type_key, .entity_key,
@@ -534,6 +540,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 // deliberately lenient where queryLimit is strict: a flag has exactly
 // two meanings and an unrecognised spelling of one of them can only mean
 // the other, whereas a limit of "lots" has no defensible reading at all.
+// That argument only holds for a genuine two-state flag — `cascade` and
+// `verbose`, its only callers. A filter whose absence is a third state
+// goes through queryTriState instead.
 func queryBool(r *http.Request, name string) bool {
 	switch strings.ToLower(r.URL.Query().Get(name)) {
 	case "1", "true", "yes", "on":
@@ -541,6 +550,38 @@ func queryBool(r *http.Request, name string) bool {
 	default:
 		return false
 	}
+}
+
+// queryTriState reads a filter that has three states rather than two:
+// absent (nil — do not filter), true, and false. It is deliberately
+// strict where queryBool is lenient, and the difference is the third
+// state: queryBool's justification is that a flag has exactly two
+// meanings, so an unrecognised spelling of one can only mean the other,
+// and that argument does not survive a filter whose absence is itself a
+// meaning. `?invalid=maybe` read as false is not a near miss — it
+// answers a designer asking for the rows that no longer fit their type
+// with exactly the rows that do, which is the "wrong answer that looks
+// like a right one" handleListEntities refuses everywhere else.
+//
+// Both spellings of both sides are accepted, and anything else is the
+// caller's own argument at its own path.
+func queryTriState(w http.ResponseWriter, r *http.Request, name string) (*bool, bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return nil, true
+	}
+	var value bool
+	switch strings.ToLower(raw) {
+	case "1", "true", "yes", "on":
+		value = true
+	case "0", "false", "no", "off":
+		value = false
+	default:
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, name+" is not true or false",
+			map[string]any{"fields": []map[string]string{{"path": name, "message": "is not true or false"}}})
+		return nil, false
+	}
+	return &value, true
 }
 
 // queryLimit reads the page limit. Absent is zero, which every listing

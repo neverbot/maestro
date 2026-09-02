@@ -23,8 +23,15 @@ const noVersion int32 = -1
 //
 // ExpectedVersion must match the stored version when the type already
 // exists; a nil ExpectedVersion against an existing type is a conflict,
-// not an overwrite. On creation there is nothing to match and the field is
-// ignored, so a seeding script may pass the same value on every run.
+// not an overwrite.
+//
+// On creation there is nothing to match, but the field is *not* ignored:
+// it is still passed as the guard on the upsert's DO UPDATE, because a
+// caller that believes it is creating may in fact be racing a creator, and
+// the guard is the only thing standing between the loser of that race and
+// a silent overwrite. A seeding script may therefore pass the same value
+// on every run, but a value it did not read from this service is not a
+// free pass — it is a claim about a row, checked as one.
 type EntityTypeInput struct {
 	Key             string
 	Label           string
@@ -107,6 +114,19 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 		}
 		if err != nil {
 			return fmt.Errorf("upsert entity type: %w", err)
+		}
+		// The locked read above cannot be the only place the spelling is
+		// checked. It runs before the write and only ever sees a row that is
+		// already visible, so on the creation path — where there is nothing
+		// to lock — a writer racing a creator, holding an ExpectedVersion
+		// that happens to match the version the winner lands on, passed both
+		// the read and the guarded DO UPDATE and updated a row it never saw,
+		// stored under a different spelling, returning no error at all. The
+		// upsert returns the row it actually touched, so comparing the stored
+		// spelling to the submitted one *after* the write closes the pre-read
+		// path and the race with one check; withTx rolls the write back.
+		if row.Key != in.Key {
+			return keyRespellingError("key", in.Key, row.Key)
 		}
 
 		// A schema change can invalidate stored rows. Re-check them rather

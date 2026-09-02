@@ -686,3 +686,141 @@ func newUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 	}
 	return id
 }
+
+// TestARaceThatWouldLandUnderAnotherSpellingIsRefused is the regression
+// test for a hole the pre-read alone could not close.
+//
+// The spelling refusal used to live only in the locked read at the top of
+// UpsertEntityType, which happens *before* the guarded write and only sees
+// a row that is already visible. On the creation path there is no row to
+// lock, so a writer racing a creator — and carrying an ExpectedVersion
+// that happens to match the version the winner lands on — sailed straight
+// through the ON CONFLICT ... DO UPDATE WHERE version = @expected_version
+// and updated a row it never read, stored under a different spelling. The
+// call returned no error at all, which is the one outcome correction 4
+// rules out.
+//
+// The interleaving is driven by an open rival transaction rather than a
+// second goroutine, so it is the test's to choose and not the scheduler's.
+func TestARaceThatWouldLandUnderAnotherSpellingIsRefused(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	rival, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	if _, err := rival.Exec(ctx,
+		`INSERT INTO entity_types (project_id, key, label, label_plural)
+		 VALUES ($1, 'Hogger', 'Hogger', 'Hoggers')`, project); err != nil {
+		t.Fatalf("rival insert: %v", err)
+	}
+
+	// The rival's row is invisible to this upsert's own locked read — an
+	// uncommitted row is not there to be seen or locked — so it takes the
+	// creation path and then blocks on the unique index. ExpectedVersion 1
+	// is exactly the version the rival's insert lands on, so the guard on
+	// the DO UPDATE cannot refuse this write either.
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+			Key: "hogger", Label: "MINE", LabelPlural: "MINE",
+			ExpectedVersion: ptrInt32(1),
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("the upsert returned %v before the rival committed; it should have blocked", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := rival.Commit(ctx); err != nil {
+		t.Fatalf("rival commit: %v", err)
+	}
+
+	select {
+	case err := <-result:
+		requireFieldError(t, err, "key",
+			`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
+				`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upsert never returned after the rival committed")
+	}
+
+	// The refusal has to roll the write back, not merely report it: the
+	// bypass this test exists for landed the label under the rival's
+	// spelling and bumped the version while returning nil.
+	row, err := svc.EntityTypeByKey(ctx, project, "hogger")
+	if err != nil {
+		t.Fatalf("EntityTypeByKey: %v", err)
+	}
+	if row.Key != "Hogger" || row.Label != "Hogger" || row.Version != 1 {
+		t.Fatalf("the losing writer changed the row: %+v", row)
+	}
+}
+
+// TestACreationThatLosesItsKeyToAnotherSpellingIsNamedAsARespelling
+// covers conflictOnEntityTypeKey's other branch: the guarded upsert
+// matched no row *and* the winner took the key under a different
+// spelling.
+//
+// TestACreationThatLosesTheRaceForItsKeyIsRefused above exercises the
+// same re-read but with matching spellings, so it can only ever observe
+// the version-conflict branch; deleting the respelling branch left the
+// whole suite green. A designer who loses this race must be told what
+// actually stands in the way — a key already spelled differently, which
+// they can address — not a version conflict on a row they never created
+// and whose spelling they cannot see.
+func TestACreationThatLosesItsKeyToAnotherSpellingIsNamedAsARespelling(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	rival, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	if _, err := rival.Exec(ctx,
+		`INSERT INTO entity_types (project_id, key, label, label_plural)
+		 VALUES ($1, 'Hogger', 'Hogger', 'Hoggers')`, project); err != nil {
+		t.Fatalf("rival insert: %v", err)
+	}
+
+	// No ExpectedVersion at all, so the guard passes noVersion and the
+	// DO UPDATE is a guaranteed mismatch once the rival's row appears:
+	// this is the path that reaches conflictOnEntityTypeKey.
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+			Key: "hogger", Label: "MINE", LabelPlural: "MINE",
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("the upsert returned %v before the rival committed; it should have blocked", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := rival.Commit(ctx); err != nil {
+		t.Fatalf("rival commit: %v", err)
+	}
+
+	select {
+	case err := <-result:
+		requireFieldError(t, err, "key",
+			`"hogger" already exists here spelled "Hogger", and keys are matched without regard to case: `+
+				`use "Hogger" to update it, or pick a key that differs by more than capitalisation`)
+		if errors.Is(err, metamodel.ErrVersionConflict) {
+			t.Fatalf("err = %v must not read as a version conflict", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the upsert never returned after the rival committed")
+	}
+}

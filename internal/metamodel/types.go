@@ -1,0 +1,275 @@
+package metamodel
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/neverbot/maestro/internal/db/dbq"
+)
+
+// noVersion is the expected_version an upsert passes when its caller has
+// no version to expect. Versions start at 1 and only ever climb, so no
+// stored row can equal it: the guarded DO UPDATE is then a no-op on the
+// insert path and a guaranteed mismatch if a row turns out to exist after
+// all.
+const noVersion int32 = -1
+
+// EntityTypeInput is an upsert request.
+//
+// ExpectedVersion must match the stored version when the type already
+// exists; a nil ExpectedVersion against an existing type is a conflict,
+// not an overwrite. On creation there is nothing to match and the field is
+// ignored, so a seeding script may pass the same value on every run.
+type EntityTypeInput struct {
+	Key             string
+	Label           string
+	LabelPlural     string
+	Description     string
+	Color           string
+	Icon            string
+	Schema          Schema
+	ExpectedVersion *int32
+	Actor           Actor
+}
+
+// entityTypeEvent is the payload of the type.* events. It carries the
+// identity of what changed and nothing else; see Service.publish.
+type entityTypeEvent struct {
+	ID  uuid.UUID `json:"id"`
+	Key string    `json:"key"`
+}
+
+// UpsertEntityType creates or updates a type, addressed by its key.
+//
+// The whole operation is one transaction: the type's row and the verdict
+// on every entity already stored against it change together, so a schema
+// edit can never land with its instances left judged by the old schema.
+func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in EntityTypeInput) (dbq.EntityType, error) {
+	if err := checkRowKey("key", in.Key); err != nil {
+		return dbq.EntityType{}, err
+	}
+	if err := in.Schema.Check(); err != nil {
+		return dbq.EntityType{}, err
+	}
+	raw, err := in.Schema.JSON()
+	if err != nil {
+		return dbq.EntityType{}, fmt.Errorf("encode field schema: %w", err)
+	}
+
+	expected := noVersion
+	if in.ExpectedVersion != nil {
+		expected = *in.ExpectedVersion
+	}
+
+	var row dbq.EntityType
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
+		// Read under the row lock, so the spelling and the version this
+		// caller is told about are the ones its own write will meet.
+		existing, err := q.GetEntityTypeByKeyForUpdate(ctx, dbq.GetEntityTypeByKeyForUpdateParams{
+			ProjectID: projectID, Key: in.Key,
+		})
+		switch {
+		case err == nil:
+			if existing.Key != in.Key {
+				return keyRespellingError("key", in.Key, existing.Key)
+			}
+			if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
+				return &VersionConflictError{Current: existing.Version}
+			}
+		case errors.Is(err, pgx.ErrNoRows):
+			// Creation: no version to match, nothing to lock.
+		default:
+			return fmt.Errorf("lookup entity type: %w", err)
+		}
+
+		row, err = q.UpsertEntityType(ctx, dbq.UpsertEntityTypeParams{
+			ProjectID:        projectID,
+			Key:              in.Key,
+			Label:            in.Label,
+			LabelPlural:      in.LabelPlural,
+			Description:      in.Description,
+			Color:            in.Color,
+			Icon:             in.Icon,
+			FieldSchema:      raw,
+			ExpectedVersion:  expected,
+			UpdatedByUserID:  in.Actor.UserID,
+			UpdatedByTokenID: in.Actor.TokenID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The guarded DO UPDATE matched nothing: between the read above
+			// and this statement another writer created or advanced the row.
+			return conflictOnEntityTypeKey(ctx, q, projectID, in.Key)
+		}
+		if err != nil {
+			return fmt.Errorf("upsert entity type: %w", err)
+		}
+
+		// A schema change can invalidate stored rows. Re-check them rather
+		// than rejecting the change or inventing values for a new field.
+		return s.revalidateEntitiesOfType(ctx, q, row)
+	})
+	if err != nil {
+		return dbq.EntityType{}, err
+	}
+
+	s.publish(projectID, "type.upserted", entityTypeEvent{ID: row.ID, Key: row.Key})
+	return row, nil
+}
+
+// conflictOnEntityTypeKey re-reads a key whose guarded upsert matched no
+// row and names what actually stands in the way. Both outcomes are real:
+// the winning writer may have created the key with a different spelling,
+// or advanced a version this caller was holding.
+func conflictOnEntityTypeKey(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, key string) error {
+	row, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: key})
+	if err != nil {
+		return fmt.Errorf("re-read entity type after a failed upsert: %w", err)
+	}
+	if row.Key != key {
+		return keyRespellingError("key", key, row.Key)
+	}
+	return &VersionConflictError{Current: row.Version}
+}
+
+// EntityTypeByKey loads one type by its key, matched without regard to
+// case, as every key in this domain is.
+func (s *Service) EntityTypeByKey(ctx context.Context, projectID uuid.UUID, key string) (dbq.EntityType, error) {
+	row, err := s.q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: key})
+	if err != nil {
+		return dbq.EntityType{}, notFound(err, "lookup entity type")
+	}
+	return row, nil
+}
+
+// EntityTypeByID loads one type by its id. The id is not enough on its
+// own: the query filters on the project too, so an id belonging to
+// another game reads as not found rather than as somebody else's type.
+func (s *Service) EntityTypeByID(ctx context.Context, projectID, id uuid.UUID) (dbq.EntityType, error) {
+	row, err := s.q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
+	if err != nil {
+		return dbq.EntityType{}, notFound(err, "lookup entity type")
+	}
+	return row, nil
+}
+
+// ListEntityTypes returns every type of a project.
+func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]dbq.EntityType, error) {
+	rows, err := s.q.ListEntityTypes(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list entity types: %w", err)
+	}
+	return rows, nil
+}
+
+// RemoveEntityType deletes a type. Without cascade, a type that still has
+// entities is refused: silently deleting a game's content is never the
+// right reading of "remove this type".
+func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID, cascade bool) error {
+	err := s.withTx(ctx, func(q *dbq.Queries) error {
+		// The count is not the only thing standing between a caller and a
+		// silently emptied type: entities.entity_type_id is ON DELETE
+		// RESTRICT, so the delete below fails on its own if any instance
+		// exists, and removing this check alone leaves
+		// TestRemoveEntityTypeRefusesWhenInUse green. What it earns is the
+		// refusal arriving as a typed ErrInUse without a transaction
+		// aborting on a raw constraint violation first.
+		if !cascade {
+			count, err := q.CountEntitiesOfType(ctx, dbq.CountEntitiesOfTypeParams{
+				ProjectID: projectID, EntityTypeID: id,
+			})
+			if err != nil {
+				return fmt.Errorf("count entities: %w", err)
+			}
+			if count > 0 {
+				return ErrInUse
+			}
+		} else if err := q.DeleteEntitiesOfType(ctx, dbq.DeleteEntitiesOfTypeParams{
+			ProjectID: projectID, EntityTypeID: id,
+		}); err != nil {
+			return fmt.Errorf("delete entities: %w", err)
+		}
+
+		rows, err := q.DeleteEntityType(ctx, dbq.DeleteEntityTypeParams{ProjectID: projectID, ID: id})
+		if err != nil {
+			// The RESTRICT foreign key described above is what catches an
+			// entity written between the count and this statement. It is
+			// the same refusal, and a caller should not have to tell a race
+			// apart from the ordinary case.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return ErrInUse
+			}
+			return fmt.Errorf("delete entity type: %w", err)
+		}
+		if rows == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	s.publish(projectID, "type.removed", entityTypeEvent{ID: id})
+	return nil
+}
+
+// revalidateEntitiesOfType re-checks every stored entity against its
+// type's current schema and flags the ones that no longer fit. Nothing is
+// deleted and nothing is back-filled: the designer decides what a newly
+// required field should hold, and a validation pass is not an edit of
+// their content.
+//
+// CheckValues, never Validate: Validate hands back a normalised map with
+// declared defaults injected, and writing that back would silently
+// back-fill every row the sweep touched.
+func (s *Service) revalidateEntitiesOfType(ctx context.Context, q *dbq.Queries, typ dbq.EntityType) error {
+	schema, err := ParseSchema(typ.FieldSchema)
+	if err != nil {
+		return err
+	}
+
+	rows, err := q.ListEntityFieldsOfType(ctx, dbq.ListEntityFieldsOfTypeParams{
+		ProjectID: typ.ProjectID, EntityTypeID: typ.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("list entities: %w", err)
+	}
+
+	var invalid, valid []uuid.UUID
+	for _, row := range rows {
+		values, err := decodeFields(row.Fields)
+		if err != nil {
+			invalid = append(invalid, row.ID)
+			continue
+		}
+		if err := schema.CheckValues(values); err != nil {
+			invalid = append(invalid, row.ID)
+			continue
+		}
+		valid = append(valid, row.ID)
+	}
+
+	for _, batch := range []struct {
+		ids  []uuid.UUID
+		flag bool
+	}{{invalid, true}, {valid, false}} {
+		if len(batch.ids) == 0 {
+			continue
+		}
+		if err := q.MarkEntitiesOfTypeInvalid(ctx, dbq.MarkEntitiesOfTypeInvalidParams{
+			ProjectID:    typ.ProjectID,
+			EntityTypeID: typ.ID,
+			Ids:          batch.ids,
+			Invalid:      batch.flag,
+		}); err != nil {
+			return fmt.Errorf("flag entities: %w", err)
+		}
+	}
+	return nil
+}

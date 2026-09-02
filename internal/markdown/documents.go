@@ -71,6 +71,19 @@ type WriteInput struct {
 	// that here rather than leaving it to the surface that will carry it
 	// (Task 10's DocsWriteInput.Links, which must stay `*[]DocsLinkInput`
 	// for exactly this reason).
+	//
+	// **`"links": null` is decided, not just observed.** encoding/json
+	// leaves a `*[]T` field nil for both an omitted key and an explicit
+	// `null`, so the two already collapse into one Go value with no
+	// choice made here. What this comment states is that the collapse is
+	// the intended answer: `null` preserves, the same as omitting the
+	// field, and not the same as `[]`, which detaches everything. The
+	// safe side, since a caller silent about links keeps them — but a
+	// caller who sent `null` meaning "detach" gets the opposite with
+	// nothing to notice by, so Task 10's tool description must say this
+	// in words an agent reads before it guesses.
+	// TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnTheWire pins
+	// `null` alongside omitted and empty.
 	Links *[]LinkTarget
 }
 

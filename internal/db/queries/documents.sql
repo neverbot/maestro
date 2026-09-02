@@ -380,7 +380,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- first, which Task 11's REST mirror may be. What is pinned is the
 -- document_id filter: TestALinkIsAddressedByItsOwnDocument uses two
 -- documents in one game, where the project filter separates nothing.
-SELECT l.role, l.created_at, t.key AS entity_type_key, e.key AS entity_key,
+SELECT l.role, t.key AS entity_type_key, e.key AS entity_key,
        e.name AS entity_name, e.id AS entity_id
 FROM document_links l
 JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
@@ -400,7 +400,7 @@ ORDER BY t.key, e.key, e.id;
 -- the other half of the same rule in its second act: nothing cascades on
 -- a soft delete, so the link row survives and comes back with its role
 -- when the document is written to again.
-SELECT l.role, l.created_at, d.id AS document_id, d.path, d.title, d.kind
+SELECT l.role, d.id AS document_id, d.path, d.title, d.kind
 FROM document_links l
 JOIN documents d ON d.id = l.document_id AND d.project_id = l.project_id
 WHERE l.project_id = sqlc.arg('project_id')::uuid

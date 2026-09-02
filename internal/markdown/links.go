@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,24 @@ type LinkInput struct {
 	EntityType string
 	EntityKey  string
 	Role       string
+}
+
+// UnlinkInput is one detachment operation, from the document's side.
+//
+// It carries no Role, deliberately, rather than reusing LinkInput with
+// the field left to be ignored. The link's key is (document, entity)
+// (LinkAdd's doc comment argues why role is not part of it), so there is
+// no second link under another role for a role argument to choose
+// between — a caller passing one to detach cannot mean anything by it,
+// and a struct that accepted the field without using it would let a
+// caller believe otherwise with nothing to correct the belief.
+// Task 10's docs.links.remove tool must address the same decision: its
+// input schema must not carry a `role` field either, for the same
+// reason.
+type UnlinkInput struct {
+	Path       string
+	EntityType string
+	EntityKey  string
 }
 
 // EntityLink is one attachment as seen from the document: which entity,
@@ -142,10 +161,11 @@ func (s *Service) LinkAdd(ctx context.Context, projectID uuid.UUID, in LinkInput
 // tells it nothing. TestRemovingALinkLeavesTheDocumentAndTheEntity pins
 // both the refusal and that neither endpoint is touched by a removal.
 //
-// Role is not read here, and the reason is the key: an attachment is
-// identified by (document, entity), so there is no second link under
-// another role for a role argument to choose between.
-func (s *Service) LinkRemove(ctx context.Context, projectID uuid.UUID, in LinkInput) error {
+// LinkRemove's argument carries no role, and the reason is the key: an
+// attachment is identified by (document, entity), so there is no second
+// link under another role for a role argument to choose between. See
+// UnlinkInput's doc comment.
+func (s *Service) LinkRemove(ctx context.Context, projectID uuid.UUID, in UnlinkInput) error {
 	problems := pathProblems(in.Path)
 	problems = append(problems, entityAddressProblems("", LinkTarget{
 		EntityType: in.EntityType, EntityKey: in.EntityKey,
@@ -343,6 +363,44 @@ func (s *Service) resolveEntity(ctx context.Context, q *dbq.Queries, projectID u
 	return entityID, nil
 }
 
+// duplicateLinkTargets finds the elements of a write's links array that
+// address an entity an earlier element already addressed, folding case
+// the way the entity key's own unique index does.
+//
+// The metamodel's bulk writes settled the analogous question for a
+// batch that names one row twice: refused whole, up front, because a
+// caller who asked for two attachments to one entity cannot have that
+// request satisfied as submitted, and left to the writes the repetition
+// would surface as whichever spelling's UpsertDocumentLink ran last —
+// the second role silently winning over the first, with nothing telling
+// the caller half its array was discarded. That precedent is
+// `metamodel.bulkAtomic`'s `repeatedIdentities`, over rows in a batch
+// call; this is the same argument over targets in one write's array,
+// where "the same row" is the (entity type, entity key) pair the link's
+// own key is built from (LinkAdd's doc comment).
+// TestALinksArrayNamingOneEntityTwiceIsRefused pins it, at two
+// spellings of one key.
+func duplicateLinkTargets(targets []LinkTarget) []metamodel.FieldError {
+	first := make(map[string]int, len(targets))
+	var problems []metamodel.FieldError
+	for i, target := range targets {
+		id := strings.ToLower(target.EntityType) + "\x00" + strings.ToLower(target.EntityKey)
+		at, seen := first[id]
+		if !seen {
+			first[id] = i
+			continue
+		}
+		problems = append(problems, metamodel.FieldError{
+			Path: fmt.Sprintf("links[%d].entity_key", i),
+			Message: fmt.Sprintf(
+				"the %s %q is already addressed by links[%d], and entity keys are matched "+
+					"without regard to case: merge the two elements into one, or drop the duplicate",
+				target.EntityType, target.EntityKey, at),
+		})
+	}
+	return problems
+}
+
 // replaceLinks is the links array a write carries. It runs inside the
 // write's own transaction, so a bad link rolls the body back with it: a
 // document and what it is about are one change, and half of it landing
@@ -351,6 +409,12 @@ func (s *Service) resolveEntity(ctx context.Context, q *dbq.Queries, projectID u
 func (s *Service) replaceLinks(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	documentID uuid.UUID, targets []LinkTarget,
 ) error {
+	// Checked whole, before anything is written, for the reason
+	// duplicateLinkTargets' own comment argues: a repetition has no
+	// per-element answer in a call that lands everything or nothing.
+	if problems := duplicateLinkTargets(targets); len(problems) > 0 {
+		return invalidInputProblems(problems)
+	}
 	keep := make([]uuid.UUID, 0, len(targets))
 	for i, target := range targets {
 		prefix := fmt.Sprintf("links[%d].", i)

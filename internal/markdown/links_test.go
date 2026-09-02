@@ -355,7 +355,7 @@ func TestRemovingALinkLeavesTheDocumentAndTheEntity(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("LinkAdd: %v", err)
 	}
-	if err := svc.LinkRemove(ctx, game, markdown.LinkInput{
+	if err := svc.LinkRemove(ctx, game, markdown.UnlinkInput{
 		Path: "s", EntityType: "quest", EntityKey: "wanted-hogger",
 	}); err != nil {
 		t.Fatalf("LinkRemove: %v", err)
@@ -376,7 +376,7 @@ func TestRemovingALinkLeavesTheDocumentAndTheEntity(t *testing.T) {
 
 	// Removing a link that is not there is not_found, not silence: an
 	// agent that removed the wrong one needs to be told.
-	err = svc.LinkRemove(ctx, game, markdown.LinkInput{
+	err = svc.LinkRemove(ctx, game, markdown.UnlinkInput{
 		Path: "s", EntityType: "quest", EntityKey: "wanted-hogger",
 	})
 	requireMissing(t, err, "entity_key", "is not attached to the quest")
@@ -542,7 +542,9 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 }
 
 // TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnTheWire is the
-// half of that distinction Go's type system alone does not carry.
+// half of that distinction Go's type system alone does not carry. It
+// also pins a third shape, `"links":null`, decided the same way an
+// omitted field is: both preserve.
 //
 // The domain says "nil preserves, empty replaces with nothing"; a field
 // tagged as a plain slice would collapse both into one value on the way
@@ -553,20 +555,43 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 // pins it here, in the domain that defines the meaning, rather than
 // waiting for Task 10 to define it again.
 //
-// The struct below deliberately mirrors Task 10's DocsWriteInput field
-// (`Links *[]DocsLinkInput \`json:"links,omitempty"\“). When that type
-// lands, this test stays: it is the statement of what the tag has to be.
+// The struct below deliberately mirrors Task 10's DocsWriteInput field:
+// Links is a `*[]DocsLinkInput`, tagged `json:"links,omitempty"`. When
+// that type lands, this test stays: it is the statement of what the tag
+// has to be.
+//
+// **This pins a stand-in, not the real thing.** `wireWrite` is declared
+// right here, in this file, because `DocsWriteInput` does not exist yet
+// (Task 10). Nothing today forces the real type to keep this shape — a
+// review of Task 10 that finds `Links` declared as a plain
+// `[]DocsLinkInput`, or without `omitempty`, would leave this test green
+// while the wire behaviour it documents is gone, which is `kind`'s
+// defect one layer up. Task 10's review must re-pin this test's claim
+// against the real `DocsWriteInput.Links`, the way it re-pins every
+// other field this plan hands it as a requirement rather than a note.
 func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnTheWire(t *testing.T) {
 	type wireWrite struct {
 		Path  string                 `json:"path"`
 		Links *[]markdown.LinkTarget `json:"links,omitempty"`
 	}
 
-	var omitted, empty wireWrite
+	var omitted, empty, explicitNull wireWrite
 	if err := json.Unmarshal([]byte(`{"path":"s"}`), &omitted); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if err := json.Unmarshal([]byte(`{"path":"s","links":[]}`), &empty); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// "links": null is decided here, not left to whichever caller hits it
+	// first: it means the same thing an omitted field means, preserve,
+	// not the same thing an empty array means, detach everything. That is
+	// the safe side — the alternative reads a caller's "I said nothing
+	// about links" as "detach everything" — but safe is not the same as
+	// obvious, and an agent that sends `null` meaning "detach" gets the
+	// opposite of what it asked for with no error to notice by. Decided
+	// and documented at WriteInput.Links; pinned here because it is the
+	// same wire distinction the rest of this test pins.
+	if err := json.Unmarshal([]byte(`{"path":"s","links":null}`), &explicitNull); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
 	if omitted.Links != nil {
@@ -576,6 +601,10 @@ func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnTheWire(t *testing.T) 
 	if empty.Links == nil || len(*empty.Links) != 0 {
 		t.Fatalf("an empty links array decoded to %#v, want a pointer to an empty slice — "+
 			"that is the only way a caller can say \"detach everything\"", empty.Links)
+	}
+	if explicitNull.Links != nil {
+		t.Fatalf("an explicit \"links\":null decoded to %#v, want nil — null preserves, "+
+			"the same as omitting the field", explicitNull.Links)
 	}
 
 	// And back out again: a request built in Go must not lose the
@@ -633,6 +662,41 @@ func TestABadLinkInAWriteRollsTheWholeWriteBack(t *testing.T) {
 	}
 	if len(links) != 0 {
 		t.Fatalf("links = %+v, want the whole array rolled back", links)
+	}
+}
+
+// TestALinksArrayNamingOneEntityTwiceIsRefused pins the decision
+// duplicateLinkTargets' doc comment argues: a links array that
+// addresses one entity under two spellings is refused whole, up front,
+// rather than silently upserting twice and landing whichever role ran
+// last. Two spellings of one key ("wanted-hogger", "WANTED-HOGGER") are
+// used deliberately, folding case the way the entity key's own unique
+// index does — the metamodel settled the identical question for a
+// case-differing pair in a bulk write's own duplicate check.
+func TestALinksArrayNamingOneEntityTwiceIsRefused(t *testing.T) {
+	svc, entities, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	newQuest(t, entities, game, "wanted-hogger", "Wanted: Hogger")
+	seedDoc(t, svc, game, "s")
+
+	_, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "s", Content: "two\n", ExpectedVersion: ptrInt32(1),
+		Links: &[]markdown.LinkTarget{
+			{EntityType: "quest", EntityKey: "wanted-hogger", Role: "script"},
+			{EntityType: "quest", EntityKey: "WANTED-HOGGER", Role: "lore"},
+		},
+	})
+	requireFieldError(t, err, "links[1].entity_key", "is already addressed by links[0]")
+
+	// Refused whole: nothing landed, not even the first, unambiguous
+	// element.
+	links, lerr := svc.LinksByDocument(ctx, game, "s")
+	if lerr != nil {
+		t.Fatalf("LinksByDocument: %v", lerr)
+	}
+	if len(links) != 0 {
+		t.Fatalf("links = %+v, want none — a refused write attaches nothing", links)
 	}
 }
 
@@ -769,7 +833,7 @@ func TestLinkingIsAnnounced(t *testing.T) {
 	// Detaching announces the same kind: the payload says nothing about
 	// the link set, so there is no sentence a client could write from
 	// one that it could not write from the other.
-	if err := svc.LinkRemove(ctx, game, markdown.LinkInput{
+	if err := svc.LinkRemove(ctx, game, markdown.UnlinkInput{
 		Path: "s", EntityType: "quest", EntityKey: "wanted-hogger",
 	}); err != nil {
 		t.Fatalf("LinkRemove: %v", err)
@@ -836,7 +900,7 @@ func TestNoLinkIsAnnouncedWhenTheAttachmentIsRefused(t *testing.T) {
 	}); err == nil {
 		t.Fatal("want the attachment refused")
 	}
-	if err := svc.LinkRemove(ctx, game, markdown.LinkInput{
+	if err := svc.LinkRemove(ctx, game, markdown.UnlinkInput{
 		Path: "s", EntityType: "quest", EntityKey: "wanted-hogger",
 	}); err == nil {
 		t.Fatal("want the detachment refused")

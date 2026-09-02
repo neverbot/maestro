@@ -449,7 +449,8 @@ func TestARelationTypeEndpointListMustNameTypesOfThisGame(t *testing.T) {
 // the locking verification's finding 1.
 //
 // checkEndpointTypes now takes a FOR SHARE lock on every endpoint id it
-// finds (correction 22, TestARelationTypeCreatedDuringATypeRemovalCannot…
+// finds (correction 22,
+// TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID
 // above), and that lock can be parked behind another transaction's row
 // lock and cancelled by lock_timeout — SQLSTATE 55P03. Before this fix,
 // any error from the lock query, cancellation included, was folded into
@@ -536,8 +537,9 @@ func TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput(t *testing.T)
 	// Task 7's third decision, proved on a real lock timeout rather than
 	// on a hand-built PgError: contention is retryable, so the surface
 	// above this package can tell an agent to resend the same call
-	// instead of reporting it broken. TestIsRetryableNamesTheFour…
-	// covers the classification; this covers the wiring that carries the
+	// instead of reporting it broken.
+	// TestIsRetryableNamesTheFourContentionStatesAndNothingElse covers
+	// the classification; this covers the wiring that carries the
 	// SQLSTATE out to it through UpsertRelationType's own wrapping.
 	if !metamodel.IsRetryable(err) {
 		t.Fatalf("a lock timeout must be retryable, got %v", err)

@@ -181,10 +181,10 @@ func TestASearchWithNoWordInItIsRefused(t *testing.T) {
 // row whose **name** is the query outranks a row that merely mentions
 // the words in a field, however often it mentions them.
 //
-// This is the test Task 6 said would have to change. It used to be
-// TestSearchRanksTheStrongerMatchFirst and it asserted the opposite
-// order — "mentioned" first, because the vector was unweighted and the
-// row carrying the word three times simply matched more often.
+// This is the test Task 6 said would have to change, renamed from its
+// previous name. It used to assert the opposite order — "mentioned"
+// first, because the vector was unweighted and the row carrying the
+// word three times simply matched more often.
 //
 // **It covered only the single-word case, and the promise was false for
 // every other one — review finding M1.** Weights alone do not deliver

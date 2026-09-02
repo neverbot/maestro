@@ -369,7 +369,7 @@ func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentV
 }
 
 const listDocumentLinksByDocument = `-- name: ListDocumentLinksByDocument :many
-SELECT l.role, l.created_at, t.key AS entity_type_key, e.key AS entity_key,
+SELECT l.role, t.key AS entity_type_key, e.key AS entity_key,
        e.name AS entity_name, e.id AS entity_id
 FROM document_links l
 JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
@@ -386,7 +386,6 @@ type ListDocumentLinksByDocumentParams struct {
 
 type ListDocumentLinksByDocumentRow struct {
 	Role          string
-	CreatedAt     pgtype.Timestamptz
 	EntityTypeKey string
 	EntityKey     string
 	EntityName    string
@@ -418,7 +417,6 @@ func (q *Queries) ListDocumentLinksByDocument(ctx context.Context, arg ListDocum
 		var i ListDocumentLinksByDocumentRow
 		if err := rows.Scan(
 			&i.Role,
-			&i.CreatedAt,
 			&i.EntityTypeKey,
 			&i.EntityKey,
 			&i.EntityName,
@@ -435,7 +433,7 @@ func (q *Queries) ListDocumentLinksByDocument(ctx context.Context, arg ListDocum
 }
 
 const listDocumentLinksByEntity = `-- name: ListDocumentLinksByEntity :many
-SELECT l.role, l.created_at, d.id AS document_id, d.path, d.title, d.kind
+SELECT l.role, d.id AS document_id, d.path, d.title, d.kind
 FROM document_links l
 JOIN documents d ON d.id = l.document_id AND d.project_id = l.project_id
 WHERE l.project_id = $1::uuid
@@ -451,7 +449,6 @@ type ListDocumentLinksByEntityParams struct {
 
 type ListDocumentLinksByEntityRow struct {
 	Role       string
-	CreatedAt  pgtype.Timestamptz
 	DocumentID uuid.UUID
 	Path       string
 	Title      string
@@ -479,7 +476,6 @@ func (q *Queries) ListDocumentLinksByEntity(ctx context.Context, arg ListDocumen
 		var i ListDocumentLinksByEntityRow
 		if err := rows.Scan(
 			&i.Role,
-			&i.CreatedAt,
 			&i.DocumentID,
 			&i.Path,
 			&i.Title,

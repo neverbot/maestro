@@ -27,6 +27,25 @@ var forwardReferencedTestNames = map[string]string{
 		"the test that will pin it, named ahead of the task that writes it.",
 }
 
+// renamedAwayTestNames names tests a comment cites as a *former* name of
+// a test that exists today under a different one — the opposite
+// direction from forwardReferencedTestNames, found the day widening this
+// check to scan internal/metamodel (review of Task 7 of the markdown
+// plan) turned up a real instance: search_test.go narrates that
+// TestSearchRanksTheNameMatchFirst "used to be
+// TestSearchRanksTheStrongerMatchFirst", which is history, not a claim
+// that the old name is still coverage anywhere. That reads exactly like
+// a dangling citation to this check's regex, which cannot tell "used to
+// be" from "covers this" apart — so the distinction is made here,
+// explicitly, rather than by weakening the regex to parse tense, which
+// would just move the false-negative risk onto every other comment in
+// the sweep.
+var renamedAwayTestNames = map[string]string{
+	"TestSearchRanksTheStrongerMatchFirst": "internal/metamodel/search_test.go: " +
+		"the pre-Task-7 name of TestSearchRanksTheNameMatchFirst, cited only " +
+		"to say what changed and why.",
+}
+
 // TestNoCommentNamesATestThatDoesNotExist is the standing check the
 // review of Task 6 asked for, after a second round of dangling test
 // names found by hand in this package and in
@@ -38,13 +57,26 @@ var forwardReferencedTestNames = map[string]string{
 //
 // It builds the set of every top-level test function this module
 // actually defines, then scans every comment in internal/markdown's own
-// Go files and in internal/db/queries/*.sql (the two places this
-// package's commentary lives) for something shaped like a test name and
-// fails on any that names no test in that set, forwardReferencedTestNames
-// excepted. A cited test may live in another package entirely (this
-// file's own sibling, versions.go, names a paging package test pinning
-// the clamp policy History reuses), so the defined set is built from the
-// whole module, not just this one package.
+// Go files, in internal/metamodel's own Go files and in
+// internal/db/queries/*.sql (the places this domain's commentary lives)
+// for something shaped like a test name and fails on any that names no
+// test in that set, forwardReferencedTestNames excepted. A cited test
+// may live in another package entirely still (this file's own sibling,
+// versions.go, names a paging package test pinning the clamp policy
+// History reuses), so the defined set is built from the whole module,
+// not just the packages scanned.
+//
+// **internal/metamodel was added here, not just internal/markdown and
+// internal/db/queries, because a citation already lived there
+// uncovered.** internal/metamodel/keys.go:145's comment on
+// RowKeyProblems cites TestAnEntityAddressIsBoundedBeforePostgresSeesIt
+// — a real test, in this package — but until this line named that
+// directory, this check could not have told that citation apart from a
+// dangling one had the cited test been renamed or removed. Task 7 is
+// what made internal/markdown cite into internal/metamodel; the check's
+// coverage had drifted from where this domain's citations actually live
+// from that point on, and it is widened here rather than left for
+// Task 8, which adds more of both.
 func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 	root := moduleRoot(t)
 	defined := definedTestNames(t, root)
@@ -52,6 +84,7 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 	var dangling []string
 	for _, dir := range []string{
 		filepath.Join(root, "internal", "markdown"),
+		filepath.Join(root, "internal", "metamodel"),
 		filepath.Join(root, "internal", "db", "queries"),
 	} {
 		entries, err := os.ReadDir(dir)
@@ -78,7 +111,8 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 				t.Fatalf("read %s: %v", path, err)
 			}
 			for _, d := range citedTestNames(string(raw), prefix) {
-				if defined[d.name] || forwardReferencedTestNames[d.name] != "" {
+				if defined[d.name] || forwardReferencedTestNames[d.name] != "" ||
+					renamedAwayTestNames[d.name] != "" {
 					continue
 				}
 				dangling = append(dangling, path+":"+strconv.Itoa(d.line)+

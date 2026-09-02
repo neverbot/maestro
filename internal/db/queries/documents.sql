@@ -282,3 +282,128 @@ SELECT * FROM document_versions
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND document_id = sqlc.arg('document_id')::uuid
   AND version = sqlc.arg('version')::integer;
+
+-- name: GetEntityTypeIDByKey :one
+-- Link endpoints are resolved here rather than through
+-- internal/metamodel's own EntityByKey, in two steps rather than one
+-- join, for a reason that is about the *answer* and not about coupling:
+-- a caller that typed "quesst" and a caller that typed "wanted-hoggerr"
+-- have made two different mistakes at two different arguments, and one
+-- flat "not found" makes an agent guess which. Two lookups let the
+-- refusal name entity_type or entity_key, which is the discrimination
+-- the spec wanted a whole extra wire code for.
+-- TestAMistypedEntityTypeAndAMistypedEntityKeyAreToldApart pins that the
+-- two misses are told apart, and the project filter here is what refuses
+-- an entity type another game declared
+-- (TestALinkToAnEntityInAnotherGameIsRefused).
+SELECT id FROM entity_types
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND lower(key) = lower(sqlc.arg('key')::text);
+
+-- name: GetEntityIDByKey :one
+-- The second half of that resolution.
+--
+-- **This query's own project filter separates nothing markdown.resolveEntity
+-- can reach, and that is stated rather than credited to a test that would
+-- not go red.** entity_type_id arrives already resolved inside the
+-- caller's own game (GetEntityTypeIDByKey filters on project_id), and
+-- 0004_metamodel.sql gives entities a composite key to entity_types
+-- carrying project_id, so an entity whose project_id disagrees with its
+-- type's is unrepresentable. Verified by mutation: neutralising this
+-- filter behind a no-op `OR TRUE` leaves the package green, including
+-- TestALinkToAnEntityFromAnotherGamesTypeOfTheSameNameIsRefusedAtTheKey,
+-- which is refused by the entity_type_id filter instead. The filter
+-- stays for the same reason ListDocumentVersions' does -- a future
+-- caller that obtains a type id some other way, which Task 11's REST
+-- mirror may be -- and because the file header's rule is that isolation
+-- is in SQL and not in whoever remembers to resolve first.
+-- What the test above does pin is the *answer*: a caller naming another
+-- game's entity under a type key both games declare is refused at
+-- entity_key, not at entity_type and not with somebody else's row.
+SELECT id FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+  AND lower(key) = lower(sqlc.arg('key')::text);
+
+-- name: UpsertDocumentLink :one
+-- Idempotent by (document, entity): re-adding a link updates its role
+-- rather than making a second edge, which is what keeps a re-run seeding
+-- script from doubling every attachment.
+-- TestReAddingALinkUpdatesItsRoleRatherThanDuplicatingIt pins it.
+--
+-- project_id is written, not filtered, and 0007_documents.sql's two
+-- composite keys are what make a cross-game link impossible by
+-- construction: this row's project_id must agree with the document's
+-- *and* with the entity's, so a document in one game cannot be attached
+-- to an entity in another whatever Go believes.
+-- TestALinkRowCannotClaimAGameItsDocumentDoesNotBelongTo forces that
+-- refusal from this package.
+INSERT INTO document_links (project_id, document_id, entity_id, role)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('document_id')::uuid,
+        sqlc.arg('entity_id')::uuid, sqlc.arg('role')::text)
+ON CONFLICT (document_id, entity_id) DO UPDATE
+SET role = excluded.role
+RETURNING *;
+
+-- name: DeleteDocumentLink :execrows
+-- The row count is what tells LinkRemove that there was nothing to
+-- detach, which it reports as not_found rather than as silence
+-- (TestRemovingALinkLeavesTheDocumentAndTheEntity).
+DELETE FROM document_links
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND document_id = sqlc.arg('document_id')::uuid
+  AND entity_id = sqlc.arg('entity_id')::uuid;
+
+-- name: DeleteDocumentLinksExcept :exec
+-- The other half of a replacing write. An empty keep list detaches
+-- everything, which is exactly what `links: []` means -- and the caller
+-- must pass an empty array rather than a nil one, because pgx encodes
+-- nil as SQL NULL and `NOT (x = ANY(NULL))` is NULL, which deletes
+-- nothing. markdown.replaceLinks says so where the slice is built.
+DELETE FROM document_links
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND document_id = sqlc.arg('document_id')::uuid
+  AND NOT (entity_id = ANY(sqlc.arg('keep')::uuid[]));
+
+-- name: ListDocumentLinksByDocument :many
+-- Ordered by the entity's type key then its key then its id: none of the
+-- first two is unique on its own, and an order that can tie reshuffles
+-- its ties between two identical calls.
+--
+-- The project filter here separates nothing that markdown.LinksByDocument
+-- can reach, and this is stated rather than credited to a test that
+-- would not go red: the document id only ever arrives already resolved
+-- inside the caller's own game (markdown.documentForLinks), and
+-- 0007_documents.sql's composite keys make a link row whose project_id
+-- disagrees with its document's unrepresentable. It stays for the same
+-- reason ListDocumentVersions' does -- a caller that does not resolve
+-- first, which Task 11's REST mirror may be. What is pinned is the
+-- document_id filter: TestALinkIsAddressedByItsOwnDocument uses two
+-- documents in one game, where the project filter separates nothing.
+SELECT l.role, l.created_at, t.key AS entity_type_key, e.key AS entity_key,
+       e.name AS entity_name, e.id AS entity_id
+FROM document_links l
+JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
+JOIN entity_types t ON t.id = e.entity_type_id AND t.project_id = e.project_id
+WHERE l.project_id = sqlc.arg('project_id')::uuid
+  AND l.document_id = sqlc.arg('document_id')::uuid
+ORDER BY t.key, e.key, e.id;
+
+-- name: ListDocumentLinksByEntity :many
+-- The reverse direction, which is how the UI builds an entity page and
+-- how an agent asked to rewrite the Hogger dialogue finds the document
+-- from the quest instead of guessing a path.
+--
+-- Soft-deleted documents are excluded: an entity page listing a document
+-- nobody can read would be a dead link on every quest it was attached
+-- to. TestAnEntityStopsListingADocumentThatWasDeleted pins it, and pins
+-- the other half of the same rule in its second act: nothing cascades on
+-- a soft delete, so the link row survives and comes back with its role
+-- when the document is written to again.
+SELECT l.role, l.created_at, d.id AS document_id, d.path, d.title, d.kind
+FROM document_links l
+JOIN documents d ON d.id = l.document_id AND d.project_id = l.project_id
+WHERE l.project_id = sqlc.arg('project_id')::uuid
+  AND l.entity_id = sqlc.arg('entity_id')::uuid
+  AND d.deleted_at IS NULL
+ORDER BY d.path, d.id;

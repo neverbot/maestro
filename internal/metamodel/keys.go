@@ -134,3 +134,18 @@ func keyRespellingError(path, requested, stored string) error {
 			requested, stored, stored),
 	}}}
 }
+
+// RowKeyProblems is rowKeyProblems under an exported name, for
+// internal/markdown, which addresses entities by (type key, key) when it
+// attaches a document to one and must bound both before they reach
+// Postgres.
+//
+// A wrapper rather than a rename: every call site in this package is
+// unexported and reads better that way, and a second, hand-written copy
+// of the same three rules in the markdown package is exactly the drift
+// markdown/errors.go's package comment takes this dependency to avoid.
+// What the markdown domain needs it for is stated at
+// markdown.entityAddressProblems, its only caller, and
+// TestAnEntityAddressIsBoundedBeforePostgresSeesIt is what pins that a
+// key Postgres itself would refuse never reaches it.
+func RowKeyProblems(path, key string) []FieldError { return rowKeyProblems(path, key) }

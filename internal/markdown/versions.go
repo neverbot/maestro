@@ -330,6 +330,16 @@ type RevertInput struct {
 // wanting to know already gets the same signal-free event Write's
 // `document.written` sends for the same resurrection, which is the
 // existing precedent and not a gap this task opened.
+//
+// **A revert does not touch the document's links**, and it must not grow
+// a links argument. It calls writeWith directly rather than Write, so it
+// is unaffected by the links array a write may carry, and that is the
+// intended arrangement rather than an oversight: a revert restores the
+// *writing*, and what a document is about is a separate decision someone
+// made separately. It is also not recoverable from the history — a link
+// change is not a version (LinkAdd's doc comment says why) — so "restore
+// the links as they were" is not a thing this call could do even if it
+// wanted to.
 func (s *Service) Revert(ctx context.Context, projectID uuid.UUID, in RevertInput) (dbq.Document, error) {
 	// One pass over every argument, as Write and Delete do:
 	// TestEveryProblemWithOneRevertIsReportedInOnePass pins that four

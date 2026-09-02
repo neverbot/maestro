@@ -131,6 +131,41 @@ const (
 	// both numbers; TestNoRevertIsAnnouncedWhenTheRevertIsRefused pins
 	// that a revert which never happened announces nothing.
 	eventDocumentReverted = "document.reverted"
+
+	// eventDocumentLinked fires from LinkAdd, LinkRemove and any Write
+	// that carried a links array, once the transaction has committed,
+	// with documentEventMinRole / documentEventHumanOnly — the pair
+	// eventDocumentWritten's comment argues, for the reason the other
+	// two kinds take it: what a document is about is the game's own
+	// content, and the viewer whose browser is rendering an entity page
+	// has no other way to learn that the page's list of documents moved.
+	//
+	// One kind covers attach and detach, deliberately: the payload
+	// carries the document's identity and nothing about the link set, so
+	// there is no sentence a client could write from "linked" that it
+	// could not write from "unlinked", and both have the same recovery —
+	// re-read the document's links, or the entity's. Two kinds would be
+	// two things to subscribe to for one refresh.
+	// TestLinkingIsAnnounced pins that both operations announce this one
+	// kind, and TestNoLinkIsAnnouncedWhenTheAttachmentIsRefused pins
+	// that a refused one announces nothing.
+	//
+	// **A write that carries a links array publishes both
+	// document.written and document.linked**, in that order. A client
+	// watching only one of them is watching for one of the two things
+	// that changed, and the alternative — folding the link change into
+	// the write event — would mean a client had to re-read links on
+	// every write in case one had.
+	// TestAWriteCarryingLinksAnnouncesBothTheWriteAndTheLink pins the
+	// order, and pins that an edit with no links array announces the
+	// write alone.
+	//
+	// The payload is a DocumentEvent, carrying the document's *unmoved*
+	// version: a link is not the document's content and LinkAdd does not
+	// advance current_version (see its doc comment), so a subscriber
+	// comparing the number against what it holds learns nothing from it
+	// and must re-read the links rather than the body.
+	eventDocumentLinked = "document.linked"
 )
 
 // documentEventMinRole and documentEventHumanOnly are the gating decided

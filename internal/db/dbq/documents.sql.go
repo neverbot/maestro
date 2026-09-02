@@ -12,6 +12,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteDocumentLink = `-- name: DeleteDocumentLink :execrows
+DELETE FROM document_links
+WHERE project_id = $1::uuid
+  AND document_id = $2::uuid
+  AND entity_id = $3::uuid
+`
+
+type DeleteDocumentLinkParams struct {
+	ProjectID  uuid.UUID
+	DocumentID uuid.UUID
+	EntityID   uuid.UUID
+}
+
+// The row count is what tells LinkRemove that there was nothing to
+// detach, which it reports as not_found rather than as silence
+// (TestRemovingALinkLeavesTheDocumentAndTheEntity).
+func (q *Queries) DeleteDocumentLink(ctx context.Context, arg DeleteDocumentLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDocumentLink, arg.ProjectID, arg.DocumentID, arg.EntityID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteDocumentLinksExcept = `-- name: DeleteDocumentLinksExcept :exec
+DELETE FROM document_links
+WHERE project_id = $1::uuid
+  AND document_id = $2::uuid
+  AND NOT (entity_id = ANY($3::uuid[]))
+`
+
+type DeleteDocumentLinksExceptParams struct {
+	ProjectID  uuid.UUID
+	DocumentID uuid.UUID
+	Keep       []uuid.UUID
+}
+
+// The other half of a replacing write. An empty keep list detaches
+// everything, which is exactly what `links: []` means -- and the caller
+// must pass an empty array rather than a nil one, because pgx encodes
+// nil as SQL NULL and `NOT (x = ANY(NULL))` is NULL, which deletes
+// nothing. markdown.replaceLinks says so where the slice is built.
+func (q *Queries) DeleteDocumentLinksExcept(ctx context.Context, arg DeleteDocumentLinksExceptParams) error {
+	_, err := q.db.Exec(ctx, deleteDocumentLinksExcept, arg.ProjectID, arg.DocumentID, arg.Keep)
+	return err
+}
+
 const getDocumentByPath = `-- name: GetDocumentByPath :one
 SELECT id, project_id, path, kind, title, summary, body_md, frontmatter, current_version, deleted_at, search, created_at, updated_at, created_by_user_id, created_by_token_id, updated_by_user_id, updated_by_token_id FROM documents
 WHERE project_id = $1::uuid
@@ -173,6 +220,75 @@ func (q *Queries) GetDocumentVersion(ctx context.Context, arg GetDocumentVersion
 	return i, err
 }
 
+const getEntityIDByKey = `-- name: GetEntityIDByKey :one
+SELECT id FROM entities
+WHERE project_id = $1::uuid
+  AND entity_type_id = $2::uuid
+  AND lower(key) = lower($3::text)
+`
+
+type GetEntityIDByKeyParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID uuid.UUID
+	Key          string
+}
+
+// The second half of that resolution.
+//
+// **This query's own project filter separates nothing markdown.resolveEntity
+// can reach, and that is stated rather than credited to a test that would
+// not go red.** entity_type_id arrives already resolved inside the
+// caller's own game (GetEntityTypeIDByKey filters on project_id), and
+// 0004_metamodel.sql gives entities a composite key to entity_types
+// carrying project_id, so an entity whose project_id disagrees with its
+// type's is unrepresentable. Verified by mutation: neutralising this
+// filter behind a no-op `OR TRUE` leaves the package green, including
+// TestALinkToAnEntityFromAnotherGamesTypeOfTheSameNameIsRefusedAtTheKey,
+// which is refused by the entity_type_id filter instead. The filter
+// stays for the same reason ListDocumentVersions' does -- a future
+// caller that obtains a type id some other way, which Task 11's REST
+// mirror may be -- and because the file header's rule is that isolation
+// is in SQL and not in whoever remembers to resolve first.
+// What the test above does pin is the *answer*: a caller naming another
+// game's entity under a type key both games declare is refused at
+// entity_key, not at entity_type and not with somebody else's row.
+func (q *Queries) GetEntityIDByKey(ctx context.Context, arg GetEntityIDByKeyParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getEntityIDByKey, arg.ProjectID, arg.EntityTypeID, arg.Key)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getEntityTypeIDByKey = `-- name: GetEntityTypeIDByKey :one
+SELECT id FROM entity_types
+WHERE project_id = $1::uuid
+  AND lower(key) = lower($2::text)
+`
+
+type GetEntityTypeIDByKeyParams struct {
+	ProjectID uuid.UUID
+	Key       string
+}
+
+// Link endpoints are resolved here rather than through
+// internal/metamodel's own EntityByKey, in two steps rather than one
+// join, for a reason that is about the *answer* and not about coupling:
+// a caller that typed "quesst" and a caller that typed "wanted-hoggerr"
+// have made two different mistakes at two different arguments, and one
+// flat "not found" makes an agent guess which. Two lookups let the
+// refusal name entity_type or entity_key, which is the discrimination
+// the spec wanted a whole extra wire code for.
+// TestAMistypedEntityTypeAndAMistypedEntityKeyAreToldApart pins that the
+// two misses are told apart, and the project filter here is what refuses
+// an entity type another game declared
+// (TestALinkToAnEntityInAnotherGameIsRefused).
+func (q *Queries) GetEntityTypeIDByKey(ctx context.Context, arg GetEntityTypeIDByKeyParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getEntityTypeIDByKey, arg.ProjectID, arg.Key)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertDocumentVersion = `-- name: InsertDocumentVersion :one
 INSERT INTO document_versions (project_id, document_id, version, title, summary, body_md,
                                frontmatter, message, deleted, author_user_id, author_token_id)
@@ -250,6 +366,133 @@ func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentV
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listDocumentLinksByDocument = `-- name: ListDocumentLinksByDocument :many
+SELECT l.role, l.created_at, t.key AS entity_type_key, e.key AS entity_key,
+       e.name AS entity_name, e.id AS entity_id
+FROM document_links l
+JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
+JOIN entity_types t ON t.id = e.entity_type_id AND t.project_id = e.project_id
+WHERE l.project_id = $1::uuid
+  AND l.document_id = $2::uuid
+ORDER BY t.key, e.key, e.id
+`
+
+type ListDocumentLinksByDocumentParams struct {
+	ProjectID  uuid.UUID
+	DocumentID uuid.UUID
+}
+
+type ListDocumentLinksByDocumentRow struct {
+	Role          string
+	CreatedAt     pgtype.Timestamptz
+	EntityTypeKey string
+	EntityKey     string
+	EntityName    string
+	EntityID      uuid.UUID
+}
+
+// Ordered by the entity's type key then its key then its id: none of the
+// first two is unique on its own, and an order that can tie reshuffles
+// its ties between two identical calls.
+//
+// The project filter here separates nothing that markdown.LinksByDocument
+// can reach, and this is stated rather than credited to a test that
+// would not go red: the document id only ever arrives already resolved
+// inside the caller's own game (markdown.documentForLinks), and
+// 0007_documents.sql's composite keys make a link row whose project_id
+// disagrees with its document's unrepresentable. It stays for the same
+// reason ListDocumentVersions' does -- a caller that does not resolve
+// first, which Task 11's REST mirror may be. What is pinned is the
+// document_id filter: TestALinkIsAddressedByItsOwnDocument uses two
+// documents in one game, where the project filter separates nothing.
+func (q *Queries) ListDocumentLinksByDocument(ctx context.Context, arg ListDocumentLinksByDocumentParams) ([]ListDocumentLinksByDocumentRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentLinksByDocument, arg.ProjectID, arg.DocumentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentLinksByDocumentRow
+	for rows.Next() {
+		var i ListDocumentLinksByDocumentRow
+		if err := rows.Scan(
+			&i.Role,
+			&i.CreatedAt,
+			&i.EntityTypeKey,
+			&i.EntityKey,
+			&i.EntityName,
+			&i.EntityID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentLinksByEntity = `-- name: ListDocumentLinksByEntity :many
+SELECT l.role, l.created_at, d.id AS document_id, d.path, d.title, d.kind
+FROM document_links l
+JOIN documents d ON d.id = l.document_id AND d.project_id = l.project_id
+WHERE l.project_id = $1::uuid
+  AND l.entity_id = $2::uuid
+  AND d.deleted_at IS NULL
+ORDER BY d.path, d.id
+`
+
+type ListDocumentLinksByEntityParams struct {
+	ProjectID uuid.UUID
+	EntityID  uuid.UUID
+}
+
+type ListDocumentLinksByEntityRow struct {
+	Role       string
+	CreatedAt  pgtype.Timestamptz
+	DocumentID uuid.UUID
+	Path       string
+	Title      string
+	Kind       string
+}
+
+// The reverse direction, which is how the UI builds an entity page and
+// how an agent asked to rewrite the Hogger dialogue finds the document
+// from the quest instead of guessing a path.
+//
+// Soft-deleted documents are excluded: an entity page listing a document
+// nobody can read would be a dead link on every quest it was attached
+// to. TestAnEntityStopsListingADocumentThatWasDeleted pins it, and pins
+// the other half of the same rule in its second act: nothing cascades on
+// a soft delete, so the link row survives and comes back with its role
+// when the document is written to again.
+func (q *Queries) ListDocumentLinksByEntity(ctx context.Context, arg ListDocumentLinksByEntityParams) ([]ListDocumentLinksByEntityRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentLinksByEntity, arg.ProjectID, arg.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentLinksByEntityRow
+	for rows.Next() {
+		var i ListDocumentLinksByEntityRow
+		if err := rows.Scan(
+			&i.Role,
+			&i.CreatedAt,
+			&i.DocumentID,
+			&i.Path,
+			&i.Title,
+			&i.Kind,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDocumentVersions = `-- name: ListDocumentVersions :many
@@ -581,6 +824,53 @@ func (q *Queries) UpsertDocument(ctx context.Context, arg UpsertDocumentParams) 
 		&i.CreatedByTokenID,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const upsertDocumentLink = `-- name: UpsertDocumentLink :one
+INSERT INTO document_links (project_id, document_id, entity_id, role)
+VALUES ($1::uuid, $2::uuid,
+        $3::uuid, $4::text)
+ON CONFLICT (document_id, entity_id) DO UPDATE
+SET role = excluded.role
+RETURNING id, project_id, document_id, entity_id, role, created_at
+`
+
+type UpsertDocumentLinkParams struct {
+	ProjectID  uuid.UUID
+	DocumentID uuid.UUID
+	EntityID   uuid.UUID
+	Role       string
+}
+
+// Idempotent by (document, entity): re-adding a link updates its role
+// rather than making a second edge, which is what keeps a re-run seeding
+// script from doubling every attachment.
+// TestReAddingALinkUpdatesItsRoleRatherThanDuplicatingIt pins it.
+//
+// project_id is written, not filtered, and 0007_documents.sql's two
+// composite keys are what make a cross-game link impossible by
+// construction: this row's project_id must agree with the document's
+// *and* with the entity's, so a document in one game cannot be attached
+// to an entity in another whatever Go believes.
+// TestALinkRowCannotClaimAGameItsDocumentDoesNotBelongTo forces that
+// refusal from this package.
+func (q *Queries) UpsertDocumentLink(ctx context.Context, arg UpsertDocumentLinkParams) (DocumentLink, error) {
+	row := q.db.QueryRow(ctx, upsertDocumentLink,
+		arg.ProjectID,
+		arg.DocumentID,
+		arg.EntityID,
+		arg.Role,
+	)
+	var i DocumentLink
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.DocumentID,
+		&i.EntityID,
+		&i.Role,
+		&i.CreatedAt,
 	)
 	return i, err
 }

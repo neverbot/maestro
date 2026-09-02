@@ -41,9 +41,6 @@ import (
 // the argument optional and omits it from the request when the caller
 // does not pass one, rather than defaulting it to the empty string on
 // the wire the way IncludeCurrent defaults the other way.
-//
-// Task 7 adds a Links field to this struct. It is deliberately not here
-// yet: a field no caller sets is a shape pre-committed sight unseen.
 type WriteInput struct {
 	Path            string
 	Content         string
@@ -52,6 +49,29 @@ type WriteInput struct {
 	ExpectedVersion *int32
 	IncludeCurrent  bool
 	Actor           Actor
+
+	// Links replaces the document's whole attachment set when it is
+	// non-nil, and leaves it untouched when it is nil.
+	//
+	// **The pointer is the distinction and it is load-bearing.** A plain
+	// slice cannot tell "attach nothing" from "do not touch the links",
+	// and reading an omitted array as empty would silently detach every
+	// attachment on every ordinary edit — the single most destructive
+	// thing this tool could do quietly. `Links: &[]LinkTarget{}` is the
+	// one way to say "detach everything", and it has to be said.
+	// TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt pins
+	// all four cases (create with, omit, replace, empty).
+	//
+	// The same distinction has to survive JSON, which is where Kind's
+	// version of this rule was found broken after the fact: `omitempty`
+	// on a plain slice omits an empty one, so the wire would collapse
+	// "detach everything" back into "say nothing". A pointer plus
+	// omitempty does not, in either direction, and
+	// TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnTheWire pins
+	// that here rather than leaving it to the surface that will carry it
+	// (Task 10's DocsWriteInput.Links, which must stay `*[]DocsLinkInput`
+	// for exactly this reason).
+	Links *[]LinkTarget
 }
 
 // Write creates or updates one document and records the snapshot.
@@ -84,6 +104,18 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 				"to update the one that is there",
 		})
 	}
+	// Only the array's length is judged here; each element is judged
+	// inside the transaction by replaceLinks, at its own index, because
+	// resolving an endpoint is a read and a read belongs where the write
+	// it guards is.
+	if in.Links != nil && len(*in.Links) > MaxLinksPerWrite {
+		problems = append(problems, metamodel.FieldError{
+			Path: "links",
+			Message: fmt.Sprintf("carries %d attachments and the most one write takes is %d: "+
+				"a document about that many things is a taxonomy, and a taxonomy is "+
+				"entities and relations", len(*in.Links), MaxLinksPerWrite),
+		})
+	}
 	if len(problems) > 0 {
 		return dbq.Document{}, invalidInputProblems(problems)
 	}
@@ -103,13 +135,30 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 	err = s.withTx(ctx, func(q *dbq.Queries) error {
 		var err error
 		written, err = s.writeWith(ctx, q, projectID, in, content)
-		return err
+		if err != nil {
+			return err
+		}
+		// Inside the same transaction, so a link naming an entity that
+		// does not exist takes the body down with it: a document and
+		// what it is about are one change.
+		if in.Links != nil {
+			return s.replaceLinks(ctx, q, projectID, written.ID, *in.Links)
+		}
+		return nil
 	})
 	if err != nil {
 		return dbq.Document{}, err
 	}
 	s.publish(projectID, eventDocumentWritten, documentEventMinRole, documentEventHumanOnly,
 		DocumentEvent{ID: written.ID, Path: written.Path, Version: written.CurrentVersion})
+	// A second event, and only when the caller said something about the
+	// links: eventDocumentLinked's comment argues why both are published
+	// rather than one, and why a write that says nothing about links
+	// must not announce a link change.
+	if in.Links != nil {
+		s.publish(projectID, eventDocumentLinked, documentEventMinRole, documentEventHumanOnly,
+			DocumentEvent{ID: written.ID, Path: written.Path, Version: written.CurrentVersion})
+	}
 	return written, nil
 }
 

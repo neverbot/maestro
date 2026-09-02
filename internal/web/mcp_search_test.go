@@ -548,3 +548,43 @@ func TestADocumentHitPassesTheToolsOwnOutputSchema(t *testing.T) {
 		t.Fatalf("document hit over the transport = %+v", doc)
 	}
 }
+
+// TestAMergedAnswerIsCutAtTheLimitAndSaysSo is the merge's own bound.
+// Each side returns up to `limit` on its own, so the concatenation can
+// be twice that, and only this cut keeps the promise the limit makes.
+// The hit that survives is the top of the merged ranking and not the
+// top of either side's — the entity ranks below the document here, and
+// a cut applied per side rather than after the merge would keep both.
+func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	seedSearchable(t, f)
+
+	out, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
+		web.SearchInput{Query: "hogger", Limit: 1})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	if len(out.Items) != 1 {
+		t.Fatalf("%d hits for limit 1, want the merged answer cut to one: %+v",
+			len(out.Items), out.Items)
+	}
+	if !out.Truncated {
+		t.Fatal("an answer that filled the limit must say so: there is no cursor to be absent")
+	}
+	// The quest is *named* Hogger and the script only says the word, so
+	// the entity is what a merge-then-cut keeps.
+	if out.Items[0].Kind != "entity" || !out.Items[0].NameMatch {
+		t.Fatalf("the surviving hit is %+v, want the top of the merged ranking", out.Items[0])
+	}
+	// And the same query under a limit both hits fit inside is not
+	// reported as truncated, so `truncated` is not simply always true.
+	roomy, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
+		web.SearchInput{Query: "hogger", Limit: 5})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	if len(roomy.Items) != 2 || roomy.Truncated {
+		t.Fatalf("two hits under a limit of five = %+v, truncated %v", roomy.Items, roomy.Truncated)
+	}
+}

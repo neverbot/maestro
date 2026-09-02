@@ -285,6 +285,16 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 // of race. The names in the message are the caller's own spellings —
 // there is nothing stored left to read them from, which is precisely the
 // condition being reported.
+//
+// **One parent per answer, unlike the two ends above.** Postgres reports
+// the first constraint a statement violates and stops, so a race that
+// deletes two of an edge's three parents at once is answered with one of
+// them and the caller meets the second on its retry. It is the same
+// class of hidden second hop bothEndpoints exists to close, and it is
+// left open here deliberately: closing it would mean re-reading all
+// three parents after a failed write to find out which are still gone —
+// work on a path only a race reaches, to save a round trip only a rarer
+// race costs.
 func edgeParentViolation(err error, in RelationInput) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {

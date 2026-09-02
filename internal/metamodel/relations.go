@@ -149,12 +149,17 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		return upsertedRelation{}, fmt.Errorf("lookup relation type: %w", err)
 	}
 
-	source, err := endpointEntity(ctx, q, projectID, "source", in.Source)
-	if err != nil {
-		return upsertedRelation{}, err
-	}
-	target, err := endpointEntity(ctx, q, projectID, "target", in.Target)
-	if err != nil {
+	// Both ends are resolved before either is reported, and that is the
+	// same argument checkEndpointTypes makes twenty lines from here about
+	// the two endpoint *lists*: an agent holding two bad endpoints fixes
+	// the one it was told about, resends, and is told about the other.
+	// Returning on the source cost a round trip per bad end and made the
+	// two halves of one decision disagree. The price is the two lookups
+	// the target end costs on an item that was going to fail anyway; the
+	// success path always paid them.
+	source, sourceErr := endpointEntity(ctx, q, projectID, "source", in.Source)
+	target, targetErr := endpointEntity(ctx, q, projectID, "target", in.Target)
+	if err := bothEndpoints(sourceErr, targetErr); err != nil {
 		return upsertedRelation{}, err
 	}
 
@@ -247,6 +252,26 @@ func edgeParentViolation(err error, in RelationInput) error {
 			ErrNotFound, in.Target.Key, in.Target.TypeKey)
 	}
 	return err
+}
+
+// bothEndpoints folds the two endpoint resolutions into the one answer
+// their caller returns.
+//
+// Two failures are joined with "; " rather than through errors.Join,
+// whose newline would put a batch report's Message on two lines, and each
+// half keeps its own sentinel: both %w verbs are wrapped, so errors.Is
+// still matches whichever of the two the caller asks about and
+// failureFor still files the item under not_found.
+func bothEndpoints(sourceErr, targetErr error) error {
+	switch {
+	case sourceErr != nil && targetErr != nil:
+		return fmt.Errorf("%w; %w", sourceErr, targetErr)
+	case sourceErr != nil:
+		return sourceErr
+	case targetErr != nil:
+		return targetErr
+	}
+	return nil
 }
 
 // endpoint is a resolved end of an edge: the entity and the type it

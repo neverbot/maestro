@@ -334,6 +334,17 @@ func TestEachMissingPieceOfAnEdgeIsNamed(t *testing.T) {
 				Target: metamodel.Ref{TypeKey: "zone", Key: "nosuch"}},
 			want: `not_found: target: no entity "nosuch" of type "zone" in this game`,
 		},
+		{
+			// Both ends in one answer, as checkEndpointTypes reports both
+			// endpoint lists in one pass: an agent with two bad endpoints
+			// otherwise fixes one, resends, and is told about the other.
+			name: "both endpoints missing",
+			in: metamodel.RelationInput{TypeKey: "requires",
+				Source: metamodel.Ref{TypeKey: "nosuch", Key: "hogger"},
+				Target: metamodel.Ref{TypeKey: "quest", Key: "nosuch"}},
+			want: `not_found: source: no entity type "nosuch" in this game; ` +
+				`not_found: target: no entity "nosuch" of type "quest" in this game`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := svc.UpsertRelation(ctx, project, tc.in)

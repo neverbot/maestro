@@ -3,6 +3,7 @@ package metamodel
 import (
 	"fmt"
 	"regexp"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -77,6 +78,68 @@ var colorPattern = regexp.MustCompile(`^#([0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-
 // that did not was the tell.
 var iconPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// textProblem is the one rule this package applies to every piece of
+// caller-supplied prose it stores or renders — an entity or type name, a
+// label, a plural, a description, a text or longtext field value, an
+// element of a list<text> — and it is the same rule checkSearchQuery
+// applies to a search query and validateName applies to a project name
+// in internal/projects/projects.go: valid UTF-8, and no control
+// character.
+//
+// Before this existed the package had three different answers to the
+// same question -- projects.go refused controls, search.go refused
+// controls, and every metamodel name, descriptor and field value refused
+// nothing -- so a NUL inside a name reached Postgres unexamined and came
+// back as `ERROR: invalid byte sequence for encoding "UTF8" (SQLSTATE
+// 22021)`, untyped, over the caller's own argument; the identical NUL
+// inside a longtext field value failed a different way, `unsupported
+// Unicode escape sequence (SQLSTATE 22P05)`, because jsonb encodes a NUL
+// as the six-character escape and Postgres's json input routine refuses
+// that escape outright. Neither is a schema_violation Task 4's caller
+// could read as "the value is wrong shape" -- both are exactly the NUL
+// checkSearchQuery already refuses on the read side, reaching the same
+// caller through the write side instead.
+//
+// **allowNewlineAndTab decides the one asymmetry a single rule cannot
+// avoid stating.** A `longtext` field value and a row's `description`
+// are free-form prose — a lore document, a designer's notes — and a
+// newline in either is the caller's own paragraph break, not malformed
+// input; refusing it would make the rule less useful than the bug it
+// replaces. Every other text this function sees — a `name`, a `label`,
+// a `label_plural`, a `text` field value, one element of a `list<text>`
+// — is rendered as a single line (a page title, a game picker, a
+// listing row, a tag chip), the same reasoning validateName gives for
+// entity and project names alike, so a newline or a tab there is refused
+// exactly like any other control character rather than silently kept or
+// silently dropped.
+//
+// A control character is refused, not stripped, for the reason
+// checkSearchQuery's doc comment gives: silently deleting part of what a
+// caller wrote answers a question it did not ask.
+func textProblem(value string, allowNewlineAndTab bool) string {
+	if !utf8.ValidString(value) {
+		return "is not valid UTF-8: a byte in it does not decode as any character"
+	}
+	for i, r := range value {
+		if !unicode.IsControl(r) {
+			continue
+		}
+		if allowNewlineAndTab && (r == '\n' || r == '\t') {
+			continue
+		}
+		if allowNewlineAndTab {
+			return fmt.Sprintf(
+				"holds a control character (%U at byte %d): only a newline or a tab is allowed here",
+				r, i)
+		}
+		return fmt.Sprintf(
+			"holds a control character (%U at byte %d): this is one line of text, "+
+				"and no control character can be part of it",
+			r, i)
+	}
+	return ""
+}
+
 // checkDescriptors collects every problem with a row's descriptive
 // columns, so a seeding agent fixes all of them in one round trip
 // instead of one per call. It reports at the wire path of each column,
@@ -88,9 +151,25 @@ func checkDescriptors(label, labelPlural, description, color, icon string) []Fie
 		problems = append(problems, FieldError{Path: "label", Message: "is required"})
 	} else {
 		tooLong("label", label, maxLabelLen, &problems)
+		if p := textProblem(label, false); p != "" {
+			problems = append(problems, FieldError{Path: "label", Message: p})
+		}
 	}
 	tooLong("label_plural", labelPlural, maxLabelLen, &problems)
+	if labelPlural != "" {
+		if p := textProblem(labelPlural, false); p != "" {
+			problems = append(problems, FieldError{Path: "label_plural", Message: p})
+		}
+	}
 	tooLong("description", description, maxDescriptionLen, &problems)
+	if description != "" {
+		// description is a row's own prose, not a rendered single line —
+		// see textProblem's doc comment — so it keeps the newline and tab
+		// a longtext field value does.
+		if p := textProblem(description, true); p != "" {
+			problems = append(problems, FieldError{Path: "description", Message: p})
+		}
+	}
 
 	if color != "" && !colorPattern.MatchString(color) {
 		problems = append(problems, FieldError{
@@ -120,12 +199,20 @@ func checkDescriptors(label, labelPlural, description, color, icon string) []Fie
 // reports at "label", and an agent that sent `name` must be told about
 // `name`. Rows whose descriptive columns really are label-shaped —
 // relation types, Task 5 — call checkDescriptors directly instead.
+//
+// name obeys textProblem's single-line rule, not the description one: it
+// is rendered as one line — a page title, a game picker, a listing row —
+// the same as a label, never as a lore document, so a newline in it is
+// refused like any other control character.
 func checkName(name string) []FieldError {
 	var problems []FieldError
 	if name == "" {
 		problems = append(problems, FieldError{Path: "name", Message: "is required"})
 	} else {
 		tooLong("name", name, maxLabelLen, &problems)
+		if p := textProblem(name, false); p != "" {
+			problems = append(problems, FieldError{Path: "name", Message: p})
+		}
 	}
 	return problems
 }

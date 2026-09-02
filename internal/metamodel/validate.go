@@ -131,6 +131,14 @@ func coerce(f Field, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("expected text, got %T", raw)
 		}
+		// The same rule descriptors.go's textProblem states for every
+		// other piece of caller-supplied prose in this package: valid
+		// UTF-8, no control character, except that a longtext value is
+		// free-form prose and keeps its newlines and tabs. A text value
+		// is single-line, the same as a name or a label.
+		if p := textProblem(s, f.Type == FieldLongText); p != "" {
+			return nil, errors.New(p)
+		}
 		return s, nil
 
 	case FieldNumber:
@@ -181,6 +189,12 @@ func coerce(f Field, raw any) (any, error) {
 		if strs, ok := raw.([]string); ok {
 			out := make([]any, len(strs))
 			for i, s := range strs {
+				// A list<text> element is a tag or an alias, rendered as
+				// one line the same as a text value — see coerce's
+				// FieldText case.
+				if p := textProblem(s, false); p != "" {
+					return nil, fmt.Errorf("element %d %s", i, p)
+				}
 				out[i] = s
 			}
 			return out, nil
@@ -194,6 +208,9 @@ func coerce(f Field, raw any) (any, error) {
 			s, ok := item.(string)
 			if !ok {
 				return nil, fmt.Errorf("element %d is %T, expected text", i, item)
+			}
+			if p := textProblem(s, false); p != "" {
+				return nil, fmt.Errorf("element %d %s", i, p)
 			}
 			out = append(out, s)
 		}

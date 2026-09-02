@@ -1822,3 +1822,77 @@ func TestARepeatIsRefusedEvenWhenTheFirstOccurrenceIsDoomed(t *testing.T) {
 		t.Fatalf("the key must be written by neither item, got %v", err)
 	}
 }
+
+// TestUpsertEntityRefusesUnprintableTextBeforeItReachesPostgres pins the
+// write-side half of the rule checkSearchQuery already applies on the
+// read side: caller-supplied text must be valid UTF-8 and free of
+// control characters, refused as the caller's own argument rather than
+// left to Postgres.
+//
+// Proved live before this test existed, all of them through
+// UpsertEntity: a NUL inside `name` returned `ERROR: invalid byte
+// sequence for encoding "UTF8" (SQLSTATE 22021)`, untyped; the same NUL
+// inside a `longtext` value returned `ERROR: unsupported Unicode escape
+// sequence (SQLSTATE 22P05)`, untyped; a NUL substitute — a lone
+// continuation byte, 0xff, not valid UTF-8 at all — returned the first
+// error again; and a newline inside `name` was accepted and stored,
+// which is the one of these five that stays accepted, deliberately: see
+// textProblem's doc comment for why `longtext` keeps its newlines and
+// `name` does not.
+func TestUpsertEntityRefusesUnprintableTextBeforeItReachesPostgres(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	for _, tc := range []struct {
+		name, entityName, summary, wantCode, wantSubstr string
+	}{
+		{"a NUL in name", "Hog\x00ger", "fine", "invalid_input", "control character"},
+		{"an invalid byte in name", "Hog\xffger", "fine", "invalid_input", "valid UTF-8"},
+		{"a NUL in a longtext value", "Hogger", "Kill Hog\x00ger.", "schema_violation", "control character"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+				TypeKey: "quest", Key: fmt.Sprintf("k-%s", strings.ReplaceAll(tc.name, " ", "-")),
+				Name:   tc.entityName,
+				Fields: map[string]any{"min_level": float64(1), "summary": tc.summary},
+			})
+			var ve *metamodel.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want a *ValidationError", err)
+			}
+			code := ve.Code
+			if code == "" {
+				code = "schema_violation" // the zero value; see ValidationError.code
+			}
+			if code != tc.wantCode {
+				t.Fatalf("code = %q, want %q", code, tc.wantCode)
+			}
+			if !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("err = %v, want it to mention %q", err, tc.wantSubstr)
+			}
+		})
+	}
+
+	// The one asymmetry: a name refuses a newline, a longtext value keeps
+	// it, both deliberately.
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "newline-in-name", Name: "Hog\nger",
+		Fields: map[string]any{"min_level": float64(1)},
+	}); err == nil || !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("a newline in name: err = %v, want it refused as a control character", err)
+	}
+
+	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "newline-in-summary", Name: "Hogger",
+		Fields: map[string]any{"min_level": float64(1), "summary": "Line one.\nLine two.\tTabbed."},
+	})
+	if err != nil {
+		t.Fatalf("a newline and a tab in a longtext value must be accepted: %v", err)
+	}
+	if row.Key != "newline-in-summary" {
+		t.Fatalf("row.Key = %q, want it stored", row.Key)
+	}
+}

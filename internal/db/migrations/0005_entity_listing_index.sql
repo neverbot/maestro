@@ -1,15 +1,35 @@
--- The index the entity listing's keyset sorts on.
+-- The index the entity listing's keyset sorts on -- and, re-reviewed
+-- 2026-09-02, only that listing's, not the three readers the paragraph
+-- below originally claimed.
 --
 -- 0004 gave relations the equivalent (relations_project_idx, on
 -- (project_id, created_at)) and its comment says why: without a
 -- project-leading index in the listing's own sort order, the position a
 -- cursor carries cannot be sought to, so every page reads the whole
--- game and sorts it. entities was left without one, and it is the table
--- read far more often -- every listing, every traversal's far end, and
--- the game home page.
+-- game and sorts it. entities was left without one for the *unfiltered*
+-- listing -- ListEntities with no type and no invalid filter, the shape
+-- the game home page and a bulk export use.
+--
+-- **It does not help the other two readers this comment used to name.**
+-- Measured the same way, same data: a type-filtered listing -- the
+-- common agent call, ListEntities{TypeKey: ...} -- still plans through
+-- entities_key_key with a top-N sort (1,675 buffers, 1.93 ms) and this
+-- index is absent from that plan; entities_key_key already leads with
+-- (project_id, entity_type_id, key), which is a better match for a
+-- type-filtered predicate than (project_id, name, id) is. The one-hop
+-- traversal (ListEntitiesRelatedTo) plans as a Nested Loop into a top-N
+-- sort (10,079 buffers, 5.87 ms) and does not touch this index either;
+-- its far end is served by entities_id_project_id_key, which 0004 added
+-- for a different join and which this migration does not change. So
+-- **the traversal still sorts its whole neighbourhood on every page and
+-- cannot seek to its cursor** -- the exact defect this migration exists
+-- to fix, still open on the one path the original comment claimed it
+-- covered. See Task 6's plan corrections
+-- (docs/superpowers/plans/2026-08-31-metamodel.md) for what that means
+-- for a query language built on this table.
 --
 -- Measured on this project's own Postgres, 50,000 entities across 20
--- games, paging the middle game 50 rows at a time:
+-- games, paging the middle game 50 rows at a time, unfiltered:
 --
 --   without: Bitmap Index Scan on entities_key_key over the whole
 --            game, 2,499 rows to the heap, then a top-N sort; 75 shared
@@ -27,9 +47,9 @@
 -- is real but below what this workload can see.
 --
 -- entities_key_key already leads with project_id, which is why the
--- unindexed plan was a bitmap scan rather than a sequential one; what it
--- cannot do is deliver rows in name order, and that is the whole
--- difference above.
+-- unindexed unfiltered plan was a bitmap scan rather than a sequential
+-- one; what it cannot do is deliver rows in name order, and that is the
+-- whole difference above.
 -- +goose Up
 CREATE INDEX entities_listing_idx ON entities (project_id, name, id);
 

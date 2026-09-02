@@ -337,24 +337,33 @@ func TestOnlyTheIndexedHeadOfALongFieldIsSearchable(t *testing.T) {
 }
 
 // TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument pins the
-// two ways an unbounded query reached Postgres and came back as
-// something an agent reads as "the server is broken".
+// three ways an unbounded or malformed query reached Postgres and came
+// back as something an agent reads as "the server is broken".
 //
-// Measured on this project's own Postgres before the bound went in, all
-// of them through Search:
+// Measured on this project's own Postgres before the bound went in,
+// through Search:
 //
 //   - a NUL inside a word — six characters of JSON escape, which an agent
 //     produces by accident — reached plainto_tsquery and returned
 //     `ERROR: invalid byte sequence for encoding "UTF8"`, untyped, so it
-//     surfaced as internal_error.
-//   - 146 KiB of words cost 2.1s of database CPU and then failed with
-//     `stack depth limit exceeded`, also untyped. 292 KiB took 8.5s and
-//     585 KiB took 33.5s: the growth is quadratic, so a handful of
-//     concurrent calls is a self-inflicted denial of service.
+//     surfaced as internal_error. An unpaired surrogate or a lone
+//     continuation byte — not a control character, but also not valid
+//     UTF-8 — took the identical path to the identical error.
+//   - a query of *one word repeated* cost 2.1s of database CPU at
+//     146 KiB, then failed with `stack depth limit exceeded`, also
+//     untyped; 292 KiB took 8.5s and 585 KiB took 33.5s. This is a
+//     separate measurement from MaxSearchQuery's doc comment, which
+//     timed *distinct* words and found a shorter query and a smaller
+//     multiplier (126 KiB / 0.36s, 263 KiB / 1.4s, 536 KiB / 5.5s) — the
+//     two are not the same run and are not meant to be compared word for
+//     word; see MaxSearchQuery for why a repeated word is not obviously
+//     the cheaper case for `plainto_tsquery` to parse. Either shape
+//     alone already makes the point: the growth is quadratic, so a
+//     handful of concurrent calls is a self-inflicted denial of service.
 //
-// Both are the caller's own argument at path `query`, so by this
-// package's own rule they are invalid_input, and both are now refused
-// before a byte of them reaches the database.
+// All three are the caller's own argument at path `query`, so by this
+// package's own rule they are invalid_input, and all three are now
+// refused before a byte of them reaches the database.
 func TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
@@ -369,6 +378,8 @@ func TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 		{"a bare NUL", "\x00", "control character"},
 		{"an escape", "hogger\x1bgnoll", "control character"},
 		{"a newline", "hogger\ngnoll", "control character"},
+		{"an unpaired surrogate", "hello \xed\xa0\x80 world", "valid UTF-8"},
+		{"a lone continuation byte", "hello \xff world", "valid UTF-8"},
 		{"146 KiB of words", strings.Repeat("gnoll ", 25000), "too long"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

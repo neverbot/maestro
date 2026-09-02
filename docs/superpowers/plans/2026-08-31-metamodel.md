@@ -6144,6 +6144,181 @@ gets three copies if it is not.)
     description makes. `TestSearchRanksTheStrongerMatchFirst` is the test
     that has to change when it is implemented, and it says so.
 
+**Re-review, 2026-09-02.** Correction 20's index and the fixes
+`checkSearchQuery` already applied (the NUL and length refusals from
+correction 17) were verified sound and stayed as they were. What the
+re-review found is what was said *about* them, and one place the same
+rule those fixes state was never applied at all — five findings, closed
+below.
+
+26. **`checkSearchQuery`'s UTF-8 check refused a NUL and let every other
+    invalid byte through.** `strings.IndexFunc(query, unicode.IsControl)`
+    decodes an invalid byte as U+FFFD, the replacement character, which
+    is not a control character, so `unicode.IsControl` never sees it and
+    the byte reaches `plainto_tsquery` unexamined. Proved live through
+    `Search`: `"hello \xed\xa0\x80 world"` (an unpaired UTF-16 surrogate
+    encoded as if it were valid UTF-8) and `"hello \xff world"` (a lone
+    continuation byte, not valid UTF-8 under any reading) both returned
+    `ERROR: invalid byte sequence for encoding "UTF8" (SQLSTATE 22021)`,
+    untyped, over the caller's own argument — the identical failure
+    correction 17 was written to close, just not closed for this class of
+    byte.
+
+    The doc comment compounded it, claiming "NUL is the one Postgres
+    itself rejects." False: Postgres rejects every invalid UTF-8 sequence
+    with SQLSTATE 22021, not only a NUL, and the claim that both refusals
+    happen "before a byte reaches Postgres" did not hold for a
+    non-NUL invalid sequence either. `checkSearchQuery` now calls
+    `utf8.ValidString` before the control-character scan, and the two
+    comments — on `checkSearchQuery` and on `Search` itself — say what
+    Postgres actually refuses.
+    `TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument` gained
+    the two live cases above; **proved red** by reverting the
+    `utf8.ValidString` check (keeping the import to isolate the one
+    change): both new subtests failed with exactly the SQLSTATE 22021
+    quoted above, reaching the caller as `internal_error`, and the
+    existing five subtests in the same test stayed green, confirming the
+    baseline ran before the mutation (`go test -v`, every subtest name
+    printed).
+
+27. **The refusal search.go states was missing entirely on the write
+    path — the third instance of a project pattern.** Correction 17 gave
+    `Search` a rule for caller-supplied text; `internal/projects/`'s
+    `validateName` had its own, older, version of the same rule; and
+    every entity name, type label, plural, description, and text or
+    longtext field value in this package refused nothing. Proved live
+    through `UpsertEntity`: `name = "Hog\x00ger"` returned `ERROR:
+    invalid byte sequence for encoding "UTF8" (SQLSTATE 22021)`, untyped;
+    a `longtext` field carrying the same NUL returned a *different*
+    untyped error, `ERROR: unsupported Unicode escape sequence (SQLSTATE
+    22P05)`, because jsonb encodes a NUL as the six-character escape
+    `\u0000` and Postgres's json input routine refuses that
+    escape outright; `name = "Hog\xffger"` (invalid UTF-8, no NUL involved)
+    returned SQLSTATE 22021 again; and `name = "Hog\nger"` was accepted
+    and stored. All three failures were fully reachable through the
+    intended agent surface — plain JSON, no crafted bytes — and none of
+    them carried a field path or a code an agent's retry logic could act
+    on.
+
+    **The one rule settled**, in `descriptors.go`'s new `textProblem`:
+    every caller-supplied string this package stores or renders — an
+    entity or type `name`, a `label`, a `label_plural`, a `description`,
+    a `text` or `longtext` field value, an element of a `list<text>` —
+    must be valid UTF-8 and hold no control character, refused as the
+    caller's own argument (`invalid_input` at the row's own path for a
+    name or descriptor, `schema_violation` at `fields.<key>` for a field
+    value, matching the split correction 25 of Task 4's re-review
+    already draws between the two). Colour and icon needed no change:
+    their existing patterns already admit only a fixed ASCII alphabet, so
+    invalid UTF-8 and every control character were already excluded by
+    construction. Keys needed no change for the same reason —
+    `rowKeyPattern` is ASCII-only.
+
+    **What was decided about newline and tab, stated rather than left to
+    fall out of the implementation:** `textProblem` takes
+    `allowNewlineAndTab`. A `longtext` field value and a row's
+    `description` are free-form prose — a lore document, a designer's
+    notes — and a newline in either is the caller's own paragraph break,
+    not malformed input, so both keep newline and tab and refuse every
+    other control character. Every other text this rule touches — `name`,
+    `label`, `label_plural`, a `text` field value, one element of a
+    `list<text>` — is rendered as a single line (a page title, a game
+    picker, a listing row, a tag chip), so a newline or a tab there is
+    refused exactly like any other control character, matching
+    `validateName`'s existing treatment of a project name and
+    `checkSearchQuery`'s treatment of a query.
+
+    Relation and relation-type paths needed no separate check:
+    `RelationInput` carries no descriptive column at all — decision on
+    that already recorded in `relations.go` — so its only caller-supplied
+    prose is field values, which go through the same `Schema.Validate`
+    and therefore the same `textProblem` entity values do; relation
+    *types* call `checkDescriptors` directly, so they inherit the fix
+    with no separate wiring.
+
+    `TestUpsertEntityRefusesUnprintableTextBeforeItReachesPostgres` pins
+    the table above plus the newline asymmetry. **Proved red** by
+    reverting the `textProblem` calls in `checkName` and in `coerce`'s
+    `FieldText`/`FieldLongText` case (keeping the unused import removed
+    so the mutation isolates the check, not a compile error): all three
+    unprintable-text subtests failed, reproducing the exact live errors
+    above byte for byte (SQLSTATE 22021 twice, SQLSTATE 22P05 once), and
+    the newline-in-name assertion failed too (`err = <nil>`, the row was
+    accepted). `go test -v` confirmed the baseline ran, subtest by
+    subtest, before the mutation. Restoring the calls returned the suite
+    to green; `make check` is clean with the fix in.
+
+28. **The migration's justification named three readers and served
+    one.** `0005_entity_listing_index.sql` said the index served "every
+    listing, every traversal's far end, and the game home page."
+    Measured on the same 50,000-row, 20-game dataset correction 20
+    already used: a type-filtered listing — `ListEntities{TypeKey: ...}`,
+    the common agent call — still plans through `entities_key_key` with a
+    top-N sort (1,675 buffers, 1.93 ms); `entities_listing_idx` is absent
+    from that plan, because `entities_key_key`'s
+    `(project_id, entity_type_id, key)` is the better match for a
+    type-filtered predicate. The one-hop traversal
+    (`ListEntitiesRelatedTo`) plans as a Nested Loop into a top-N sort
+    (10,079 buffers, 5.87 ms) and never touches this index either; its
+    far end is served by `entities_id_project_id_key`, an index 0004
+    added for a different join, so the migration's comment was taking
+    credit for an existing win. **What the index actually buys is the
+    *unfiltered* entity listing** — no type, no invalid filter — which is
+    the shape the game home page and a bulk export use; the 235 ms →
+    49 ms, 200-page measurement already in the migration is that reader's
+    number and needed no re-measuring, only re-labelling.
+
+    More substantively: **the traversal still sorts its whole
+    neighbourhood on every page and cannot seek to its cursor**, which is
+    the exact defect this migration exists to fix, left open on the one
+    path the original comment claimed it had already covered. The
+    migration's comment now names one reader instead of three, states the
+    two it does not help and why, and says the traversal's gap stays
+    open. `TestMigrateUpDownUp` and the package suite stayed green
+    against the corrected comment — nothing about the index's DDL
+    changed, only what is claimed about it. See correction 23 for the
+    traversal's other open issue (the join shape does not generalise to a
+    recursive walk); the seek gap here is a second, independent reason a
+    views query cannot inherit `ListEntitiesRelatedTo` unchanged, and it
+    is added to what correction 24 already tells the views sub-project to
+    expect from this listing.
+
+29. **Two comments recorded contradictory measurements of the same class
+    of experiment, presented as if comparable.** `search.go`'s
+    `MaxSearchQuery` comment: 126 KiB answered in 0.36 s, 263 KiB failed
+    after 1.4 s, 536 KiB failed after 5.5 s, all with *distinct* words.
+    `search_test.go`'s bound test: 146 KiB failed after 2.1 s, 292 KiB
+    after 8.5 s, 585 KiB after 33.5 s, all with *one word repeated*.
+    Roughly six times apart on the number that justifies the bound, both
+    read as measured on this project's own Postgres, and the direction
+    runs backwards from what the framing implies — a repeated word reads
+    as the easy case and measured six times worse. Neither comment said
+    it was timing a different workload from the other.
+
+    Reconciling them by re-running one workload under the other's
+    wording would manufacture a third number nobody asked for; the
+    honest fix is to say what each already was. Both comments now name
+    their own workload explicitly, say in as many words that they are
+    separate runs and not a comparison, and `search.go`'s comment points
+    at `search_test.go`'s for the second data point rather than letting a
+    reader find two unattributed measurements and assume they were
+    meant to agree.
+
+30. **Recorded, not fixed**, matching how the previous round's own
+    informational findings were handled:
+
+    - `unicode.IsControl` covers Unicode category Cc only, so `U+200B`
+      (zero-width space) and `U+2028` (line separator) pass every check
+      in this file and in `checkSearchQuery` alike. Harmless today, and
+      "one line of text" is a looser promise than what the check
+      enforces — recorded so a future tightening starts here instead of
+      rediscovering the gap.
+    - `TestMigrateUpDownUp` still asserts only that goose *reported* each
+      `Down` succeeded, not that each `Down` undid its `Up`; a `Down`
+      that silently did nothing would pass. Pre-existing, not introduced
+      by 0005, and 0005's own `Down` (`DROP INDEX entities_listing_idx`)
+      was checked by hand this round rather than by the suite.
+
 - [x] **Step 1: Add the listing and search queries**
 
 `ListEntitiesPage` is printed in Task 4's Step 1 but was **not** added

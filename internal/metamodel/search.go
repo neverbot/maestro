@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -37,6 +38,18 @@ const (
 // concurrent calls carrying text nobody vetted is a denial of service
 // the server does to itself, and what a caller gets back for it is an
 // internal_error over its own argument.
+//
+// **This is one of two measurements of the same failure mode, not the
+// only one.** `search_test.go`'s
+// TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument timed the
+// identical failure with one word repeated rather than distinct words,
+// on a separate run, and got numbers roughly six times larger at the
+// same sizes. Distinct runs on different data are not directly
+// comparable and neither comment claims to be measuring the other's
+// workload; both are recorded because either one alone proves the bound
+// is needed, and the gap between them is a caution against reading a
+// single measured number as the constant rather than as one sample of a
+// quadratic curve.
 const MaxSearchQuery = 4 << 10
 
 // Search runs a full-text query over a game's entities and returns the
@@ -54,11 +67,11 @@ const MaxSearchQuery = 4 << 10
 // the absence of the word.
 //
 // **The query has a bound of its own: MaxSearchQuery, 4 KiB**, and it
-// must hold no control character. Both are refused as invalid_input at
-// path `query` before the text reaches the database, for the reasons
-// checkSearchQuery records. The two bounds are stated together because a
-// caller reading only the index one would think the query side was
-// unlimited, which is exactly what it used to be.
+// must be valid UTF-8 holding no control character. All of it is refused
+// as invalid_input at path `query` before the text reaches the database,
+// for the reasons checkSearchQuery records. The two bounds are stated
+// together because a caller reading only the index one would think the
+// query side was unlimited, which is exactly what it used to be.
 //
 // **What it ranks by.** `ts_rank` over that column, which scores by how
 // many of the query's lexemes a row matches and how often. It is
@@ -115,23 +128,37 @@ func (s *Service) Search(ctx context.Context, projectID uuid.UUID, query, typeKe
 // and one that cannot match anything, rather than letting either answer
 // "nothing found" or "the server is broken".
 //
-// **All three refusals are invalid_input at path `query`**, which is the
+// **All four refusals are invalid_input at path `query`**, which is the
 // rule this package applies to every argument a caller supplied: the
-// value is the caller's and so is the recovery. Two of them used to be
+// value is the caller's and so is the recovery. Three of them used to be
 // neither refused nor typed. A NUL — six characters of JSON escape, so
 // an agent writes one by accident — travelled into `plainto_tsquery` and
 // came back as `ERROR: invalid byte sequence for encoding "UTF8": 0x00
-// (SQLSTATE 22021)`, untyped, reaching the caller as internal_error; and
-// an unbounded query burned database CPU before failing the same
-// anonymous way (MaxSearchQuery records the measurements). Both now stop
-// here, before a byte reaches Postgres.
+// (SQLSTATE 22021)`, untyped, reaching the caller as internal_error; an
+// unbounded query burned database CPU before failing the same anonymous
+// way (MaxSearchQuery records the measurements); and a query that was
+// invalid UTF-8 without containing a NUL — an unpaired surrogate, a lone
+// continuation byte — reached Postgres by the identical route and failed
+// with the identical SQLSTATE 22021, because `unicode.IsControl` decodes
+// an invalid byte as the replacement character U+FFFD, which is not a
+// control character, and so let it through. All four now stop here,
+// before a byte reaches Postgres.
+//
+// **The query must be valid UTF-8.** Postgres rejects every invalid
+// byte sequence with SQLSTATE 22021, not only a NUL — a NUL is simply
+// the one invalid sequence a JSON-encoding agent is likeliest to produce
+// by accident, which is why it was the first one this function caught.
+// `utf8.ValidString` is checked before the control-character scan below,
+// so a query that is both invalid UTF-8 and free of any decodable
+// control character is still refused, and refused with a message about
+// its actual defect rather than "no word to search for".
 //
 // **A control character is refused, not stripped**, and that includes
 // newline and tab: a query is one line of text a human or an agent
 // typed, `simple` can make a lexeme of none of these, and silently
 // deleting part of a caller's query would answer a question it did not
-// ask. NUL is the one Postgres itself rejects; the rest are refused with
-// it because a query carrying any of them is a caller assembling text
+// ask. NUL is refused by the same rule as the rest, not a special case:
+// a query carrying any control character is a caller assembling text
 // wrongly, and telling it so at the first character is more useful than
 // searching for whatever survived.
 //
@@ -157,6 +184,10 @@ func checkSearchQuery(query string) error {
 			"is too long (%d bytes, the most this search takes is %d): "+
 				"search for the words that matter rather than pasting the text",
 			len(query), MaxSearchQuery))
+	}
+	if !utf8.ValidString(query) {
+		return searchQueryProblem("is not valid UTF-8: a byte in it does not decode as any " +
+			"character, and Postgres refuses that outright")
 	}
 	if i := strings.IndexFunc(query, unicode.IsControl); i >= 0 {
 		return searchQueryProblem(fmt.Sprintf(

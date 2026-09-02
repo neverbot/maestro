@@ -482,3 +482,428 @@ func equalStrings(a, b []string) bool {
 }
 
 func ptrBool(v bool) *bool { return &v }
+
+// seedTakesPlaceIn declares the relation type the traversal tests hop
+// along and returns nothing: every test that uses it addresses the type
+// by its key, as a caller would.
+func seedTakesPlaceIn(t *testing.T, svc *metamodel.Service, project uuid.UUID) {
+	t.Helper()
+	if _, err := svc.UpsertRelationType(context.Background(), project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in", SemanticRole: "spatial",
+	}); err != nil {
+		t.Fatalf("seed relation type: %v", err)
+	}
+}
+
+func relate(t *testing.T, svc *metamodel.Service, project uuid.UUID, typeKey string, src, dst metamodel.Ref) {
+	t.Helper()
+	if _, err := svc.UpsertRelation(context.Background(), project, metamodel.RelationInput{
+		TypeKey: typeKey, Source: src, Target: dst,
+	}); err != nil {
+		t.Fatalf("relate %s/%s -> %s/%s: %v", src.TypeKey, src.Key, dst.TypeKey, dst.Key, err)
+	}
+}
+
+// TestOneHopTraversalAnswersInBothDirections pins the only thing
+// direction means here: which end of the edge the anchor sits at, and
+// therefore which end comes back.
+func TestOneHopTraversalAnswersInBothDirections(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedTakesPlaceIn(t, svc, project)
+
+	relate(t, svc, project, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	relate(t, svc, project, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+
+	// Which quests happen in Elwynn Forest? The anchor is the zone and
+	// the edges point at it, so the hop is incoming.
+	incoming, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		},
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("incoming: %v", err)
+	}
+	// Ordered by name, not by key: "Kobold Camp" sorts before "Wanted:
+	// Hogger". Every listing in this file shares that order, which is
+	// what the cursor is a position in.
+	if got := keysOf(incoming); !equalStrings(got, []string{"kobold-camp", "hogger"}) {
+		t.Fatalf("incoming = %v, want the two quests", got)
+	}
+
+	// Where does Hogger happen? The anchor is the quest and its edge
+	// points away, so the hop is outgoing.
+	outgoing, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "quest", EntityKey: "hogger",
+			Direction: metamodel.DirectionOutgoing,
+		},
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("outgoing: %v", err)
+	}
+	if got := keysOf(outgoing); !equalStrings(got, []string{"elwynn"}) {
+		t.Fatalf("outgoing = %v, want the zone", got)
+	}
+
+	// The same anchor read the other way round has no neighbours, and
+	// says so rather than falling back to the direction that does.
+	empty, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "quest", EntityKey: "hogger",
+			Direction: metamodel.DirectionIncoming,
+		},
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("the empty direction: %v", err)
+	}
+	if len(empty.Entities) != 0 {
+		t.Fatalf("incoming from a source entity returned %v", keysOf(empty))
+	}
+}
+
+// TestAnUnknownDirectionIsRefused pins that a misspelled direction is an
+// invalid_input at its own path, not an empty page and not a silent fall
+// back to outgoing. Both of those answer a question the caller did not
+// ask, and a caller cannot tell either from "this anchor has no
+// neighbours".
+func TestAnUnknownDirectionIsRefused(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedTakesPlaceIn(t, svc, project)
+	relate(t, svc, project, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+
+	for _, direction := range []string{"", "in", "Outgoing", "both"} {
+		t.Run(fmt.Sprintf("%q", direction), func(t *testing.T) {
+			_, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+				RelatedTo: &metamodel.RelatedFilter{
+					RelationTypeKey: "takes_place_in", EntityTypeKey: "quest", EntityKey: "hogger",
+					Direction: direction,
+				},
+				Limit: 50,
+			})
+			if !errors.Is(err, metamodel.ErrInvalidInput) {
+				t.Fatalf("err = %v, want invalid_input", err)
+			}
+			var ve *metamodel.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("err = %v, want a ValidationError", err)
+			}
+			if len(ve.Fields) != 1 || ve.Fields[0].Path != "related_to.direction" {
+				t.Fatalf("fields = %+v, want one problem at path \"related_to.direction\"", ve.Fields)
+			}
+			for _, want := range []string{`"outgoing"`, `"incoming"`} {
+				if !strings.Contains(ve.Fields[0].Message, want) {
+					t.Fatalf("message = %q, want it to name %s", ve.Fields[0].Message, want)
+				}
+			}
+		})
+	}
+}
+
+// TestASelfLoopAppearsOnceInItsOwnNeighbourList pins the decision
+// RelatedFilter records: an edge from an entity to itself puts the
+// anchor in its own answer, once, under either direction. Twice would be
+// the join matching both arms; never would be this listing hiding an edge
+// the game declared.
+func TestASelfLoopAppearsOnceInItsOwnNeighbourList(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "unlocks", Label: "unlocks", SemanticRole: "unlock",
+	}); err != nil {
+		t.Fatalf("seed relation type: %v", err)
+	}
+	relate(t, svc, project, "unlocks",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"})
+
+	for _, direction := range []string{metamodel.DirectionOutgoing, metamodel.DirectionIncoming} {
+		t.Run(direction, func(t *testing.T) {
+			page, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+				RelatedTo: &metamodel.RelatedFilter{
+					RelationTypeKey: "unlocks", EntityTypeKey: "quest", EntityKey: "hogger",
+					Direction: direction,
+				},
+				Limit: 50,
+			})
+			if err != nil {
+				t.Fatalf("ListEntities: %v", err)
+			}
+			if got := keysOf(page); !equalStrings(got, []string{"hogger"}) {
+				t.Fatalf("got %v, want the anchor exactly once", got)
+			}
+		})
+	}
+}
+
+// TestATraversalNamesAMistypedKey pins that each of the three keys a hop
+// carries is resolved before the listing runs, and that a miss names the
+// key rather than answering with an empty neighbourhood.
+func TestATraversalNamesAMistypedKey(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedTakesPlaceIn(t, svc, project)
+
+	cases := []struct {
+		name string
+		rel  metamodel.RelatedFilter
+		want string
+	}{
+		{"the relation type", metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_at", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		}, `"takes_place_at"`},
+		{"the anchor's type", metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zonne", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		}, `"zonne"`},
+		{"the anchor itself", metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwyn",
+			Direction: metamodel.DirectionIncoming,
+		}, `"elwyn"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rel := tc.rel
+			_, err := svc.ListEntities(ctx, project,
+				metamodel.EntityFilter{RelatedTo: &rel, Limit: 50})
+			if !errors.Is(err, metamodel.ErrNotFound) {
+				t.Fatalf("err = %v, want not_found", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to name %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestATraversalHonoursTheEntityTypeFilter pins that a filter carried
+// alongside RelatedTo is applied and not dropped. A hop that ignored
+// TypeKey would answer "which quests are here" with the zones and
+// classes too, and nothing in the answer would say the clause had been
+// discarded.
+func TestATraversalHonoursTheEntityTypeFilter(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "available_in", Label: "available in", SemanticRole: "availability",
+	}); err != nil {
+		t.Fatalf("seed relation type: %v", err)
+	}
+	relate(t, svc, project, "available_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	relate(t, svc, project, "available_in",
+		metamodel.Ref{TypeKey: "class", Key: "mage"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+
+	all, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "available_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		},
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("unfiltered: %v", err)
+	}
+	if got := keysOf(all); !equalStrings(got, []string{"mage", "hogger"}) {
+		t.Fatalf("unfiltered = %v, want both neighbours", got)
+	}
+
+	quests, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		TypeKey: "quest",
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "available_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		},
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("filtered: %v", err)
+	}
+	if got := keysOf(quests); !equalStrings(got, []string{"hogger"}) {
+		t.Fatalf("filtered = %v, want only the quest", got)
+	}
+}
+
+// TestATraversalPagesLikeEveryOtherListing pins that a hop is not
+// silently truncated at its limit. The plan for this task cut the
+// neighbour set in Go and returned no cursor, which made every neighbour
+// past the limit unreachable with nothing in the answer to say so; the
+// keyset is on the query instead.
+func TestATraversalPagesLikeEveryOtherListing(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 7)
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	}); err != nil {
+		t.Fatalf("seed zone type: %v", err)
+	}
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest",
+	}); err != nil {
+		t.Fatalf("seed zone: %v", err)
+	}
+	seedTakesPlaceIn(t, svc, project)
+	for i := range 7 {
+		relate(t, svc, project, "takes_place_in",
+			metamodel.Ref{TypeKey: "quest", Key: fmt.Sprintf("quest-%02d", i)},
+			metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+	}
+
+	rel := metamodel.RelatedFilter{
+		RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+		Direction: metamodel.DirectionIncoming,
+	}
+	var seen []string
+	filter := metamodel.EntityFilter{RelatedTo: &rel, Limit: 3}
+	for page := 1; page <= 5; page++ {
+		got, err := svc.ListEntities(ctx, project, filter)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		seen = append(seen, keysOf(got)...)
+		if got.NextCursor == "" {
+			break
+		}
+		filter.Cursor = got.NextCursor
+	}
+	if len(seen) != 7 {
+		t.Fatalf("paged over %d neighbours, want 7: %v", len(seen), seen)
+	}
+	for i, key := range seen {
+		if want := fmt.Sprintf("quest-%02d", i); key != want {
+			t.Fatalf("neighbour %d is %q, want %q", i, key, want)
+		}
+	}
+
+	// A traversal's cursor belongs to that traversal, so it cannot be
+	// carried over to the plain listing of the same entity type.
+	first, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{RelatedTo: &rel, Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	_, err = svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Limit: 3, Cursor: first.NextCursor})
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want a traversal's cursor refused by the plain listing", err)
+	}
+}
+
+// TestATraversalIsScopedToItsGame pins that two games sharing every key
+// do not share a neighbourhood. The anchor and the relation type are
+// resolved inside the project, which is the mechanism; the query's own
+// project filters are defence in depth, as the SQL comment records.
+func TestATraversalIsScopedToItsGame(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine := newProject(t, pool)
+	theirs := newProject(t, pool)
+	for _, project := range []uuid.UUID{mine, theirs} {
+		seedWorld(t, svc, project)
+		seedTakesPlaceIn(t, svc, project)
+	}
+	relate(t, svc, theirs, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+
+	page, err := svc.ListEntities(ctx, mine, metamodel.EntityFilter{
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		},
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("ListEntities: %v", err)
+	}
+	if len(page.Entities) != 0 {
+		t.Fatalf("my Elwynn has %v as neighbours, all of them somebody else's", keysOf(page))
+	}
+}
+
+// TestAnEdgeCannotOutliveItsRelationType pins the answer to "what does a
+// traversal do with an edge whose type was deleted": there is no such
+// edge to have an opinion about.
+//
+// relations.relation_type_id is ON DELETE RESTRICT, so a type with edges
+// cannot be dropped, and RemoveRelationType(cascade) deletes the edges
+// first — so the two ways a relation type goes away either refuse or take
+// the edges with them. This traversal therefore never sees a dangling
+// edge, and nothing in the query filters for one.
+func TestAnEdgeCannotOutliveItsRelationType(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedTakesPlaceIn(t, svc, project)
+	relate(t, svc, project, "takes_place_in",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+
+	relType, err := svc.RelationTypeByKey(ctx, project, "takes_place_in")
+	if err != nil {
+		t.Fatalf("RelationTypeByKey: %v", err)
+	}
+	if err := svc.RemoveRelationType(ctx, project, relType.ID, false); !errors.Is(err, metamodel.ErrInUse) {
+		t.Fatalf("removing a type with edges: err = %v, want in_use", err)
+	}
+	if err := svc.RemoveRelationType(ctx, project, relType.ID, true); err != nil {
+		t.Fatalf("cascade: %v", err)
+	}
+
+	var edges int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM relations WHERE project_id = $1`, project).Scan(&edges); err != nil {
+		t.Fatalf("count edges: %v", err)
+	}
+	if edges != 0 {
+		t.Fatalf("%d edges outlived their relation type", edges)
+	}
+	// And the traversal that named it now names the key, rather than
+	// answering over edges that are no longer classified.
+	_, err = svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in", EntityTypeKey: "zone", EntityKey: "elwynn",
+			Direction: metamodel.DirectionIncoming,
+		},
+		Limit: 50,
+	})
+	if !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("err = %v, want not_found naming the removed relation type", err)
+	}
+}

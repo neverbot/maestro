@@ -3,6 +3,7 @@ package metamodel
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 )
@@ -78,7 +79,57 @@ var colorPattern = regexp.MustCompile(`^#([0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-
 // that did not was the tell.
 var iconPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// textProblem is the one rule this package applies to every piece of
+// TextFault is what CheckText found wrong with one piece of caller text:
+// either the value is not valid UTF-8, or it holds a control character
+// the caller was not allowed, at Offset and decoding as Rune.
+type TextFault struct {
+	InvalidUTF8 bool
+	Rune        rune
+	Offset      int
+}
+
+// CheckText is the judgement behind every "is this storable text?" rule
+// in Maestro, exported so no package grows a second copy of it.
+//
+// **It reports what is wrong, not how to say it.** internal/markdown
+// refuses at a different argument path, with a different error type and
+// different wording — a document body is prose, a `name` is a line in a
+// picker — and only the judgement is shared: the ordering, the
+// allowance, and which rune at which byte. internal/markdown's
+// SplitContent and this package's textProblem are both callers, and Task
+// 3 bounds `kind` and `message` through it rather than writing the scan
+// a third time.
+//
+// **allowedControls is the allowance, as the set of control runes the
+// caller may keep.** "" for a value rendered as one line, "\n\t" for
+// this package's free-form prose, "\n\r\t" for a markdown body, which
+// keeps a CRLF document byte for byte. Nothing outside U+0000-U+001F and
+// U+007F is a control character here, so passing a non-control rune in
+// the set is inert rather than an escape hatch.
+//
+// **UTF-8 is checked before the control scan and that ordering is
+// load-bearing**, not a style: ranging over a string turns an invalid
+// byte into U+FFFD, which is not a control character, so a scan alone
+// lets an invalid sequence through to Postgres, which refuses it with
+// SQLSTATE 22021 as an untyped server fault over the caller's own bytes.
+//
+// A control character is refused, not stripped: silently deleting part
+// of what a caller wrote answers a question it did not ask.
+func CheckText(value, allowedControls string) (TextFault, bool) {
+	if !utf8.ValidString(value) {
+		return TextFault{InvalidUTF8: true}, true
+	}
+	for i, r := range value {
+		if !unicode.IsControl(r) || strings.ContainsRune(allowedControls, r) {
+			continue
+		}
+		return TextFault{Rune: r, Offset: i}, true
+	}
+	return TextFault{}, false
+}
+
+// textProblem is CheckText's judgement in this package's words, and the
+// one rule this package applies to every piece of
 // caller-supplied prose it stores or renders — an entity or type name, a
 // label, a plural, a description, a text or longtext field value, an
 // element of a list<text> — and it is the same rule checkSearchQuery
@@ -117,27 +168,27 @@ var iconPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 // checkSearchQuery's doc comment gives: silently deleting part of what a
 // caller wrote answers a question it did not ask.
 func textProblem(value string, allowNewlineAndTab bool) string {
-	if !utf8.ValidString(value) {
+	allowed := ""
+	if allowNewlineAndTab {
+		allowed = "\n\t"
+	}
+	fault, bad := CheckText(value, allowed)
+	if !bad {
+		return ""
+	}
+	if fault.InvalidUTF8 {
 		return "is not valid UTF-8: a byte in it does not decode as any character"
 	}
-	for i, r := range value {
-		if !unicode.IsControl(r) {
-			continue
-		}
-		if allowNewlineAndTab && (r == '\n' || r == '\t') {
-			continue
-		}
-		if allowNewlineAndTab {
-			return fmt.Sprintf(
-				"holds a control character (%U at byte %d): only a newline or a tab is allowed here",
-				r, i)
-		}
+	r, i := fault.Rune, fault.Offset
+	if allowNewlineAndTab {
 		return fmt.Sprintf(
-			"holds a control character (%U at byte %d): this is one line of text, "+
-				"and no control character can be part of it",
+			"holds a control character (%U at byte %d): only a newline or a tab is allowed here",
 			r, i)
 	}
-	return ""
+	return fmt.Sprintf(
+		"holds a control character (%U at byte %d): this is one line of text, "+
+			"and no control character can be part of it",
+		r, i)
 }
 
 // checkDescriptors collects every problem with a row's descriptive

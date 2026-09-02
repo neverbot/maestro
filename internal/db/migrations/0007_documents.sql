@@ -76,10 +76,14 @@
 --
 -- For body_md this bound is not a backstop behind a smaller Go limit --
 -- it is *tighter* than one. Task 2 sets markdown.MaxBodyBytes to 1 MiB
--- (1048576 bytes), eight times this bound, so a body between 131072 and
--- 1048576 characters is accepted by Go, written in full, and indexed by
--- its first 131072 characters only, with nothing recording the
--- truncation. Task 9's search cannot see past that point in a long
+-- (1048576 *bytes*) against this bound of 131072 *characters*: the two
+-- are not the same unit, so the ratio is 8 for ASCII prose and about 2.7
+-- for CJK, and any body between 131072 characters and whatever the Go
+-- bound allows is accepted by Go, written in full, and indexed by its
+-- first 131072 characters only, with nothing recording the truncation.
+-- The load-bearing half holds at every encoding -- the Go bound is the
+-- looser one, so this truncation is what binds first; only the multiplier
+-- depends on the script the game is written in. Task 9's search cannot see past that point in a long
 -- document, and its tool description says so, the way the metamodel's
 -- own search tool discloses its 128 KiB index bound (correction 2).
 

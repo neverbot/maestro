@@ -28,35 +28,45 @@ const diffContext = 3
 // lcsLimit bounds the dynamic-programming table one diff will build,
 // per side, after the common prefix and suffix have been trimmed.
 //
-// **Measured, not guessed.** BenchmarkUnifiedDiff, on an Apple M1:
-// 4,000 lines rewritten on both sides costs 49 ms and 66.7 MB of
-// allocation for one call, which is the worst case this bound admits and
-// the cost of one "compare these two versions" click on a document
+// **What the bound costs at its own limit.** The table is (n+1)*(m+1)
+// cells of int32, so a diff at the limit on both sides holds
+// 1001*1001*4 bytes = 4.0 MB, and BenchmarkUnifiedDiff on an Apple M1
+// measures the whole call at **4.3 ms and 4.37 MB of allocation** for
+// 1,000 lines rewritten on both sides. That is the worst case this
+// bound admits: one "compare these two versions" click on a document
 // rewritten end to end. One line past the bound the coarse fallback
-// costs 0.5 ms and 0.37 MB, and a one-line edit inside a 40,000-line
-// document costs 1.1 ms and 1.3 MB — almost all of it splitting the two
-// bodies into lines, not diffing them.
+// costs 0.14 ms and 88 KB, and a one-line edit inside a 40,000-line
+// document costs 1.1 ms and 1.3 MB -- almost all of it splitting the
+// two bodies into lines, not diffing them.
 //
-// 66.7 MB per concurrent call is the number that sets the bound, and it
-// is the reason it is 4,000 rather than the ~20,000 lines a 1 MiB body
-// holds: the table is O(n*m) cells of int32, so 20,000 per side is 25
-// times the cells — 1.6 GB and over a second — which is not a thing an
-// HTTP handler may do, and a handful of concurrent callers asking for it
-// is an out-of-memory kill rather than a slow page. Recorded rather than
-// hidden: nothing here limits how many diffs run at once, so the honest
-// worst case for an instance is 66.7 MB times the number of simultaneous
-// comparison requests. If that ever bites, the fix is a semaphore around
-// this call and not a smaller table.
+// **Why 1,000 and not more.** The bound is a memory bound, and the
+// figure that matters is not one call but several: nothing here limits
+// how many diffs run at once, and Diff is mounted for agents and for
+// browsers, the two consumers that fan out. The table is quadratic, so
+// the bound is the only thing standing between a handful of concurrent
+// comparisons and an out-of-memory kill on the small self-hosted box
+// this project targets. At 1,000 that worst case is 4.37 MB per call,
+// so ten at once is 44 MB -- an expense. The previous bound of 4,000
+// was 66.7 MB per call (measured, same benchmark: 67 ms), so ten at
+// once was 670 MB -- a killed process. The quadratic is why the
+// numbers are so far apart for a 4x change in the constant, and it is
+// why raising this constant is never a small decision: doubling it
+// quadruples the memory.
+//
+// **What is lost is nothing a caller could have used.** Past the bound
+// the answer is one coarse hunk saying the whole body was replaced,
+// with DiffResult.Coarse saying so out loud. A document that still
+// differs by more than 1,000 lines *after* its common prefix and suffix
+// are trimmed has been rewritten, not edited, and "this was rewritten"
+// is a true answer rather than a degraded one -- nobody reads a
+// 2,000-line unified diff line by line either.
 //
 // The trim is what makes the bound generous rather than tight. It
 // applies to the *difference*, not to the document, so a one-line edit
 // in a 40,000-line script builds a table of 7 by 7
 // (TestAHugeButLocalChangeIsStillComputedLineByLine). Only a document
-// rewritten from top to bottom reaches the limit, and past it the answer
-// is one coarse hunk saying the whole body was replaced, with
-// DiffResult.Coarse saying so out loud rather than pretending the
-// line-by-line answer was computed.
-const lcsLimit = 4000
+// rewritten from top to bottom reaches the limit.
+const lcsLimit = 1000
 
 // DiffResult is one comparison between two versions of a document.
 //

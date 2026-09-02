@@ -70,3 +70,26 @@ func TestTheCoarseFallbackIsCheaperThanTheTableItReplaces(t *testing.T) {
 		t.Fatalf("%d lines per side is past the bound and must fall back", lcsLimit+1)
 	}
 }
+
+// TestTheBoundKeepsTheTableWithinItsMemoryBudget is a tripwire, not a
+// behaviour test: it asserts arithmetic, because the arithmetic is the
+// whole reason the constant has the value it has and it is invisible at
+// the point someone would change it. diffOps allocates (n+1)*(m+1)
+// cells of int32, nothing bounds how many diffs run at once, and the
+// table is quadratic -- so doubling lcsLimit quadruples the worst case
+// and a change that looks like "4000 works fine on my laptop" is a
+// 66.7 MB per-call allocation on a self-hosted box. 8 MiB is the budget
+// the current bound was chosen against, with room for the ops slice and
+// the rendered output on top (BenchmarkUnifiedDiff measures the whole
+// call at 4.37 MB against the table's own 4.0 MB). Raising lcsLimit
+// past it is allowed; doing so silently is not.
+func TestTheBoundKeepsTheTableWithinItsMemoryBudget(t *testing.T) {
+	const budget = 8 << 20
+	table := (int64(lcsLimit) + 1) * (int64(lcsLimit) + 1) * 4
+	if table > budget {
+		t.Fatalf("lcsLimit = %d builds a %d-byte table, over the %d-byte budget; "+
+			"the bound is quadratic, so re-measure BenchmarkUnifiedDiff and "+
+			"re-justify the number in lcsLimit's comment before raising it",
+			lcsLimit, table, budget)
+	}
+}

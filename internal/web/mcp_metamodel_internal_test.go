@@ -11,6 +11,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -48,6 +49,11 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 		Identity:  ids,
 		Projects:  projSvc,
 		Metamodel: metamodel.New(pool, nil),
+		// And a markdown service, because this is the build with the
+		// most tools on it and the docs.* eleven must be inside the
+		// comparison: a docs tool registered with mcp.AddTool directly
+		// would otherwise never be seen here.
+		Markdown: markdown.New(pool, nil),
 	})
 
 	ctx := context.Background()

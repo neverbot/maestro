@@ -30,13 +30,13 @@ type MCPDeps struct {
 	// service to get one.
 	Metamodel *metamodel.Service
 
-	// Markdown is the prose domain, and it is optional in a narrower
-	// sense than Metamodel: no tool is registered or unregistered on
-	// account of it today. The one surface that reads it is `search`,
-	// which unions the document index with the entity one and answers
-	// with entities alone when this is nil. cmd/maestro always builds
-	// one, so that arm is the shape of the dependency rather than a
-	// behaviour a caller can ask for.
+	// Markdown is the prose domain the tools in mcp_docs.go serve.
+	// Optional in the same sense as Metamodel: a Server built without
+	// one still starts and still answers every other tool, because
+	// newMCPServer registers the docs tools only when it is present
+	// (TestTheDocsToolsAreAbsentWithoutAMarkdownService). `search` reads
+	// it too, and answers with entities alone when it is nil.
+	// cmd/maestro always builds one.
 	Markdown *markdown.Service
 }
 
@@ -406,6 +406,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 	// built with a metamodel service — see MCPDeps.Metamodel.
 	if deps.Metamodel != nil {
 		s.addMetamodelTools(srv, deps)
+	}
+
+	// The prose tools, on the same terms — see MCPDeps.Markdown.
+	if deps.Markdown != nil {
+		s.addDocsTools(srv, deps)
 	}
 
 	return srv

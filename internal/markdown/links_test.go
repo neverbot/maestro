@@ -561,14 +561,18 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 // has to be.
 //
 // **This pins a stand-in, not the real thing.** `wireWrite` is declared
-// right here, in this file, because `DocsWriteInput` does not exist yet
-// (Task 10). Nothing today forces the real type to keep this shape — a
-// review of Task 10 that finds `Links` declared as a plain
-// `[]DocsLinkInput`, or without `omitempty`, would leave this test green
-// while the wire behaviour it documents is gone, which is `kind`'s
-// defect one layer up. Task 10's review must re-pin this test's claim
-// against the real `DocsWriteInput.Links`, the way it re-pins every
-// other field this plan hands it as a requirement rather than a note.
+// right here, in this file, because this package cannot import
+// internal/web. Nothing here forces the real type to keep this shape — a
+// `Links` declared as a plain `[]DocsLinkInput`, or without `omitempty`,
+// would leave this test green while the wire behaviour it documents is
+// gone, which is `kind`'s defect one layer up. **The claim is re-pinned
+// against the real type by
+// TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType
+// (internal/web/mcp_docs_internal_test.go)**, which asserts
+// DocsWriteInput.Links is exactly `*[]DocsLinkInput` tagged
+// `json:"links,omitempty"` and decodes the same three shapes through
+// it. Neither test replaces the other: this one owns the meaning, that
+// one owns the declaration.
 func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnTheWire(t *testing.T) {
 	type wireWrite struct {
 		Path  string                 `json:"path"`

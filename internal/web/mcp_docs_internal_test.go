@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -151,4 +152,110 @@ func TestANamedMissPublishesItsPath(t *testing.T) {
 	if !ok || len(fields) != 1 || fields[0]["path"] != "entity_key" {
 		t.Fatalf("details = %v, want one field problem at entity_key", details)
 	}
+}
+
+// TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType re-pins,
+// against the real type, the claim internal/markdown could only pin
+// against a stand-in: TestOmittingLinksAndSendingAnEmptyArrayAreDifferent
+// OnTheWire (internal/markdown/links_test.go) decodes into a struct
+// declared in its own file, because DocsWriteInput did not exist when it
+// was written, and its own comment says its claim must be re-pinned
+// here.
+//
+// The three states have to survive JSON in both directions: omitted and
+// an explicit null preserve the document's attachments, an empty array
+// detaches everything, and a populated one replaces the set. `omitempty`
+// on a plain slice would collapse the empty case back into the omitted
+// one, which is the silent, destructive direction — and it is exactly
+// how `kind` broke once already, as a plain string with omitempty.
+func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType(t *testing.T) {
+	// The declaration itself, so a later edit cannot quietly drop the
+	// pointer or the tag and leave the decode cases passing for a
+	// different reason.
+	field, ok := reflect.TypeOf(DocsWriteInput{}).FieldByName("Links")
+	if !ok {
+		t.Fatal("DocsWriteInput has no Links field at all")
+	}
+	if got := field.Type.String(); got != "*[]web.DocsLinkInput" {
+		t.Fatalf("Links is %s, want *[]web.DocsLinkInput", got)
+	}
+	if got := field.Tag.Get("json"); got != "links,omitempty" {
+		t.Fatalf(`Links is tagged %q, want "links,omitempty"`, got)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		body    string
+		nil     bool
+		targets int
+	}{
+		{"omitted", `{"path":"a.md"}`, true, 0},
+		{"null", `{"path":"a.md","links":null}`, true, 0},
+		{"empty", `{"path":"a.md","links":[]}`, false, 0},
+		{"populated", `{"path":"a.md","links":[{"entity_type":"quest","entity_key":"k"}]}`, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var in DocsWriteInput
+			if err := json.Unmarshal([]byte(tc.body), &in); err != nil {
+				t.Fatalf("decode %s: %v", tc.body, err)
+			}
+			if (in.Links == nil) != tc.nil {
+				t.Fatalf("%s decoded to Links %v, want nil = %v", tc.body, in.Links, tc.nil)
+			}
+			if in.Links != nil && len(*in.Links) != tc.targets {
+				t.Fatalf("%s decoded to %d targets, want %d", tc.body, len(*in.Links), tc.targets)
+			}
+			// And what the domain is handed for each: nil preserves,
+			// non-nil replaces.
+			targets := linkTargetsOf(in.Links)
+			if (targets == nil) != tc.nil {
+				t.Fatalf("linkTargetsOf gave %v for %s, want nil = %v", targets, tc.body, tc.nil)
+			}
+
+			// Out again, so an empty array does not re-encode as an
+			// omitted field.
+			raw, err := json.Marshal(in)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			hasKey := strings.Contains(string(raw), `"links"`)
+			if hasKey == tc.nil {
+				t.Fatalf("re-encoded as %s; a nil Links must omit the key and a "+
+					"non-nil one must carry it", raw)
+			}
+		})
+	}
+}
+
+// TestTheRemoveToolsInputCarriesNoRole pins the decision Task 7 made in
+// the domain — markdown.LinkRemove takes an UnlinkInput, which cannot
+// carry a role — on the wire, where a caller actually reads it. A link's
+// key is (document, entity), so there is never a second link under
+// another role to choose between, and an input schema still asking for a
+// role would tell a caller otherwise with nothing to correct the belief.
+// docs.links.add keeps its role, and the two are not one shared shape.
+func TestTheRemoveToolsInputCarriesNoRole(t *testing.T) {
+	if _, ok := reflect.TypeOf(DocsLinkRemoveInput{}).FieldByName("Role"); ok {
+		t.Fatal("DocsLinkRemoveInput carries a Role that markdown.LinkRemove cannot read")
+	}
+	for _, name := range jsonKeysOf(reflect.TypeOf(DocsLinkRemoveInput{})) {
+		if name == "role" {
+			t.Fatal("docs.links.remove's input schema asks for a role it ignores")
+		}
+	}
+	if _, ok := reflect.TypeOf(DocsLinkAddInput{}).FieldByName("Role"); !ok {
+		t.Fatal("DocsLinkAddInput lost its Role, which markdown.LinkAdd does read")
+	}
+}
+
+// jsonKeysOf lists the wire names of a struct's own fields.
+func jsonKeysOf(t reflect.Type) []string {
+	keys := make([]string, 0, t.NumField())
+	for i := range t.NumField() {
+		tag := t.Field(i).Tag.Get("json")
+		if name, _, _ := strings.Cut(tag, ","); name != "" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
 }

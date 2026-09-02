@@ -326,3 +326,13 @@ func splitLines(body string) []string {
 	}
 	return strings.Split(strings.TrimSuffix(body, "\n"), "\n")
 }
+
+// MaxDiffLines is lcsLimit under a name internal/web can quote, so
+// docs.diff's tool description states the comparison bound rather than
+// repeating the number — a description promising a bound the code has
+// moved off is the defect this project has produced most often, and one
+// constant with two names cannot drift. It says the same thing lcsLimit
+// does, from the outside: past this many lines per side, after the
+// common prefix and suffix are trimmed, the answer is one coarse hunk
+// with DiffResult.Coarse set.
+const MaxDiffLines = lcsLimit

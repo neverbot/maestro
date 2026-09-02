@@ -56,12 +56,24 @@ type registerRequest struct {
 // handler that reads r.Body directly is the exception that needs
 // justifying, not the rule.
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeJSONBodyLimit(w, r, v, maxAuthRequestBodyBytes)
+}
+
+// decodeJSONBodyLimit is decodeJSONBody with the bound named by the
+// caller. It exists because the game-content routes (api_metamodel.go)
+// accept a legitimately much larger body than anything in this file —
+// one entities.upsert batch is hundreds of rows — and hardcoding this
+// file's 16 KiB there would have refused an ordinary seed as malformed.
+// The media-type check, the MaxBytesReader and the two refusals are
+// shared, so the two surfaces cannot answer a too-large body
+// differently.
+func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, errCodeUnsupportedMediaType, "Content-Type must be application/json")
 		return false
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxAuthRequestBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {

@@ -1,0 +1,578 @@
+package web
+
+import (
+	"errors"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/roles"
+)
+
+// This file is the human half of the game-content surface: the REST
+// routes a browser reads and writes a game's types, entities and
+// relations through. It mirrors the sixteen MCP tools
+// (mcp_metamodel.go), and "mirrors" is meant literally — every handler
+// here decodes into that file's own input struct, calls that file's own
+// unexported core, and answers with that file's own output struct. There
+// is one implementation of each operation and one wire vocabulary; the
+// two surfaces differ only in how a caller is admitted (see
+// mcp_metamodel.go's header for that split) and in how a refusal is
+// spelled: an MCP tool answers with a code inside a tool result, and
+// this file answers with the same code and the same details object under
+// an HTTP status.
+//
+// **Route shapes: a row key never shares a segment with a literal.**
+// This is Task 8's first recorded decision. Row keys permit `new`,
+// `index`, `id`, `null`, `games`, `types` and `search` (see
+// internal/metamodel/keys.go, which recorded the collision and left the
+// choice here), so /types/{key} would make a key's legality depend on
+// which sibling routes happen to exist — and would silently change
+// meaning the day a /types/new page is added, because Go's ServeMux
+// prefers a literal segment over a wildcard without saying so. Every
+// row here is therefore addressed through a fixed discriminator:
+// /types/by-key/{key}, /types/by-id/{id}, /entities/by-key/{type}/{key},
+// /entities/by-id/{id}. The discriminator sits where no key ever sits,
+// so no key can collide with it — "by-key" and "by-id" are themselves
+// perfectly legal keys, and
+// TestARouteShapedKeyIsStillAddressable declares a type for each of the
+// dangerous words and addresses it both ways. The two alternatives
+// keys.go recorded — a reserved-word list in the domain, or resolving
+// the ambiguity in the router — were both rejected for the same reason:
+// they make a designer's vocabulary hostage to a routing table, and a
+// key rule tightened after a game is seeded costs renames.
+//
+// **Nothing here flattens a game's fields onto a row.** That is the
+// second decision. A game may declare fields named `key`, `name`, `id`,
+// `version`, `invalid` or `type_key`; the database keeps them in a jsonb
+// column, walled off from the row's own columns, and this surface keeps
+// exactly that wall — an entity answers with its own identity at the top
+// level and the game's values nested under `fields`, the same shape the
+// MCP surface uses and the same shape the page renders from. So there is
+// no reserved-key list, no rename forced on a game that legitimately
+// calls a field `name`, and no place where lifting one namespace into
+// the other could shadow the other. TestAGameFieldNamedLikeARowColumnNeverShadowsIt
+// writes an entity whose every field is named after a row column and
+// reads it back to prove it.
+
+// maxContentRequestBodyBytes bounds a game-content request body.
+//
+// It is deliberately far larger than maxAuthRequestBodyBytes (16 KiB,
+// api_auth.go), because the bodies are a different kind of thing: a
+// login carries three short strings, while one entities.upsert batch is
+// the unit a seed is written in — hundreds of rows, each of which may
+// carry up to metamodel.MaxIndexedText of prose. 4 MiB holds a large
+// batch comfortably and still bounds what a single request can make this
+// process allocate. Over it, the caller is told the body was too large
+// (413) rather than being handed a JSON parse error to puzzle over.
+const maxContentRequestBodyBytes = 4 << 20
+
+// deps builds the MCPDeps the shared cores take. Built per call rather
+// than cached: it is three pointer copies, and a cached copy would be a
+// second place Options' services are read from.
+func (s *Server) deps() MCPDeps {
+	return MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects, Metamodel: s.opts.Metamodel}
+}
+
+// requireContentService refuses a game-content route on an instance
+// built without a metamodel service. That shape is supported
+// deliberately (Options.Metamodel), and every core below would panic on
+// a nil service, so the guard is here rather than in each of them.
+func (s *Server) requireContentService(w http.ResponseWriter) bool {
+	if s.opts.Metamodel == nil {
+		writeError(w, http.StatusNotFound, errCodeNotFound, "this instance serves no game content")
+		return false
+	}
+	return true
+}
+
+// requireEditor gates every write on this surface. It is the one check
+// the MCP surface never needed: a token is editor-equivalent by
+// construction (see requireProject's own doc comment for why that is
+// deliberate), but a session caller's role is real, and a viewer is
+// someone who may read a game and not change it.
+//
+// The message names the caller's actual role, because "forbidden" alone
+// leaves a designer who was quietly demoted with nothing to act on.
+func requireEditor(w http.ResponseWriter, scope ProjectScope) bool {
+	if roles.AtLeast(roles.Role(scope.Role), roles.Editor) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, errCodeForbidden,
+		"your role in this game is "+scope.Role+"; changing its content needs at least editor")
+	return false
+}
+
+// decodeContentBody decodes a game-content request body under this
+// file's own, larger bound. See maxContentRequestBodyBytes.
+func decodeContentBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeJSONBodyLimit(w, r, v, maxContentRequestBodyBytes)
+}
+
+// checkStatedProject enforces, on this surface, the rule ScopedArgs
+// states for the MCP one: an optional project_id in the body is a
+// confirmation, never a selector. Present and disagreeing with the game
+// in the URL, the call is refused; present and agreeing, it is accepted;
+// absent, nothing happens.
+//
+// Silently ignoring a disagreeing project_id would be the alternative,
+// and it is the dangerous one: a client that has lost track of which
+// game it is editing would be told its write succeeded, in the other
+// game, which is exactly the mistake the field exists to catch.
+func checkStatedProject(w http.ResponseWriter, scope ProjectScope, in scopedInput) bool {
+	stated := in.requestedProjectID()
+	if stated == nil || *stated == "" {
+		return true
+	}
+	if id, err := uuid.Parse(*stated); err == nil && id == scope.ProjectID {
+		return true
+	}
+	writeError(w, http.StatusForbidden, errCodeScopeViolation,
+		"the project_id in this request names a different game than the URL")
+	return false
+}
+
+// writeDomainError maps a domain error onto an HTTP status and the same
+// code the MCP surface returns for it, so both surfaces are one
+// contract. It is the REST twin of mcpErrorFor (mcp_errors.go), and the
+// arms are deliberately in the same order and matched the same way —
+// errors.As for the two typed errors, errors.Is against a sentinel for
+// the rest, never by reading a code off the error itself.
+//
+// The statuses are the only thing this adds:
+//
+//   - 400 for invalid_input: the caller's own argument is malformed —
+//     a cursor, a uuid, a limit, an oversized query — which is a bad
+//     request in the plainest sense.
+//   - 422 for invalid_schema, schema_violation and endpoint_type_mismatch:
+//     the request was well formed and the content it carried was refused
+//     by a rule the game itself declared.
+//   - 409 for version_conflict and in_use: the caller is not wrong, the
+//     world moved (or is holding on to the row).
+//   - 404 for not_found, 503 for retryable, 500 for anything unmapped.
+//
+// Nothing an agent or a designer can fix reports internal_error; that is
+// this project's standing rule and the default arm is only reached by a
+// fault neither of them caused, which is why it also logs.
+func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
+	var domainErr *MCPError
+	if errors.As(err, &domainErr) {
+		writeCodedError(w, statusForCode(domainErr.Code), domainErr.Code, domainErr.Message, domainErr.Details)
+		return
+	}
+	var conflict *metamodel.VersionConflictError
+	switch {
+	case errors.As(err, &conflict):
+		writeCodedError(w, http.StatusConflict, errCodeVersionConflict, err.Error(),
+			map[string]any{"current_version": conflict.Current})
+	case errors.Is(err, metamodel.ErrInvalidSchema):
+		writeCodedError(w, http.StatusUnprocessableEntity, errCodeInvalidSchema, err.Error(), fieldDetails(err))
+	case errors.Is(err, metamodel.ErrSchemaViolation):
+		writeCodedError(w, http.StatusUnprocessableEntity, errCodeSchemaViolation, err.Error(), fieldDetails(err))
+	case errors.Is(err, metamodel.ErrInvalidInput):
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, err.Error(), fieldDetails(err))
+	case errors.Is(err, metamodel.ErrEndpointTypeMismatch):
+		writeCodedError(w, http.StatusUnprocessableEntity, errCodeEndpointTypeMismatch, err.Error(), nil)
+	case errors.Is(err, metamodel.ErrInUse):
+		writeCodedError(w, http.StatusConflict, errCodeInUse, err.Error(), nil)
+	case errors.Is(err, metamodel.ErrNotFound):
+		writeCodedError(w, http.StatusNotFound, errCodeNotFound, err.Error(), nil)
+	case metamodel.IsRetryable(err):
+		// Logged, not carried: the database's own "canceling statement
+		// due to lock timeout" describes this server's internals, not
+		// the caller's next move, and an operator seeing a run of these
+		// wants to know which lock. Same split mcpErrorFor makes.
+		slog.WarnContext(r.Context(), "game-content request hit database contention",
+			"path", r.URL.Path, "error", err)
+		writeCodedError(w, http.StatusServiceUnavailable, errCodeRetryable,
+			"the database refused this over contention; send the same request again", nil)
+	default:
+		slog.ErrorContext(r.Context(), "game-content request failed",
+			"path", r.URL.Path, "error", err)
+		writeCodedError(w, http.StatusInternalServerError, errCodeInternal,
+			"the server could not complete the request", nil)
+	}
+}
+
+// statusForCode maps an *MCPError's own code — the codes this package's
+// own parsing layer produces, never the domain's — onto a status. An
+// unknown code is 422 rather than 500: an *MCPError is by construction a
+// refusal this server chose to make about the caller's request, so
+// reporting one as a server fault would be a lie, and 422 is the
+// weakest true statement available.
+func statusForCode(code string) int {
+	switch code {
+	case errCodeInvalidInput:
+		return http.StatusBadRequest
+	case errCodeScopeViolation:
+		return http.StatusForbidden
+	case errCodeNotFound:
+		return http.StatusNotFound
+	case errCodeUnauthorized:
+		return http.StatusUnauthorized
+	default:
+		return http.StatusUnprocessableEntity
+	}
+}
+
+// writeCodedError is writeError plus the optional details object the
+// domain's field-path errors carry. Split out rather than folded into
+// writeError because every other call site in this package has no
+// details to pass and should not have to say so.
+func writeCodedError(w http.ResponseWriter, status int, code, message string, details map[string]any) {
+	body := map[string]any{"error": code, "message": message}
+	if len(details) > 0 {
+		body["details"] = details
+	}
+	writeJSON(w, status, body)
+}
+
+// --- Entity types ---
+
+func (s *Server) handleListTypes(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	out, err := typesList(r.Context(), s.deps(), caller, scope.ProjectID, TypesListInput{})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleUpsertType answers 200, not 201, and the reason is the domain's
+// rather than a preference: this route is an upsert idempotent by key
+// (metamodel.UpsertEntityType), so the same request may create a type or
+// edit one, and a status claiming "created" would be wrong half the
+// time. The answer carries the row's version, which is what a client
+// actually needs to know what happened and what to send next.
+func (s *Server) handleUpsertType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	var in TypesUpsertInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := typesUpsert(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	out, err := typesGet(r.Context(), s.deps(), caller, scope.ProjectID, TypesGetInput{Key: r.PathValue("key")})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRemoveType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	out, err := typesRemove(r.Context(), s.deps(), caller, scope.ProjectID, TypesRemoveInput{
+		ID: r.PathValue("id"), Cascade: queryBool(r, "cascade"),
+	})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- Relation types ---
+
+func (s *Server) handleListRelationTypes(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	out, err := relationTypesList(r.Context(), s.deps(), caller, scope.ProjectID, RelationTypesListInput{})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleUpsertRelationType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	var in RelationTypesUpsertInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := relationTypesUpsert(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetRelationType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	out, err := relationTypesGet(r.Context(), s.deps(), caller, scope.ProjectID,
+		RelationTypesGetInput{Key: r.PathValue("key")})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRemoveRelationType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	out, err := relationTypesRemove(r.Context(), s.deps(), caller, scope.ProjectID, RelationTypesRemoveInput{
+		ID: r.PathValue("id"), Cascade: queryBool(r, "cascade"),
+	})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- Entities ---
+
+// handleListEntities is the one handler whose input comes from the query
+// string rather than a body, so it is also the one that has to decide
+// what a malformed parameter means. Every one of them is the caller's
+// own argument at its own path — never a 500, and never silently
+// ignored: a page rendered from a filter the server quietly dropped is
+// a wrong answer that looks like a right one.
+func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	in := EntitiesListInput{
+		TypeKey: r.URL.Query().Get("type_key"),
+		Cursor:  r.URL.Query().Get("cursor"),
+		Limit:   limit,
+		Verbose: queryBool(r, "verbose"),
+	}
+	if raw := r.URL.Query().Get("invalid"); raw != "" {
+		invalid := queryBool(r, "invalid")
+		in.Invalid = &invalid
+	}
+	// related_to is spelled with dotted parameter names so one query
+	// string can carry a nested filter without inventing an encoding:
+	// related_to.relation_type_key, .entity_type_key, .entity_key,
+	// .direction. Any one of them present turns the listing into the
+	// traversal, and the domain refuses an incomplete one at its own
+	// path — including a missing direction, which it will not default.
+	if hasRelatedTo(r) {
+		in.RelatedTo = &RelatedToInput{
+			RelationTypeKey: r.URL.Query().Get("related_to.relation_type_key"),
+			EntityTypeKey:   r.URL.Query().Get("related_to.entity_type_key"),
+			EntityKey:       r.URL.Query().Get("related_to.entity_key"),
+			Direction:       r.URL.Query().Get("related_to.direction"),
+		}
+	}
+	out, err := entitiesList(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleUpsertEntities(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	var in EntitiesUpsertInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := entitiesUpsert(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	// 200 with a report, even when some items failed: in partial mode a
+	// batch that lands nineteen of twenty rows is not a failed request,
+	// and the failures are in the body with their index, key and code.
+	// Only a refusal of the *call* — an unknown mode, an atomic batch
+	// rolled back — comes back as a status.
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	out, err := entitiesGet(r.Context(), s.deps(), caller, scope.ProjectID, EntitiesGetInput{
+		TypeKey: r.PathValue("type"), Key: r.PathValue("key"),
+	})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRemoveEntity(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	out, err := entitiesRemove(r.Context(), s.deps(), caller, scope.ProjectID,
+		EntitiesRemoveInput{ID: r.PathValue("id")})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- Relations ---
+
+func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	out, err := relationsList(r.Context(), s.deps(), caller, scope.ProjectID, RelationsListInput{
+		TypeKey:  r.URL.Query().Get("type_key"),
+		SourceID: r.URL.Query().Get("source_id"),
+		TargetID: r.URL.Query().Get("target_id"),
+		Cursor:   r.URL.Query().Get("cursor"),
+		Limit:    limit,
+	})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleUpsertRelations(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	var in RelationsUpsertInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := relationsUpsert(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRemoveRelation(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) || !requireEditor(w, scope) {
+		return
+	}
+	out, err := relationsRemove(r.Context(), s.deps(), caller, scope.ProjectID,
+		RelationsRemoveInput{ID: r.PathValue("id")})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- Search ---
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	out, err := searchEntities(r.Context(), s.deps(), caller, scope.ProjectID, SearchInput{
+		Query:   r.URL.Query().Get("query"),
+		TypeKey: r.URL.Query().Get("type_key"),
+		Limit:   limit,
+	})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// --- Query-string helpers ---
+
+// queryBool reads a flag parameter. Present with any of the four true
+// spellings is true; anything else, including absent, is false. It is
+// deliberately lenient where queryLimit is strict: a flag has exactly
+// two meanings and an unrecognised spelling of one of them can only mean
+// the other, whereas a limit of "lots" has no defensible reading at all.
+func queryBool(r *http.Request, name string) bool {
+	switch strings.ToLower(r.URL.Query().Get(name)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// queryLimit reads the page limit. Absent is zero, which every listing
+// in the domain reads as "the default" (metamodel.pageSize); a value
+// that is not a number is the caller's own problem at path `limit`,
+// never a silently ignored parameter. A number outside the domain's cap
+// is *not* refused here — the domain clamps it, deliberately, and
+// re-deciding that here would be a second bound to keep in step with the
+// first.
+func queryLimit(w http.ResponseWriter, r *http.Request) (int32, bool) {
+	raw := r.URL.Query().Get("limit")
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil {
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, "limit is not a number",
+			map[string]any{"fields": []map[string]string{{"path": "limit", "message": "is not a number"}}})
+		return 0, false
+	}
+	return int32(value), true
+}
+
+// hasRelatedTo reports whether the query string carries any part of the
+// traversal filter. Any part, not all four: an incomplete traversal must
+// reach the domain and be refused there, at the missing part's own path,
+// rather than being read here as an ordinary listing — which would
+// answer a caller who asked for one entity's neighbours with the whole
+// game.
+func hasRelatedTo(r *http.Request) bool {
+	query := r.URL.Query()
+	for _, name := range []string{
+		"related_to.relation_type_key", "related_to.entity_type_key",
+		"related_to.entity_key", "related_to.direction",
+	} {
+		if query.Get(name) != "" {
+			return true
+		}
+	}
+	return false
+}

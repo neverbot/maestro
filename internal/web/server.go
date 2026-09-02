@@ -262,6 +262,27 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("GET /api/games/{game}/invites", s.handleListProjectInvites)
 	s.registerProjectRoute("DELETE /api/games/{game}/invites/{invite}", s.handleRevokeProjectInvite)
 
+	// The game-content surface (api_metamodel.go), mirroring the sixteen
+	// MCP tools. Every row addressed by key or id sits behind a fixed
+	// by-key/by-id segment; see that file's header for why the obvious
+	// /types/{key} shape was rejected.
+	s.registerProjectRoute("GET /api/games/{game}/types", s.handleListTypes)
+	s.registerProjectRoute("POST /api/games/{game}/types", s.handleUpsertType)
+	s.registerProjectRoute("GET /api/games/{game}/types/by-key/{key}", s.handleGetType)
+	s.registerProjectRoute("DELETE /api/games/{game}/types/by-id/{id}", s.handleRemoveType)
+	s.registerProjectRoute("GET /api/games/{game}/relation-types", s.handleListRelationTypes)
+	s.registerProjectRoute("POST /api/games/{game}/relation-types", s.handleUpsertRelationType)
+	s.registerProjectRoute("GET /api/games/{game}/relation-types/by-key/{key}", s.handleGetRelationType)
+	s.registerProjectRoute("DELETE /api/games/{game}/relation-types/by-id/{id}", s.handleRemoveRelationType)
+	s.registerProjectRoute("GET /api/games/{game}/entities", s.handleListEntities)
+	s.registerProjectRoute("POST /api/games/{game}/entities", s.handleUpsertEntities)
+	s.registerProjectRoute("GET /api/games/{game}/entities/by-key/{type}/{key}", s.handleGetEntity)
+	s.registerProjectRoute("DELETE /api/games/{game}/entities/by-id/{id}", s.handleRemoveEntity)
+	s.registerProjectRoute("GET /api/games/{game}/relations", s.handleListRelations)
+	s.registerProjectRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
+	s.registerProjectRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
+	s.registerProjectRoute("GET /api/games/{game}/search", s.handleSearch)
+
 	// The MCP tools (mcp.go) are built once, here, and mounted in
 	// Stateless mode: no Mcp-Session-Id bookkeeping, and every tool call
 	// is its own independently-authenticated HTTP request rather than a

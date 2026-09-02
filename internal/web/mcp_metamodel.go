@@ -19,15 +19,29 @@ import (
 // types) and to fill it (entities, relations), plus the two ways of
 // getting rows back out (listing with a cursor, and search).
 //
-// **Every function here takes both a Caller and a resolved project id,
-// and every one starts with requireScope.** That is not belt and braces
-// over addScopedTool's own check: these functions are exported and
-// tested directly, without the wire wrapper, precisely so the isolation
-// invariant is pinned here too — and the query layer underneath takes
-// the project id as a parameter and filters on it in SQL, which is where
-// the invariant is actually enforced (see the metamodel plan's Task 7
-// requirement). A handler that forgot to pass a project id would not
-// compile; a handler that merely forgot to *check* one would.
+// **Every exported MCP* function here starts with requireScope, and
+// every one of them delegates to an unexported core of the same name.**
+// The check is not belt and braces over addScopedTool's own: these
+// functions are exported and tested directly, without the wire wrapper,
+// precisely so the isolation invariant is pinned here too — and the
+// query layer underneath takes the project id as a parameter and filters
+// on it in SQL, which is where the invariant is actually enforced (see
+// the metamodel plan's Task 7 requirement). A handler that forgot to
+// pass a project id would not compile; a handler that merely forgot to
+// *check* one would.
+//
+// The unexported cores exist for Task 8's REST mirror
+// (api_metamodel.go), and the split is exactly where the two surfaces
+// differ and nowhere else. requireScope asks one question — "is this
+// *token* bound to this game" — and a session caller has no binding to
+// check, so it refuses every human by construction. What stands in its
+// place on the REST side is requireProject, which resolves the game from
+// the URL and the caller's membership in it before a handler runs, and
+// registerProjectRoute plus TestEveryGameScopedRouteGoesThroughRequireProject
+// are what make that unskippable. So: one implementation of every tool,
+// two admission checks, each asking the question its own credential can
+// answer. A core must never be called from anywhere that has not already
+// resolved a scope, which is why none of the sixteen is exported.
 //
 // **No *input* type here is a domain type.** Every input is a struct
 // declared in this file, converted into the domain's own input by hand.
@@ -487,6 +501,13 @@ func MCPTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 	if err := requireScope(caller, projectID); err != nil {
 		return TypeDetailOutput{}, err
 	}
+	return typesUpsert(ctx, deps, caller, projectID, in)
+}
+
+// typesUpsert is MCPTypesUpsert without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func typesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesUpsertInput) (TypeDetailOutput, error) {
 	schema, err := schemaOf(in.Schema)
 	if err != nil {
 		return TypeDetailOutput{}, err
@@ -513,6 +534,13 @@ func MCPTypesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uu
 	if err := requireScope(caller, projectID); err != nil {
 		return TypesListOutput{}, err
 	}
+	return typesList(ctx, deps, caller, projectID, TypesListInput{})
+}
+
+// typesList is MCPTypesList without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func typesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, _ TypesListInput) (TypesListOutput, error) {
 	rows, err := deps.Metamodel.ListEntityTypes(ctx, projectID)
 	if err != nil {
 		return TypesListOutput{}, err
@@ -529,6 +557,13 @@ func MCPTypesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uui
 	if err := requireScope(caller, projectID); err != nil {
 		return TypeDetailOutput{}, err
 	}
+	return typesGet(ctx, deps, caller, projectID, in)
+}
+
+// typesGet is MCPTypesGet without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func typesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesGetInput) (TypeDetailOutput, error) {
 	row, err := deps.Metamodel.EntityTypeByKey(ctx, projectID, in.Key)
 	if err != nil {
 		return TypeDetailOutput{}, err
@@ -541,6 +576,13 @@ func MCPTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 	if err := requireScope(caller, projectID); err != nil {
 		return RemovedOutput{}, err
 	}
+	return typesRemove(ctx, deps, caller, projectID, in)
+}
+
+// typesRemove is MCPTypesRemove without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func typesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRemoveInput) (RemovedOutput, error) {
 	id, err := parseID("id", in.ID)
 	if err != nil {
 		return RemovedOutput{}, err
@@ -556,6 +598,13 @@ func MCPRelationTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, pr
 	if err := requireScope(caller, projectID); err != nil {
 		return RelationTypeDetailOutput{}, err
 	}
+	return relationTypesUpsert(ctx, deps, caller, projectID, in)
+}
+
+// relationTypesUpsert is MCPRelationTypesUpsert without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesUpsertInput) (RelationTypeDetailOutput, error) {
 	schema, err := schemaOf(in.Schema)
 	if err != nil {
 		return RelationTypeDetailOutput{}, err
@@ -590,6 +639,13 @@ func MCPRelationTypesList(ctx context.Context, deps MCPDeps, caller Caller, proj
 	if err := requireScope(caller, projectID); err != nil {
 		return RelationTypesListOutput{}, err
 	}
+	return relationTypesList(ctx, deps, caller, projectID, RelationTypesListInput{})
+}
+
+// relationTypesList is MCPRelationTypesList without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationTypesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, _ RelationTypesListInput) (RelationTypesListOutput, error) {
 	rows, err := deps.Metamodel.ListRelationTypes(ctx, projectID)
 	if err != nil {
 		return RelationTypesListOutput{}, err
@@ -606,6 +662,13 @@ func MCPRelationTypesGet(ctx context.Context, deps MCPDeps, caller Caller, proje
 	if err := requireScope(caller, projectID); err != nil {
 		return RelationTypeDetailOutput{}, err
 	}
+	return relationTypesGet(ctx, deps, caller, projectID, in)
+}
+
+// relationTypesGet is MCPRelationTypesGet without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationTypesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesGetInput) (RelationTypeDetailOutput, error) {
 	row, err := deps.Metamodel.RelationTypeByKey(ctx, projectID, in.Key)
 	if err != nil {
 		return RelationTypeDetailOutput{}, err
@@ -618,6 +681,13 @@ func MCPRelationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, pr
 	if err := requireScope(caller, projectID); err != nil {
 		return RemovedOutput{}, err
 	}
+	return relationTypesRemove(ctx, deps, caller, projectID, in)
+}
+
+// relationTypesRemove is MCPRelationTypesRemove without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRemoveInput) (RemovedOutput, error) {
 	id, err := parseID("id", in.ID)
 	if err != nil {
 		return RemovedOutput{}, err
@@ -639,6 +709,13 @@ func MCPEntitiesUpsert(ctx context.Context, deps MCPDeps, caller Caller, project
 	if err := requireScope(caller, projectID); err != nil {
 		return EntitiesUpsertOutput{}, err
 	}
+	return entitiesUpsert(ctx, deps, caller, projectID, in)
+}
+
+// entitiesUpsert is MCPEntitiesUpsert without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func entitiesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesUpsertInput) (EntitiesUpsertOutput, error) {
 	actor := actorOf(caller)
 	items := make([]metamodel.EntityInput, 0, len(in.Items))
 	for _, item := range in.Items {
@@ -679,6 +756,13 @@ func MCPEntitiesList(ctx context.Context, deps MCPDeps, caller Caller, projectID
 	if err := requireScope(caller, projectID); err != nil {
 		return EntitiesListOutput{}, err
 	}
+	return entitiesList(ctx, deps, caller, projectID, in)
+}
+
+// entitiesList is MCPEntitiesList without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func entitiesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesListInput) (EntitiesListOutput, error) {
 	filter := metamodel.EntityFilter{
 		TypeKey: in.TypeKey,
 		Invalid: in.Invalid,
@@ -725,6 +809,13 @@ func MCPEntitiesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 	if err := requireScope(caller, projectID); err != nil {
 		return EntityOutput{}, err
 	}
+	return entitiesGet(ctx, deps, caller, projectID, in)
+}
+
+// entitiesGet is MCPEntitiesGet without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func entitiesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesGetInput) (EntityOutput, error) {
 	row, err := deps.Metamodel.EntityByKey(ctx, projectID, in.TypeKey, in.Key)
 	if err != nil {
 		return EntityOutput{}, err
@@ -741,6 +832,13 @@ func MCPEntitiesRemove(ctx context.Context, deps MCPDeps, caller Caller, project
 	if err := requireScope(caller, projectID); err != nil {
 		return RemovedOutput{}, err
 	}
+	return entitiesRemove(ctx, deps, caller, projectID, in)
+}
+
+// entitiesRemove is MCPEntitiesRemove without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func entitiesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesRemoveInput) (RemovedOutput, error) {
 	id, err := parseID("id", in.ID)
 	if err != nil {
 		return RemovedOutput{}, err
@@ -756,6 +854,13 @@ func MCPRelationsUpsert(ctx context.Context, deps MCPDeps, caller Caller, projec
 	if err := requireScope(caller, projectID); err != nil {
 		return RelationsUpsertOutput{}, err
 	}
+	return relationsUpsert(ctx, deps, caller, projectID, in)
+}
+
+// relationsUpsert is MCPRelationsUpsert without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationsUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsUpsertInput) (RelationsUpsertOutput, error) {
 	actor := actorOf(caller)
 	items := make([]metamodel.RelationInput, 0, len(in.Items))
 	for _, item := range in.Items {
@@ -790,6 +895,13 @@ func MCPRelationsList(ctx context.Context, deps MCPDeps, caller Caller, projectI
 	if err := requireScope(caller, projectID); err != nil {
 		return RelationsListOutput{}, err
 	}
+	return relationsList(ctx, deps, caller, projectID, in)
+}
+
+// relationsList is MCPRelationsList without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationsList(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsListInput) (RelationsListOutput, error) {
 	filter := metamodel.RelationFilter{
 		TypeKey: in.TypeKey,
 		Cursor:  in.Cursor,
@@ -846,6 +958,13 @@ func MCPRelationsRemove(ctx context.Context, deps MCPDeps, caller Caller, projec
 	if err := requireScope(caller, projectID); err != nil {
 		return RemovedOutput{}, err
 	}
+	return relationsRemove(ctx, deps, caller, projectID, in)
+}
+
+// relationsRemove is MCPRelationsRemove without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationsRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsRemoveInput) (RemovedOutput, error) {
 	id, err := parseID("id", in.ID)
 	if err != nil {
 		return RemovedOutput{}, err
@@ -863,6 +982,13 @@ func MCPSearch(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.
 	if err := requireScope(caller, projectID); err != nil {
 		return SearchOutput{}, err
 	}
+	return searchEntities(ctx, deps, caller, projectID, in)
+}
+
+// searchEntities is MCPSearch without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func searchEntities(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
 	rows, err := deps.Metamodel.Search(ctx, projectID, in.Query, in.TypeKey, in.Limit)
 	if err != nil {
 		return SearchOutput{}, err

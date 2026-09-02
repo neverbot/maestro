@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -907,5 +908,238 @@ func TestADocsToolCallIsRefusedForAnotherGamesIDOverTheWire(t *testing.T) {
 	decodeToolText(t, result, &body)
 	if body.Error != "scope_violation" {
 		t.Fatalf("error = %q, want scope_violation", body.Error)
+	}
+}
+
+// writeDoc is a one-line document write for the tests below, which care
+// about which rows come back from a listing rather than about the prose
+// in them.
+func writeDoc(t *testing.T, f metamodelFixture, path, body string, links ...web.DocsLinkInput) {
+	t.Helper()
+	in := web.DocsWriteInput{
+		Path: path, Content: body, ExpectedVersion: int32Ptr(0), Message: "seed",
+	}
+	if len(links) > 0 {
+		in.Links = &links
+	}
+	if _, err := web.MCPDocsWrite(context.Background(), f.deps, f.caller, f.game, in); err != nil {
+		t.Fatalf("MCPDocsWrite %s: %v", path, err)
+	}
+}
+
+// TestTheListingTellsTombstonesApartFiltersAndPages pins the four claims
+// docs.list's own description makes and that nothing was asserting.
+//
+// It exists because four separate mutations of docsList survived the
+// whole package: publishing Deleted false for every row, ignoring
+// IncludeDeleted, ignoring the entity filter, and never setting
+// NextCursor or Truncated. The round-trip test above touches three of
+// those, and could not fail on any of them: its fixture holds exactly
+// one document, so a filter that does nothing returns the same one row
+// as a filter that works, a page that never fills cannot be truncated,
+// and nothing in it is ever deleted. **A one-row fixture proves nothing
+// about a filter.** This one holds three documents across two entities,
+// one of them a tombstone, which is the smallest fixture in which each
+// of those four behaviours has an observably different wrong answer.
+func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")
+	if _, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game, web.EntitiesUpsertInput{
+		Items: []web.EntityItemInput{{TypeKey: "quest", Key: "kobold-candles", Name: "Kobold Candles"}},
+	}); err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+
+	writeDoc(t, f, "lore/hogger.md", "# Hogger\n",
+		web.DocsLinkInput{EntityType: "quest", EntityKey: "wanted-hogger", Role: "script"})
+	writeDoc(t, f, "lore/kobolds.md", "# Kobolds\n",
+		web.DocsLinkInput{EntityType: "quest", EntityKey: "kobold-candles"})
+	writeDoc(t, f, "lore/zzz-cut.md", "# Cut content\n")
+
+	if _, err := web.MCPDocsDelete(ctx, f.deps, f.caller, f.game, web.DocsDeleteInput{
+		Path: "lore/zzz-cut.md", Message: "cut from the release", ExpectedVersion: int32Ptr(1),
+	}); err != nil {
+		t.Fatalf("MCPDocsDelete: %v", err)
+	}
+
+	paths := func(out web.DocsListOutput) []string {
+		got := make([]string, 0, len(out.Items))
+		for _, item := range out.Items {
+			got = append(got, item.Path)
+		}
+		return got
+	}
+
+	// 1. A soft-deleted document is absent by default.
+	live, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{})
+	if err != nil {
+		t.Fatalf("MCPDocsList: %v", err)
+	}
+	if got := paths(live); len(got) != 2 || got[0] != "lore/hogger.md" || got[1] != "lore/kobolds.md" {
+		t.Fatalf("listing = %v, want the two live documents", got)
+	}
+
+	// 2. include_deleted brings it back, and the row says which one it
+	// is. A listing that answers deleted false for a tombstone is a
+	// listing a client cannot use include_deleted with at all.
+	all, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("MCPDocsList include_deleted: %v", err)
+	}
+	if got := paths(all); len(got) != 3 {
+		t.Fatalf("listing with include_deleted = %v, want all three documents", got)
+	}
+	for _, item := range all.Items {
+		want := item.Path == "lore/zzz-cut.md"
+		if item.Deleted != want {
+			t.Fatalf("row %s says deleted %v, want %v", item.Path, item.Deleted, want)
+		}
+	}
+
+	// 3. The entity filter narrows to the documents attached to that
+	// entity, which is docs.list's bolded claim: it is how a quest's
+	// script is found without guessing its path.
+	byEntity, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
+		EntityType: "quest", EntityKey: "kobold-candles",
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsList by entity: %v", err)
+	}
+	if got := paths(byEntity); len(got) != 1 || got[0] != "lore/kobolds.md" {
+		t.Fatalf("listing by entity = %v, want only the document attached to that quest", got)
+	}
+
+	// 4. A page that does not hold everything says so and carries the
+	// cursor to the rest.
+	first, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{Limit: 1})
+	if err != nil {
+		t.Fatalf("MCPDocsList limit 1: %v", err)
+	}
+	if len(first.Items) != 1 || !first.Truncated || first.NextCursor == nil {
+		t.Fatalf("first page = %+v, want one row, truncated and a cursor", first)
+	}
+	second, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
+		Limit: 1, Cursor: *first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsList second page: %v", err)
+	}
+	if len(second.Items) != 1 || second.Items[0].Path == first.Items[0].Path {
+		t.Fatalf("second page = %+v, want the next row and not the first again", second.Items)
+	}
+	// The cursor is issued whenever a page came back full, so the page
+	// after the last row is the empty one, and that is the page that
+	// says the listing is over.
+	if second.NextCursor == nil {
+		t.Fatalf("second page = %+v, want a cursor while the page is still full", second)
+	}
+	last, err := web.MCPDocsList(ctx, f.deps, f.caller, f.game, web.DocsListInput{
+		Limit: 1, Cursor: *second.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsList past the last row: %v", err)
+	}
+	if len(last.Items) != 0 || last.Truncated || last.NextCursor != nil {
+		t.Fatalf("page past the end = %+v, want empty and untruncated", last)
+	}
+}
+
+// TestAHistoryPageSaysWhenThereIsMore is the history half of the paging
+// claim. docs.history's description promises next_cursor and nothing
+// asserted it: every existing history assertion reads a document with
+// one or two versions and no limit, where a page can never fill.
+func TestAHistoryPageSaysWhenThereIsMore(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	writeDoc(t, f, "lore/hogger.md", "# One\n")
+	for version, body := range []string{"# Two\n", "# Three\n"} {
+		if _, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
+			Path: "lore/hogger.md", Content: body, ExpectedVersion: int32Ptr(int32(version) + 1),
+			Message: "another draft",
+		}); err != nil {
+			t.Fatalf("MCPDocsWrite onto version %d: %v", version+1, err)
+		}
+	}
+
+	first, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.game, web.DocsHistoryInput{
+		Path: "lore/hogger.md", Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsHistory: %v", err)
+	}
+	if len(first.Items) != 1 || !first.Truncated || first.NextCursor == nil {
+		t.Fatalf("first page = %+v, want one version, truncated and a cursor", first)
+	}
+	if first.Items[0].Version != 3 {
+		t.Fatalf("first row is version %d, want the newest", first.Items[0].Version)
+	}
+	second, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.game, web.DocsHistoryInput{
+		Path: "lore/hogger.md", Limit: 1, Cursor: *first.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsHistory second page: %v", err)
+	}
+	if len(second.Items) != 1 || second.Items[0].Version != 2 {
+		t.Fatalf("second page = %+v, want version 2", second.Items)
+	}
+}
+
+// TestADiffTooLargeToCompareSaysCoarseOnTheWire pins the one field of
+// docs.diff a client cannot reconstruct from the answer.
+//
+// docs.diff's description tells a client to read coarse before it
+// renders, because a coarse answer says "the whole body was replaced"
+// about two versions that may differ by a word. Nothing asserted the
+// field: every other diff assertion compares small bodies, where coarse
+// is false either way.
+func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+
+	lines := func(word string) string {
+		var b strings.Builder
+		for i := 0; i <= markdown.MaxDiffLines; i++ {
+			b.WriteString(word)
+			b.WriteString(" ")
+			b.WriteString(strconv.Itoa(i))
+			b.WriteString("\n")
+		}
+		return b.String()
+	}
+	writeDoc(t, f, "lore/epic.md", lines("alpha"))
+	if _, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
+		Path: "lore/epic.md", Content: lines("beta"), ExpectedVersion: int32Ptr(1),
+	}); err != nil {
+		t.Fatalf("MCPDocsWrite the rewrite: %v", err)
+	}
+	if _, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.game, web.DocsWriteInput{
+		Path: "lore/epic.md", Content: lines("beta") + "one more line\n", ExpectedVersion: int32Ptr(2),
+	}); err != nil {
+		t.Fatalf("MCPDocsWrite the small edit: %v", err)
+	}
+
+	whole, err := web.MCPDocsDiff(ctx, f.deps, f.caller, f.game, web.DocsDiffInput{
+		Path: "lore/epic.md", FromVersion: 1, ToVersion: 2,
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsDiff: %v", err)
+	}
+	if !whole.Coarse {
+		t.Fatalf("diff = %+v, want coarse true past the comparison bound", whole)
+	}
+
+	// And the same tool answers coarse false for an edit inside a body
+	// of the same size, which is the half that makes the field worth
+	// reading: a client that saw coarse true on everything would learn
+	// to ignore it.
+	small, err := web.MCPDocsDiff(ctx, f.deps, f.caller, f.game, web.DocsDiffInput{
+		Path: "lore/epic.md", FromVersion: 2, ToVersion: 3,
+	})
+	if err != nil {
+		t.Fatalf("MCPDocsDiff the small edit: %v", err)
+	}
+	if small.Coarse {
+		t.Fatalf("diff = %+v, want coarse false for a one-line edit", small)
 	}
 }

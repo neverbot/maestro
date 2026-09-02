@@ -97,8 +97,28 @@ const (
 	// per-item commits produce, and the reason UpsertEntities publishes
 	// identities rather than a count. Role gating would not fix that; it
 	// would only starve the viewer this decision exists to serve.
-	// Coalescing a burst belongs to the transport, where the subscriber
-	// and its backlog are visible, and Tasks 6 and 7 own it.
+	//
+	// What a subscriber actually receives from a burst that size is not
+	// 400 events, and the difference matters to the argument above.
+	// realtime.Hub buffers 64 events per subscription and drops the rest
+	// (subscriberBuffer, hub.go); each drop leaves a gap in that
+	// subscription's own Seq, and internal/web/events.go turns the gap
+	// into a synthetic "resync" — "you missed something, go and re-read"
+	// — rather than silent loss. So the failure mode is degradation, not
+	// disappearance, which is what makes shipping the per-row events
+	// safe. But it cuts both ways: the seeding agent named above as the
+	// subscriber with the most to lose is precisely the one whose own
+	// burst overflows the buffer, so what it gets back is a resync, not
+	// the per-row warning that would have explained its next
+	// schema_violation. The warning is real for a subscriber watching
+	// *someone else's* burst, and for the designer's browser; for the
+	// agent driving the batch it only becomes real once the bursts are
+	// coalesced.
+	//
+	// Coalescing therefore belongs to the transport, where the
+	// subscriber and its backlog are visible, and **Tasks 6 and 7 own
+	// it** — as the thing that makes the benefit claimed here true, not
+	// as a polish item.
 	eventEntityUpserted = "entity.upserted"
 	eventEntityRemoved  = "entity.removed"
 )

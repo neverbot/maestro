@@ -4,19 +4,29 @@
 -- between games is enforced in SQL, not in Go, so a query trusting an id
 -- alone would hand a caller another game's row the moment an id leaked.
 --
--- That is the whole mechanism only for the statements addressing
--- entity_types itself (GetEntityTypeByID, DeleteEntityType): drop the
--- filter there and a leaked id reads, or deletes, another game's type,
--- which TestTypesAreScopedToTheirProject pins. It is *not* the mechanism
--- for the three statements reaching entities through an entity_type_id
--- (ListEntityFieldsOfType, MarkEntitiesOfTypeInvalid,
--- DeleteEntitiesOfType). 0004_metamodel.sql gives entities a composite
+-- That is the whole mechanism only for the statements addressing a row
+-- by its own primary key: GetEntityTypeByID and DeleteEntityType, which
+-- TestTypesAreScopedToTheirProject pins, and GetEntityByID and
+-- DeleteEntity, which
+-- TestTheEntityQueriesThatAddressARowByIDAreScopedToTheProject pins.
+-- Drop the filter from any of the four and a leaked id reads, or
+-- deletes, another game's row. The entity pair needed a test of its own
+-- against the queries: their only caller is RemoveEntity, which reads
+-- the row, then its type, then deletes, so each of its three filters
+-- masks the others and only mutating all three at once is observable
+-- through the service.
+--
+-- It is *not* the mechanism for the statements reaching entities through
+-- an entity_type_id (ListEntityFieldsOfType, MarkEntitiesOfTypeInvalid,
+-- DeleteEntitiesOfType, GetEntityByKey, GetEntityByKeyForUpdate,
+-- UpsertEntity). 0004_metamodel.sql gives entities a composite
 -- FOREIGN KEY (entity_type_id, project_id) REFERENCES
 -- entity_types (id, project_id), so an entity's project is already
 -- determined by its type's: no row can match a type id under one project
--- id and not another, and dropping the filter from those three changes no
--- result and can be caught by no test. They keep it as defence in depth,
--- against a future schema that relaxes that composite key, and so that a
+-- id and not another, and dropping the filter from any of those six
+-- changes no result and can be caught by no test. They keep it as
+-- defence in depth, against a future schema that relaxes that composite
+-- key, and so that a
 -- reader adding the next entities query copies the safe shape rather than
 -- having to work out which statements happen to be covered by a
 -- constraint. Written down here because a comment claiming these filters
@@ -184,7 +194,10 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- racing an in-flight edit is told to merge onto a version that is
 -- already stale by the time it retries, and retries into the same refusal
 -- forever. What the lock buys is not the refusal -- the guarded DO UPDATE
--- refuses on its own -- but the *number* the caller is told to merge onto.
+-- refuses on its own -- but the *number* the caller is told to merge
+-- onto. TestTheReportedCurrentEntityVersionIsTheOneTheWriteWouldHaveMet
+-- pins exactly that, because nothing else here does: both entity race
+-- tests block on the unique index inside the INSERT, not on this lock.
 SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid

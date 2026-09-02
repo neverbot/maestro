@@ -82,9 +82,16 @@ func (u upsertedEntity) event() entityEvent {
 //
 // Index and Key are what let a caller retry only what failed: an agent
 // seeding four hundred rows re-sends the handful named here rather than
-// the batch. Message is the item's own error, which in this package is a
-// path and a rule — never another item's values, since a batch report is
-// the one place a row's content could leak into a neighbour's error.
+// the batch. Message is the item's own error, and what it holds depends
+// on the fault: a field path and a rule where the item's own arguments
+// or values are wrong (`schema_violation: fields.min_level: expected
+// number, got string`), and otherwise the plain reason the item was
+// refused, which may name nothing of the item at all (`not_found: no
+// entity type "quest" in this game`). What it never holds is another
+// item's values: a batch report is the one place a row's content could
+// leak into a neighbour's error, and
+// TestBulkPartialLandsTheGoodRowsAndReportsTheRest pins that it does
+// not.
 type BulkFailure struct {
 	Index   int    `json:"index"`
 	Key     string `json:"key"`
@@ -93,6 +100,14 @@ type BulkFailure struct {
 }
 
 // BulkResult reports what a batch did.
+//
+// Succeeded is `json:"-"` because a dbq.Entity is a database row and not
+// a wire shape — it carries the audit columns and the raw jsonb, and
+// serialising it here would publish a shape no design decision has been
+// made about. The consequence is that a marshalled BulkResult reports
+// failures and nothing else, so **Task 7 must decide what a successful
+// batch tells an agent** — how many rows landed, under which keys, at
+// which versions — because today the honest answer is nothing at all.
 type BulkResult struct {
 	Succeeded []dbq.Entity  `json:"-"`
 	Failed    []BulkFailure `json:"failed"`
@@ -129,6 +144,13 @@ func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in Enti
 // an error with an empty result. The one case that returns both is a
 // cancelled context: see the loop below.
 //
+// **A key repeated inside one batch** is refused by repeatedKeys before
+// it can be misdiagnosed, and the two modes answer it differently for
+// the reason each mode exists: in partial the later occurrence is a
+// per-item invalid_input failure and the rest of the batch is
+// undisturbed, and in atomic the whole batch is refused before anything
+// is written. Both arguments are at their call sites.
+//
 // Both modes publish only after their transaction has committed, and
 // publish one identity event per row that landed rather than one event
 // carrying a count: a count is a value, not an identity, and a
@@ -153,8 +175,20 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 		}}}
 	}
 
+	repeats := repeatedKeys(items)
 	var result BulkResult
 	for i, in := range items {
+		// A repeated key is the item's own fault and needs no round trip
+		// to diagnose. In partial mode it fails alone: the first
+		// occurrence is a perfectly good item, and refusing the batch
+		// over it would throw away the other three hundred rows, which
+		// is the failure this mode exists to prevent.
+		if problem, ok := repeats[i]; ok {
+			result.Failed = append(result.Failed, failureFor(i, in.Key,
+				&ValidationError{Code: codeInvalidInput, Fields: []FieldError{problem}}))
+			continue
+		}
+
 		// Nothing else stops this loop: every item has its own
 		// transaction, so a cancelled caller would otherwise turn a
 		// 500-row batch into 500 failed round trips whose report nobody
@@ -174,6 +208,20 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 			return err
 		})
 		if err != nil {
+			// The guard above only catches a cancellation that lands
+			// *between* two items. The ordinary case is the other one:
+			// the caller goes away while an item is in flight, that
+			// item's own transaction fails with the cancellation, and
+			// failureFor would file it as internal_error — the code
+			// reserved for what nobody planned for. One cancellation
+			// would then surface twice, once as this stop error and once
+			// as a server fault against an item whose only problem was
+			// that nobody was left to hear about it. The cancellation
+			// can also land between the write and the commit, where the
+			// two are indistinguishable from in here.
+			if stopped := ctx.Err(); stopped != nil {
+				return result, fmt.Errorf("bulk upsert stopped at item %d: %w", i, stopped)
+			}
 			result.Failed = append(result.Failed, failureFor(i, in.Key, err))
 			continue
 		}
@@ -184,6 +232,26 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 }
 
 func (s *Service) upsertEntitiesAtomic(ctx context.Context, projectID uuid.UUID, items []EntityInput) (BulkResult, error) {
+	// Refused before anything is written, and refused whole. An atomic
+	// batch that names one row twice cannot be satisfied as submitted —
+	// the caller asked for n rows and at most n-1 can exist — and there
+	// is no per-item answer to give in a mode that lands everything or
+	// nothing. Doing it up front also makes the report deterministic:
+	// left to the writes, a repetition surfaces as whichever conflict
+	// the two items' versions happen to produce, and two items chaining
+	// the versions the other will leave behind both commit, so
+	// Succeeded comes back carrying the same row id twice and the caller
+	// is told two rows landed where one exists.
+	if repeats := repeatedKeys(items); len(repeats) > 0 {
+		fields := make([]FieldError, 0, len(repeats))
+		for i := range items {
+			if problem, ok := repeats[i]; ok {
+				fields = append(fields, problem)
+			}
+		}
+		return BulkResult{}, &ValidationError{Code: codeInvalidInput, Fields: fields}
+	}
+
 	var (
 		rows   []dbq.Entity
 		events []entityEvent
@@ -210,6 +278,49 @@ func (s *Service) upsertEntitiesAtomic(ctx context.Context, projectID uuid.UUID,
 		s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly, event)
 	}
 	return BulkResult{Succeeded: rows}, nil
+}
+
+// repeatedKeys finds the items of a batch that address a row an earlier
+// item already addressed, keyed by index and carrying the problem to
+// report.
+//
+// A seeding agent building a batch from a file produces this by
+// accident, and it is the one fault a batch can hold that the database
+// cannot diagnose: the two items are one row, so the second is refused
+// as a version conflict against a caller that never claimed a version —
+// which sends an agent to re-read the row and retry with the version it
+// is handed, at which point its own second item quietly overwrites its
+// first. The real answer is that the key appears twice, and only the
+// batch can see that.
+//
+// Identity is (type key, key), both folded, because that is what the
+// unique index folds: one key under two types is two rows. Folding with
+// strings.ToLower is exact here — rowKeyPattern admits ASCII only, so
+// there is no case where it and the index's lower() can disagree — and
+// an item whose key is malformed enough to escape that is refused on its
+// own arguments anyway.
+func repeatedKeys(items []EntityInput) map[int]FieldError {
+	type identity struct{ typeKey, key string }
+	first := make(map[identity]int, len(items))
+	var repeats map[int]FieldError
+	for i, in := range items {
+		id := identity{strings.ToLower(in.TypeKey), strings.ToLower(in.Key)}
+		if at, seen := first[id]; seen {
+			if repeats == nil {
+				repeats = make(map[int]FieldError)
+			}
+			repeats[i] = FieldError{
+				Path: fmt.Sprintf("items[%d].key", i),
+				Message: fmt.Sprintf(
+					"%q is already addressed by item %d of this batch, and keys are matched "+
+						"without regard to case: give one of the two items a different key, "+
+						"or merge them into one", in.Key, at),
+			}
+			continue
+		}
+		first[id] = i
+	}
+	return repeats
 }
 
 // upsertEntityWith does the work against any queries handle, so the same
@@ -381,9 +492,15 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 // tsvector input: map iteration order is randomised, and a search column
 // that differs between two identical writes is a diff nobody can explain.
 //
-// Only string values are collected, which is the whole of what a text
-// search over this domain can use: numbers, booleans and dates are found
-// by filtering on the jsonb, not by matching words.
+// What is collected is every word a text search over this domain can
+// use: the strings — text, longtext and the chosen option of an enum,
+// which Validate leaves as a plain string — and the elements of a
+// list<text>, which are the tags and aliases a designer searches for
+// more often than anything else. What is left out is the two types that
+// carry no words at all, number and bool: those are found by filtering on
+// the jsonb, and putting them here would only fill the tsvector with
+// digits that match nothing anyone types. (There is no date type in this
+// package; if one is ever added it belongs with the filters, not here.)
 func searchTextOf(values map[string]any) string {
 	keys := make([]string, 0, len(values))
 	for k := range values {
@@ -392,11 +509,22 @@ func searchTextOf(values map[string]any) string {
 	sort.Strings(keys)
 
 	var b strings.Builder
-	for _, k := range keys {
-		if s, ok := values[k].(string); ok {
+	write := func(v any) {
+		if s, ok := v.(string); ok {
 			b.WriteString(s)
 			b.WriteByte(' ')
 		}
+	}
+	for _, k := range keys {
+		// Validate normalises a list<text> to []any of strings, whatever
+		// the caller passed, so this is the only list shape to expect.
+		if list, ok := values[k].([]any); ok {
+			for _, item := range list {
+				write(item)
+			}
+			continue
+		}
+		write(values[k])
 	}
 	return b.String()
 }

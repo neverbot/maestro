@@ -23,9 +23,9 @@ import (
 // commits, never inside it (Service.publish's own doc comment).
 const (
 	// eventDocumentWritten fires from Write once its transaction has
-	// committed. Tasks 5 and 6 add the remaining kinds and state their
-	// own gating here rather than copying this one; Task 4's
-	// eventDocumentDeleted, below, is the first to do so.
+	// committed. Task 4's eventDocumentDeleted and Task 6's
+	// eventDocumentReverted, below, state their own gating here rather
+	// than copying this one.
 	//
 	// **The gating below is decided for documents, not inherited.**
 	// internal/metamodel/events.go argues four pairs of its own and
@@ -110,12 +110,33 @@ const (
 	// that a delete which rolls back announces nothing, which is the
 	// case TestADeletionIsAnnounced cannot reach on its own.
 	eventDocumentDeleted = "document.deleted"
+
+	// eventDocumentReverted fires from Revert once its transaction has
+	// committed, with documentEventMinRole / documentEventHumanOnly —
+	// the pair eventDocumentWritten's comment argues, for the same
+	// reason eventDocumentDeleted takes it: a revert is the game's own
+	// content moving, and the subscriber who cannot find out any other
+	// way is the viewer whose browser is rendering the document.
+	//
+	// It is a separate kind from document.written even though a revert
+	// *is* a write, and the reason is what a subscriber does with it: a
+	// browser showing "an agent rewrote this" and a browser showing "Ana
+	// reverted this to version 7" are two different sentences, and a
+	// client that had to infer the second from the first would have to
+	// fetch the history to find out. The payload carries the version
+	// that was restored as well as the new one, which is the whole
+	// difference.
+	//
+	// TestRevertIsAnnouncedWithTheVersionItRestored pins the kind and
+	// both numbers; TestNoRevertIsAnnouncedWhenTheRevertIsRefused pins
+	// that a revert which never happened announces nothing.
+	eventDocumentReverted = "document.reverted"
 )
 
 // documentEventMinRole and documentEventHumanOnly are the gating decided
 // above, named so the call sites read as the decision rather than as two
-// bare literals a later edit could drift apart. Task 4 already reuses
-// them and Tasks 5 and 6 do too — the kinds this package publishes are one
+// bare literals a later edit could drift apart. Tasks 4 and 6 both reuse
+// them — the kinds this package publishes are one
 // decision about one kind of fact, unlike the metamodel's four pairs,
 // which cover two genuinely different facts (a game's vocabulary and its
 // content). TestADocumentEventReachesAViewerAndATokenAlike is what pins
@@ -136,4 +157,18 @@ type DocumentEvent struct {
 	ID      uuid.UUID `json:"id"`
 	Path    string    `json:"path"`
 	Version int32     `json:"version"`
+}
+
+// RevertEvent is document.reverted's payload: identity, the new version,
+// and the version whose content was restored.
+//
+// It carries no body, like every payload here: publication order is not
+// commit order, so a payload holding prose could stably tell a client
+// the wrong prose. FromVersion is the one thing a DocumentEvent could
+// not have said, and it is the whole reason for a second payload type.
+type RevertEvent struct {
+	ID          uuid.UUID `json:"id"`
+	Path        string    `json:"path"`
+	Version     int32     `json:"version"`
+	FromVersion int32     `json:"from_version"`
 }

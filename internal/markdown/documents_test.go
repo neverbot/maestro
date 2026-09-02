@@ -154,43 +154,61 @@ func TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage(t *testing.T) 
 		t.Fatalf("Write: %v", err)
 	}
 
-	// **This read-back goes through SQL and not through the public
-	// surface, and that is a gap this task cannot close.** History,
-	// ReadVersion and the diff are Task 6, and this plan's own rule is
-	// that no query lands ahead of its caller — so until Task 6 there is
-	// no public way to read a version's message, author or snapshot at
-	// all. Asserting them here is what keeps them from being written and
-	// never looked at in the meantime; Task 6 must repeat these
-	// assertions through History and ReadVersion.
-	var version int32
-	var message, title, summary, body string
-	var frontmatter []byte
-	var authorUser, authorToken *uuid.UUID
-	var deleted bool
-	if err := pool.QueryRow(ctx,
-		`SELECT v.version, v.message, v.title, v.summary, v.body_md, v.frontmatter,
-		        v.author_user_id, v.author_token_id, v.deleted
-		   FROM document_versions v JOIN documents d ON d.id = v.document_id
-		  WHERE d.project_id = $1 AND d.path = 'bible'`, game).
-		Scan(&version, &message, &title, &summary, &body, &frontmatter,
-			&authorUser, &authorToken, &deleted); err != nil {
-		t.Fatalf("read the version row: %v", err)
+	// **This read-back goes through the public surface.** Task 3 landed
+	// it as a raw pool.QueryRow, because History and ReadVersion did not
+	// exist yet and this plan's rule is that no query lands ahead of its
+	// caller — so a version's message, author, title, summary,
+	// frontmatter and deleted flag were written and readable by nothing.
+	// Task 6 pays that debt: every assertion below is now made through
+	// the two readers a real caller uses, and the SQL is gone.
+	page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "bible"})
+	if err != nil {
+		t.Fatalf("History: %v", err)
 	}
-	if version != 1 || message != "the first note" || body != "The world is called Azeroth.\n" {
-		t.Fatalf("version row = (%d, %q, %q), want (1, %q, %q)",
-			version, message, body, "the first note", "The world is called Azeroth.\n")
+	if len(page.Versions) != 1 {
+		t.Fatalf("%d versions, want 1", len(page.Versions))
 	}
-	if title != "bible" || summary != "The world is called Azeroth." {
-		t.Fatalf("version row derived values = (%q, %q), want the document's own", title, summary)
+	meta := page.Versions[0]
+	if meta.Version != 1 || meta.Message != "the first note" {
+		t.Fatalf("version row = (%d, %q), want (1, %q)",
+			meta.Version, meta.Message, "the first note")
 	}
-	if string(frontmatter) != `{"era": "first"}` {
-		t.Fatalf("version frontmatter = %s, want the frontmatter of the write", frontmatter)
+	if meta.Title != "bible" || meta.Summary != "The world is called Azeroth." {
+		t.Fatalf("version row derived values = (%q, %q), want the document's own",
+			meta.Title, meta.Summary)
 	}
-	if authorUser == nil || *authorUser != user || authorToken == nil || *authorToken != token {
-		t.Fatalf("author = %v/%v, want %v/%v", authorUser, authorToken, user, token)
+	if meta.AuthorUserID == nil || *meta.AuthorUserID != user ||
+		meta.AuthorTokenID == nil || *meta.AuthorTokenID != token {
+		t.Fatalf("author = %v/%v, want %v/%v",
+			meta.AuthorUserID, meta.AuthorTokenID, user, token)
 	}
-	if deleted {
-		t.Fatal("deleted = true on an ordinary write: the tombstone is Task 4's")
+	if meta.Deleted {
+		t.Fatal("deleted = true on an ordinary write: only a tombstone carries it")
+	}
+	if !meta.CreatedAt.Valid {
+		t.Fatal("a version records when it was written")
+	}
+	// document_versions.project_id was written by InsertDocumentVersion
+	// and asserted by nothing at all until this read (Task 3's
+	// correction 15 recorded it for Task 6's isolation tests).
+	if meta.ProjectID != game {
+		t.Fatalf("ProjectID = %v, want the game the write was made in (%v)", meta.ProjectID, game)
+	}
+
+	// The body and the frontmatter are the half a history row
+	// deliberately does not carry, so they come back through ReadVersion.
+	full, err := svc.ReadVersion(ctx, game, "bible", 1)
+	if err != nil {
+		t.Fatalf("ReadVersion: %v", err)
+	}
+	if full.BodyMd != "The world is called Azeroth.\n" {
+		t.Fatalf("BodyMd = %q, want the body as written", full.BodyMd)
+	}
+	if string(full.Frontmatter) != `{"era": "first"}` {
+		t.Fatalf("version frontmatter = %s, want the frontmatter of the write", full.Frontmatter)
+	}
+	if full.ProjectID != game {
+		t.Fatalf("ProjectID = %v, want %v", full.ProjectID, game)
 	}
 }
 

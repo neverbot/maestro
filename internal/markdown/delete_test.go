@@ -100,25 +100,15 @@ func TestOnlyTheTombstoneVersionIsMarkedDeleted(t *testing.T) {
 		t.Fatalf("resurrect: %v", err)
 	}
 
-	rows, err := pool.Query(ctx,
-		`SELECT v.version, v.deleted FROM document_versions v
-		   JOIN documents d ON d.id = v.document_id
-		  WHERE d.project_id = $1 AND d.path = 'bible' ORDER BY v.version`, game)
+	// Read back through History, the public reader Task 6 added: Task 4
+	// asserted this over a raw pool.Query because none existed.
+	page, err := svc.History(ctx, game, markdown.HistoryFilter{Path: "bible"})
 	if err != nil {
-		t.Fatalf("read the versions: %v", err)
+		t.Fatalf("History: %v", err)
 	}
-	defer rows.Close()
 	got := map[int32]bool{}
-	for rows.Next() {
-		var version int32
-		var deleted bool
-		if err := rows.Scan(&version, &deleted); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got[version] = deleted
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
+	for _, v := range page.Versions {
+		got[v.Version] = v.Deleted
 	}
 	want := map[int32]bool{1: false, 2: false, 3: true, 4: false}
 	if len(got) != len(want) {
@@ -676,36 +666,32 @@ func TestATombstonesBodyIsStillReadableAsAVersion(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	// Task 6 gives this a public reader; until then the assertion is
-	// that the row is there with the body intact, which is what makes
-	// "nothing is ever lost" true rather than claimed.
-	//
-	// **Task 6 must extend this test to go through ReadVersion.** It is
-	// noted here rather than left implicit because a test that reaches
-	// into the database is a placeholder for a public read that does not
-	// exist yet, and a placeholder nobody replaces is how a feature
-	// ships write-only.
-	var body, title, summary string
-	var frontmatter []byte
-	if err := pool.QueryRow(ctx,
-		`SELECT v.body_md, v.title, v.summary, v.frontmatter
-		   FROM document_versions v JOIN documents d ON d.id = v.document_id
-		  WHERE d.project_id = $1 AND d.path = 'bible' AND v.version = 2`,
-		game).Scan(&body, &title, &summary, &frontmatter); err != nil {
-		t.Fatalf("read the tombstone body: %v", err)
+	// Task 4 landed this as a raw pool.QueryRow because the tombstone
+	// had no public reader; Task 6 replaces it with the reader, which is
+	// what makes "nothing is ever lost" true rather than claimed. A
+	// placeholder nobody replaces is how a feature ships write-only.
+	v2, err := svc.ReadVersion(ctx, game, "bible", 2)
+	if err != nil {
+		t.Fatalf("ReadVersion of the tombstone: %v", err)
 	}
-	if body != "the world is called Azeroth\n" {
-		t.Fatalf("body = %q, want the body as it stood at deletion", body)
+	if v2.BodyMd != "the world is called Azeroth\n" {
+		t.Fatalf("BodyMd = %q, want the body as it stood at deletion", v2.BodyMd)
+	}
+	if !v2.Deleted {
+		t.Fatal("the tombstone version must say it is one")
 	}
 	// A tombstone is a full snapshot, not a body with the rest blanked:
 	// everything version 1 carried is carried here too.
-	if title != "The Bible" {
-		t.Fatalf("title = %q, want the title as it stood at deletion", title)
+	if v2.Title != "The Bible" {
+		t.Fatalf("Title = %q, want the title as it stood at deletion", v2.Title)
 	}
-	if summary != "the world is called Azeroth" {
-		t.Fatalf("summary = %q, want the summary as it stood at deletion", summary)
+	if v2.Summary != "the world is called Azeroth" {
+		t.Fatalf("Summary = %q, want the summary as it stood at deletion", v2.Summary)
 	}
-	if string(frontmatter) != `{"title": "The Bible"}` {
-		t.Fatalf("frontmatter = %s, want the frontmatter as it stood at deletion", frontmatter)
+	if string(v2.Frontmatter) != `{"title": "The Bible"}` {
+		t.Fatalf("Frontmatter = %s, want the frontmatter as it stood at deletion", v2.Frontmatter)
+	}
+	if v2.Message != "cut" {
+		t.Fatalf("Message = %q, want the reason the document was cut", v2.Message)
 	}
 }

@@ -22,13 +22,23 @@
 --     and the filter is defence in depth. Here 0007_documents.sql gives
 --     the child tables the same composite key, so the same argument
 --     would apply -- and the spec (§5) rejects it for these tables
---     specifically: read_version and history (Task 6) are the calls
+--     specifically: GetDocumentVersion and ListDocumentVersions are the
+--     calls
 --     where "join to the parent, then check" is one forgotten join away
 --     from serving another game's prose, and the invariant must not
 --     depend on anyone remembering. So the version queries carry their
 --     own denormalised project_id and never join documents to establish
 --     scope. InsertDocumentVersion writes it as a column rather than
 --     filtering on it, and the composite key is what keeps it honest.
+--     **Stated plainly, because it is checkable and was checked:** no
+--     call this package offers can make that filter matter -- History
+--     and ReadVersion resolve the document inside the game first, and
+--     the composite key makes a version row disagreeing with its
+--     document unrepresentable, so dropping the filter from either
+--     query leaves the suite green. It stays for the callers that do
+--     not resolve first, which Task 11's REST mirror may be. See
+--     markdown.documentForVersions, which says the same thing where a
+--     reader of the Go will find it.
 --
 -- No write here sets updated_at. 0007_documents.sql puts a
 -- set_updated_at trigger on documents, so the column has one mechanism
@@ -226,3 +236,40 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND deleted_at IS NULL
   AND current_version = sqlc.arg('expected_version')::integer
 RETURNING *;
+
+-- name: ListDocumentVersions :many
+-- Version metadata only, newest first. **No bodies**: prose is the
+-- largest payload in the system and agents are its main consumer, so a
+-- history that carried them would blow a context window on the first
+-- call against a document anyone has actually worked on (spec §7).
+-- TestHistoryIsNewestFirstAndCarriesNoBodies pins the order and the
+-- absence, the latter by reading the returned row type's own fields.
+--
+-- Keyset by version alone, which is unique within a document
+-- (document_versions_key), so there is no tiebreak to add and the page
+-- is an index scan. The project filter is load-bearing here and is not
+-- defence in depth: this is one of the two calls the file header names
+-- as being one forgotten join away from serving another game's prose,
+-- and it deliberately does not reach the parent document at all.
+-- TestReadingAnotherGamesVersionIsNotFound covers it through History,
+-- and TestAVersionRowCarriesItsOwnProjectId is what pins that the
+-- denormalised column is the one being filtered on.
+SELECT id, project_id, document_id, version, title, summary, message, deleted,
+       author_user_id, author_token_id, created_at
+FROM document_versions
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND document_id = sqlc.arg('document_id')::uuid
+  AND (sqlc.narg('after_version')::integer IS NULL
+       OR version < sqlc.narg('after_version')::integer)
+ORDER BY version DESC
+LIMIT sqlc.arg('limit')::int;
+
+-- name: GetDocumentVersion :one
+-- The other call the file header names. Same rule: filtered by
+-- project_id and document_id, never by version alone and never by a
+-- join. TestReadingAnotherGamesVersionIsNotFound pins the project
+-- filter through ReadVersion.
+SELECT * FROM document_versions
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND document_id = sqlc.arg('document_id')::uuid
+  AND version = sqlc.arg('version')::integer;

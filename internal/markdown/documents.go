@@ -35,13 +35,14 @@ import (
 // body-only fix to a typo means "move the shelf." A nil Kind leaves
 // whatever is stored alone; a Kind pointing at "" clears it, same as
 // pointing at any other value sets it. TestAnEditThatOmitsKindLeavesIt
-// Unchanged pins both directions. Task 5's revert and Task 10's `docs.write`
-// both read from this: revert never sets it at all, and the tool leaves
+// Unchanged pins both directions. Revert and Task 10's `docs.write`
+// both read from this: Revert never sets it at all
+// (TestRevertingLeavesTheDocumentsKindAlone), and the tool leaves
 // the argument optional and omits it from the request when the caller
 // does not pass one, rather than defaulting it to the empty string on
 // the wire the way IncludeCurrent defaults the other way.
 //
-// Task 6 adds a Links field to this struct. It is deliberately not here
+// Task 7 adds a Links field to this struct. It is deliberately not here
 // yet: a field no caller sets is a shape pre-committed sight unseen.
 type WriteInput struct {
 	Path            string
@@ -112,8 +113,8 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 	return written, nil
 }
 
-// writeWith does the work against any queries handle, so Task 6's revert
-// shares one implementation with this one. Every caller runs it inside a
+// writeWith does the work against any queries handle, so Revert shares
+// one implementation with this one. Every caller runs it inside a
 // transaction, and none of them publishes from in here.
 func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	in WriteInput, content Content,
@@ -297,7 +298,8 @@ func conflictOn(row dbq.Document, include bool) error {
 // A soft-deleted document is not found. Deletion is soft so that nothing
 // is lost and a mistaken removal is recoverable (spec §3), not so that
 // every reader has to filter — a caller that wants the deleted row asks
-// the listing for it (Task 8) or reads a version (Task 6).
+// the listing for it (Task 8) or reads a version (ReadVersion, whose
+// document resolution deliberately includes deleted rows).
 // TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory pins the
 // hiding, and
 // TestWritingToADeletedPathResurrectsItAndContinuesTheNumbering pins

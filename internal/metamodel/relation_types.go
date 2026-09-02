@@ -82,9 +82,15 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 		// a declaration naming two unknown types is fixed in one round
 		// trip. They are read inside the transaction because they are read
 		// against the same game the write lands in.
-		problems := checkEndpointTypes(ctx, q, projectID, "source_type_ids", in.SourceTypeIDs)
-		problems = append(problems,
-			checkEndpointTypes(ctx, q, projectID, "target_type_ids", in.TargetTypeIDs)...)
+		problems, err := checkEndpointTypes(ctx, q, projectID, "source_type_ids", in.SourceTypeIDs)
+		if err != nil {
+			return err
+		}
+		targetProblems, err := checkEndpointTypes(ctx, q, projectID, "target_type_ids", in.TargetTypeIDs)
+		if err != nil {
+			return err
+		}
+		problems = append(problems, targetProblems...)
 		if len(problems) > 0 {
 			return &ValidationError{Code: codeInvalidInput, Fields: problems}
 		}
@@ -199,18 +205,46 @@ func endpointList(ids []uuid.UUID) []uuid.UUID {
 //
 // One statement per list rather than one lookup per id, because the lock
 // and the check are the same read: a per-id loop would take the same
-// locks one round trip at a time. A failure to read at all is reported
-// against the list and not an element — nothing was checked, so no index
-// is the one at fault.
-func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, path string, ids []uuid.UUID) []FieldError {
+// locks one round trip at a time.
+//
+// **A failure to read at all is returned as an error, not folded into a
+// FieldError.** It used to be: any error from the lock query, including
+// one this transaction had no way to satisfy, came back as
+// `FieldError{Message: "could not be checked: " + err.Error()}`, which
+// the caller then wrapped as `codeInvalidInput`. That is a lie a lock
+// timeout can now tell that it could not before this function started
+// taking `FOR SHARE`: the old per-id `GetEntityTypeByID` took no lock and
+// could not be cancelled by `lock_timeout`, so nothing reached this
+// branch except a connection actually down. `FOR SHARE` can be parked
+// behind another transaction's row lock and cancelled by
+// `lock_timeout`/`statement_timeout` (SQLSTATE 55P03 / 57014) — a
+// retryable contention event, not a problem with the ids the caller
+// sent, and `invalid_input` is read by a seeding agent as "resending
+// this unchanged is pointless," which for contention is exactly wrong.
+// `FieldError.Message` is also a bare string: flattening the error into
+// one erases the `*pgconn.PgError` a caller further up could otherwise
+// recover with `errors.As`. Returning the error instead keeps its
+// SQLSTATE intact and lets it propagate past `ValidationError` entirely,
+// landing — today — on `internal_error`: an honest "something on the
+// server side went wrong," not a caller-fixable field problem. Whether
+// retryable contention earns its own wire code, so an agent is told to
+// retry instead of merely told the call failed, is left to whichever
+// task wires this package's errors onto MCP (mcp_errors.go's own doc
+// comment names it as still open); nothing here forecloses that — the
+// SQLSTATE is still there to switch on once that mapping exists.
+//
+// A failure to read at all is still attributed to the list and not an
+// element in spirit — nothing was checked, so no index is the one at
+// fault — but now as an opaque error rather than a field-shaped one.
+func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, path string, ids []uuid.UUID) ([]FieldError, error) {
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	found, err := q.LockEndpointEntityTypes(ctx, dbq.LockEndpointEntityTypesParams{
 		ProjectID: projectID, Ids: ids,
 	})
 	if err != nil {
-		return []FieldError{{Path: path, Message: "could not be checked: " + err.Error()}}
+		return nil, fmt.Errorf("lock endpoint entity types (%s): %w", path, err)
 	}
 	known := make(map[uuid.UUID]struct{}, len(found))
 	for _, id := range found {
@@ -226,7 +260,7 @@ func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID
 			})
 		}
 	}
-	return problems
+	return problems, nil
 }
 
 // conflictOnRelationTypeKey names what stands in the way of a guarded

@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -439,6 +441,99 @@ func TestARelationTypeEndpointListMustNameTypesOfThisGame(t *testing.T) {
 
 	if _, err := svc.RelationTypeByKey(ctx, mine, "takes_place_in"); !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("the refused declaration must store nothing, got %v", err)
+	}
+}
+
+// TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput closes
+// the locking verification's finding 1.
+//
+// checkEndpointTypes now takes a FOR SHARE lock on every endpoint id it
+// finds (correction 22, TestARelationTypeCreatedDuringATypeRemovalCannot…
+// above), and that lock can be parked behind another transaction's row
+// lock and cancelled by lock_timeout — SQLSTATE 55P03. Before this fix,
+// any error from the lock query, cancellation included, was folded into
+// a FieldError and reported as invalid_input: a caller told its ids were
+// wrong when nothing about them was ever checked, and told not to resend
+// unchanged when resending unchanged is exactly the right recovery for
+// contention. This test holds a real row lock, gives the upsert's
+// connection a real lock_timeout, and proves the cancellation reaches
+// the caller as an ordinary Go error carrying the SQLSTATE — not a
+// ValidationError, and not ErrInvalidInput.
+func TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	zone, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	})
+	if err != nil {
+		t.Fatalf("seed zone type: %v", err)
+	}
+
+	// A pool of the test's own, every connection given a short
+	// lock_timeout on the session Postgres itself starts it with — the
+	// same knob an operator sets in postgresql.conf, so this proves the
+	// exact deployment shape finding 1 describes rather than a synthetic
+	// stand-in for it.
+	cfg, err := pgxpool.ParseConfig(pool.Config().ConnString())
+	if err != nil {
+		t.Fatalf("parse pool config: %v", err)
+	}
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "SET lock_timeout = '300ms'")
+		return err
+	}
+	timeoutPool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("open lock_timeout pool: %v", err)
+	}
+	defer timeoutPool.Close()
+	timeoutSvc := metamodel.New(timeoutPool, nil)
+
+	// Hold a conflicting lock on zone's own row, uncommitted, from a
+	// connection outside every pool under test.
+	blocker := standaloneConn(t, pool)
+	tx, err := blocker.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin blocking transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx,
+		`SELECT id FROM entity_types WHERE id = $1 FOR UPDATE`, zone.ID); err != nil {
+		t.Fatalf("hold the zone row: %v", err)
+	}
+
+	// The FOR SHARE in checkEndpointTypes blocks on FOR UPDATE above and
+	// is cancelled by this connection's own lock_timeout; the call
+	// returns on its own, no polling or second goroutine required.
+	_, err = timeoutSvc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+		TargetTypeIDs: []uuid.UUID{zone.ID},
+	})
+	if err == nil {
+		t.Fatal("UpsertRelationType succeeded; the endpoint lock did not block it")
+	}
+
+	var validation *metamodel.ValidationError
+	if errors.As(err, &validation) {
+		t.Fatalf("a lock timeout was reported as a ValidationError (code %q): %v", validation.Code, err)
+	}
+	if errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("a lock timeout was reported as ErrInvalidInput: %v", err)
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("the SQLSTATE did not survive: got %v", err)
+	}
+	if pgErr.Code != "55P03" {
+		t.Fatalf("pgErr.Code = %q, want 55P03 (lock_timeout)", pgErr.Code)
+	}
+
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatalf("release the held row: %v", err)
 	}
 }
 

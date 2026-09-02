@@ -974,6 +974,27 @@ func TestListRelationsFiltersByTypeAndEndpoint(t *testing.T) {
 	}
 }
 
+// TestARelationTypeKeyFilterIsBoundedBeforePostgresSeesIt is
+// TestATypeKeyFilterIsBoundedBeforePostgresSeesIt's sibling for
+// ListRelations: its type_key filter reached RelationTypeByKey
+// unbounded before this test existed, and an invalid UTF-8 byte in the
+// key would reach Postgres as a byte sequence it refuses outright
+// (SQLSTATE 22021), landing as internal_error over a value the caller
+// itself supplied.
+func TestARelationTypeKeyFilterIsBoundedBeforePostgresSeesIt(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	_, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{
+		TypeKey: "requires\x80",
+	})
+	requireFieldError(t, err, "type_key",
+		"must be letters, digits, underscores or hyphens, starting with a letter or a digit")
+}
+
 // TestARelationsCursorWithAForgedNonTimestampSortIsMalformed reaches the
 // arm ListRelations' comment above time.Parse says is reachable but had
 // no test: a cursor whose fingerprint agrees — so it passes

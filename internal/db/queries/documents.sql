@@ -443,6 +443,17 @@ ORDER BY d.path, d.id;
 -- that, with a document attached to two entities of which one is
 -- filtered on; a JOIN would answer with the same row twice.
 --
+-- **`l.project_id = d.project_id` inside that EXISTS is defence in
+-- depth, not load-bearing, and no test here says otherwise.** The
+-- entity id the caller filters on is already resolved inside this
+-- game (List's own resolveEntity call), and document_links rows are
+-- themselves scoped to a project, so nothing in this game's page can
+-- reach another game's document through this clause even with it
+-- dropped; the suite stays green without it. It stays anyway, for the
+-- same reason 0007_documents.sql's comment gives for the version
+-- tables: a clause whose absence the suite cannot catch is exactly the
+-- one a later edit removes first, and this one costs nothing to keep.
+--
 -- The project filter is load-bearing here, unlike the ones the header
 -- describes as defence in depth: a listing resolves nothing beforehand,
 -- so this filter is the only thing keeping one game's prose out of

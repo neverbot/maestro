@@ -251,9 +251,20 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	// The type filter is resolved for both shapes of listing, so a
 	// traversal narrowed by entity type answers the question it was
 	// asked instead of dropping the clause.
+	//
+	// Bounded before the lookup runs, through rowKeyProblems -- the same
+	// rule UpsertEntityType checks a caller's key against before it is
+	// ever a row -- so a type_key holding an invalid UTF-8 byte is a
+	// named invalid_input rather than a bare "invalid byte sequence for
+	// encoding \"UTF8\"" (SQLSTATE 22021) surfacing as internal_error
+	// over a value the caller itself supplied.
+	// TestATypeKeyFilterIsBoundedBeforePostgresSeesIt pins it.
 	var typeID *uuid.UUID
 	typePart := ""
 	if f.TypeKey != "" {
+		if problems := rowKeyProblems("type_key", f.TypeKey); len(problems) > 0 {
+			return EntityPage{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
+		}
 		typ, err := s.EntityTypeByKey(ctx, projectID, f.TypeKey)
 		if err != nil {
 			return EntityPage{}, err

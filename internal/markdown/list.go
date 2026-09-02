@@ -45,6 +45,16 @@ const (
 // Cursor is the NextCursor of a previous call. It belongs to the game
 // and to the exact filter it was issued for and to no other;
 // DocumentPage carries the contract.
+//
+// **Kind's zero value, "", means "no filter", and there is deliberately
+// no spelling of "documents with no kind" today.** A document's kind is
+// optional (Write's own comment), so some rows in a real game are
+// expected to have none, and this filter cannot select them: Kind: ""
+// is indistinguishable from Kind unset. Recorded here as a decision Task
+// 10 (the docs.list tool surface) must either accept, stating the gap in
+// the tool description, or close by giving this filter a third state --
+// the same TriState problem paging.TriState solves for a caller-supplied
+// boolean, applied here to a caller-supplied string.
 type ListFilter struct {
 	PathPrefix     string
 	Kind           string
@@ -66,9 +76,13 @@ type ListFilter struct {
 // bodies would blow a context window on the first call against a real
 // game. TestAListingRowCarriesNoBodyAtAll pins the absence over every
 // field rather than over a field it can name, since what has to hold is
-// that no such field exists, and
-// TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack reads every
-// field that is here back through List.
+// that no such field exists: a substring match on the lowered field
+// name, plus a scan of every field's rendered value for a body string
+// actually written and read back, the same two checks
+// TestAHistoryRowCarriesNoBodyAtAll runs for a version row. What
+// actually catches a populated field this reflection missed is
+// TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack's struct
+// equality, which reads every field that is here back through List.
 type DocumentSummary struct {
 	ID             uuid.UUID
 	Path           string
@@ -150,14 +164,16 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, f ListFilter) (
 	case f.EntityType != "":
 		// Bounded before either lookup runs, through the metamodel's own
 		// key rule rather than a second copy of it, exactly as the link
-		// calls do (entityAddressProblems). An entity key holding an
-		// invalid UTF-8 byte reaches Postgres as a byte sequence it
+		// calls do. entityAddressKeyProblems, not entityAddressProblems:
+		// List has no role argument, and running the whole of
+		// entityAddressProblems here would silently apply the role rule
+		// to a field this filter does not have (see
+		// entityAddressKeyProblems' doc comment). An entity key holding
+		// an invalid UTF-8 byte reaches Postgres as a byte sequence it
 		// refuses outright, which would land on the default arm as
 		// internal_error over a value the caller supplied.
 		// TestAnEntityFilterIsBoundedBeforePostgresSeesIt pins it.
-		problems = append(problems, entityAddressProblems("", LinkTarget{
-			EntityType: f.EntityType, EntityKey: f.EntityKey,
-		})...)
+		problems = append(problems, entityAddressKeyProblems("", f.EntityType, f.EntityKey)...)
 	}
 	if len(problems) > 0 {
 		return DocumentPage{}, invalidInputProblems(problems)
@@ -261,6 +277,20 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, f ListFilter) (
 // TestACursorFromAnEntityFilteredListingIsRefusedElsewhere covers the
 // entity part in both directions, and
 // TestAListingPagesAndItsCursorBelongsToItsFilter the other three.
+//
+// **The two strings.ToLower calls are pinned only by
+// TestTheDocumentListingFingerprintLeadsWithTheProjectId, the
+// composition test, and not by any behavioural test in this package.**
+// What would pin them behaviourally is a cursor issued from a listing
+// filtered on one casing of a prefix or a kind, carried across to the
+// same listing re-spelled with a different casing, and accepted -- the
+// entity part already has exactly that proof, the "QUEST"/"Wanted-Hogger"
+// case in TestACursorFromAnEntityFilteredListingIsRefusedElsewhere. No
+// such case exists for the prefix or the kind. The failure mode is a
+// false refusal -- a caller re-spelling its own filter's case gets
+// "cursor belongs to a different listing" where the two filters answer
+// the same rows -- rather than a wrong answer, so this is recorded as a
+// known gap rather than fixed here.
 func documentListingFingerprint(projectID uuid.UUID, f ListFilter, entityID string) string {
 	return paging.Fingerprint(projectID.String(), "documents",
 		strings.ToLower(f.PathPrefix), strings.ToLower(f.Kind), entityID,

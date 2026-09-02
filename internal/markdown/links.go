@@ -295,8 +295,21 @@ func (s *Service) documentForLinks(ctx context.Context, q *dbq.Queries, projectI
 	return row, nil
 }
 
-// entityAddressProblems bounds the caller's own strings before either
-// lookup runs, at the argument's own path.
+// entityAddressKeyProblems bounds the two keys of an entity address —
+// type and key, nothing else — before either lookup runs, at the
+// argument's own path.
+//
+// Split out from entityAddressProblems below so that List, which has no
+// role argument to check, calls this half directly rather than the
+// whole of entityAddressProblems. Before this split, List built a
+// LinkTarget with Role left at its zero value and ran it through
+// entityAddressProblems anyway; the check passed because an empty role
+// is currently a valid one, not because List had no role to be wrong
+// about. That is a landmine rather than a bug today: the day
+// checkShortText's rule for an empty role changes — required, say, or
+// bounded some other way — List would start refusing callers at a
+// field named "role" that ListFilter does not have and no caller ever
+// sent.
 //
 // The two keys go through metamodel.RowKeyProblems rather than through a
 // rule written here, because they are the metamodel's keys: the rule
@@ -312,9 +325,18 @@ func (s *Service) documentForLinks(ctx context.Context, q *dbq.Queries, projectI
 //
 // prefix is "" for the single-link calls and "links[i]." for an element
 // of a write's array.
+func entityAddressKeyProblems(prefix, entityType, entityKey string) []metamodel.FieldError {
+	problems := metamodel.RowKeyProblems(prefix+"entity_type", entityType)
+	return append(problems, metamodel.RowKeyProblems(prefix+"entity_key", entityKey)...)
+}
+
+// entityAddressProblems is entityAddressKeyProblems plus the role bound,
+// for the calls that carry a role: LinkAdd and a write's own links
+// array. List has no role argument and calls entityAddressKeyProblems
+// directly instead; see that function's doc comment for why the
+// difference matters.
 func entityAddressProblems(prefix string, target LinkTarget) []metamodel.FieldError {
-	problems := metamodel.RowKeyProblems(prefix+"entity_type", target.EntityType)
-	problems = append(problems, metamodel.RowKeyProblems(prefix+"entity_key", target.EntityKey)...)
+	problems := entityAddressKeyProblems(prefix, target.EntityType, target.EntityKey)
 	return append(problems, checkShortText(prefix+"role", target.Role, MaxRoleLen)...)
 }
 

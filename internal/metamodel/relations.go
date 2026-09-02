@@ -563,6 +563,17 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	}
 	typePart := ""
 	if f.TypeKey != "" {
+		// Bounded before the lookup runs, the same rule and the same
+		// reason as ListEntities' TypeKey: rowKeyProblems is what
+		// UpsertRelationType checks a caller's key against before it is
+		// ever a row, and running it here closes the same SQLSTATE 22021
+		// this domain's own correction elsewhere already closed for the
+		// markdown package's entity filter, rather than leaving this
+		// sibling listing to reach Postgres unbounded.
+		// TestARelationTypeKeyFilterIsBoundedBeforePostgresSeesIt pins it.
+		if problems := rowKeyProblems("type_key", f.TypeKey); len(problems) > 0 {
+			return RelationPage{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
+		}
 		relType, err := s.RelationTypeByKey(ctx, projectID, f.TypeKey)
 		if err != nil {
 			return RelationPage{}, err

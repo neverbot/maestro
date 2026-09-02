@@ -449,6 +449,27 @@ func TestAnUnknownTypeKeyInAListingNamesTheKey(t *testing.T) {
 	}
 }
 
+// TestATypeKeyFilterIsBoundedBeforePostgresSeesIt is markdown's
+// TestAnEntityFilterIsBoundedBeforePostgresSeesIt applied to this
+// listing's own type_key filter, which reached EntityTypeByKey
+// unbounded before this test existed: an invalid UTF-8 byte in the key
+// reaches Postgres as a byte sequence it refuses outright (SQLSTATE
+// 22021), which lands as internal_error over a value the caller itself
+// supplied.
+func TestATypeKeyFilterIsBoundedBeforePostgresSeesIt(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	_, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		TypeKey: "quest\x80", Limit: 10,
+	})
+	requireFieldError(t, err, "type_key",
+		"must be letters, digits, underscores or hyphens, starting with a letter or a digit")
+}
+
 // TestAListingIsScopedToItsGame pins the filter that does the isolating.
 func TestAListingIsScopedToItsGame(t *testing.T) {
 	pool := testutil.NewPool(t)

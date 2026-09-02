@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -97,16 +98,49 @@ func TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack(t *testing.T) {
 // TestAListingRowCarriesNoBodyAtAll pins the absence over every field of
 // the type rather than over a field it can name, because what has to
 // hold is that no such field exists — the same shape
-// TestAHistoryRowCarriesNoBodyAtAll takes for a version row. A listing
-// is the one call in this domain an agent makes against a whole game,
-// and a body on it would blow a context window on the first call.
+// TestAHistoryRowCarriesNoBodyAtAll takes for a version row, and the
+// same two checks: a substring match on the lowered field name, so a
+// field spelled any way that reads as a body or a frontmatter survives
+// a rename, and a scan of every field's rendered value for a body
+// string actually written and read back, so a field under some other
+// name that happens to carry prose is caught too. A listing is the one
+// call in this domain an agent makes against a whole game, and a body
+// on it would blow a context window on the first call.
+//
+// A version of this test that instead matched a hardcoded set of field
+// names shipped in Task 8 and was proved too weak by a later review:
+// adding a populated `Markdown string` field to DocumentSummary left it
+// green. This shape was proved red against that same mutation, both
+// empty and populated with the seeded body text.
 func TestAListingRowCarriesNoBodyAtAll(t *testing.T) {
-	row := reflect.TypeOf(markdown.DocumentSummary{})
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	const body = "the-body-no-listing-row-may-carry\n"
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "bible", Content: "---\ntitle: T\nsummary: S\n---\n" + body,
+		ExpectedVersion: ptrInt32(0),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	page, err := svc.List(ctx, game, markdown.ListFilter{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(page.Documents) != 1 {
+		t.Fatalf("%d documents, want 1", len(page.Documents))
+	}
+	row := reflect.ValueOf(page.Documents[0])
 	for i := 0; i < row.NumField(); i++ {
-		switch row.Field(i).Name {
-		case "BodyMD", "BodyMd", "Body", "Content", "Frontmatter":
-			t.Fatalf("DocumentSummary carries %q: a listing returns summaries, never bodies",
-				row.Field(i).Name)
+		field := row.Type().Field(i)
+		if name := strings.ToLower(field.Name); strings.Contains(name, "body") ||
+			strings.Contains(name, "frontmatter") {
+			t.Fatalf("a listing row carries %s: a listing returns summaries, never bodies",
+				field.Name)
+		}
+		if rendered := fmt.Sprintf("%v", row.Field(i).Interface()); strings.Contains(rendered, body) {
+			t.Fatalf("field %s of a listing row holds the body %q", field.Name, rendered)
 		}
 	}
 }
@@ -614,6 +648,32 @@ func TestTheLimitIsClampedRatherThanFoldedOntoTheDefault(t *testing.T) {
 	if len(negative.Documents) != int(markdown.DefaultDocumentPage) {
 		t.Fatalf("%d documents for a negative limit, want the default %d",
 			len(negative.Documents), markdown.DefaultDocumentPage)
+	}
+}
+
+// TestACapExceedingFixtureIsActuallyCappedAtTheCap is what
+// TestTheLimitIsClampedRatherThanFoldedOntoTheDefault's sixty-row
+// fixture cannot prove: with sixty rows against a cap of two hundred,
+// "clamped at the cap" and "no bound at all" answer identically, since
+// there is nothing past the cap to lose. This fixture has more rows
+// than MaxDocumentPage, so the two only agree if the cap is genuinely
+// applied.
+func TestACapExceedingFixtureIsActuallyCappedAtTheCap(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	seedDocuments(t, svc, game, "lore", int(markdown.MaxDocumentPage)+1)
+
+	page, err := svc.List(ctx, game, markdown.ListFilter{Limit: markdown.MaxDocumentPage + 50})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(page.Documents) != int(markdown.MaxDocumentPage) {
+		t.Fatalf("%d documents, want the cap of %d: a limit over the cap must still be capped, "+
+			"not treated as no bound at all", len(page.Documents), markdown.MaxDocumentPage)
+	}
+	if page.NextCursor == "" {
+		t.Fatal("a page at the cap with rows still behind it must carry a cursor")
 	}
 }
 

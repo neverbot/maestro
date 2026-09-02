@@ -7262,12 +7262,14 @@ rather than on what was planned).
    is the audit record of who wrote the row — so that shape would have
    let an agent name any user or token it liked as the author of its
    writes. It also has no json tags, so the wire keys would have been
-   `TypeKey`, `Key`, `Name`. **No domain type is used as a wire type
+   `TypeKey`, `Key`, `Name`. **No domain type is used as an *input* type
    anywhere in `mcp_metamodel.go`**; `EntityItemInput` and
    `RelationItemInput` carry no actor and `actorOf` builds one from the
    authenticated caller.
    `TestMCPEntitiesUpsertRecordsTheCallersOwnToken` pins it, proved red
-   by zeroing the actor.
+   by zeroing the actor. The unqualified version of that sentence, which
+   this correction and the file header both carried, was wrong about the
+   output direction; correction 26 fixes it.
 
 9. **Tools are not prefixed `maestro.`.** Step 5 names them
    `maestro.types.upsert`; Core shipped `whoami`, `games.list`,
@@ -7312,9 +7314,13 @@ rather than on what was planned).
     caller cannot read is a bound a caller trips over. No number in a
     description is typed out, so a description cannot go on promising a
     cap that moved. `search`'s description states the ranking, both
-    bounds and that the answer is a top-N and not a page;
-    `entities.list`'s states that the `related_to` traversal is not
-    paged and truncates silently at `MaxEntityPage`.
+    bounds and that the answer is a top-N and not a page.
+
+    **The clause about `entities.list` that stood here was false, and so
+    was the description built from it** — see correction 20. The
+    `related_to` traversal was never unpaged and never truncated. The
+    rule this correction states is about *numbers*; it does nothing
+    about a sentence, and a sentence is what went wrong.
 
 14. **`TestEveryMCPToolGoesThroughAddScopedTool`** is the MCP
     counterpart of `TestEveryGameScopedRouteGoesThroughRequireProject`.
@@ -7362,6 +7368,196 @@ rather than on what was planned).
     marshals to JSON `null`, which fails the output schema and, more to
     the point, makes "the batch reported no failures" look like "the
     batch reported nothing".
+
+**A second review round, closing what it found.** Isolation and
+authorship came through clean; every finding below is about what the
+surface *says* and what an agent does after reading it.
+
+20. **`entities.list`'s description claimed the traversal was not
+    paged, and every clause of that claim was false.** It said the
+    one-hop `related_to` walk returned at most `MaxEntityPage`
+    neighbours, never set `next_cursor`, and silently dropped anything
+    past the cap — and sent an agent to `relations.list` as the escape
+    hatch. `listRelated` has always computed a fingerprint, decoded the
+    cursor and returned `pageOf(...)`: the same paging as the plain
+    listing, with the same `pageSize(f.Limit, 50, 500)`, so **50 by
+    default and not 500**. Proved live: 60 neighbours give a 50-item
+    page with a cursor, then a 10-item page. The sentence was written
+    new, against code that already paged.
+
+    An agent following it would have stopped at the first page believing
+    it held a whole neighbourhood. Fixed in the description, in the
+    `MaxEntityPage` comment that fed it (`internal/metamodel/list.go`)
+    and in correction 13 above. `relations.list`'s description is
+    repaired by the same change: it was offering the id-shaped tool as
+    the way around a cap that does not exist, and now says what it is
+    actually for — an edge's own fields, which a traversal over entities
+    never returns.
+
+    `TestATraversalPagesLikeEveryOtherListing` had been pinning the
+    truth at the domain layer all along; what was missing was a guard at
+    the wire, where the sentence lives.
+    `TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire`
+    (internal/web) pages a traversal over a real MCP client and was
+    proved red by making `listRelated` return its rows without a cursor.
+
+21. **`related_to.direction` was documented and typed optional and is
+    mandatory.** The description called `"outgoing"` its default,
+    `RelatedToInput.Direction` carried `omitempty`, and the served input
+    schema therefore left it out of `required` — while `listRelated`
+    refuses an absent or unrecognised value outright, arguing that
+    defaulting to outgoing is "the same fault with a fuller page".
+
+    **The domain's refusal is right and the wire now agrees with it.**
+    Half a neighbourhood presented as the whole one is a wrong answer,
+    not a convenience. The `omitempty` is gone — the SDK infers this
+    schema by reflection, so the tag *is* the wire contract — the prose
+    names no default, and the same test above asserts `direction` is in
+    the served `required` list and that omitting it cannot produce a
+    listing. Proved red by putting `omitempty` back.
+
+22. **`semantic_role` reported `internal_error` for a value the
+    description enumerates.** Nothing in Go validated it; the only guard
+    was the `CHECK` in `0004_metamodel.sql`, so `semantic_role:
+    "nonsense"` reached Postgres and came back as
+    `{"error":"internal_error"}` with a check-constraint violation in
+    the log — something an agent typed and could fix, reported as a
+    server fault, with no path and no list of what would be accepted.
+    It is the only reachable `CHECK` on the metamodel tables.
+
+    `metamodel.SemanticRoles` is now the exported list, `UpsertRelationType`
+    refuses anything outside it as `invalid_input` at path
+    `semantic_role` naming all six, and `relation_types.upsert`'s
+    description is built from the same slice (correction 13's rule,
+    applied to a list rather than to a number) so the two cannot drift.
+    The constraint stays as the backstop for a writer that does not come
+    through this package.
+
+23. **Ranking: the promise was true for one word and false for more, and
+    the fix is a sort key rather than a weight.** The description
+    promised that a row the query *names* outranks a row that only
+    mentions the words in a field, "however often it mentions them".
+    `ts_rank` saturates towards 1.0 as a lexeme repeats, so a single
+    word under label A wins comfortably — a name match beat 5000
+    repetitions — but a multi-word query is a weighted sum of several
+    saturating terms and frequency overtakes the name. **Four
+    repetitions of a two-word phrase was enough**: `search "gnoll pack"`
+    ranked a lore row above the entity actually named `Gnoll Pack`.
+    `TestSearchRanksTheNameMatchFirst` only ever exercised one word.
+
+    **Qualifying the description was rejected in favour of fixing the
+    ranking**, because the promise is the useful one: an agent's first
+    hit being the wrong row has no recovery but to search again, harder,
+    which is the whole reason 0006 exists. An explicit weight array was
+    rejected too — it moves the number of repetitions it takes and
+    leaves the shape of the curve alone. `SearchEntities` now leads its
+    `ORDER BY` with `ts_filter(search, '{a}') @@ query`: the A half is
+    the name and nothing else, so the predicate asks exactly the
+    question the promise is about, and as a leading key it is a
+    guarantee rather than a tendency. `ts_rank` still orders within each
+    of the two groups, which is the work the weights were introduced
+    for. The test is now a table — one word, two words, two words
+    repeated 500 times, three words — and the two-word cases were proved
+    red against the old `ORDER BY`.
+
+24. **Bulk failures leaked raw Postgres text, the same hole `mcpErrorFor`
+    was already closing one step along.** `failureFor` set
+    `Message: err.Error()` unconditionally, *before* the switch, so
+    `retryable` and `internal_error` carried `canceling statement due to
+    lock timeout (SQLSTATE 55P03)`, `relation "entities_secret" does not
+    exist (SQLSTATE 42P01)`, constraint names. `mcp_errors.go`
+    deliberately withholds exactly that and a test asserts it — and the
+    bulk path is where contention was actually observed, so this was the
+    likelier route out, not the rarer one. It also undercut `retryable`
+    itself: the message an agent read beside the code was the text the
+    design says it must not see.
+
+    Both arms now carry a fixed message, and `failureFor` takes a
+    context so it can `slog` what it withholds — withholding a message
+    must not lose it, which is the pairing `mcpErrorFor` already had.
+    Every other arm keeps `err.Error()`, because every other code names
+    something the caller sent.
+
+25. **The retryable ordering is now pinned on both sides.** Moving
+    `IsRetryable` to the front of `failureFor`, and to the front of
+    `mcpErrorFor`, left the full suite green both times — an ordering
+    argued at length in two doc comments and enforced by nothing. An
+    error that is both a domain refusal and a contention SQLSTATE
+    (`errors.Join`) must report the domain code: that is the one a
+    caller can act on, and "resend unchanged" is the worst possible
+    advice about a row that will be refused again.
+    `TestABulkFailureNeverCarriesTheDatabasesOwnWords` and
+    `TestADomainCodeOutranksAContentionSQLSTATE` pin it; both mutations
+    are now red.
+
+26. **"No wire type here is a domain type" was false in the output
+    direction, and is now stated accurately and *tested*.**
+    `TypeDetailOutput.Schema` and `RelationTypeDetailOutput.Schema` are
+    `metamodel.Schema`; the bulk outputs carry `[]metamodel.BulkWrite`,
+    `[]metamodel.RelationWrite` and `[]metamodel.BulkFailure`. Nothing
+    leaks today, but an `updated_by_user_id` added to `BulkWrite` **did**
+    reach the wire, unblocked by the hand-written output schema and
+    caught only by a golden test in another package. The invariant held
+    by that test, not by the structural rule the comment claimed.
+
+    Shadowing the four was rejected: their field lists *are* the wire
+    contract, and a shadow struct beside each is a copy to keep in step —
+    the failure this avoids rather than the one it causes. Instead the
+    header says input and output separately, and
+    `TestTheDomainTypesOnTheWireCarryExactlyTheseKeys` marshals all four
+    and pins their key sets, so growing one of them fails in the package
+    whose comment makes the claim. Proved red twice.
+
+27. **`57014` stays in `IsRetryable`, and the advice beside it was
+    completed instead.** 40001, 40P01 and 55P03 are contention by
+    construction; `query_canceled` is also what an operator's
+    `statement_timeout` raises on a query that is simply too expensive,
+    every time it is run, and "change nothing and resend" is wrong
+    advice there. **Dropping it is worse**: a lock wait that runs into
+    `statement_timeout` rather than into `lock_timeout` is exactly the
+    contention this code exists for, and it would report as
+    `internal_error` — a caller told the server broke when the recovery
+    was to wait a moment.
+
+    So the code is kept, because it still names the one recovery all
+    four share, and what was missing is the *next* step when resending
+    stops helping. On a read there always is one: ask for less.
+    `mcpErrorFor`'s shared message says so for every tool, and
+    `entities.list`, `relations.list` and `search` each carry the read
+    counterpart of the back-off advice `entities.upsert` already had.
+
+28. **The backfill test did not guard the shipped migration.**
+    `TestTheSearchBackfillIsExact` wrote both SQL expressions out in its
+    own literal and compared them, and its doc said "change either and
+    this test says so". It did not: changing the *actual migration's*
+    `UPDATE` to a non-equal expression left every test green, because
+    nothing in the suite ever applied `0006` to a row. It proved an
+    algebra identity about a copy.
+
+    The identity itself was correct — verified independently over twelve
+    shapes with no mismatches — so nothing about the migration changed.
+    The test did. It now seeds real rows carrying the pre-0006 vector,
+    executes the Up arm **read out of the file that ships**, then writes
+    the same rows through `dbq.UpsertEntity` — the generated caller of
+    the statement that ships — and compares the two columns. Neither
+    side is written out in the test any more. It also covers a NULL
+    vector (which is what `coalesce` is for) and runs the Down arm.
+    Proved red by mutating the migration's Up arm, the Down arm, and
+    `UpsertEntity`'s B half in turn.
+
+29. **Small things.** `types.remove` on a type still in use answered
+    `{"error":"in_use","message":"in_use"}`, and all four removals'
+    not-found answered `message:"not_found"` — a code repeated as prose,
+    where `entities.get` and `types.get` have named their misses since
+    Task 4. `missingByID` now names the kind of row and the id back (the
+    only part of the call a caller can compare against what it holds),
+    and `stillInUse` names the type, how much content stands behind the
+    refusal and that `cascade` is the way through — which is the actual
+    recovery and was nowhere in the answer.
+
+    And `limit: -1` silently becomes the default on all three listings
+    while the descriptions documented only the over-cap case; each now
+    says both.
 
 ---
 

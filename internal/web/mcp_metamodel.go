@@ -403,15 +403,44 @@ type SearchOutput struct {
 	Truncated bool        `json:"truncated"`
 }
 
-// RelationOutput is one edge. Its endpoints are ids rather than the
-// (type key, key) refs the caller wrote, because that is what the row
-// holds; entities.list with related_to is how an agent walks the graph
-// in the terms it thinks in.
+// RefOutput is one endpoint of an edge, in the terms it was written
+// with: the entity's type key, its own key, and its name.
+//
+// Name is here as well as the two keys because every caller that
+// resolves an endpoint is about to show or log it, and the entity read
+// that produced the keys already carried the name — omitting it would
+// buy nothing and cost a round trip per endpoint.
+type RefOutput struct {
+	TypeKey string `json:"type_key"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+}
+
+// RelationOutput is one edge.
+//
+// It carries its endpoints twice, and both are load-bearing: the ids are
+// what the row holds and what relations.remove and the two endpoint
+// filters address entities by, and Source/Target are the (type key, key)
+// refs the edge was actually written with. Task 7 shipped this answer
+// with the ids alone, honestly documented, because resolving a page of
+// edges needed a bulk entity-by-ids read that did not exist;
+// metamodel.EntitiesByIDs is that read, and one query per page is what
+// it costs.
+//
+// Source and Target are pointers, and a nil one is not an error: the
+// endpoint read happens after the page was listed, so an entity removed
+// in between (which takes its edges with it, by cascade) leaves an edge
+// in hand whose endpoint no longer exists. The id is still reported;
+// the ref is simply absent, which is the honest answer rather than a
+// ref with empty strings in it that a client would render as a row
+// named "".
 type RelationOutput struct {
-	ID       uuid.UUID `json:"id"`
-	TypeKey  string    `json:"type_key"`
-	SourceID uuid.UUID `json:"source_id"`
-	TargetID uuid.UUID `json:"target_id"`
+	ID       uuid.UUID  `json:"id"`
+	TypeKey  string     `json:"type_key"`
+	SourceID uuid.UUID  `json:"source_id"`
+	TargetID uuid.UUID  `json:"target_id"`
+	Source   *RefOutput `json:"source,omitempty"`
+	Target   *RefOutput `json:"target,omitempty"`
 }
 
 // RelationsListOutput is one page of edges.
@@ -788,6 +817,10 @@ func MCPRelationsList(ctx context.Context, deps MCPDeps, caller Caller, projectI
 	if err != nil {
 		return RelationsListOutput{}, err
 	}
+	refs, err := endpointRefs(ctx, deps, projectID, page.Relations)
+	if err != nil {
+		return RelationsListOutput{}, err
+	}
 	items := make([]RelationOutput, 0, len(page.Relations))
 	for _, row := range page.Relations {
 		items = append(items, RelationOutput{
@@ -795,6 +828,8 @@ func MCPRelationsList(ctx context.Context, deps MCPDeps, caller Caller, projectI
 			TypeKey:  names[row.RelationTypeID],
 			SourceID: row.SourceID,
 			TargetID: row.TargetID,
+			Source:   refs[row.SourceID],
+			Target:   refs[row.TargetID],
 		})
 	}
 	result := RelationsListOutput{Items: items}
@@ -1040,6 +1075,38 @@ func entityTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (map
 	return names, nil
 }
 
+// endpointRefs resolves every entity id a page of edges names into the
+// ref the edge was written with. Two queries for the whole page — the
+// game's type vocabulary, and one bulk entity read — never one per
+// endpoint: this is the fix Task 7 recorded as owed and named this task
+// as the place for.
+//
+// An id that resolves to nothing is left out of the map rather than
+// mapped to an empty ref; see RelationOutput for why a caller reads a
+// missing endpoint as absent and not as a row named "".
+func endpointRefs(ctx context.Context, deps MCPDeps, projectID uuid.UUID, rows []dbq.Relation) (map[uuid.UUID]*RefOutput, error) {
+	refs := make(map[uuid.UUID]*RefOutput, 2*len(rows))
+	if len(rows) == 0 {
+		return refs, nil
+	}
+	ids := make([]uuid.UUID, 0, 2*len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.SourceID, row.TargetID)
+	}
+	entities, err := deps.Metamodel.EntitiesByIDs(ctx, projectID, ids)
+	if err != nil {
+		return nil, err
+	}
+	types, err := entityTypeKeys(ctx, deps, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for id, row := range entities {
+		refs[id] = &RefOutput{TypeKey: types[row.EntityTypeID], Key: row.Key, Name: row.Name}
+	}
+	return refs, nil
+}
+
 func relationTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (map[uuid.UUID]string, error) {
 	rows, err := deps.Metamodel.ListRelationTypes(ctx, projectID)
 	if err != nil {
@@ -1273,12 +1340,14 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"endpoint's entity id. Paged by next_cursor exactly as entities.list is; "+
 				"limit defaults to %d and is capped at %d, and a limit below one gets the "+
 				"default rather than an error. "+
-				"**Endpoints come back as entity ids, not as the (type_key, key) refs they "+
-				"were written with**, because that is what the row holds; to walk a game's "+
-				"graph in keys, use entities.list with related_to instead. This tool is what "+
-				"you want when the answer is about the edges themselves — removing one, or "+
-				"reading an edge's own fields, which a traversal over entities never "+
-				"returns. %s",
+				"Each edge names both endpoints twice: `source_id`/`target_id`, the entity "+
+				"ids the row holds and the ones relations.remove and this tool's own "+
+				"endpoint filters take, and `source`/`target`, the (type_key, key, name) "+
+				"refs the edge was written with. An endpoint whose entity was removed while "+
+				"the page was being read has its id but no ref. Use entities.list with "+
+				"related_to to walk a game's graph; use this tool when the answer is about "+
+				"the edges themselves — removing one, or reading an edge's own fields, which "+
+				"a traversal over entities never returns. %s",
 			metamodel.DefaultRelationPage, metamodel.MaxRelationPage, retryAdvice),
 		OutputSchema: relationsListOutputSchema,
 		Annotations:  readOnlyTool(),
@@ -1521,6 +1590,27 @@ var searchOutputSchema = &jsonschema.Schema{
 	},
 }
 
+// refOutputSchema is one resolved endpoint. Not in any Required list of
+// the edge that carries it: an endpoint whose entity was removed
+// between the listing and the resolution is reported by id alone (see
+// RelationOutput).
+//
+// A function rather than a var, unlike its neighbours, because the two
+// endpoints of an edge would otherwise share one *jsonschema.Schema
+// pointer, and the SDK refuses a schema whose nodes do not form a tree
+// — it panics at AddTool, which is how this was found.
+func refOutputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:     "object",
+		Required: []string{"type_key", "key", "name"},
+		Properties: map[string]*jsonschema.Schema{
+			"type_key": stringSchema(),
+			"key":      stringSchema(),
+			"name":     stringSchema(),
+		},
+	}
+}
+
 var relationOutputSchema = &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"id", "type_key", "source_id", "target_id"},
@@ -1529,6 +1619,8 @@ var relationOutputSchema = &jsonschema.Schema{
 		"type_key":  stringSchema(),
 		"source_id": stringSchema(),
 		"target_id": stringSchema(),
+		"source":    refOutputSchema(),
+		"target":    refOutputSchema(),
 	},
 }
 

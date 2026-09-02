@@ -296,6 +296,17 @@ FOR UPDATE;
 SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
+-- name: ListEntitiesByIDs :many
+-- The bulk counterpart of GetEntityByID, for turning a page of edges
+-- back into the (type key, key) refs its endpoints were written with.
+-- The project filter is what keeps a leaked id from resolving: the ids
+-- here are caller-visible values off a previous answer, exactly like
+-- ListRelations's own source_id/target_id, so the scope cannot come
+-- from them.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND id = ANY(sqlc.arg('ids')::uuid[]);
+
 -- name: DeleteEntity :execrows
 DELETE FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;

@@ -492,6 +492,57 @@ func (q *Queries) GetRelationTypeByKeyForUpdate(ctx context.Context, arg GetRela
 	return i, err
 }
 
+const listEntitiesByIDs = `-- name: ListEntitiesByIDs :many
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND id = ANY($2::uuid[])
+`
+
+type ListEntitiesByIDsParams struct {
+	ProjectID uuid.UUID
+	Ids       []uuid.UUID
+}
+
+// The bulk counterpart of GetEntityByID, for turning a page of edges
+// back into the (type key, key) refs its endpoints were written with.
+// The project filter is what keeps a leaked id from resolving: the ids
+// here are caller-visible values off a previous answer, exactly like
+// ListRelations's own source_id/target_id, so the scope cannot come
+// from them.
+func (q *Queries) ListEntitiesByIDs(ctx context.Context, arg ListEntitiesByIDsParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesByIDs, arg.ProjectID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEntitiesPage = `-- name: ListEntitiesPage :many
 SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
 WHERE project_id = $1::uuid

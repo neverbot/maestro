@@ -361,6 +361,44 @@ func (s *Service) EntityByKey(ctx context.Context, projectID uuid.UUID, typeKey,
 	return row, nil
 }
 
+// EntitiesByIDs reads a set of this game's entities in one query,
+// keyed by id. It is the read a caller needs when it holds ids and owes
+// its own caller keys: a page of relations names its endpoints by id
+// (that is what the row holds), and Task 7 shipped `relations.list`
+// answering in ids for want of exactly this statement.
+//
+// It is deliberately a map and not a slice: every caller so far joins it
+// back onto rows it already has, and handing back a slice would make
+// each of them build the same index. An id with no row is simply absent
+// — a leaked id from another game (the project filter is in SQL, where
+// every other statement here puts it), a removal that raced the listing
+// that produced it, or a caller's typo all produce the same gap, and
+// none of the three is a failure of this read. A caller that needs to
+// distinguish them compares the map's size against what it asked for.
+//
+// Duplicate ids are fine and cost nothing: `= ANY` does not care, and a
+// dense node named on both ends of many edges is the ordinary case. The
+// caller is expected to ask for at most a page's worth; nothing here
+// bounds the list, because nothing here is reachable from a
+// caller-supplied array — every call site builds the ids from rows it
+// just read under its own limit.
+func (s *Service) EntitiesByIDs(ctx context.Context, projectID uuid.UUID, ids []uuid.UUID) (map[uuid.UUID]dbq.Entity, error) {
+	byID := make(map[uuid.UUID]dbq.Entity, len(ids))
+	if len(ids) == 0 {
+		// No query at all, and not merely an empty answer: a listing
+		// with no edges must not cost a round trip.
+		return byID, nil
+	}
+	rows, err := s.q.ListEntitiesByIDs(ctx, dbq.ListEntitiesByIDsParams{ProjectID: projectID, Ids: ids})
+	if err != nil {
+		return nil, fmt.Errorf("lookup entities by id: %w", err)
+	}
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	return byID, nil
+}
+
 // RemoveEntity deletes one entity. Its relations go with it, by cascade.
 func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) error {
 	// Read the row, and its type, before deleting: entity.removed

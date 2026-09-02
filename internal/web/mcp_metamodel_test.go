@@ -928,3 +928,148 @@ func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
 }
 
 func ptrFloat(v float64) *float64 { return &v }
+
+// seedOneEdge declares a quest and a zone, one takes_place_in relation
+// type between them, two entities and the single edge joining them, and
+// hands back the ids of both endpoints. It exists for the endpoint-ref
+// tests below, which need a real edge and care about nothing else.
+func seedOneEdge(t *testing.T, f metamodelFixture) (source, target uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+
+	quest, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	})
+	if err != nil {
+		t.Fatalf("MCPTypesUpsert quest: %v", err)
+	}
+	zone, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "zone", Label: "Zone", LabelPlural: "Zones",
+	})
+	if err != nil {
+		t.Fatalf("MCPTypesUpsert zone: %v", err)
+	}
+	if _, err := web.MCPRelationTypesUpsert(ctx, f.deps, f.caller, f.game, web.RelationTypesUpsertInput{
+		Key: "takes_place_in", Label: "takes place in",
+		SourceTypeIDs: []string{quest.ID.String()},
+		TargetTypeIDs: []string{zone.ID.String()},
+	}); err != nil {
+		t.Fatalf("MCPRelationTypesUpsert: %v", err)
+	}
+	written, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game, web.EntitiesUpsertInput{
+		Items: []web.EntityItemInput{
+			{TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger"},
+			{TypeKey: "zone", Key: "elwynn", Name: "Elwynn Forest"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+	if written.Count != 2 {
+		t.Fatalf("seeded %d entities, want 2: %+v", written.Count, written.Failed)
+	}
+	if _, err := web.MCPRelationsUpsert(ctx, f.deps, f.caller, f.game, web.RelationsUpsertInput{
+		Items: []web.RelationItemInput{{
+			TypeKey: "takes_place_in",
+			Source:  web.RefInput{TypeKey: "quest", Key: "hogger"},
+			Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
+		}},
+	}); err != nil {
+		t.Fatalf("MCPRelationsUpsert: %v", err)
+	}
+	return written.Written[0].ID, written.Written[1].ID
+}
+
+// TestRelationsListNamesBothEndpointsByRef closes Task 7's own finding
+// 18: `relations.list` answered with endpoint ids because the row holds
+// ids and no bulk entity-by-ids query existed, and it named this task as
+// where the fix was cheapest. It is here: every edge now carries the
+// (type_key, key, name) ref each endpoint was written with, alongside
+// the ids a removal still addresses them by.
+func TestRelationsListNamesBothEndpointsByRef(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	sourceID, targetID := seedOneEdge(t, f)
+
+	page, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game, web.RelationsListInput{})
+	if err != nil {
+		t.Fatalf("MCPRelationsList: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("items = %+v, want the one edge", page.Items)
+	}
+	edge := page.Items[0]
+	if edge.SourceID != sourceID || edge.TargetID != targetID {
+		t.Fatalf("edge ids = (%s, %s), want (%s, %s)", edge.SourceID, edge.TargetID, sourceID, targetID)
+	}
+	if edge.Source == nil || edge.Target == nil {
+		t.Fatalf("edge = %+v, want both endpoints resolved to refs", edge)
+	}
+	if edge.Source.TypeKey != "quest" || edge.Source.Key != "hogger" || edge.Source.Name != "Wanted: Hogger" {
+		t.Fatalf("source = %+v, want the quest it was written with", edge.Source)
+	}
+	if edge.Target.TypeKey != "zone" || edge.Target.Key != "elwynn" || edge.Target.Name != "Elwynn Forest" {
+		t.Fatalf("target = %+v, want the zone it was written with", edge.Target)
+	}
+}
+
+// TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs is the
+// paired guard against the fault this project has found in nine
+// consecutive tasks: an answer growing a field its published contract
+// does not mention. The output schemas here are hand-written, so nothing
+// but a test connects them to the struct they describe.
+func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+
+	session := connectMCP(t, httpSrv.URL, f.token)
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var list *mcp.Tool
+	for _, tool := range tools.Tools {
+		if tool.Name == "relations.list" {
+			list = tool
+		}
+	}
+	if list == nil {
+		t.Fatal("relations.list is not served")
+	}
+	raw, err := json.Marshal(list.OutputSchema)
+	if err != nil {
+		t.Fatalf("marshal output schema: %v", err)
+	}
+	var served struct {
+		Properties struct {
+			Items struct {
+				Items struct {
+					Properties map[string]struct {
+						Properties map[string]json.RawMessage `json:"properties"`
+					} `json:"properties"`
+				} `json:"items"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &served); err != nil {
+		t.Fatalf("decode output schema: %v", err)
+	}
+	for _, end := range []string{"source", "target"} {
+		ref, ok := served.Properties.Items.Items.Properties[end]
+		if !ok {
+			t.Fatalf("output schema has no %q property: %s", end, raw)
+		}
+		for _, key := range []string{"type_key", "key", "name"} {
+			if _, ok := ref.Properties[key]; !ok {
+				t.Fatalf("%s ref schema has no %q: %s", end, key, raw)
+			}
+		}
+	}
+
+	// The description is the other half of the same contract, and Task
+	// 7 shipped it saying the opposite of what the tool now does.
+	if strings.Contains(list.Description, "not as the (type_key, key) refs") {
+		t.Fatalf("relations.list still tells an agent its endpoints are ids only: %s", list.Description)
+	}
+}

@@ -24,8 +24,15 @@ Scope: sub-project 7 of the roadmap in
 >   constrained by the server. §10.5 carries the two committed key rules
 >   and open question 9 is closed against them.
 > - §10.1 and §10.2 — both findings were verified and accepted; the
->   decisions they ask for now live as open questions O2 and O1 in the
->   core spec, and §11.3–11.4 point there instead of posing them again.
+>   decisions they ask for now live as O2 and O1 in the core spec, and
+>   §11.3–11.4 point there instead of posing them again. **Both were
+>   decided on 2026-09-02, in favour of what these sections recommended:
+>   the bulk upserts gain `on_conflict` (decided, not yet implemented),
+>   and `semantic_role` stays as a label with `analysis_traits` added
+>   beside it as the analytical axis.** §11.3 and §11.4 are closed,
+>   §4.1's fourth law is no longer contingent, and §6's
+>   `seeding-a-game.md` teaches the one-call re-seed marked pending
+>   implementation.
 > - §10.3 — the views spec's operator table has been corrected to
 >   `list<text>`; the substantive gap this section reports is unchanged.
 >
@@ -269,20 +276,28 @@ must not compress.
 Stated in `skill.md`, argued in `modelling/deciding.md`:
 
 1. **A reference to another entity is a relation. Always.** There is no
-   reference field type, and this is not an omission.
+   reference field type, and this is not an omission — *decided
+   2026-09-02, core open question O3: no `entity_ref` type will be
+   added.* The law's one honest limit, which the page states rather
+   than hides: an *edge* cannot point at a third entity, so a field
+   like a door's `requires_ability` is a soft reference — a key the
+   game keeps consistent, which nothing validates and no traversal
+   follows.
 2. **Data that belongs to the connection goes on the relation.** Edges
    carry their own typed fields.
 3. **Declare the direction when you declare the relation type**, and
    name the type so the direction is readable. Queries take
    `direction` literally; nothing infers it.
 4. **Declare `analysis_traits` at the same moment you declare the
-   relation type.** Not later. *Contingent on open question O1 in the
-   core spec: `analysis_traits` does not exist in the committed schema
-   and the analysis spec proposes it. If O1 lands on "no traits", this
-   law becomes the same instruction about `semantic_role`, and §4.5 is
-   rewritten rather than dropped — the point is that the analytical
-   meaning of an edge is declared with the edge type, whatever the
-   column ends up being called.*
+   relation type.** Not later. *Decided 2026-09-02, core open question
+   O1: `analysis_traits` is the analytical axis and it is added by the
+   analysis sub-project; `semantic_role` stays beside it as the
+   human-readable label of what the edge means, with no analytical
+   meaning. The law is no longer contingent on anything — but
+   `analysis_traits` is not in the committed schema yet, so a bundle
+   page teaching it is written against the analysis sub-project and
+   ships with it.* The same moment is also when you set
+   `semantic_role`: two questions about one edge, asked once.
 
 ### 4.2 Decision 1 — is this a field, or a relation?
 
@@ -462,7 +477,13 @@ Coverage per genre, as the user named them:
 - **Metroidvania** — `room`, `ability`, `boss`, `item`; `connects_to`
   carrying `requires_ability` on the edge. Hard problem: the gate lives
   on the edge, and this is the genre that exists in the bundle to prove
-  it.
+  it. The transcript also states the limit honestly, because an agent
+  will hit it: `requires_ability` is a `text` key naming an `ability`,
+  and nothing validates it — a soft reference the game keeps consistent
+  itself. There is no reference field type and there will not be one
+  (decided 2026-09-02, core open question O3); a game that needs the
+  gate to be traversable models it as its own entity with two
+  relations.
 
 ### 5.2 Why a transcript, and what was rejected
 
@@ -537,10 +558,16 @@ can verify:
 
 - **`seeding-a-game.md`** — from an empty game to a few hundred
   entities. Types first, relation types with traits second, entities in
-  `atomic` batches third, relations fourth. Includes the honest warning
-  from the analysis spec that a game mid-seed is *supposed* to look like
-  a field of orphans, and that running `analysis.orphans` before the
-  edges are written is a self-inflicted wound.
+  `atomic` batches third, relations fourth. Re-seeding is one call:
+  repeat the same payload with `on_conflict: "skip"` to leave existing
+  rows alone, or `"overwrite"` to correct rows this agent owns. *Pending
+  implementation — `on_conflict` is decided (core open question O2) but
+  not yet on the surface; see §10.1 for the interim read-then-write
+  loop, and do not ship this page until the argument exists.* Includes
+  the honest warning from the analysis spec that a game mid-seed is
+  *supposed* to look like a field of orphans, and that running
+  `analysis.orphans` before the edges are written is a self-inflicted
+  wound.
 - **`joining-a-game.md`** — arriving at content someone else seeded.
   `types.list`, `relation_types.list`, then a small `entities.list` per
   type to see real values before writing anything. This recipe is the
@@ -815,12 +842,12 @@ There is no `on_conflict: skip`, no `if_not_exists`, and no bulk
 read that returns key → version cheaply enough to precede a 500-row
 write without a page walk.
 
-So the bundle must teach a workaround: seed with `atomic`, **keep the
-versions the response returns**, and on any re-run first `entities.list`
-the type with a large limit and build a key → version map before
-writing. That is several extra calls and one extra piece of state an
-agent must carry across a session boundary it frequently does not
-survive.
+Without a conflict mode, the bundle would have to teach a workaround:
+seed with `atomic`, **keep the versions the response returns**, and on
+any re-run first `entities.list` the type with a large limit and build a
+key → version map before writing. That is several extra calls and one
+extra piece of state an agent must carry across a session boundary it
+frequently does not survive.
 
 A workaround in a teaching document is debt. **Recommendation, aimed at
 the metamodel and not at this sub-project:** `entities.upsert` and
@@ -829,43 +856,63 @@ default `"fail"` so nothing changes for existing callers. `"skip"` makes
 a re-seed genuinely idempotent; `"overwrite"` makes a corrective re-seed
 one call.
 
-**This finding was verified and accepted.** The core spec's
+**This finding was verified and accepted**, and the core spec's
 "Idempotency" section has been amended to say that idempotency here
-means row identity and not a conflict-free re-run, and the
-recommendation above is recorded there as **open question O2** — the one
-place it is stated, because it is a change to the core spec's MCP
-surface. Compare `2026-09-02-markdown-domain-design.md` §7, which
-spells a create as `expected_version: 0`; if the metamodel adopts that
-shape instead, this section's workaround becomes a two-line rule rather
-than a page.
+means row identity and not a conflict-free re-run.
+
+> **Decided 2026-09-02 — the recommendation is adopted.** Core open
+> question O2 is closed: the bulk upserts gain
+> `on_conflict: "fail" | "skip" | "overwrite"`, defaulting to `"fail"`.
+> A re-seed is one call, not a read-then-write loop.
+>
+> **It is not implemented yet.** It is a change to the bulk write path
+> and the tool surface, filed as Task 10 in
+> `docs/superpowers/plans/2026-08-31-metamodel.md`. So
+> `recipes/seeding-a-game.md` teaches the simple form —
+> `on_conflict: "skip"` to re-seed, `"overwrite"` to correct rows the
+> caller owns — **marked as pending implementation**, and no bundle page
+> ships describing that argument as available until Task 10 lands. The
+> read-then-write loop is documented only as the interim path, and is
+> deleted from the bundle when the task lands.
+>
+> `2026-09-02-markdown-domain-design.md` §7's `expected_version: 0`
+> spelling was considered as an alternative and not adopted for the
+> metamodel; the two surfaces keep their own conventions, and §7 there
+> now says so.
 
 ### 10.2 Two overlapping semantic vocabularies
 
 `relation_types` carries `semantic_role` (six values, in the shipped
-`CHECK`) and will carry `analysis_traits` (seven values). The analysis
-spec keeps the first as descriptive metadata and as a fallback mapping,
-and its own open question 3 asks whether it survives at all.
-
-The bundle would have to teach both, explain that one is a compatibility
-fallback for the other, and explain that `ordering` and bare `acyclic`
-are unreachable through the fallback. That is two vocabularies for one
-job and it is precisely the kind of thing that makes an agent choose
-wrong — and then choose wrong consistently, across thirty relation
-types. The bundle cannot fix this; it can only document it at length,
-which is the tell.
+`CHECK`) and will carry `analysis_traits` (seven values). The risk this
+section reported was that the bundle would have to teach both, explain
+that one is a compatibility fallback for the other, and explain that
+`ordering` and bare `acyclic` are unreachable through the fallback —
+two vocabularies for one job, which is precisely the kind of thing that
+makes an agent choose wrong, and then choose wrong consistently across
+thirty relation types.
 
 **Recommendation:** decide before the bundle is written. If
 `semantic_role` survives, the bundle teaches traits only and treats the
 role as a human-readable label with no analytical meaning.
 
-**This finding was verified and accepted.** The question is now stated
-in exactly one place — **open question O1** in
-`2026-08-31-core-and-metamodel-design.md`, "Metamodel" — because
-`semantic_role` is that spec's column, and because the analysis spec's
-§2D and its own open question 3 were posing it twice more. The analysis
-spec's trait vocabulary is now marked as a *proposal* contingent on that
-answer, rather than as chosen. §11.3 no longer poses the question
-separately; it names what blocks on it.
+> **Decided 2026-09-02 — that is the answer.** Core open question O1 is
+> closed: `semantic_role` survives and `analysis_traits` is added by the
+> analysis sub-project. They are two axes, not two vocabularies for one
+> job — the role says what an edge *means* to a designer, the traits say
+> how it *behaves* in a graph walk — and that is exactly the shape the
+> recommendation above asked for.
+>
+> What the bundle teaches, therefore: **traits for analysis, the role as
+> a label, and never one as a substitute for the other.** The one
+> remaining mention of the mapping is that a game seeded before traits
+> existed gets a `derived_from_role` resolution reported in every
+> analysis result; the bundle names it as a migration path an agent
+> reads, not as a way an agent declares behaviour. That is a paragraph,
+> not the page of hedging this section feared.
+>
+> `analysis_traits` is not in the committed schema yet — it ships with
+> the analysis sub-project — so `reference/analysis.md` is written
+> against that sub-project and not before it.
 
 ### 10.3 `list<text>` is the only list type
 
@@ -1009,18 +1056,24 @@ rather than paying a round trip per typo.
 2. **Overrides.** Ship none in v1 (§7.4), or build the per-game document
    path now? Recommendation: none. The counter-argument is that adding
    an extension point later means the first user is already forked.
-3. **Does `semantic_role` survive?** Moved: the question is now stated
-   once, as **open question O1** in
-   `2026-08-31-core-and-metamodel-design.md`, "Metamodel". What blocks
-   on it here: `reference/analysis.md` cannot be written, and neither
-   can §4.1's fourth law or §4.5, since all three are about what an
-   agent declares on `relation_types.upsert`. **Do not answer it here.**
-4. **`on_conflict` on the bulk upserts** (§10.1). Moved: **open
-   question O2** in the core spec, "Idempotency". What blocks on it
-   here: `recipes/seeding-a-game.md` is either two paragraphs or two
-   pages depending on the answer, and the read-then-write loop is the
-   only part of the bundle that asks an agent to carry state across a
-   session boundary. **Do not answer it here.**
+3. ~~**Does `semantic_role` survive?**~~ **Closed, decided 2026-09-02:
+   yes, and `analysis_traits` is added beside it.** (Core open question
+   O1 in `2026-08-31-core-and-metamodel-design.md`, "Metamodel.") They
+   are two axes — the role says what an edge *means*, the traits say how
+   it *behaves* in a graph walk — so nothing here has to teach one as a
+   substitute for the other. `reference/analysis.md`, §4.1's fourth law
+   and §4.5 are unblocked: they teach traits for analysis and the role
+   as a label. They still wait on the analysis sub-project shipping the
+   column, which is delivery order, not an open decision.
+4. ~~**`on_conflict` on the bulk upserts**~~ **Closed, decided
+   2026-09-02: the bulk upserts gain
+   `on_conflict: "fail" | "skip" | "overwrite"`, default `"fail"`.**
+   (§10.1; core open question O2, "Idempotency".) So
+   `recipes/seeding-a-game.md` is the two-paragraph version, and no part
+   of the bundle asks an agent to carry versions across a session
+   boundary. **Not implemented yet** — filed as Task 10 in
+   `docs/superpowers/plans/2026-08-31-metamodel.md` — so that page is
+   marked pending and does not ship before the argument exists.
 5. **A shape-summary on `games.get`** (§10.4). Worth it, or premature?
 6. **Is the fourth-genre acceptance test worth its cost?** It is the
    only anti-ossification mechanism proposed here, and it is

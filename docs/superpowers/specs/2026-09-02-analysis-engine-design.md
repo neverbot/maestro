@@ -12,6 +12,16 @@ Scope: sub-project 6 of the roadmap in
 >   decision it depends on is now stated once, as open question O1 in
 >   the core spec, and §11.5 and §12.3 cross-reference it instead of
 >   restating it. Nothing about the vocabulary itself changed.
+>
+> **Decided 2026-09-02.** O1 is answered, in favour of this spec's
+> recommendation: `analysis_traits` is added and `semantic_role` stays
+> beside it as descriptive metadata with no analytical meaning. §2D is
+> therefore a decision, not a proposal, and §11.1 is no longer
+> contingent on anything. §2C's argument is what carried it — one axis
+> conflates what an edge *means* with how it *behaves* — and the same
+> argument is why `semantic_role` survives rather than being replaced:
+> the two axes are both worth recording, and only one of them is the
+> engine's business.
 > - §2 and §9 — an incoherent trait combination is `invalid_schema`, not
 >   `schema_violation`. The committed `internal/metamodel/errors.go`
 >   makes those two distinct sentinels, split by who is at fault, and a
@@ -115,23 +125,30 @@ time a genre invents a meaning, which is the exact failure mode the
 pure metamodel exists to avoid, and it still would not say whether a
 cycle in that type is a bug.
 
-**D (proposed, and this spec's recommendation). A closed vocabulary of
+**D (decided, and this spec's recommendation). A closed vocabulary of
 analytical traits, declared per relation type, orthogonal to
 `semantic_role`, with a per-analysis override.**
 
-> This is a *proposal*, not a settled decision, and the correction
-> matters because two other specs read it as settled. Adding
-> `analysis_traits` beside `semantic_role` means the schema carries two
-> vocabularies about relation types, which
-> `2026-09-02-agent-skill-bundle-design.md` §10.2 identifies as a
-> blocker for writing its analysis page. The question — traits plus a
-> demoted `semantic_role`, traits with `semantic_role` dropped, or no
-> traits at all — is recorded once, as **open question O1** in
-> `2026-08-31-core-and-metamodel-design.md`, "Metamodel". **The user
-> decides.** Everything below assumes the answer is "traits are added";
-> if it is not, §2's vocabulary and §11.1 fall and the analyses
-> themselves are unaffected, since they consume the *resolved* set of
-> gating relation types and not the mechanism that produced it.
+> **Decided 2026-09-02.** This is the settled choice, not a proposal.
+> `analysis_traits` is added and `semantic_role` stays beside it: they
+> are two axes, one saying what an edge *means* and one saying how it
+> *behaves*, and the argument in C is what carried the decision. Core
+> open question O1 in `2026-08-31-core-and-metamodel-design.md`,
+> "Metamodel", records it as answered.
+>
+> The schema does therefore carry two vocabularies about relation types,
+> which `2026-09-02-agent-skill-bundle-design.md` §10.2 raised as a
+> blocker for writing its analysis page. What unblocks it is the
+> division of labour rather than the removal of one side: an edge's
+> analytical behaviour is `analysis_traits` and nothing else,
+> `semantic_role` is a human-readable label with no analytical meaning
+> of its own, and the bundle teaches them as two different questions
+> asked of the same edge rather than as two spellings of one. The one
+> place a role still reaches the engine is the fixed
+> `derived_from_role` mapping below, which exists so games seeded before
+> traits existed still analyse — a migration path, reported as such in
+> every result, and not a second way to declare behaviour. An agent
+> declaring a new relation type declares traits.
 
 A game declares, on each relation type it cares about, which of a
 small fixed set of *graph behaviours* that type has. The vocabulary is
@@ -735,14 +752,14 @@ documentation correction:
    column and the wrong second one. See §7 for the correction and for
    the interaction with the index the views spec asks for.
 5. Not a schema change but a correction to the core spec's wording:
-   `semantic_role` is described there as the mechanism the analysis
+   `semantic_role` was described there as the mechanism the analysis
    sub-project will use. This spec argues in §2C that it is not
-   sufficient. **That amendment has been made**: the core spec's
-   "Metamodel" section now records it as **open question O1** — traits
-   plus a demoted `semantic_role`, traits with `semantic_role` dropped,
-   or no traits — rather than asserting either answer. The user decides;
-   until then, §2D's vocabulary is a proposal and §11.1 is contingent on
-   it. §12.3 no longer poses the question separately.
+   sufficient. **That amendment has been made, and the question it
+   raised is now decided** (2026-09-02, in the core spec's "Metamodel"):
+   traits are added and `semantic_role` stays as a human-readable label
+   with no analytical meaning. §2D's vocabulary is therefore chosen and
+   §11.1 is unconditional. §12.3 records the decision rather than the
+   question.
 
 Every table added by items 2 and 3 follows the committed migration's
 composite foreign-key convention — see §6 and
@@ -776,15 +793,18 @@ Stated plainly rather than answered with false confidence.
    view carry analysis parameters. Leaning toward routes-as-seeds
    because it adds nothing, but not decided.
 
-3. **Does `semantic_role` survive, and are traits added at all?**
-   Moved. This question is now stated once, as **open question O1** in
-   `2026-08-31-core-and-metamodel-design.md`, "Metamodel", because
-   `semantic_role` is that spec's column and because
-   `2026-09-02-agent-skill-bundle-design.md` §11.3 was posing the same
-   question a third time. The substance is unchanged and it is still the
-   user's call, still cheaper before any real game is seeded; this spec
-   states its recommendation in §2D and consumes whichever answer comes
-   back. **Do not answer it here.**
+3. ~~**Does `semantic_role` survive, and are traits added at all?**~~
+   **Closed, decided 2026-09-02: both.** `semantic_role` survives
+   unchanged — it is shipped, validated against
+   `metamodel.SemanticRoles` and on the wire — and the analysis
+   sub-project adds `analysis_traits` beside it. They are two axes:
+   the role says what an edge *means*, the traits say how it *behaves*
+   in a graph walk, and §2C's argument that one axis cannot carry both
+   is exactly why there are two rather than why one replaces the other.
+   Recorded in full as core open question O1 in
+   `2026-08-31-core-and-metamodel-design.md`, "Metamodel".
+   `analysis_traits` is not implemented; it belongs to this
+   sub-project, and §11.1 is its schema change.
 
 4. **Can a route step be a relation rather than an entity?** "Take the
    portal to Darnassus" is an edge, not a node. Modelling it as an

@@ -9,10 +9,13 @@ of a game together: characters, places, missions, progression, story.**
 Self-hosted. Open source. It holds the *design* of a game, never a
 running one: no live instances, no real players, no telemetry.
 
-> **Early days.** The server runs — accounts, games, agent tokens, the
-> MCP surface and live updates are in place — but the game-design domain
-> itself is not built yet, so there is nothing to model with. See
-> [Running it](#running-it) to start an instance, and
+> **Early days.** A game can declare its own types and be filled with
+> content today, by an agent over MCP or a person over the HTTP API.
+> What is not built yet is everything you would *look at* it with: no
+> diagrams, no catalogues to browse, no prose, no analysis. The web
+> interface is one page showing what a game contains. See
+> [Running it](#running-it) to start an instance, the
+> [Roadmap](#roadmap) for what is done, and
 > [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design.
 
 ## Maestro knows nothing about games
@@ -34,10 +37,19 @@ code change, so nothing about any genre is baked in.
 | :----------------- | :-------------------------------------------------------------- | :---------------------------------------------------------------------------- |
 | **MMORPG**         | `Class` `Zone` `Dungeon` `Quest` `Talent`                        | `connects_to` `takes_place_in` `requires` `rewards`                            |
 | **Racing career**  | `Driver` `Car` `Circuit` `Race` `Licence`                        | `unlocks` `contains` `requires`                                                |
-| **Metroidvania**   | `Room` `Ability` `Boss` `Item`                                   | `connects_to`, carrying its own `requires_ability`                             |
+| **Metroidvania**   | `Room` `Ability` `Boss` `Item`                                   | `connects_to`, carrying its own `is_one_way`                                   |
 
-That last one is the point of typed edges: whether a door can be crossed
-belongs to the door, not to either room.
+That last one is the point of typed edges: whether a door swings both
+ways belongs to the door, not to either room. `is_one_way` is a real
+declared field on the relation type, validated on every write the way a
+field on an entity is.
+
+A door can also record *what opens it* — `requires_ability:
+"mothwing_cloak"` — and that field is a weaker thing, worth being plain
+about: Maestro checks that the value is text, not that any such ability
+exists. It is a convention the game keeps, not a link the server
+follows. The references Maestro does guarantee are relations, and both
+ends of a relation are entities.
 
 ## What you get on top of the graph
 
@@ -217,7 +229,7 @@ as an unknown token.
 ## Roadmap
 
 - [x] **Core.** Server, Postgres, identity, MCP and REST surfaces.
-- [ ] **Metamodel.** The four primitives, field schemas, validation.
+- [x] **Metamodel.** The four primitives, field schemas, validation.
 - [ ] **Markdown.** Versioned prose, linked to entities.
 - [ ] **Views.** The query language, saved views, layouts, coordinates.
 - [ ] **Interface.** Maestro's own look, and the renderer catalogue.
@@ -227,6 +239,10 @@ as an unknown token.
 Design documents, one per sub-project as they land:
 
 - [Core and metamodel](docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md)
+- [The markdown domain](docs/superpowers/specs/2026-09-02-markdown-domain-design.md)
+- [Views and the D2 query language](docs/superpowers/specs/2026-09-02-views-and-query-language-design.md)
+- [The analysis engine](docs/superpowers/specs/2026-09-02-analysis-engine-design.md)
+- [The agent skill bundle](docs/superpowers/specs/2026-09-02-agent-skill-bundle-design.md)
 
 ## License
 

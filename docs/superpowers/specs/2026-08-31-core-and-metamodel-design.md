@@ -14,19 +14,34 @@ Scope: first of seven sub-projects (see "Roadmap" at the end)
 >
 > - "Field schemas" — the list type is `list<text>`, not `list<…>`; the
 >   field-key rule and the required-versus-default rule are stated.
-> - "Field schemas" — **open question (O3)**: a relation cannot carry a
->   typed reference to a third entity.
-> - "Metamodel" — **open question (O1)**: whether `semantic_role` is the
->   analysis mechanism, or descriptive metadata beside a separate
+> - "Field schemas" — **O3**: a relation cannot carry a typed reference
+>   to a third entity.
+> - "Metamodel" — **O1**: whether `semantic_role` is the analysis
+>   mechanism, or descriptive metadata beside a separate
 >   `analysis_traits` vocabulary.
-> - "Idempotency" — **open question (O2)**: re-running a seed over rows
->   that already exist is not conflict-free; the old wording read as
->   though it were.
+> - "Idempotency" — **O2**: re-running a seed over rows that already
+>   exist is not conflict-free; the old wording read as though it were.
 > - "Error shapes" and "Field validation" — `invalid_schema` exists as a
 >   seventh code, distinct from `schema_violation`.
 >
-> Nothing else in the spec changed. The open questions are the user's to
-> decide; no later spec may answer them on its own.
+> Nothing else in the spec changed.
+
+> **Decided 2026-09-02.** O1, O2 and O3 are answered; none of them is
+> open any more. In short:
+>
+> - **O1 — both axes exist.** `semantic_role` stays as it shipped and
+>   says what a relation *means*; the analysis sub-project adds
+>   `analysis_traits`, which says how it *behaves* in a graph walk. See
+>   "Metamodel" below.
+> - **O2 — bulk upserts gain `on_conflict`**, decided but **not yet
+>   implemented**. See "Idempotency" below.
+> - **O3 — no reference field type.** A pointer to another entity is a
+>   relation; an edge field naming an entity is a soft reference that
+>   nothing validates. See "Field schemas" below.
+>
+> The other statement the sub-project specs asked about, **one key rule
+> or two**, was already settled in code and stays settled: two rules,
+> for the reason "Field schemas" gives.
 
 ## 1. What Maestro is
 
@@ -213,40 +228,43 @@ Mothwing Cloak"), optional `semantic_role`, `version`.
 `semantic_role` is one of `prerequisite`, `unlock`, `containment`,
 `spatial`, `availability`, `reward`, or null, enforced by a `CHECK` on
 the column. It is **not** used for drawing — views select relation types
-explicitly. It exists so the analysis sub-project can answer questions
-that need real semantics: "is this quest unreachable?", "is there a
-prerequisite cycle?". Those are the questions a designer cannot answer
-by eye across 400 missions.
+explicitly. It records what an edge *means* to a designer, in a form a
+human reads on a type page and an agent can be taught.
 
-> **Open question O1 — is `semantic_role` the analysis mechanism?**
-> Recorded here, in the one place that owns the column, so that no other
-> spec answers it on its own.
+It is not the analysis mechanism. The questions a designer cannot answer
+by eye across 400 missions — "is this quest unreachable?", "is there a
+prerequisite cycle?" — are answered from a second, orthogonal column,
+`analysis_traits`, which the analysis sub-project adds and owns; see the
+decision below.
+
+> **Decided 2026-09-02 — O1: `semantic_role` stays, and
+> `analysis_traits` is added beside it.** Outcome (a): the two are
+> orthogonal axes and both exist. `semantic_role` says what a relation
+> *means* to a designer (`reward`, `availability`); the analysis
+> sub-project adds `relation_types.analysis_traits text[]`, which says
+> how a relation *behaves* in a graph walk (acyclic, symmetric,
+> direction of dependency). Neither replaces the other.
 >
-> `2026-09-02-analysis-engine-design.md` §2 argues that this column
-> conflates two orthogonal axes — what an edge *means* to a designer
-> (`reward`, `availability`) and how it *behaves* in a graph walk
-> (acyclic, symmetric, direction of dependency) — that a closed enum of
-> meanings must grow every time a genre invents a meaning, and that it
-> still cannot say whether a cycle in a given type is a bug. It proposes
-> a second, orthogonal vocabulary, `relation_types.analysis_traits
-> text[]`, and keeps `semantic_role` as descriptive metadata plus a
-> fixed compatibility mapping.
-> `2026-09-02-agent-skill-bundle-design.md` §10.2 reports that two
-> vocabularies for one job is what makes an agent choose wrong
-> consistently across thirty relation types, and that its
-> `reference/analysis.md` page cannot be written until this is settled.
+> The argument in `2026-09-02-analysis-engine-design.md` §2 is accepted,
+> and it is precisely the reason there are two columns rather than one:
+> a single axis conflates meaning with behaviour, a closed enum of
+> meanings must grow every time a genre invents a meaning, and it still
+> cannot say whether a cycle in a given type is a bug. What follows from
+> accepting that is that behaviour needs its own vocabulary — not that
+> meaning stops being worth recording.
 >
-> Three outcomes are open, and **the user decides**:
-> (a) traits are added and `semantic_role` is kept as a human-readable
-> label with no analytical meaning; (b) traits are added and
-> `semantic_role` is dropped in a migration, before any real game is
-> seeded; (c) traits are rejected and `semantic_role` is extended
-> instead.
+> `semantic_role` does not move. It is already shipped: the column, its
+> `CHECK`, `metamodel.SemanticRoles` and the wire format all exist and
+> are validated. Dropping it would be a migration and a wire change
+> bought for nothing, since a human-readable label is exactly what it is
+> good at.
 >
-> Until it is decided, this sentence is the authority: `semantic_role`
-> is what the committed schema has, and whether it *drives* analysis is
-> undecided. The analysis and skill-bundle specs cross-reference this
-> question rather than restating it.
+> What this settles downstream: `semantic_role` is descriptive metadata
+> with **no analytical meaning**; analysis reads `analysis_traits` and
+> nothing else. The agent bundle therefore teaches traits for analysis
+> and the role as a label, and never as two ways to say one thing.
+> `analysis_traits` itself is not implemented — it belongs to the
+> analysis sub-project, which owns its vocabulary and its validation.
 
 ### Field schemas
 
@@ -302,40 +320,41 @@ entity *is a relation*. That single rule keeps the graph complete and
 is what makes view queries work at all — a reference hidden inside a
 jsonb field would be invisible to every traversal.
 
-> **Open question O3 — a relation cannot carry a typed reference to a
-> third entity.** Recorded here because it is a metamodel question, not
-> a views question, and it must be stated in exactly one place.
+> **Decided 2026-09-02 — O3: there will be no reference field type, and
+> an edge field naming an entity is a soft reference.** The first option
+> is taken: leave it. A pointer to another entity *is* a relation, and
+> that stays the whole of the rule. No `entity_ref` type is added.
 >
-> The rule above is stated for *entities*, and it holds there: an
-> entity pointing at an entity is an edge. It does not resolve the case
-> where the thing doing the pointing is itself an edge. A metroidvania
-> door is a `connects_to` relation from room to room whose gate is
-> "requires the Mothwing Cloak" — a reference to a third entity, the
-> `Ability`. A relation's own fields are scalars of the six types above,
-> so the only available spelling is a `text` field holding an ability
-> key, which nothing validates and no traversal can follow; and a
-> relation cannot itself be an endpoint of another relation. The
-> capability the rule promises for entities therefore has no equivalent
-> for edges.
+> The case the question raised is real and is now stated as a known
+> property rather than as a gap. The rule above is stated for
+> *entities*, and it holds there: an entity pointing at an entity is an
+> edge. It does not extend to the case where the thing doing the
+> pointing is itself an edge. A metroidvania door is a `connects_to`
+> relation from room to room whose gate is "requires the Mothwing
+> Cloak" — a reference to a third entity, the `Ability`. A relation's
+> own fields are scalars of the six types above, so the only available
+> spelling is a `text` field holding an ability key; a relation cannot
+> itself be an endpoint of another relation.
 >
-> `2026-09-02-views-and-query-language-design.md` §3.3 hits this on its
-> metroidvania example and cross-references this question; its `map`
-> view renders the text field happily, and the dangling key is invisible
-> to it.
+> **That text field is a soft reference: a convention the game keeps,
+> not a link the server checks.** Nothing validates that the key names
+> an existing entity, no traversal follows it, and no view resolves it —
+> `2026-09-02-views-and-query-language-design.md` §3.3's `map` view
+> renders a dangling key exactly as convincingly as a real one. Naming
+> that honestly is the decision; an `entity_ref` type validated on write
+> but deliberately not traversable would have been a second, weaker kind
+> of reference sitting beside the real one, which is the ambiguity this
+> metamodel exists to avoid. A game that needs the gate to be a first
+> class, traversable thing models it as its own entity with two
+> relations, which the metamodel already supports.
 >
-> Options, none chosen: leave it, and let the analysis engine report
-> dangling keys later; add an `entity_ref` field type that is validated
-> on write but is deliberately not traversable; model the gate as its
-> own entity with two relations. **The user decides**, and the decision
-> is cheaper now than after a game is seeded.
+> Reporting dangling reference keys is left to the analysis sub-project,
+> as an optional check a game opts into, and not to the write path.
 >
-> Note for whoever decides: `readme.md`'s genre table presents this
-> exact metroidvania door as the example that justifies typed edges.
-> Edges *do* carry typed fields, so the readme is not wrong about that —
-> but the ability reference itself is untyped and unvalidated, and the
-> readme's framing reads as a stronger promise than the design makes.
-> `readme.md` was out of scope for this reconciliation pass and has not
-> been edited.
+> `readme.md` has been corrected as part of this decision: its genre
+> table used to present the metroidvania door's `requires_ability` as
+> the example justifying typed edges, which read as a stronger promise
+> than the design makes.
 
 ### Constraints and indexes
 
@@ -442,30 +461,42 @@ count is unchanged, which is the guarantee, but nothing is written and
 every item comes back as a failure. The metamodel plan's Task 9 asserts
 exactly this, and it is correct.
 
-> **Open question O2 — should a bulk upsert have a conflict mode?**
-> Recorded here rather than in the sub-project specs that ran into it.
+> **Decided 2026-09-02 — O2: bulk upserts gain `on_conflict`. Decided,
+> and not yet implemented.**
 >
-> As designed, an agent re-seeding must first read every affected row to
-> learn its version, then write with those versions. That is a page walk
+> `entities.upsert` and `relations.upsert` grow
+> `on_conflict: "fail" | "skip" | "overwrite"`, defaulting to `"fail"`
+> so nothing changes for an existing caller. `"skip"` makes a re-seed
+> genuinely idempotent; `"overwrite"` makes a corrective re-seed one
+> call.
+>
+> Why: as designed, an agent re-seeding must first read every affected
+> row to learn its version, then write with those versions — a page walk
 > before a 500-row write, plus one piece of state carried across a
 > session boundary an agent frequently does not survive.
-> `2026-09-02-agent-skill-bundle-design.md` §10.1 concludes the bundle
-> must teach that read-then-write loop, and correctly names a workaround
-> in a teaching document as debt.
+> `2026-09-02-agent-skill-bundle-design.md` §10.1 concluded the bundle
+> would have to teach that loop, and correctly named a workaround in a
+> teaching document as debt. A re-seed should be one call.
 >
-> Its recommendation, aimed at this spec: `entities.upsert` and
-> `relations.upsert` gain `on_conflict: "fail" | "skip" | "overwrite"`,
-> defaulting to `"fail"` so nothing changes for existing callers.
-> `"skip"` makes a re-seed genuinely idempotent, `"overwrite"` makes a
-> corrective re-seed one call. The counter-argument is that
-> `"overwrite"` is a documented way to lose a concurrent editor's work,
-> which is the failure `expected_version` exists to prevent.
+> The counter-argument stands and is answered by the default rather than
+> by refusing the mode: `"overwrite"` is a documented way to lose a
+> concurrent editor's work, which is exactly what `expected_version`
+> exists to prevent. It is therefore opt-in per call, never the default,
+> and the bundle teaches `"skip"` for re-seeding and `"overwrite"` only
+> for a deliberate correction of rows the caller owns.
 >
-> Not decided. **The user decides**; it is a change to this spec's MCP
-> surface, so it belongs to the metamodel sub-project and not to the
-> bundle. Compare `2026-09-02-markdown-domain-design.md` §7, which
-> spells a create as `expected_version: 0` — an explicit "I expect this
-> not to exist" rather than an omission.
+> **Status: not implemented.** This is a change to the bulk write path
+> and to the MCP tool surface, so it is a task and not a documentation
+> edit. It is filed in `docs/superpowers/plans/2026-08-31-metamodel.md`
+> as Task 10. Until that task lands, the paragraph above this note
+> describes the shipped behaviour and a verbatim re-run still conflicts
+> on every existing row.
+>
+> Compare `2026-09-02-markdown-domain-design.md` §7, which spells a
+> create as `expected_version: 0` — an explicit "I expect this not to
+> exist" rather than an omission. That convention is not adopted here;
+> `on_conflict` covers the same ground for a batch without making every
+> single-item caller carry a version it does not have.
 
 ### Bulk writes
 
@@ -721,6 +752,7 @@ puts it in a *Mage route* view.
 Two data-model consequences this spec must honour, and does: references
 between entities are always relations (never hidden in jsonb), and edges
 carry their own typed fields (a metroidvania door needs
-`requires_ability` on the edge, not on either room). What that field
-cannot be is a *typed reference to the `Ability`* — see open question O3
-under "Field schemas".
+`requires_ability` on the edge, not on either room). What that field is
+*not* is a typed reference to the `Ability`: it is a `text` key nothing
+validates and no traversal follows — a soft reference, decided
+2026-09-02 under "Field schemas".

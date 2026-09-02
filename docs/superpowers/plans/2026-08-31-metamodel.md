@@ -8710,6 +8710,78 @@ off that session, not inferred.
 
 ---
 
+### Task 10: `on_conflict` on the bulk upserts
+
+**Status: not started.** This task exists because a decision was taken,
+not because a defect was found. Core open question O2 in
+`docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md`,
+"Idempotency", was **decided on 2026-09-02**: a re-seed should be one
+call rather than a read-then-write loop, so `entities.upsert` and
+`relations.upsert` gain a conflict mode. Nothing below is implemented
+yet, and until it is, a verbatim re-run of a seeding payload still
+conflicts on every row that already exists — which Task 9 asserts and
+which stays correct until this task lands.
+
+**Files:**
+- Modify: `internal/metamodel/bulk.go`, `internal/metamodel/entities.go`,
+  `internal/metamodel/relations.go` (the write paths that resolve an
+  existing row and compare `expected_version`)
+- Modify: `internal/web/mcp_metamodel.go` and `internal/web/api_metamodel.go`
+  (the tool and route inputs)
+- Modify: `internal/metamodel/bulk_internal_test.go`,
+  `internal/web/mcp_metamodel_test.go`, `internal/web/seed_e2e_test.go`
+
+**The shape.** `entities.upsert` and `relations.upsert` take an optional
+`on_conflict` of `"fail" | "skip" | "overwrite"`, single item and batch
+alike:
+
+- `"fail"` — **the default**, and exactly today's behaviour: a row that
+  exists and whose `expected_version` is absent or stale is a
+  `version_conflict`. Nothing changes for any existing caller, and an
+  omitted argument must be indistinguishable from today.
+- `"skip"` — a row that already exists is left untouched and reported as
+  skipped, not as a failure. This is what makes a re-seed genuinely
+  idempotent.
+- `"overwrite"` — a row that already exists is written regardless of its
+  version. This is a documented way to lose a concurrent editor's work,
+  which is the failure `expected_version` exists to prevent, so it is
+  opt-in per call and never a default.
+
+**What the design decision requires the implementation to honour:**
+
+- [ ] **Step 1: `on_conflict` and `expected_version` interact
+  explicitly, not by accident.** Decide and test one rule: an item
+  carrying an `expected_version` *and* `on_conflict: "overwrite"` is
+  either a rejection (`invalid_input`, the two arguments contradict) or
+  the version wins. Whichever is chosen, it is stated in the tool
+  description; the one unacceptable outcome is that a caller's explicit
+  version is silently ignored.
+- [ ] **Step 2: a skipped row is a third outcome in the result
+  envelope**, distinct from a landed row and from a failure. `partial`
+  and `atomic` both need it, and a skip must not make an `atomic` batch
+  roll back — a re-seed of two hundred rows where all two hundred are
+  skipped is a success with nothing written.
+- [ ] **Step 3: the reported outcome addresses the row.** A skipped item
+  still comes back with its key, its id and its current version, because
+  the caller's next act is frequently to correct the rows it skipped.
+- [ ] **Step 4: the SSE events match what happened.** A skipped row
+  publishes nothing; an overwrite publishes the same update event an
+  ordinary write does.
+- [ ] **Step 5: Task 9's end-to-end seed grows a re-seed subtest.** The
+  same two hundred rows, re-sent with `"skip"`, land zero writes, zero
+  failures, two hundred skips and no version moved; re-sent with
+  `"overwrite"`, land two hundred writes and two hundred bumped
+  versions. Task 9's existing assertion — a re-seed with no
+  `on_conflict` conflicts on every row — stays, unchanged, as the proof
+  that the default did not move.
+- [ ] **Step 6: update the specs and the bundle.** The core spec's
+  "Idempotency" note drops its "not implemented" status;
+  `2026-09-02-agent-skill-bundle-design.md` §6 and §10.1 drop the
+  pending-implementation marking and delete the interim read-then-write
+  loop from `recipes/seeding-a-game.md`.
+
+---
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:
@@ -8739,6 +8811,14 @@ Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:
   Task 7, and the Core plan's Task 13.
 - **Definition of done** — Task 9 seeds two hundred rows through the real
   surface and reads them back.
+- **Idempotency** — Tasks 4 and 5 give the surface row identity by
+  `(project, type, key)`, and Task 9 pins that a re-run without
+  `expected_version` conflicts on every existing row. The spec's open
+  question about that was **decided on 2026-09-02**: the bulk upserts
+  gain `on_conflict`, so a re-seed becomes one call. That is a change to
+  the write path and the tool surface, so it is Task 10 and it is not
+  implemented; everything Tasks 4, 5 and 9 assert stays true until it
+  lands.
 
 Deliberately **not** here, and correctly so: transitive traversal and
 reachability (views sub-project), prerequisite-cycle and unreachable-content

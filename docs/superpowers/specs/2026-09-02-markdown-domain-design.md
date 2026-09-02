@@ -15,7 +15,11 @@ Scope: third of seven sub-projects (roadmap item 3 in
 >   true; "these keys as written are fine" was not.
 > - §7 — `expected_version: 0` for a create is a real difference from
 >   the metamodel surface, not a restatement of it, and it bears on the
->   core spec's open question O2.
+>   core spec's open question O2. **Decided 2026-09-02: O2 is closed the
+>   other way** — the metamodel's bulk upserts gain
+>   `on_conflict: "fail" | "skip" | "overwrite"` rather than adopting
+>   this spec's convention, so the difference is permanent and
+>   deliberate. `docs.write` keeps `expected_version: 0`.
 >
 > Unchanged and confirmed correct against the committed migration: the
 > observation that `entities.search` is a plain `tsvector` column rather
@@ -421,10 +425,16 @@ Four deliberate choices in that table:
   re-run of a seeding payload conflicts on every row it already wrote;
   here, the version is always required and `0` is the explicit "I expect
   this not to exist". Whether the metamodel should adopt the same shape,
-  or grow an `on_conflict` mode instead, is **open question O2** in
-  `2026-08-31-core-and-metamodel-design.md`, "Idempotency". If it is
-  answered there, this tool follows it rather than keeping a second
-  convention.
+  or grow an `on_conflict` mode instead, was open question O2 in
+  `2026-08-31-core-and-metamodel-design.md`, "Idempotency". **Decided
+  2026-09-02: the metamodel grows `on_conflict`**
+  (`"fail" | "skip" | "overwrite"`, default `"fail"`, not yet
+  implemented), and does not adopt `expected_version: 0`. So the two
+  surfaces keep two conventions on purpose, and this one does not
+  change: a document has one version line and always carries it, while a
+  metamodel batch of five hundred rows should not have to learn five
+  hundred versions before it can be re-run. Naming the difference here
+  is what stops it being read as an accident.
 - **`docs.write` takes an optional `links` array**, so an agent seeding
   a game creates the script and attaches it to its quest in one call.
   Passing `links` *replaces* the document's link set; omitting it

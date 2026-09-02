@@ -19,6 +19,11 @@ shape.
 > - §3.3 and §7.6 — the "a relation cannot reference a third entity"
 >   problem is now stated once, as open question O3 in the core spec,
 >   and cross-referenced from here instead of being re-argued.
+>   **Decided 2026-09-02: there will be no reference field type.** An
+>   edge field naming another entity is a soft reference — a convention
+>   the game keeps, not a link the server checks — so this spec's
+>   `text` treatment of `requires_ability` is the permanent shape and
+>   §7.6 is closed.
 > - §5.4 — the new tables' foreign keys must follow the committed
 >   migration's composite-key convention; single-column references to
 >   `entities`, `entity_types`, `relation_types` and `api_tokens` reopen
@@ -418,9 +423,9 @@ progression graph from returning the whole game.
 
 Types: `room`, `ability`. Relation `connects_to` (room → room) with
 its own field `requires_ability` (`text`, holding an ability key that
-nothing validates — see open question **O3** in
-`2026-08-31-core-and-metamodel-design.md`, "Field schemas", and §7.6
-below).
+nothing validates — a soft reference, and permanently so: decided
+2026-09-02, "Field schemas" in
+`2026-08-31-core-and-metamodel-design.md`, and §7.6 below).
 
 ```json
 {
@@ -984,23 +989,23 @@ before the sub-project closes.
    each zone" is a question a designer asks constantly, and the
    analysis sub-project will want it too. Should it live here as a
    `summarise` stage, or there?
-6. **Ability references on edges — owned by the core spec, not by
-   this one.** Example 3.3 stores `requires_ability` as `text` holding
-   an ability key, because the metamodel deliberately has no reference
+6. ~~**Ability references on edges**~~ **Closed, decided 2026-09-02:
+   there is no reference field type, and the `text` field is the
+   answer.** Example 3.3 stores `requires_ability` as `text` holding an
+   ability key, because the metamodel deliberately has no reference
    field type — a reference is a relation — and a *relation* cannot
    point at a third entity, so a gated door has nowhere typed to put
-   "which ability". The text field works and the view above renders it;
-   nothing validates that the ability exists, and the `map` view draws
-   a dangling key exactly as convincingly as a real one.
+   "which ability". That field is a **soft reference**: a convention the
+   game keeps, which nothing validates and no traversal follows. The
+   view above renders it, and the `map` view draws a dangling key
+   exactly as convincingly as a real one.
 
-   This is a metamodel question, not a views question, so it is stated
-   once and only once, as **open question O3** in
-   `2026-08-31-core-and-metamodel-design.md`, "Field schemas", together
-   with the three candidate answers. It is the user's decision. This
-   spec is a *consumer* of whatever is decided: `edge_where` and
-   `label_from` work unchanged on a `text` field, and an `entity_ref`
-   field type would only need `@`-style resolution added to §2.4's
-   attribute references.
+   Recorded in full in `2026-08-31-core-and-metamodel-design.md`,
+   "Field schemas". No `entity_ref` type is added, so §2.4's attribute
+   references need no `@`-style resolution and `edge_where` and
+   `label_from` keep working on a `text` field, unchanged. Reporting
+   dangling keys is left to the analysis sub-project as an opt-in
+   check, not to this spec and not to the write path.
 7. **Background image layers.** One image per view is assumed above.
    A world map with a separate overlay layer is a plausible near-term
    ask, and the schema as written would need a join table for it.

@@ -2,11 +2,16 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestRequireScopeRefusesASessionCaller pins that a session caller —
@@ -71,5 +76,61 @@ func TestMCPHandlerRefusesASessionCaller(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401 for a session caller on /mcp", rec.Code)
+	}
+}
+
+// TestMCPErrorForReportsContentionAsRetryable pins Task 7's third
+// decision at the boundary that actually puts it on the wire: a database
+// failure over contention comes back as "retryable", not as
+// "internal_error", so an agent is told to send the same call again
+// rather than told the server broke.
+//
+// It also pins the two halves the decision depends on — that the code is
+// exactly the one metamodel.IsRetryable admits, and that a non-retryable
+// database error is still internal_error — because a mapping that
+// answered "retryable" to everything would pass a one-case test.
+func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
+	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())
+
+	for _, tc := range []struct {
+		sqlstate string
+		want     string
+	}{
+		{"55P03", errCodeRetryable},
+		{"40P01", errCodeRetryable},
+		{"40001", errCodeRetryable},
+		{"57014", errCodeRetryable},
+		{"42601", errCodeInternal},
+		{"23505", errCodeInternal},
+	} {
+		t.Run(tc.sqlstate, func(t *testing.T) {
+			err := fmt.Errorf("upsert entity: %w",
+				&pgconn.PgError{Code: tc.sqlstate, Message: "canceling statement due to lock timeout"})
+			result := mcpErrorFor(context.Background(), "entities.upsert", caller, err)
+
+			if !result.IsError {
+				t.Fatal("a failed call must be reported as an error")
+			}
+			text, ok := result.Content[0].(*mcp.TextContent)
+			if !ok {
+				t.Fatalf("content[0] = %T, want *mcp.TextContent", result.Content[0])
+			}
+			var body struct {
+				Error   string `json:"error"`
+				Message string `json:"message"`
+			}
+			if err := json.Unmarshal([]byte(text.Text), &body); err != nil {
+				t.Fatalf("decode %q: %v", text.Text, err)
+			}
+			if body.Error != tc.want {
+				t.Fatalf("error = %q, want %q", body.Error, tc.want)
+			}
+			// The database's own message never reaches the agent: it
+			// describes the server's internals, not the caller's next
+			// move, and mcpErrorFor logs it instead.
+			if strings.Contains(body.Message, "canceling statement") {
+				t.Fatalf("message = %q leaks the database's own text", body.Message)
+			}
+		})
 	}
 }

@@ -34,8 +34,18 @@ type Ref struct {
 // against, and the last writer wins. Two designers editing one edge's
 // fields at once therefore do not conflict — the second overwrites the
 // first, silently. Giving edges the same compare-and-set the other three
-// tables have would need a migration adding the column; Task 7 owns that
-// call if the MCP surface wants edge concurrency.
+// tables have would need a migration adding the column.
+//
+// **Task 7 declined to add it**, and the MCP surface therefore offers no
+// expected_version on relations.upsert. The reason is the pair below:
+// adding `version` alone would harden the wrong half. The exposure is
+// specifically an edge's *fields*, which is where the parallel-edge
+// refusal pushes multiplicity, so whoever fixes this has to choose
+// between the two remedies knowing both — and Task 7, which adds no
+// column and rewrites no index, is not where that choice is cheapest.
+// What Task 7 did do is stop the surface from implying a guarantee that
+// is not there: relations.upsert's own description says an edge is
+// last-writer-wins.
 //
 // **This decision and UpsertRelation's refusal of parallel edges are one
 // pair, and must be revisited as a pair.** Read alone each is defensible
@@ -57,13 +67,13 @@ type Ref struct {
 //
 // So the escape hatch is real but lossy under concurrent editing, which
 // is a smaller claim than the one the other doc comment makes on its
-// own. **Task 7 owns the migration** if it wants edge concurrency, and
+// own. The migration is still unwritten — Task 7 declined it, above — and
 // whoever opens either question should read the other first: adding
 // `version` here makes the parallel-edge refusal cost what it was
 // assumed to cost, and relaxing the uniqueness index instead would make
-// this decision moot. Neither is a Task 5 change — one is a migration,
-// the other rewrites the ON CONFLICT target that makes a re-seed
-// idempotent.
+// this decision moot. Neither is a Task 5 change and neither was a Task
+// 7 change — one is a migration, the other rewrites the ON CONFLICT
+// target that makes a re-seed idempotent.
 type RelationInput struct {
 	TypeKey string
 	Source  Ref

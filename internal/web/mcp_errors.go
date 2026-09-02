@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 )
 
@@ -105,6 +106,21 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	switch {
 	case errors.Is(err, projects.ErrProjectNotFound):
 		return mcpErrorResult(errCodeNotFound, "no such game", nil)
+	case metamodel.IsRetryable(err):
+		// Checked before the default arm and after every mapping that
+		// names something the caller sent, for the reason failureFor
+		// (internal/metamodel/bulk.go) gives about the same ordering: it
+		// only ever intercepts errors that were heading for
+		// internal_error, which is the set it exists to rescue. The
+		// database's own message is deliberately not carried through —
+		// an agent acts on the code, and "canceling statement due to
+		// lock timeout" describes the server's internals, not the
+		// caller's next move — but it is logged, because an operator
+		// seeing a run of these wants to know which lock.
+		slog.WarnContext(ctx, "mcp tool call hit database contention",
+			"tool", toolName, "user_id", caller.UserID, "token_id", caller.TokenID, "error", err)
+		return mcpErrorResult(errCodeRetryable,
+			"the database refused this over contention; send the same call again", nil)
 	default:
 		slog.ErrorContext(ctx, "mcp tool call failed",
 			"tool", toolName, "user_id", caller.UserID, "token_id", caller.TokenID, "error", err)

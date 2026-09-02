@@ -225,13 +225,16 @@ func endpointList(ids []uuid.UUID) []uuid.UUID {
 // one erases the `*pgconn.PgError` a caller further up could otherwise
 // recover with `errors.As`. Returning the error instead keeps its
 // SQLSTATE intact and lets it propagate past `ValidationError` entirely,
-// landing — today — on `internal_error`: an honest "something on the
-// server side went wrong," not a caller-fixable field problem. Whether
-// retryable contention earns its own wire code, so an agent is told to
-// retry instead of merely told the call failed, is left to whichever
-// task wires this package's errors onto MCP (mcp_errors.go's own doc
-// comment names it as still open); nothing here forecloses that — the
-// SQLSTATE is still there to switch on once that mapping exists.
+// landing on the `retryable` wire code: Task 7 took the call this
+// comment left open and gave contention a code of its own, so an agent
+// meeting a lock timeout here is told to resend the same call rather
+// than merely told it failed. IsRetryable (service.go) is the
+// classifier, failureFor (bulk.go) and mcpErrorFor
+// (internal/web/mcp_errors.go) are the two boundaries that read it, and
+// TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput proves
+// it end to end against a real held lock. What makes any of it possible
+// is that the error keeps its `*pgconn.PgError`, which is what
+// flattening it into a `FieldError` destroyed.
 //
 // A failure to read at all is still attributed to the list and not an
 // element in spirit — nothing was checked, so no index is the one at

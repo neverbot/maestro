@@ -329,6 +329,15 @@ func repeatedIdentities[In any](
 // code, for the reason errors.go records — the actor is never
 // caller-supplied, so an agent can do nothing about it — and
 // internal_error is the correct report for a fault it cannot fix.
+//
+// IsRetryable is checked *last*, after every domain code and before the
+// default. Order matters here and it is the opposite of what "specific
+// before general" suggests: a contention SQLSTATE and a domain refusal
+// never arrive on the same error, but if one ever did, the domain code
+// is the one a caller can act on, and "resend unchanged" is the worst
+// possible advice about a row that will be refused again. Checking it
+// last also means it only ever intercepts errors that were heading for
+// internal_error, which is exactly the set it exists to rescue.
 func failureFor(index int, key string, err error) BulkFailure {
 	f := BulkFailure{Index: index, Key: key, Message: err.Error()}
 	switch {
@@ -346,6 +355,8 @@ func failureFor(index int, key string, err error) BulkFailure {
 		f.Code = "endpoint_type_mismatch"
 	case errors.Is(err, ErrInUse):
 		f.Code = "in_use"
+	case IsRetryable(err):
+		f.Code = "retryable"
 	default:
 		f.Code = "internal_error"
 	}

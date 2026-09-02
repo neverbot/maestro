@@ -532,6 +532,16 @@ func TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput(t *testing.T)
 		t.Fatalf("pgErr.Code = %q, want 55P03 (lock_timeout)", pgErr.Code)
 	}
 
+	// Task 7's third decision, proved on a real lock timeout rather than
+	// on a hand-built PgError: contention is retryable, so the surface
+	// above this package can tell an agent to resend the same call
+	// instead of reporting it broken. TestIsRetryableNamesTheFour…
+	// covers the classification; this covers the wiring that carries the
+	// SQLSTATE out to it through UpsertRelationType's own wrapping.
+	if !metamodel.IsRetryable(err) {
+		t.Fatalf("a lock timeout must be retryable, got %v", err)
+	}
+
 	if err := tx.Rollback(ctx); err != nil {
 		t.Fatalf("release the held row: %v", err)
 	}

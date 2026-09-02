@@ -184,3 +184,68 @@ func notFound(err error, what string) error {
 	}
 	return fmt.Errorf("%s: %w", what, err)
 }
+
+// retryableSQLStates are the SQLSTATEs IsRetryable admits.
+//
+// They are listed rather than matched by class prefix. Class 40 also
+// holds 40000 (transaction_rollback) and 40003 (statement_completion_
+// unknown), and class 57 holds 57P01-57P05, every one of which is the
+// server going away rather than two transactions meeting; telling an
+// agent to resend into a shutting-down instance is not a recovery. A
+// list is also readable next to the reason each entry earns its place:
+//
+//   - 40001 serialization_failure — two transactions could not be
+//     ordered; one is asked to go again.
+//   - 40P01 deadlock_detected — Postgres broke a cycle by cancelling
+//     this transaction, and the survivor is about to release what this
+//     one wanted.
+//   - 55P03 lock_not_available — lock_timeout fired while waiting for a
+//     row another transaction held. checkEndpointTypes (relation_types.go)
+//     is the path that reaches this one, and its doc comment is where
+//     this decision was left open.
+//   - 57014 query_canceled — statement_timeout fired, or someone
+//     cancelled the query.
+var retryableSQLStates = map[string]bool{
+	"40001": true,
+	"40P01": true,
+	"55P03": true,
+	"57014": true,
+}
+
+// IsRetryable reports whether err is a database failure that the
+// identical call, resent unchanged, may survive.
+//
+// **This is Task 7's third decision, and the wire code it feeds is
+// `retryable`.** Until it existed, a lock timeout and a deadlock landed
+// on internal_error — the code reserved for what nobody planned for, and
+// the code a seeding agent reads as "stop": the recovery it teaches is
+// to report the call broken, when the correct recovery was to send the
+// same bytes again a moment later. Every other code in this package's
+// vocabulary describes something the caller must *change* before
+// resending (a value, a key, a version, a name that does not exist);
+// this is the only one that says change nothing.
+//
+// **It is a predicate and not a sentinel, deliberately.** The other
+// mappings in this file (actorConstraintViolation, searchLimitExceeded)
+// convert a *pgconn.PgError into a domain error at the one call site
+// that can produce it. Contention is not like that: it can surface from
+// any statement in this package, so a sentinel would have to be wrapped
+// in at dozens of call sites and would be silently missing from
+// whichever one a later change forgets. A predicate over the SQLSTATE
+// the error already carries is checked where the answer is needed — the
+// two error-mapping boundaries, failureFor (bulk.go) and mcpErrorFor
+// (internal/web/mcp_errors.go) — and cannot be forgotten by a write path
+// that never mentions it. errors.As does the unwrapping, so it holds
+// through however many layers of fmt.Errorf a path adds.
+//
+// It says nothing about whether retrying is *wise*: an agent that meets
+// this repeatedly is contending with something, and the answer to that
+// is a smaller batch or a pause, not a tighter loop. That advice belongs
+// in the tool description, which is where a caller reads it.
+func IsRetryable(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return retryableSQLStates[pgErr.Code]
+}

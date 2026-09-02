@@ -39,10 +39,18 @@ var (
 //
 // Unmapped in internal/web/mcp_errors.go, it therefore reaches an agent
 // as internal_error and reaches an operator as a legible log line, which
-// is the correct pairing for a condition an agent cannot fix. **Task 7
-// decides whether it earns a wire code of its own**; until something can
-// be done about it from the outside, one would only invite a caller to
-// retry.
+// is the correct pairing for a condition an agent cannot fix.
+//
+// **Task 7 decided it does not earn a wire code**, and left it unmapped
+// for exactly the reason above: every code in the block at the top of
+// this file names something the caller can do — change a value, change a
+// key, merge onto a version, resend unchanged — and there is nothing a
+// caller can do about a token bound to another game but stop using it,
+// which it cannot know from here. Task 7 did add one code for a fault
+// the caller does not own (`retryable`, see IsRetryable in service.go),
+// so the rule is not "only caller-caused faults get codes"; it is that a
+// code exists to name a recovery, and this condition has none on the
+// agent's side.
 var ErrActorNotInGame = errors.New("the actor recorded on this write does not belong to this game")
 
 // FieldError is one problem with one field.

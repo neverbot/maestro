@@ -42,12 +42,22 @@ type uuidValue = uuid.UUID
 // that migration — so this comment's claim is accurate again, not merely
 // aspirational.
 const (
-	errCodeUnauthorized         = "unauthorized"
-	errCodeInternal             = "internal_error"
-	errCodeForbidden            = "forbidden"
-	errCodeNotFound             = "not_found"
-	errCodeBadRequest           = "bad_request"
-	errCodeScopeViolation       = "scope_violation"
+	errCodeUnauthorized   = "unauthorized"
+	errCodeInternal       = "internal_error"
+	errCodeForbidden      = "forbidden"
+	errCodeNotFound       = "not_found"
+	errCodeBadRequest     = "bad_request"
+	errCodeScopeViolation = "scope_violation"
+	// errCodeRetryable is the one code in this vocabulary whose recovery
+	// is to change nothing and send the same call again: the database
+	// refused a statement over contention (a lock timeout, a deadlock, a
+	// serialization failure, a cancelled statement) rather than over
+	// anything the caller sent. metamodel.IsRetryable is the classifier
+	// and its doc comment argues the decision; mcpErrorFor is what puts
+	// it on the wire. Before it existed all four landed on
+	// internal_error, which tells an agent to give up on a call that
+	// would have worked.
+	errCodeRetryable            = "retryable"
 	errCodeSlugTaken            = "slug_taken"
 	errCodeSlugInvalid          = "slug_invalid"
 	errCodeNameInvalid          = "name_invalid"

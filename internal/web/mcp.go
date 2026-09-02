@@ -376,10 +376,14 @@ func (s *Server) newMCPServer() *mcp.Server {
 
 // mcpHandler serves the MCP endpoint. Every request must carry a bearer
 // token that resolves to a live token caller — not merely "any Caller",
-// which would also admit a session cookie. The REST surface is
-// deliberately closed to token callers (requireHumanCaller,
-// api_projects.go); this is the opposite gate, deliberately closing the
-// agent surface to a browser session: a person's session cookie proves
+// which would also admit a session cookie. The REST routes that decide
+// who holds standing in the product — creating and listing games,
+// membership, tokens, invites — are deliberately closed to token callers
+// (requireHumanCaller, api_projects.go); Task 8's game-*content* routes
+// (api_metamodel.go) are not, because a token is exactly a credential
+// for one game's content and refusing it there would deny over REST what
+// the same token already does over MCP. This is the opposite gate,
+// deliberately closing the agent surface to a browser session: a person's session cookie proves
 // they are logged in as themselves, not that they are entitled to act as
 // an unscoped agent, and every tool this task adds assumes exactly one
 // bound project on the caller, which only a token caller ever carries

@@ -709,3 +709,43 @@ type gameSummary struct {
 		Invalid   int64 `json:"invalid"`
 	} `json:"totals"`
 }
+
+// TestATokenMayReadItsOwnGamesContentAndNoOthers pins the one thing the
+// REST content routes decide about token callers that the rest of the
+// REST surface decides the other way. Creating games, membership, tokens
+// and invites are closed to a token outright (requireHumanCaller); a
+// game's content is not, because a token *is* a credential for exactly
+// one game's content and refusing it here would deny over REST what the
+// same token already does over MCP. What still holds is the binding:
+// the game in the URL must be the game the token is bound to.
+func TestATokenMayReadItsOwnGamesContentAndNoOthers(t *testing.T) {
+	f := newRESTFixture(t)
+	ctx := context.Background()
+	questType(t, f)
+
+	other, err := f.proj.Create(ctx, "le-mans", "Le Mans", f.ownerID)
+	if err != nil {
+		t.Fatalf("Create other game: %v", err)
+	}
+	token, _, err := f.ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: f.game, UserID: f.ownerID, Label: "agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	send := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		f.srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	own := send(f.path("/types"))
+	if own.Code != http.StatusOK {
+		t.Fatalf("own game = %d: %s", own.Code, own.Body.String())
+	}
+	assertError(t, send("/api/games/"+other.ID.String()+"/types"),
+		http.StatusForbidden, "scope_violation", "")
+}

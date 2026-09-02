@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 )
@@ -103,10 +104,29 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	if errors.As(err, &domainErr) {
 		return mcpErrorResult(domainErr.Code, domainErr.Message, domainErr.Details)
 	}
-	var conflict *metamodel.VersionConflictError
+	var (
+		conflict    *metamodel.VersionConflictError
+		docConflict *markdown.ConflictError
+	)
 	switch {
 	case errors.Is(err, projects.ErrProjectNotFound):
 		return mcpErrorResult(errCodeNotFound, "no such game", nil)
+
+	// The markdown domain's conflict, above the metamodel's because it
+	// is a different Go type and the arm below would not catch it: a
+	// version conflict on a document would otherwise fall all the way
+	// through to internal_error, which is the code meaning "give up"
+	// for the one failure a re-read and a retry resolve.
+	//
+	// A document conflict carries the current body as well as the
+	// current version, unless the caller turned the echo off, and says
+	// so when the version to merge onto is a tombstone. The details
+	// payload is built in the domain (ConflictError.Details) so this
+	// surface and the REST one cannot disagree about what a conflict
+	// carries. TestEveryMarkdownDomainErrorHasAWireCode and
+	// TestAConflictCarriesTheBodyAsDataRatherThanProse pin it.
+	case errors.As(err, &docConflict):
+		return mcpErrorResult(errCodeVersionConflict, err.Error(), docConflict.Details())
 
 	// The metamodel's vocabulary. Each arm is matched with errors.Is
 	// against the sentinel and never by reading a code off the error
@@ -194,6 +214,7 @@ func fieldDetails(err error) map[string]any {
 	var (
 		validation *metamodel.ValidationError
 		schemaErr  *metamodel.SchemaError
+		missing    *markdown.MissingError
 	)
 	var problems []metamodel.FieldError
 	switch {
@@ -201,6 +222,14 @@ func fieldDetails(err error) map[string]any {
 		problems = validation.Fields
 	case errors.As(err, &schemaErr):
 		problems = schemaErr.Fields
+	// A named miss publishes the argument that missed. This is the
+	// discrimination the markdown spec wanted a ninth wire code
+	// (`entity_not_found`) for: one flat not_found from docs.links.add
+	// cannot say whether the document path or the entity key was
+	// typo'd, and this one is not flat — it carries the path as data.
+	// TestANamedMissPublishesItsPath pins it.
+	case errors.As(err, &missing):
+		problems = missing.Fields()
 	default:
 		return nil
 	}

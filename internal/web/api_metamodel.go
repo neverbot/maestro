@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/roles"
@@ -179,7 +180,10 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 		writeCodedError(w, statusForCode(domainErr.Code), domainErr.Code, domainErr.Message, domainErr.Details)
 		return
 	}
-	var conflict *metamodel.VersionConflictError
+	var (
+		conflict    *metamodel.VersionConflictError
+		docConflict *markdown.ConflictError
+	)
 	switch {
 	// Unreachable through a route today — requireProject resolves the
 	// game before any handler here runs, so a missing game is a 404 long
@@ -190,6 +194,15 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 	// one surface and not_found on the other.
 	case errors.Is(err, projects.ErrProjectNotFound):
 		writeCodedError(w, http.StatusNotFound, errCodeNotFound, "no such game", nil)
+	// The markdown domain's conflict, in the same position mcpErrorFor
+	// puts it and for the same reason: it is a different Go type from
+	// metamodel.VersionConflictError and the arm below does not catch
+	// it. "Arm for arm" is a claim this file makes about itself, and
+	// TestAMarkdownConflictIsAConflictOnBothSurfaces is what enforces
+	// it for this pair.
+	case errors.As(err, &docConflict):
+		writeCodedError(w, http.StatusConflict, errCodeVersionConflict, err.Error(),
+			docConflict.Details())
 	case errors.As(err, &conflict):
 		writeCodedError(w, http.StatusConflict, errCodeVersionConflict, err.Error(),
 			map[string]any{"current_version": conflict.Current})

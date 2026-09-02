@@ -67,9 +67,9 @@ func invalidInputProblems(problems []metamodel.FieldError) error {
 // wire code does not — a code exists to name a recovery, and both of
 // these have the same recovery, at two different arguments.
 //
-// Publishing it as details.fields on the wire is Task 10's work
-// (internal/web's fieldDetails); what is pinned here is the type, its
-// sentinel and its Fields accessor
+// internal/web's fieldDetails publishes it as details.fields on both
+// surfaces (TestANamedMissPublishesItsPath, over there); what is pinned
+// here is the type, its sentinel and its Fields accessor
 // (TestAMissingErrorIsANotFoundThatNamesItsArgument).
 type MissingError struct {
 	Path    string
@@ -82,8 +82,7 @@ func (e *MissingError) Error() string { return "not_found: " + e.Message }
 // not_found arm in internal/web catches this without knowing the type.
 func (e *MissingError) Is(target error) bool { return target == metamodel.ErrNotFound }
 
-// Fields is what internal/web's fieldDetails will read to publish the
-// path.
+// Fields is what internal/web's fieldDetails reads to publish the path.
 func (e *MissingError) Fields() []metamodel.FieldError {
 	return []metamodel.FieldError{{Path: e.Path, Message: e.Message}}
 }
@@ -113,14 +112,13 @@ func missingDocument(path string) error {
 //
 // It is a different Go type from metamodel.VersionConflictError, which
 // means **internal/web needs an arm of its own for it in both
-// mcpErrorFor and writeDomainError** — Task 10, and the reason
-// TestEveryMarkdownDomainErrorHasAWireCode exists there. Without that
-// arm this lands on the default arm and an agent is told internal_error
-// over a conflict it could have merged, which is precisely the class of
-// defect this plan's header names. Until Task 10 lands, no surface
-// publishes this type: what is pinned here is the sentinel it satisfies
-// and the payload Details builds
-// (TestAConflictErrorCarriesTheCurrentDocument).
+// mcpErrorFor and writeDomainError** — landed in Task 10, and the
+// reason TestEveryMarkdownDomainErrorHasAWireCode exists there. Without
+// that arm this lands on the default arm and an agent is told
+// internal_error over a conflict it could have merged, which is
+// precisely the class of defect this plan's header names. What is
+// pinned here is the sentinel it satisfies and the payload Details
+// builds (TestAConflictErrorCarriesTheCurrentDocument).
 //
 // **Deleted is a fourth thing a conflict can be about**, added by Task 4
 // rather than inherited: the version a caller is told to merge onto may

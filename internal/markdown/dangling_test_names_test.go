@@ -21,11 +21,12 @@ import (
 // is removed the day the task lands and the named test exists; if a
 // removal is forgotten, the standing check starts failing for the right
 // reason (an entry that is no longer forward, just wrong).
-var forwardReferencedTestNames = map[string]string{
-	"TestEveryMarkdownDomainErrorHasAWireCode": "errors.go: Task 10 adds " +
-		"internal/web's arm for markdown.VersionConflictError; this is " +
-		"the test that will pin it, named ahead of the task that writes it.",
-}
+// It is empty today: Task 10 landed internal/web's arm for
+// markdown.ConflictError together with
+// TestEveryMarkdownDomainErrorHasAWireCode, which was this map's only
+// entry, so the citation in errors.go now names a test that exists and
+// the exception came out with it.
+var forwardReferencedTestNames = map[string]string{}
 
 // renamedAwayTestNames names tests a comment cites as a *former* name of
 // a test that exists today under a different one — the opposite

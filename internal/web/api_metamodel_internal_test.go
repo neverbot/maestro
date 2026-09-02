@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 )
@@ -49,6 +50,12 @@ func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 		{"nothing there", metamodel.ErrNotFound, http.StatusNotFound, errCodeNotFound},
 		{"contention", &pgconn.PgError{Code: "40001", Message: "deadlock detected"}, http.StatusServiceUnavailable, errCodeRetryable},
 		{"a refusal this layer made", NewMCPError(errCodeInvalidInput, "cursor is not a cursor"), http.StatusBadRequest, errCodeInvalidInput},
+		// The markdown domain's two own error types. Neither is caught
+		// by an arm above it: ConflictError is a different Go type from
+		// VersionConflictError, and MissingError reaches the not_found
+		// arm only because its Is method answers for that sentinel.
+		{"a stale document version", &markdown.ConflictError{Current: 3}, http.StatusConflict, errCodeVersionConflict},
+		{"no document there", &markdown.MissingError{Path: "path", Message: "no such document"}, http.StatusNotFound, errCodeNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()

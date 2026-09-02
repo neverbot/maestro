@@ -8258,11 +8258,24 @@ watched fail before its fix landed.
     `404 not_found: no relation type "" in this game`, because the domain
     resolves the relation type before it checks anything else. The other
     three one-part permutations answer `400 invalid_input` at
-    `related_to.direction`. The MCP surface answers identically — the
-    core is shared — so this is the domain's ordering rather than a
-    divergence between surfaces. `handleListEntities`' comment used to
-    claim all four came back at their own path; it now says what is true,
-    and the test pins all four answers as they are.
+    `related_to.direction`. `handleListEntities`' comment used to claim
+    all four came back at their own path; it now says what is true, and
+    the test pins all four answers as they are.
+
+    **Round 4 correction: the parity sentence this entry shipped with was
+    itself false, and Round 4 fixed the divergence rather than the
+    sentence.** It read "the MCP surface answers identically — the core
+    is shared". It does not, and it never did. `RelatedToInput`
+    (`mcp_metamodel.go`) carries no `omitempty` on any of its four
+    fields, so all four are `required` in the tool's served schema and
+    the SDK's validator refuses an incomplete traversal — naming the
+    absent properties — *before* the core is called. REST reached the
+    domain and answered whatever its resolution order produced, so the
+    two surfaces diverged on all four permutations, and the one REST
+    answer this entry set out to record accurately was one MCP never
+    produces. See Round 4, correction 2: REST refuses an incomplete
+    `related_to` itself now, naming every missing part, and the parity
+    claim is true because the code makes it so.
 
 **Proved by breaking the code under them.** Every test named above was
 watched fail with the fix removed, not merely watched pass: the project
@@ -8291,6 +8304,188 @@ sentence reworded; `maxContentRequestBodyBytes` cut to 16 KiB;
 
 Every run of every test above had `TEST_DATABASE_URL` set, confirmed by
 counting skips: 0 with it, 183 without.
+
+**Round 4 review (the same surface, a fourth pass).** The role mechanism
+held under it — no pattern shape got past `registerContentRoute`, GET is
+genuinely unwrapped, and a lowercase method is dead on the mux. What
+follows is the residue: one convention test that could be escaped, one
+parity claim that was false in the commit that set out to stop overstating,
+and a family of refusals that were wrong or silent about the caller's own
+input.
+
+1. **The convention test's allowlist is inverted.**
+   `TestEveryContentRouteIsRegisteredAsContent` held a hand-written list
+   of the segments that name game content and checked only those. The
+   review proved the escape: registering
+   `POST /api/games/{game}/views` through `registerProjectRoute` left
+   *both* convention tests green and let a viewer write. The `checked ==
+   0` guard catches a list gone wholly stale, never a single missing
+   entry — and `views` is not hypothetical, since `api_metamodel.go`'s
+   own header and `app.js` both name the views sub-project as the next
+   thing built on this surface.
+
+   The closed set is the other one. Under `/api/games/{game}/` this
+   instance has four standing sub-resources of its own — `members`,
+   `tokens`, `invites`, `events` — gated by owner/admin checks rather
+   than by `requireEditor`, plus the bare game, which carries no trailing
+   segment. Everything else under that prefix is game content **by
+   default** and must go through `registerContentRoute`. A genuinely
+   non-content sub-resource is added to `notContent` deliberately, in the
+   same commit that registers it. Proved by re-running the `views`
+   experiment: the inverted test names it, the other two stay green.
+
+2. **The MCP parity claim was false, so the divergence was fixed.**
+   `api_metamodel.go`, `api_metamodel_test.go` and Round 3's own entry 23
+   all claimed the two surfaces answer the four one-part traversals
+   identically because the core is shared. The core is shared; the
+   question the two surfaces asked it was not. `RelatedToInput` has no
+   `omitempty` on any field, so all four parts are `required` in the
+   served schema and the SDK's validator refuses
+   `{related_to:{direction:"outgoing"}}` with
+   `required: missing properties: ["relation_type_key" "entity_type_key"
+   "entity_key"]` before the core runs, while REST reached the domain and
+   answered `404 not_found: no relation type "" in this game`.
+
+   `queryRelatedTo` now decides completeness in the REST handler, the
+   same place the MCP schema decides it, and refuses an incomplete
+   traversal with `400 invalid_input` naming **every** missing part at
+   its own path. A part written with no value (`?related_to.direction=`)
+   is present and missing both, so it is listed among the missing rather
+   than refused on its own — one answer naming everything absent beats
+   four naming one thing each. All three claims were corrected to say
+   what the code now does.
+
+3. **The wrong-typed-field message was false for numbers.** The commit
+   that replaced "malformed JSON body" with a named field and type
+   introduced `"must be " + jsonTypeName(...) + ", not " + Value`, and
+   `encoding/json` sets `UnmarshalTypeError.Value` to `"number
+   <literal>"` when the JSON kind was right and the value was not. So
+   `{"expected_version": 999999999999}` was answered
+   `expected_version must be a number, not number 999999999999` — the
+   library's own wording leaked, and the sentence denies that a number is
+   one. Both branches are reachable live from `POST /types` (too wide for
+   int32, and `1.5`). `wrongTypeProblem` now says what is actually wrong
+   — the width or the fraction — with the field's real bounds in it:
+   `must be a whole number between -2147483648 and 2147483647, not
+   999999999999`. The object, list and string cases were correct and are
+   unchanged, nested paths included.
+
+4. **Three more in the same family.**
+
+   - **A body of the wrong shape entirely.** `[]` or `"just a string"`
+     carries no field for `encoding/json` to name, so the
+     `wrongType.Field != ""` guard dropped through to "malformed JSON
+     body" for well-formed JSON — the same defect one branch along.
+     Naming no path is right; calling it malformed is not. It now reads
+     `the request body must be a JSON object, not array`. `null` is
+     deliberately not in this family: unmarshalling it into a struct is a
+     no-op, so it reaches the domain as an empty body and is refused
+     there, field by field, which is the right answer for it.
+   - **`?limit=999999999999` said "limit is not a number".** It is a
+     number; it does not fit the `int32` the field is, and a caller told
+     their number is not one has nowhere to go. `strconv` reports range
+     and syntax through one error, so `queryLimit` now separates them and
+     the range case carries the bounds. `?limit=lots` still says it is
+     not a number.
+   - **Data after the JSON body was silently discarded.**
+     `json.Decoder.Decode` reads one value and stops, so
+     `{"key":"a"}{"key":"b"}` answered 200 having written only the first
+     — on the surface whose stated rule is that nothing a caller wrote is
+     silently ignored. `decodeJSONBodyLimit` checks `dec.More()` now, so
+     both surfaces that share it (`/api/auth/login` included) refuse a
+     body carrying more than one value, and the test confirms the first
+     value does not land while the second is refused.
+
+5. **Repeated and empty query parameters.** Two live holes on the same
+   surface that had just refused an unrecognised `invalid` spelling.
+   `?invalid=true&invalid=false` took the first and dropped the second
+   without a word, and `?invalid=true&invalid=garbage` answered 200
+   having never looked at the garbage — the one remaining path on which
+   an unrecognised spelling of `invalid` was accepted, which is exactly
+   what refusing it existed to close. `?invalid=` read as absent and
+   answered with every row, while this same task refuses an empty
+   `project_id` on the ground that an empty confirmation confirms
+   nothing.
+
+   Every query parameter this surface reads now comes in through one
+   door, `querySingle`, and **the rule is stated as: a parameter the
+   caller wrote must appear exactly once and must carry a value; only an
+   absent parameter is absent.** Repetition is refused because
+   `url.Values` keeps every value and reading the first is a silent
+   choice between two things the caller asked for. An explicitly empty
+   value is refused for the same reason `checkStatedProject` refuses an
+   empty `project_id`: an empty filter filters nothing, and answering the
+   whole listing to a designer whose client dropped the value of
+   `invalid` is this surface's own "wrong answer that looks like a right
+   one". So the query string does **not** get a different rule from the
+   body — it gets the same one, and that is the answer to "decide and
+   state which rule applies".
+
+   The one deliberate cost is the bare-flag idiom: `?verbose` and
+   `?cascade` reach Go as written-and-empty and are now refused rather
+   than read as `true`. Refusing is the safe direction for a parameter
+   one of whose callers is a cascading delete, and the caller is told
+   exactly what to write. `queryBool` stays lenient about *spelling*,
+   which was always the only thing its leniency argument covered.
+
+6. **The empty state implied an action a viewer cannot take.** Round 3
+   changed it to say types are declared over MCP or the game's content
+   routes. True for an editor; a viewer sees the same sentence and can do
+   neither, and telling someone to do the one thing the server will
+   refuse is worse than telling them nothing. `GET /summary` now carries
+   the caller's own `role` — free, since `requireProject` has already
+   resolved it — and `app.js` writes the second half of the sentence from
+   it: an editor is told how to declare the first type, a viewer is told
+   that this instance will refuse a write from them and who to ask.
+   `role` is never a permission; every refusal is still the server's,
+   made again on the next request.
+
+7. **Recorded, and one of the three fixed after all.**
+
+   - **A route registered straight on `s.mux` was invisible to both
+     convention tests**, because they walk `s.registeredPatterns`, which
+     only `route()` populates — the remaining "one step along" for the
+     claim that the editor gate is impossible to forget. This was flagged
+     as record-only, with the source-grep test left as a judgement call.
+     The judgement went the other way: `TestOnlyRouteTouchesTheMux` reads
+     this package's own non-test sources and allows `s.mux.Handle`
+     exactly once, inside `route()`. It is worth its bluntness because
+     the grep is narrow (one method on one field), the failure explains
+     itself, and the alternatives — an accessor, or a mux wrapper type —
+     buy the same property with indirection in the one file that most
+     needs to stay readable. Its cost is honest and recorded in its own
+     doc comment: renaming `route()` or the `mux` field breaks it.
+     Proved by re-running the `views` experiment through `s.mux.Handle`
+     directly: both convention tests pass, this one names the file and
+     line.
+   - **`statusForCode` has no `errCodeBadRequest` arm**, so an
+     `*MCPError` carrying it would be reported as 422. Unreachable today
+     — nothing constructs one — but the default arm is now pinned as 422
+     by a test, which makes the gap durable rather than transient.
+     Recorded, not fixed: adding an arm for a code no constructor
+     produces is dead code that reads as coverage.
+   - **`PUT`/`PATCH`/`OPTIONS` on a content path** get the mux's
+     plain-text `Method Not Allowed` rather than this surface's
+     `{"error","message"}` envelope. Whole-API and pre-existing; it
+     belongs to whatever task decides the envelope for method and route
+     mismatches everywhere, not to this one.
+
+**Proved by breaking the code under them.** Every test named above was
+watched fail before its fix and pass after, with `TEST_DATABASE_URL` set
+on every run and confirmed by the baseline subtests appearing in `-v`
+output: a `views` route registered through `registerProjectRoute` (the
+inverted convention test named it while the other two stayed green); the
+same route registered straight on `s.mux` (only `TestOnlyRouteTouchesTheMux`
+named it); the four one-part traversals and the empty-valued part (each
+answered 200, a 404 or a single path before `queryRelatedTo`); a
+too-wide and a fractional `expected_version` (each answered "not number
+<literal>"); `[]`, `"just a string"` and `42` as whole bodies (each
+answered "malformed JSON body"); two JSON values in one body (answered
+200, having written the first); `?limit=999999999999` (answered "not a
+number"); the repeated and empty parameters, one subtest each (each
+answered 200 with a listing); and the viewer's empty state (the
+role-aware branch short-circuited to the editor's sentence, and the
+browser test named it).
 
 ---
 

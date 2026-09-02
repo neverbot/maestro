@@ -3,7 +3,9 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"mime"
 	"net"
 	"net/http"
@@ -75,23 +77,37 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeError(w, http.StatusRequestEntityTooLarge, errCodeRequestTooLarge, "request body too large")
 			return false
 		}
 		var wrongType *json.UnmarshalTypeError
-		if errors.As(err, &wrongType) && wrongType.Field != "" {
-			// Not a malformed body: the JSON parsed, and one field
-			// carried the wrong kind of value. Saying "malformed JSON
-			// body" to that is both false and unactionable — the caller
-			// is told neither which field nor what was expected — while
-			// every other refusal on the game-content surface names its
-			// own path. encoding/json already knows all three things, so
-			// the answer carries them, in the same {"fields":[{"path",
-			// "message"}]} shape the domain's own field errors use.
-			problem := "must be " + jsonTypeName(wrongType.Type) + ", not " + wrongType.Value
+		if errors.As(err, &wrongType) {
+			// Not a malformed body: the JSON parsed, and what it
+			// carried was the wrong kind of value. Saying "malformed
+			// JSON body" to that is both false and unactionable — the
+			// caller is told neither where nor what was expected —
+			// while every other refusal on the game-content surface
+			// names its own path.
+			//
+			// Field is empty when the whole body was the wrong shape (a
+			// list, a bare string): there is no path to name then, and
+			// naming none is right, but the answer still has to say
+			// what was wrong rather than call well-formed JSON
+			// malformed.
+			if wrongType.Field == "" {
+				writeError(w, http.StatusBadRequest, errCodeBadRequest,
+					"the request body must be "+jsonBodyTypeName(wrongType.Type)+", not "+wrongType.Value)
+				return false
+			}
+			problem := wrongTypeProblem(wrongType)
+			// encoding/json already knows the path, the expected type
+			// and the value that arrived, so the answer carries all
+			// three, in the same {"fields":[{"path","message"}]} shape
+			// the domain's own field errors use.
 			writeCodedError(w, http.StatusBadRequest, errCodeBadRequest,
 				wrongType.Field+" "+problem,
 				map[string]any{"fields": []map[string]string{{"path": wrongType.Field, "message": problem}}})
@@ -100,7 +116,77 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 		writeError(w, http.StatusBadRequest, errCodeBadRequest, "malformed JSON body")
 		return false
 	}
+	// One request carries one JSON value. Decode stops at the end of the
+	// first, so a body holding two — what a client concatenating
+	// payloads sends — would otherwise be accepted with everything after
+	// the first silently discarded, on a surface whose stated rule is
+	// that nothing a caller wrote is silently ignored.
+	if dec.More() {
+		writeError(w, http.StatusBadRequest, errCodeBadRequest,
+			"the request body must carry exactly one JSON value, and this one carries more")
+		return false
+	}
 	return true
+}
+
+// wrongTypeProblem says what was wrong with a value encoding/json
+// refused, in the caller's own vocabulary.
+//
+// The number case is why this is a function rather than a
+// concatenation. encoding/json sets UnmarshalTypeError.Value to
+// "number <literal>" when the JSON kind was right and the value was
+// not — 999999999999 into an int32, or 1.5 into any integer — so
+// "must be " + jsonTypeName + ", not " + Value produced "must be a
+// number, not number 999999999999": it leaks the library's own wording
+// and, worse, denies that a number is one. What is actually wrong there
+// is the width or the fraction, so that is what the answer says, with
+// the field's real bounds in it.
+func wrongTypeProblem(e *json.UnmarshalTypeError) string {
+	literal, isNumber := strings.CutPrefix(e.Value, "number ")
+	if lo, hi, bounded := integerBounds(e.Type); isNumber && bounded {
+		return fmt.Sprintf("must be a whole number between %d and %d, not %s", lo, hi, literal)
+	}
+	if isNumber {
+		return "must be " + jsonTypeName(e.Type) + ", not " + literal
+	}
+	return "must be " + jsonTypeName(e.Type) + ", not " + e.Value
+}
+
+// jsonBodyTypeName is jsonTypeName for the request body as a whole,
+// which is the one place the word "JSON" earns its keep: a caller told
+// "the body must be an object" is being told what to send on the wire,
+// and the wire here is JSON.
+func jsonBodyTypeName(t reflect.Type) string {
+	switch name := jsonTypeName(t); name {
+	case "an object":
+		return "a JSON object"
+	case "a list":
+		return "a JSON list"
+	default:
+		return name
+	}
+}
+
+// integerBounds reports the range of a Go integer type, so a refusal can
+// tell a caller what would have fit instead of only what did not.
+// Anything that is not a fixed-width integer is unbounded as far as this
+// answer is concerned.
+func integerBounds(t reflect.Type) (int64, int64, bool) {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		bits := t.Bits()
+		if bits >= 64 {
+			return math.MinInt64, math.MaxInt64, true
+		}
+		return -1 << (bits - 1), 1<<(bits-1) - 1, true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:
+		return 0, 1<<t.Bits() - 1, true
+	default:
+		return 0, 0, false
+	}
 }
 
 // jsonTypeName names a Go type the way the JSON a caller sent would

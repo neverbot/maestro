@@ -2,7 +2,9 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -311,8 +313,12 @@ func (s *Server) handleRemoveType(w http.ResponseWriter, r *http.Request, caller
 	if !s.requireContentService(w) {
 		return
 	}
+	cascade, ok := queryBool(w, r, "cascade")
+	if !ok {
+		return
+	}
 	out, err := typesRemove(r.Context(), s.deps(), caller, scope.ProjectID, TypesRemoveInput{
-		ID: r.PathValue("id"), Cascade: queryBool(r, "cascade"),
+		ID: r.PathValue("id"), Cascade: cascade,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -368,8 +374,12 @@ func (s *Server) handleRemoveRelationType(w http.ResponseWriter, r *http.Request
 	if !s.requireContentService(w) {
 		return
 	}
+	cascade, ok := queryBool(w, r, "cascade")
+	if !ok {
+		return
+	}
 	out, err := relationTypesRemove(r.Context(), s.deps(), caller, scope.ProjectID, RelationTypesRemoveInput{
-		ID: r.PathValue("id"), Cascade: queryBool(r, "cascade"),
+		ID: r.PathValue("id"), Cascade: cascade,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -394,44 +404,31 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 	if !ok {
 		return
 	}
-	in := EntitiesListInput{
-		TypeKey: r.URL.Query().Get("type_key"),
-		Cursor:  r.URL.Query().Get("cursor"),
-		Limit:   limit,
-		Verbose: queryBool(r, "verbose"),
+	typeKey, ok := queryString(w, r, "type_key")
+	if !ok {
+		return
 	}
+	cursor, ok := queryString(w, r, "cursor")
+	if !ok {
+		return
+	}
+	verbose, ok := queryBool(w, r, "verbose")
+	if !ok {
+		return
+	}
+	in := EntitiesListInput{TypeKey: typeKey, Cursor: cursor, Limit: limit, Verbose: verbose}
 	invalid, ok := queryTriState(w, r, "invalid")
 	if !ok {
 		return
 	}
 	in.Invalid = invalid
-	// related_to is spelled with dotted parameter names so one query
-	// string can carry a nested filter without inventing an encoding:
-	// related_to.relation_type_key, .entity_type_key, .entity_key,
-	// .direction. Any one of them present turns the listing into the
-	// traversal, and the domain refuses an incomplete one rather than
-	// quietly answering with the whole game — including a missing
-	// direction, which it will not default.
-	//
-	// Three of the four one-part permutations name the missing part at
-	// its own field path. The fourth does not, and that is recorded
-	// rather than papered over: given only a direction, the domain
-	// resolves the relation type first and answers `not_found: no
-	// relation type "" in this game`, naming the lookup that failed
-	// instead of the three parts that were absent. The MCP surface
-	// answers identically — the core is shared — so this is a property
-	// of the domain's ordering and not a divergence between the two
-	// surfaces.
-	// TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame
-	// pins all four answers as they actually are.
-	if hasRelatedTo(r) {
-		in.RelatedTo = &RelatedToInput{
-			RelationTypeKey: r.URL.Query().Get("related_to.relation_type_key"),
-			EntityTypeKey:   r.URL.Query().Get("related_to.entity_type_key"),
-			EntityKey:       r.URL.Query().Get("related_to.entity_key"),
-			Direction:       r.URL.Query().Get("related_to.direction"),
-		}
+	// The traversal filter and the completeness it is refused for both
+	// live in queryRelatedTo; see its doc comment.
+	relatedTo, ok := queryRelatedTo(w, r)
+	if !ok {
+		return
 	}
+	in.RelatedTo = relatedTo
 	out, err := entitiesList(r.Context(), s.deps(), caller, scope.ProjectID, in)
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -498,13 +495,21 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 	if !ok {
 		return
 	}
-	out, err := relationsList(r.Context(), s.deps(), caller, scope.ProjectID, RelationsListInput{
-		TypeKey:  r.URL.Query().Get("type_key"),
-		SourceID: r.URL.Query().Get("source_id"),
-		TargetID: r.URL.Query().Get("target_id"),
-		Cursor:   r.URL.Query().Get("cursor"),
-		Limit:    limit,
-	})
+	in := RelationsListInput{Limit: limit}
+	for _, part := range []struct {
+		name  string
+		field *string
+	}{
+		{"type_key", &in.TypeKey}, {"source_id", &in.SourceID},
+		{"target_id", &in.TargetID}, {"cursor", &in.Cursor},
+	} {
+		value, ok := queryString(w, r, part.name)
+		if !ok {
+			return
+		}
+		*part.field = value
+	}
+	out, err := relationsList(r.Context(), s.deps(), caller, scope.ProjectID, in)
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
@@ -551,10 +556,16 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 	if !ok {
 		return
 	}
+	query, ok := queryString(w, r, "query")
+	if !ok {
+		return
+	}
+	typeKey, ok := queryString(w, r, "type_key")
+	if !ok {
+		return
+	}
 	out, err := searchEntities(r.Context(), s.deps(), caller, scope.ProjectID, SearchInput{
-		Query:   r.URL.Query().Get("query"),
-		TypeKey: r.URL.Query().Get("type_key"),
-		Limit:   limit,
+		Query: query, TypeKey: typeKey, Limit: limit,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -565,20 +576,91 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 
 // --- Query-string helpers ---
 
+// querySingle reads the one value of a query parameter, and is the
+// single door every parameter on this surface comes in through.
+//
+// It enforces the half of that surface's stated rule the individual
+// readers below could not see: a parameter appears at most once. Go's
+// url.Values keeps every repetition and Get returns the first, so
+// `?invalid=true&invalid=false` used to be answered from the first and
+// the second dropped without a word — and `?invalid=true&invalid=garbage`
+// answered 200 having never looked at the garbage at all, which is the
+// one path on which an unrecognised spelling of `invalid` still got
+// through after refusing it everywhere else.
+//
+// present is not the same as raw != "": `?invalid=` is a parameter the
+// caller wrote and left empty, and the readers below all treat that as
+// something to refuse rather than as absence. Absent is absent; written
+// is written.
+func querySingle(w http.ResponseWriter, r *http.Request, name string) (raw string, present, ok bool) {
+	values, present := r.URL.Query()[name]
+	if !present {
+		return "", false, true
+	}
+	if len(values) > 1 {
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, name+" was given more than once",
+			map[string]any{"fields": []map[string]string{{"path": name, "message": "was given more than once"}}})
+		return "", true, false
+	}
+	return values[0], true, true
+}
+
+// queryPresentValue is querySingle plus the other half of the rule: a
+// parameter written with no value is refused rather than read as absent.
+//
+// That is the same judgement checkStatedProject makes about an empty
+// `project_id` — an empty confirmation confirms nothing — applied to the
+// query string, and it holds here for the same reason. `?invalid=` used
+// to answer with the whole listing, so a designer whose client dropped
+// the value of the filter naming the rows that no longer fit their type
+// was handed every row instead, which is this surface's own "wrong
+// answer that looks like a right one". The one deliberate cost is the
+// bare-flag idiom: `?verbose` and `?cascade` (which url.Values also
+// present as written-and-empty) are refused rather than read as true.
+// Refusing is the safe direction for a parameter one of whose callers is
+// a cascading delete, and the caller is told exactly what to write.
+func queryPresentValue(w http.ResponseWriter, r *http.Request, name string) (raw string, present, ok bool) {
+	raw, present, ok = querySingle(w, r, name)
+	if !ok || !present {
+		return raw, present, ok
+	}
+	if raw == "" {
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, name+" was given with no value",
+			map[string]any{"fields": []map[string]string{{"path": name, "message": "was given with no value"}}})
+		return "", true, false
+	}
+	return raw, true, true
+}
+
+// queryString reads a plain string parameter — a key, a cursor, a search
+// query. Absent is the empty string, which every listing in the domain
+// reads as "do not filter on this"; written-and-empty is refused.
+func queryString(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
+	raw, _, ok := queryPresentValue(w, r, name)
+	return raw, ok
+}
+
 // queryBool reads a flag parameter. Present with any of the four true
-// spellings is true; anything else, including absent, is false. It is
-// deliberately lenient where queryLimit is strict: a flag has exactly
-// two meanings and an unrecognised spelling of one of them can only mean
-// the other, whereas a limit of "lots" has no defensible reading at all.
-// That argument only holds for a genuine two-state flag — `cascade` and
-// `verbose`, its only callers. A filter whose absence is a third state
-// goes through queryTriState instead.
-func queryBool(r *http.Request, name string) bool {
-	switch strings.ToLower(r.URL.Query().Get(name)) {
+// spellings is true; anything else is false. It is deliberately lenient
+// where queryLimit is strict: a flag has exactly two meanings and an
+// unrecognised spelling of one of them can only mean the other, whereas
+// a limit of "lots" has no defensible reading at all. That argument only
+// holds for a genuine two-state flag — `cascade` and `verbose`, its only
+// callers. A filter whose absence is a third state goes through
+// queryTriState instead.
+//
+// The leniency is about spelling and nothing else: a repeated flag and a
+// flag written with no value are both refused, by queryPresentValue.
+func queryBool(w http.ResponseWriter, r *http.Request, name string) (bool, bool) {
+	raw, present, ok := queryPresentValue(w, r, name)
+	if !ok || !present {
+		return false, ok
+	}
+	switch strings.ToLower(raw) {
 	case "1", "true", "yes", "on":
-		return true
+		return true, true
 	default:
-		return false
+		return false, true
 	}
 }
 
@@ -596,9 +678,9 @@ func queryBool(r *http.Request, name string) bool {
 // Both spellings of both sides are accepted, and anything else is the
 // caller's own argument at its own path.
 func queryTriState(w http.ResponseWriter, r *http.Request, name string) (*bool, bool) {
-	raw := r.URL.Query().Get(name)
-	if raw == "" {
-		return nil, true
+	raw, present, ok := queryPresentValue(w, r, name)
+	if !ok || !present {
+		return nil, ok
 	}
 	var value bool
 	switch strings.ToLower(raw) {
@@ -621,37 +703,108 @@ func queryTriState(w http.ResponseWriter, r *http.Request, name string) (*bool, 
 // is *not* refused here — the domain clamps it, deliberately, and
 // re-deciding that here would be a second bound to keep in step with the
 // first.
+//
+// A number too wide for the int32 the field is gets its own answer.
+// strconv reports range and syntax through the same error, so both used
+// to be reported as "limit is not a number" — false for `999999999999`,
+// which is a number, and unactionable, because a caller told their
+// number is not one has nowhere to go from there. The clamp above is
+// about the domain's page size and cannot help here: the value never
+// reaches an int32 to be clamped.
 func queryLimit(w http.ResponseWriter, r *http.Request) (int32, bool) {
-	raw := r.URL.Query().Get("limit")
-	if raw == "" {
-		return 0, true
+	raw, present, ok := queryPresentValue(w, r, "limit")
+	if !ok || !present {
+		return 0, ok
 	}
 	value, err := strconv.ParseInt(raw, 10, 32)
 	if err != nil {
-		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, "limit is not a number",
-			map[string]any{"fields": []map[string]string{{"path": "limit", "message": "is not a number"}}})
+		problem := "is not a number"
+		if errors.Is(err, strconv.ErrRange) {
+			problem = fmt.Sprintf("must be a whole number between %d and %d, not %s",
+				math.MinInt32, math.MaxInt32, raw)
+		}
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput, "limit "+problem,
+			map[string]any{"fields": []map[string]string{{"path": "limit", "message": problem}}})
 		return 0, false
 	}
 	return int32(value), true
 }
 
-// hasRelatedTo reports whether the query string carries any part of the
-// traversal filter. Any part, not all four: an incomplete traversal must
-// reach the domain and be refused there, at the missing part's own path,
-// rather than being read here as an ordinary listing — which would
-// answer a caller who asked for one entity's neighbours with the whole
-// game.
-func hasRelatedTo(r *http.Request) bool {
-	query := r.URL.Query()
-	for _, name := range []string{
-		"related_to.relation_type_key", "related_to.entity_type_key",
-		"related_to.entity_key", "related_to.direction",
-	} {
-		if query.Get(name) != "" {
-			return true
+// relatedToParts names the four query parameters that spell the one-hop
+// traversal, in the order a refusal lists them. They are dotted so one
+// query string can carry a nested filter without inventing an encoding.
+var relatedToParts = []string{
+	"related_to.relation_type_key",
+	"related_to.entity_type_key",
+	"related_to.entity_key",
+	"related_to.direction",
+}
+
+// queryRelatedTo reads the traversal filter, or refuses an incomplete
+// one naming every part that is missing.
+//
+// Any part present turns the listing into a traversal — any, not all
+// four. Read as "all four", a query naming one part and forgetting the
+// rest falls through to an ordinary listing, which answers a caller who
+// asked for one entity's neighbours with every entity in the game.
+//
+// Completeness is decided here rather than left to the domain, and that
+// is what makes this surface's parity with MCP true rather than
+// asserted. RelatedToInput (mcp_metamodel.go) carries no `omitempty` on
+// any of its four fields, so all four are `required` in the tool's
+// served schema and the SDK's validator refuses an incomplete traversal,
+// naming the absent properties, before the core is ever called. REST
+// used to reach the domain instead and answer whatever its resolution
+// order produced: three of the four one-part permutations at
+// related_to.direction, and the fourth as `not_found: no relation type
+// ""`, naming a lookup the caller never asked to make. The core is
+// shared; the two surfaces were not answering the same question to it.
+// They refuse the same four requests now, at the same paths.
+//
+// A part written with no value is present and missing both, so it is
+// listed among the missing rather than refused on its own by
+// queryPresentValue — one answer naming everything absent beats four
+// answers naming one thing each.
+func queryRelatedTo(w http.ResponseWriter, r *http.Request) (*RelatedToInput, bool) {
+	values := make([]string, len(relatedToParts))
+	present := false
+	var missing []map[string]string
+	for i, name := range relatedToParts {
+		raw, given, ok := querySingle(w, r, name)
+		if !ok {
+			return nil, false
 		}
+		if given {
+			present = true
+		}
+		if raw == "" {
+			missing = append(missing, map[string]string{
+				"path":    name,
+				"message": "is required for a related_to traversal",
+			})
+			continue
+		}
+		values[i] = raw
 	}
-	return false
+	if !present {
+		return nil, true
+	}
+	if len(missing) > 0 {
+		paths := make([]string, 0, len(missing))
+		for _, field := range missing {
+			paths = append(paths, field["path"])
+		}
+		writeCodedError(w, http.StatusBadRequest, errCodeInvalidInput,
+			"a related_to traversal needs all four of its parts; missing "+strings.Join(paths, ", "),
+			map[string]any{"fields": missing})
+		return nil, false
+	}
+	return &RelatedToInput{
+		RelationTypeKey: values[0],
+		EntityTypeKey:   values[1],
+		EntityKey:       values[2],
+		Direction:       values[3],
+	}, true
 }
 
 // --- The game home page's summary ---
@@ -677,6 +830,18 @@ type GameSummaryOutput struct {
 	EntityTypes   []EntityTypeSummary   `json:"entity_types"`
 	RelationTypes []RelationTypeSummary `json:"relation_types"`
 	Totals        GameTotals            `json:"totals"`
+
+	// Role is the caller's own role in this game, and it is here for the
+	// page's words rather than for its data. The empty state has to tell
+	// a reader what to do next, and what to do next differs: an editor
+	// declares the game's first type over MCP or the content routes,
+	// while a viewer asking the same routes is refused. A page that tells
+	// a viewer to do the one thing the server will not let them do is
+	// worse than one that says nothing. requireProject has already
+	// resolved the role for this request, so carrying it costs a field
+	// and no query. It is never a permission — every refusal is still
+	// the server's, made again on the next request.
+	Role string `json:"role"`
 }
 
 // EntityTypeSummary is one declared entity type and what the game holds
@@ -738,6 +903,7 @@ func (s *Server) handleGameSummary(w http.ResponseWriter, r *http.Request, _ Cal
 	out := GameSummaryOutput{
 		EntityTypes:   make([]EntityTypeSummary, 0, len(entityTypes)),
 		RelationTypes: make([]RelationTypeSummary, 0, len(relationTypes)),
+		Role:          scope.Role,
 	}
 	for _, row := range entityTypes {
 		counts := entityCounts[row.ID]

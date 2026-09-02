@@ -78,6 +78,20 @@ func (f restFixture) call(t *testing.T, cookie *http.Cookie, method, path string
 	return rec
 }
 
+// raw sends a body this fixture must not marshal: the point of several
+// tests below is a body encoding/json will reject, or one carrying more
+// than a single JSON value, neither of which survives a round trip
+// through json.Marshal.
+func (f restFixture) raw(t *testing.T, method, suffix, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, f.path(suffix), strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(f.cookie)
+	rec := httptest.NewRecorder()
+	f.srv.ServeHTTP(rec, req)
+	return rec
+}
+
 func (f restFixture) path(suffix string) string {
 	return "/api/games/" + f.game.String() + suffix
 }
@@ -915,6 +929,16 @@ func TestAWrongTypedFieldIsNamed(t *testing.T) {
 		{"a version that is not a number", "/types",
 			`{"key":"quest","label":"Quest","label_plural":"Quests","expected_version":"one"}`, "expected_version"},
 		{"a batch that is not a list", "/entities", `{"items":"not-an-array"}`, "items"},
+		// encoding/json reports a number that does not fit as
+		// Value "number <literal>", so the naive concatenation read
+		// "must be a number, not number 999999999999" — false twice
+		// over, since it is a number and the sentence says it is not.
+		{"a version too large for the field", "/types",
+			`{"key":"quest","label":"Quest","label_plural":"Quests","expected_version":999999999999}`,
+			"expected_version"},
+		{"a version that is not whole", "/types",
+			`{"key":"quest","label":"Quest","label_plural":"Quests","expected_version":1.5}`,
+			"expected_version"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, f.path(tc.suffix), strings.NewReader(tc.body))
@@ -926,6 +950,9 @@ func TestAWrongTypedFieldIsNamed(t *testing.T) {
 			got := assertError(t, rec, http.StatusBadRequest, "bad_request", tc.path)
 			if strings.Contains(got.Message, "malformed") {
 				t.Errorf("message = %q, but this body is well-formed JSON", got.Message)
+			}
+			if strings.Contains(got.Message, "not number ") {
+				t.Errorf("message = %q leaks encoding/json's own wording and denies that a number is one", got.Message)
 			}
 		})
 	}
@@ -995,35 +1022,224 @@ func TestASeedSizedBatchIsAccepted(t *testing.T) {
 // through to an ordinary listing — which answers a caller who asked for
 // one entity's neighbours with every entity in the game, the exact
 // failure that function's comment argues against.
+//
+// It also pins the completeness refusal itself, and the parity claim
+// that refusal exists to make true. The MCP tool's schema marks all four
+// parts required (RelatedToInput carries no omitempty on any field), so
+// an agent sending three of them is refused by the SDK's validator,
+// named property by named property, before the core is ever called. REST
+// used to reach the domain instead and answer whatever the domain's
+// resolution order happened to produce — three of the four permutations
+// at related_to.direction, and the fourth as `not_found: no relation
+// type ""`, which names a lookup the caller never asked for. The two
+// surfaces refuse the same four requests now, for the same reason and
+// at the same paths.
 func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testing.T) {
 	f := newRESTFixture(t)
 	invalidAndValidQuests(t, f)
 
-	// Three of the four permutations come back at the missing part's own
-	// field path. The fourth is recorded here rather than fixed: with
-	// only a direction, the domain resolves the relation type first and
-	// answers 404 for the empty key, so the refusal names the type it
-	// could not find instead of the parts that were missing. It is the
-	// same answer the MCP surface gives — the two share the core — so
-	// parity holds and the honest statement is "refused, at its own path
-	// in three cases out of four".
+	const (
+		relKey  = "related_to.relation_type_key"
+		typeKey = "related_to.entity_type_key"
+		entKey  = "related_to.entity_key"
+		dirKey  = "related_to.direction"
+	)
 	for _, tc := range []struct {
-		query  string
-		status int
-		code   string
-		path   string
+		query   string
+		missing []string
 	}{
-		{"?related_to.entity_key=hogger", http.StatusBadRequest, "invalid_input", "related_to.direction"},
-		{"?related_to.entity_type_key=quest", http.StatusBadRequest, "invalid_input", "related_to.direction"},
-		{"?related_to.relation_type_key=takes_place_in", http.StatusBadRequest, "invalid_input", "related_to.direction"},
-		{"?related_to.direction=outgoing", http.StatusNotFound, "not_found", ""},
+		{"?" + entKey + "=hogger", []string{relKey, typeKey, dirKey}},
+		{"?" + typeKey + "=quest", []string{relKey, entKey, dirKey}},
+		{"?" + relKey + "=takes_place_in", []string{typeKey, entKey, dirKey}},
+		{"?" + dirKey + "=outgoing", []string{relKey, typeKey, entKey}},
+		// A part written with no value is a part that is present and
+		// missing, not a part that was never asked for: the traversal is
+		// still refused, and all four parts are named.
+		{"?" + dirKey + "=", []string{relKey, typeKey, entKey, dirKey}},
 	} {
 		rec := f.as(t, http.MethodGet, "/entities"+tc.query, nil)
 		if rec.Code == http.StatusOK {
 			t.Fatalf("%s = 200 with %s, want a refusal rather than the whole game",
 				tc.query, rec.Body.String())
 		}
-		assertError(t, rec, tc.status, tc.code, tc.path)
+		got := assertError(t, rec, http.StatusBadRequest, "invalid_input", "")
+		paths := map[string]bool{}
+		for _, field := range got.Details.Fields {
+			paths[field.Path] = true
+		}
+		if len(paths) != len(tc.missing) {
+			t.Errorf("%s named %d paths, want exactly the %d missing ones: %s",
+				tc.query, len(paths), len(tc.missing), rec.Body.String())
+		}
+		for _, want := range tc.missing {
+			if !paths[want] {
+				t.Errorf("%s did not name the missing %s: %s", tc.query, want, rec.Body.String())
+			}
+		}
+	}
+
+	// And a traversal with all four parts spelled still reaches the
+	// domain, so the guard refuses incompleteness and nothing else.
+	if rec := f.as(t, http.MethodGet, "/entities?"+relKey+"=takes_place_in&"+
+		typeKey+"=quest&"+entKey+"=hogger&"+dirKey+"=outgoing", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("a complete traversal over an undeclared relation type = %d, want the domain's own 404: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
+// TestARepeatedOrEmptyQueryParameterIsRefused pins the rule this surface
+// applies to its query string, which is the one queryTriState already
+// applied to the value it reads: a parameter the caller wrote is a
+// parameter the caller meant, so it must carry exactly one value and
+// that value must say something.
+//
+// Both halves were live holes. `?invalid=true&invalid=false` took the
+// first and dropped the second silently; `?invalid=true&invalid=garbage`
+// answered 200 and never saw the garbage at all — the one remaining path
+// on which an unrecognised spelling of `invalid` was accepted, which is
+// exactly what refusing it existed to close. `?invalid=` read as absent
+// and answered with both rows, while this same surface refuses an empty
+// `project_id` on the ground that an empty confirmation confirms
+// nothing. An empty filter filters nothing, by the same argument.
+func TestARepeatedOrEmptyQueryParameterIsRefused(t *testing.T) {
+	f := newRESTFixture(t)
+	invalidAndValidQuests(t, f)
+
+	for _, tc := range []struct{ name, query, path string }{
+		{"a filter given twice", "?invalid=true&invalid=false", "invalid"},
+		{"a filter given twice, once unreadably", "?invalid=true&invalid=garbage", "invalid"},
+		{"a limit given twice", "?limit=1&limit=2", "limit"},
+		{"a filter with no value", "?invalid=", "invalid"},
+		{"a limit with no value", "?limit=", "limit"},
+		{"a cursor with no value", "?cursor=", "cursor"},
+		{"a flag with no value", "?verbose=", "verbose"},
+		{"a traversal part given twice", "?related_to.direction=outgoing&related_to.direction=incoming",
+			"related_to.direction"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := f.as(t, http.MethodGet, "/entities"+tc.query, nil)
+			if rec.Code == http.StatusOK {
+				t.Fatalf("%s = 200: %s", tc.query, rec.Body.String())
+			}
+			assertError(t, rec, http.StatusBadRequest, "invalid_input", tc.path)
+		})
+	}
+}
+
+// TestALimitTooLargeForTheFieldSaysSo pins the difference between a
+// limit that is not a number and one that is. `?limit=999999999999` used
+// to be told "limit is not a number", which is false — it is a number,
+// it simply does not fit the int32 the field is — and unactionable,
+// because a caller told their number is not one has nowhere to go.
+func TestALimitTooLargeForTheFieldSaysSo(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+
+	got := assertError(t, f.as(t, http.MethodGet, "/entities?limit=999999999999", nil),
+		http.StatusBadRequest, "invalid_input", "limit")
+	if strings.Contains(got.Message, "not a number") {
+		t.Errorf("message = %q, but 999999999999 is a number", got.Message)
+	}
+	if !strings.Contains(got.Message, "999999999999") {
+		t.Errorf("message = %q, want it to quote the value it refused", got.Message)
+	}
+	// A genuine non-number still says what it is.
+	got = assertError(t, f.as(t, http.MethodGet, "/entities?limit=lots", nil),
+		http.StatusBadRequest, "invalid_input", "limit")
+	if !strings.Contains(got.Message, "not a number") {
+		t.Errorf("message = %q, want it to say \"lots\" is not a number", got.Message)
+	}
+}
+
+// TestABodyThatIsNotAnObjectSaysSo pins the other half of the wrong-type
+// refusal. A body that is well-formed JSON but the wrong shape entirely
+// — a list, a bare string — carries no field path for encoding/json to
+// report, so the handler used to fall through to "malformed JSON body",
+// which is false for the same reason it was false for a wrong-typed
+// field: the JSON parsed. Naming no path is right; calling it malformed
+// is not.
+func TestABodyThatIsNotAnObjectSaysSo(t *testing.T) {
+	f := newRESTFixture(t)
+
+	// `null` is deliberately absent: unmarshalling it into a struct is a
+	// no-op rather than an error, so it is not a wrong-shaped body at
+	// all — it reaches the domain as an empty one and is refused there,
+	// field by field, which is the right answer for it.
+	for _, body := range []string{`[]`, `"just a string"`, `42`} {
+		t.Run(body, func(t *testing.T) {
+			got := assertError(t, f.raw(t, http.MethodPost, "/types", body),
+				http.StatusBadRequest, "bad_request", "")
+			if strings.Contains(got.Message, "malformed") {
+				t.Errorf("message = %q, but %s is well-formed JSON", got.Message, body)
+			}
+			if !strings.Contains(got.Message, "JSON object") {
+				t.Errorf("message = %q, want it to say the body must be a JSON object", got.Message)
+			}
+		})
+	}
+}
+
+// TestDataAfterTheJSONBodyIsRefused pins the last silently ignored input
+// on a surface whose stated rule is that nothing is silently ignored.
+// json.Decoder.Decode reads one value and stops, so a body carrying two
+// — `{"key":"a"}{"key":"b"}`, which is what a client concatenating
+// payloads sends — used to answer 200 having written only the first, and
+// the caller had no way to learn the second never happened.
+func TestDataAfterTheJSONBodyIsRefused(t *testing.T) {
+	f := newRESTFixture(t)
+
+	body := `{"key":"quest","label":"Quest","label_plural":"Quests"}` +
+		`{"key":"zone","label":"Zone","label_plural":"Zones"}`
+	assertError(t, f.raw(t, http.MethodPost, "/types", body),
+		http.StatusBadRequest, "bad_request", "")
+
+	// And nothing was written: the first value must not land while the
+	// second is refused.
+	var list struct {
+		Types []any `json:"types"`
+	}
+	decodeBody(t, f.as(t, http.MethodGet, "/types", nil), &list)
+	if len(list.Types) != 0 {
+		t.Fatalf("a refused two-value body still wrote %d types", len(list.Types))
+	}
+}
+
+// TestTheSummaryNamesTheCallersRole pins the one field the game home
+// page needs and could not get anywhere else. The page's empty state
+// used to tell every reader that types are declared over MCP or the
+// content routes; a viewer reading that sentence can do neither, and
+// telling someone to take an action the server will refuse is worse than
+// telling them nothing. The role is what lets the page say what its
+// reader can actually do, and it is free here — requireProject has
+// already resolved it for the request.
+func TestTheSummaryNamesTheCallersRole(t *testing.T) {
+	f := newRESTFixture(t)
+	ctx := context.Background()
+
+	var summary struct {
+		Role string `json:"role"`
+	}
+	decodeBody(t, f.as(t, http.MethodGet, "/summary", nil), &summary)
+	if summary.Role != "owner" {
+		t.Errorf("the owner's summary names role %q", summary.Role)
+	}
+
+	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "onlooker@studio.com", DisplayName: "Onlooker", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	rec := f.call(t, loginAs(t, f.srv, "onlooker@studio.com"), http.MethodGet, f.path("/summary"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("viewer summary = %d: %s", rec.Code, rec.Body.String())
+	}
+	decodeBody(t, rec, &summary)
+	if summary.Role != "viewer" {
+		t.Errorf("the viewer's summary names role %q", summary.Role)
 	}
 }
 

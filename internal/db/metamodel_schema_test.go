@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -453,36 +458,178 @@ func TestDeletingATokenClearsOnlyTheTokenColumn(t *testing.T) {
 // rank differently from the same game re-seeded after it, silently and
 // with nothing to signal why.
 //
-// The two expressions are written out here rather than imported, because
-// the point is to compare them: the left is the migration's, applied to
-// the pre-migration expression, and the right is the one in
-// UpsertEntity (metamodel.sql). Change either and this test says so.
+// **It runs the shipped files against real rows — review finding M3.**
+// The first version of this test wrote both SQL expressions out in its
+// own literal and compared them, and said "change either and this test
+// says so". It did not: the reviewer changed the *actual migration's*
+// UPDATE to a non-equal expression and the whole suite stayed green,
+// because nothing in it ever applied 0006 to a row. It proved an
+// algebra identity about a copy.
+//
+// So the migration's Up arm is read out of the file that ships and
+// executed, and the comparison is against `dbq.UpsertEntity` — the
+// generated caller of the statement that ships. Neither side is written
+// out here any more, and a change to either one that breaks the
+// identity fails this test.
+//
+// The order is the real one: a database is migrated, and content is
+// seeded into it afterwards. That also keeps the migration's unqualified
+// UPDATE off the re-seeded rows, which it would otherwise weight a
+// second time — a fact worth knowing about 0006 and the reason it is a
+// one-shot rather than something to re-run.
 func TestTheSearchBackfillIsExact(t *testing.T) {
 	t.Parallel()
 	pool := testutil.NewPool(t)
 	ctx := context.Background()
 
-	for _, tc := range []struct{ name, fields string }{
-		{"a row with text fields", "A gnoll camp led by a gnoll chieftain."},
-		{"a row whose fields carry no text at all", ""},
-		{"a row whose fields repeat its own name", "Gnoll gnoll gnoll"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	var projectID, typeID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (slug, name) VALUES ('azeroth', 'Azeroth') RETURNING id`).
+		Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO entity_types (project_id, key, label, label_plural)
+		 VALUES ($1, 'quest', 'Quest', 'Quests') RETURNING id`, projectID).
+		Scan(&typeID); err != nil {
+		t.Fatalf("insert entity type: %v", err)
+	}
+
+	// Every shape a stored row can take that the identity could break
+	// on. searchTextOf (internal/metamodel) is what produces the text
+	// half in production; here the test supplies it directly, because
+	// what is under test is the vector algebra and not the flattening.
+	shapes := []struct{ label, name, text string }{
+		{"ordinary", "Gnoll Pack", "A gnoll camp led by a gnoll chieftain."},
+		{"no text at all", "Gnoll Pack", ""},
+		{"fields that repeat the name", "Gnoll", "Gnoll gnoll gnoll"},
+		{"an empty name", "", "A camp with no name."},
+		{"a name of nothing but spaces", "   ", "A camp with a blank name."},
+		{"punctuation only", "!?&", "..."},
+		{"unicode", "Château d'Ombrage", "Un château hanté par des goules."},
+		{"emoji", "🐺 Pack", "🐺🐺🐺 everywhere"},
+		{"a word too long to index", strings.Repeat("z", 3000), strings.Repeat("y", 3000)},
+		{"a very long body", "Gnoll Pack", strings.Repeat("gnoll pack ", 5000)},
+		{"text that is only whitespace", "Gnoll", "   \t  "},
+		{"a name that is also the whole text", "Hogger", "Hogger"},
+	}
+
+	// The pre-0006 write path, spelled here because it no longer exists
+	// anywhere else: this is exactly what Task 6's UpsertEntity stored.
+	const oldWritePath = `INSERT INTO entities (project_id, entity_type_id, key, name, search)
+		VALUES ($1, $2, $3, $4, to_tsvector('simple', $4::text || ' ' || $5::text))`
+	for i, shape := range shapes {
+		if _, err := pool.Exec(ctx, oldWritePath, projectID, typeID,
+			fmt.Sprintf("migrated-%02d", i), shape.name, shape.text); err != nil {
+			t.Fatalf("seed %s as a pre-migration row: %v", shape.label, err)
+		}
+	}
+	// A row whose vector is NULL, which is why the migration coalesces:
+	// it must not be the thing that empties an index.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO entities (project_id, entity_type_id, key, name, search)
+		 VALUES ($1, $2, 'no-vector', 'No Vector', NULL)`, projectID, typeID); err != nil {
+		t.Fatalf("seed a row with no vector: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, gooseArm(t, "0006_weighted_entity_search.sql", "Up")); err != nil {
+		t.Fatalf("apply the migration's Up arm: %v", err)
+	}
+
+	// Now the rows a game seeded after the migration would hold, written
+	// through the statement that actually ships.
+	q := dbq.New(pool)
+	for i, shape := range shapes {
+		if _, err := q.UpsertEntity(ctx, dbq.UpsertEntityParams{
+			ProjectID: projectID, EntityTypeID: typeID,
+			Key:  fmt.Sprintf("reseeded-%02d", i),
+			Name: shape.name, Fields: []byte("{}"), SearchText: shape.text,
+			ExpectedVersion: -1,
+		}); err != nil {
+			t.Fatalf("re-seed %s: %v", shape.label, err)
+		}
+	}
+
+	for i, shape := range shapes {
+		t.Run(shape.label, func(t *testing.T) {
 			var same bool
-			err := pool.QueryRow(ctx, `
-				WITH old AS (
-					SELECT to_tsvector('simple', $1::text || ' ' || $2::text) AS v
-				)
-				SELECT (setweight(to_tsvector('simple', $1::text), 'A') || setweight(old.v, 'B'))
-				     = (setweight(to_tsvector('simple', $1::text), 'A')
-				        || setweight(to_tsvector('simple', $1::text || ' ' || $2::text), 'B'))
-				FROM old`, "Gnoll", tc.fields).Scan(&same)
-			if err != nil {
+			var migrated string
+			if err := pool.QueryRow(ctx, `
+				SELECT m.search = r.search, m.search::text
+				FROM entities m, entities r
+				WHERE m.project_id = $1 AND m.key = $2
+				  AND r.project_id = $1 AND r.key = $3`,
+				projectID, fmt.Sprintf("migrated-%02d", i), fmt.Sprintf("reseeded-%02d", i),
+			).Scan(&same, &migrated); err != nil {
 				t.Fatalf("compare: %v", err)
 			}
 			if !same {
-				t.Fatal("the migration's backfilled vector differs from what UpsertEntity now writes")
+				t.Fatalf("the migrated row's vector differs from the re-seeded row's: %s", migrated)
 			}
 		})
 	}
+
+	// The NULL row keeps a usable vector rather than staying NULL: the
+	// name alone, under label A, which is what coalesce buys.
+	t.Run("a row that had no vector", func(t *testing.T) {
+		var got string
+		if err := pool.QueryRow(ctx,
+			`SELECT search::text FROM entities WHERE project_id = $1 AND key = 'no-vector'`,
+			projectID).Scan(&got); err != nil {
+			t.Fatalf("read the backfilled vector: %v", err)
+		}
+		if !strings.Contains(got, "'no':1A") || !strings.Contains(got, "'vector':2A") {
+			t.Fatalf("vector = %s, want the name indexed under label A", got)
+		}
+	})
+
+	// The Down arm is shipped too, and a downgrade must leave a working
+	// search rather than a NULL column. It ranks by presence rather than
+	// by frequency until rows are rewritten, which 0006 says out loud.
+	if _, err := pool.Exec(ctx, gooseArm(t, "0006_weighted_entity_search.sql", "Down")); err != nil {
+		t.Fatalf("apply the migration's Down arm: %v", err)
+	}
+	var unweighted int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM entities WHERE project_id = $1 AND (search IS NULL OR search::text LIKE '%A%')`,
+		projectID).Scan(&unweighted); err != nil {
+		t.Fatalf("count downgraded rows: %v", err)
+	}
+	if unweighted != 0 {
+		t.Fatalf("%d rows still carry a weight or a NULL vector after the Down arm", unweighted)
+	}
+}
+
+// gooseArm returns one arm of a shipped migration, read from the file
+// that ships rather than from a copy.
+//
+// It parses the goose annotations rather than importing goose's own
+// parser, which is unexported: the format here is two `-- +goose Up` /
+// `-- +goose Down` markers and plain statements between them, and the
+// migrations in this repository use nothing else. A migration that grows
+// a StatementBegin block will need this to grow with it, and will say so
+// by failing.
+func gooseArm(t *testing.T, file, arm string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("migrations", file))
+	if err != nil {
+		t.Fatalf("read %s: %v", file, err)
+	}
+	body := string(raw)
+	if strings.Contains(body, "+goose StatementBegin") {
+		t.Fatalf("%s uses a StatementBegin block, which this parser does not handle", file)
+	}
+	start := strings.Index(body, "-- +goose "+arm)
+	if start < 0 {
+		t.Fatalf("%s has no %s arm", file, arm)
+	}
+	rest := body[start+len("-- +goose "+arm):]
+	if end := strings.Index(rest, "-- +goose "); end >= 0 {
+		rest = rest[:end]
+	}
+	sql := strings.TrimSpace(rest)
+	if sql == "" {
+		t.Fatalf("%s's %s arm is empty", file, arm)
+	}
+	return sql
 }

@@ -777,3 +777,74 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 		t.Fatalf("a traversal with no direction was answered: %+v", result.StructuredContent)
 	}
 }
+
+// TestTheDomainTypesOnTheWireCarryExactlyTheseKeys closes review finding
+// L1.
+//
+// mcp_metamodel.go's header claimed "no wire type here is a domain
+// type", unqualified. In the *input* direction that is true and
+// load-bearing — an Actor off the wire would let an agent name any
+// author it liked. In the *output* direction it was simply false:
+// TypeDetailOutput.Schema and RelationTypeDetailOutput.Schema are
+// metamodel.Schema, and the two bulk outputs carry []metamodel.BulkWrite,
+// []metamodel.RelationWrite and []metamodel.BulkFailure. The reviewer
+// added an `updated_by_user_id` to metamodel.BulkWrite and it reached
+// the wire, unblocked by the hand-written output schemas.
+//
+// Re-exporting them is still the right call: their field lists *are*
+// the wire contract, and a shadow struct beside each would be a copy to
+// keep in step, which is the failure this avoids rather than the one it
+// causes. What was missing is a place where growing one of them is
+// visible. That is here. A field added to any of the four fails this
+// test, and whoever added it decides in the open whether an agent
+// should see it — rather than discovering it in another package's
+// golden file, or not at all.
+func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  []string
+	}{
+		{"metamodel.BulkWrite", metamodel.BulkWrite{},
+			[]string{"id", "key", "type_key", "version"}},
+		{"metamodel.RelationWrite", metamodel.RelationWrite{},
+			[]string{"id", "source_id", "target_id", "type_key"}},
+		{"metamodel.BulkFailure", metamodel.BulkFailure{},
+			[]string{"code", "index", "key", "message"}},
+		// A Schema is a list of Fields, so the keys that matter are one
+		// Field's. Every optional key is given a value, because the
+		// marshaller omits the empty ones and a zero value would pin
+		// half the contract. `default` comes from MarshalJSON rather
+		// than from a struct tag, which is the reason these schemas are
+		// hand-written at all.
+		{"metamodel.Schema's Field", metamodel.Field{
+			Key: "difficulty", Label: "Difficulty", Type: metamodel.FieldEnum,
+			Required: true, Options: []string{"easy"},
+			Min: ptrFloat(1), Max: ptrFloat(10),
+			HasDefault: true, Default: "easy",
+		}, []string{"default", "key", "label", "max", "min", "options", "required", "type"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.value)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var keyed map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &keyed); err != nil {
+				t.Fatalf("decode %s: %v", raw, err)
+			}
+			got := make([]string, 0, len(keyed))
+			for k := range keyed {
+				got = append(got, k)
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("wire keys = %v, want %v — a domain type on this surface grew a "+
+					"field; decide whether an agent should see it, then update this list",
+					got, tc.want)
+			}
+		})
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }

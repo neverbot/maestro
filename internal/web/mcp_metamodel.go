@@ -29,7 +29,7 @@ import (
 // requirement). A handler that forgot to pass a project id would not
 // compile; a handler that merely forgot to *check* one would.
 //
-// **No wire type here is a domain type.** Every input is a struct
+// **No *input* type here is a domain type.** Every input is a struct
 // declared in this file, converted into the domain's own input by hand.
 // The one shape this rules out is the important one: metamodel's
 // EntityInput and RelationInput carry an Actor, and an Actor is the
@@ -37,6 +37,21 @@ import (
 // straight off the wire would let an agent name any user or token it
 // liked as the author of its writes. actorOf builds it from the
 // authenticated caller and nothing else.
+//
+// **The outputs are a different claim, and a weaker one — review
+// finding L1.** This comment used to say "no wire type here is a domain
+// type", unqualified, and that was false in the output direction:
+// TypeDetailOutput.Schema and RelationTypeDetailOutput.Schema are
+// metamodel.Schema, and the two bulk outputs carry []metamodel.
+// BulkWrite, []metamodel.RelationWrite and []metamodel.BulkFailure. The
+// hand-written output schemas do not shut the gap either — a field
+// added to metamodel.BulkWrite reached the wire through them. So the
+// four are re-exported deliberately (their field lists are the wire
+// contract, and a shadow struct would be a copy to keep in step), and
+// what holds the line is a *test* rather than the type system:
+// TestTheDomainTypesOnTheWireCarryExactlyTheseKeys marshals each of the
+// four and pins its key set, so a field added to any of them fails here
+// and its author decides whether an agent should see it.
 //
 // **Ids cross the wire as strings.** The SDK infers a tool's input
 // schema from its Go input type by reflection, and uuid.UUID is a

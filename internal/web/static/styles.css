@@ -6,6 +6,11 @@
   --accent: #2b2b2b;
   --accent-ink: #ffffff;
   --muted: #666666;
+  /* The one colour that means "this needs your attention": the forms'
+     error text and the home page's invalid-row line are the same
+     statement to a reader, so they are the same token rather than the
+     same hex typed twice. */
+  --danger: #a4262c;
   font-family: system-ui, sans-serif;
 }
 
@@ -87,7 +92,7 @@ button:disabled {
   justify-self: auto;
 }
 
-.error { color: #a4262c; min-height: 1.2em; }
+.error { color: var(--danger); min-height: 1.2em; }
 
 .notice {
   border: 1px solid var(--line);
@@ -136,13 +141,13 @@ ul.catalogue li {
 .catalogue-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* The one thing on this page that asks a designer to do something: rows
-   a schema edit stopped fitting. Given the error colour the forms use,
-   not a colour of its own, so the page has one vocabulary for "look
-   here" — and a border as well as a colour, so it does not depend on
-   colour alone to be noticed. */
+   a schema edit stopped fitting. Given --danger, the same token the
+   forms' error text uses, so the page has one vocabulary for "look here"
+   — and a border as well as a colour, so it does not depend on colour
+   alone to be noticed. */
 .catalogue-invalid {
   grid-column: 1 / -1;
-  color: #a4262c;
+  color: var(--danger);
   border-top: 1px solid var(--line);
   padding-top: 0.4rem;
   font-size: 0.85rem;

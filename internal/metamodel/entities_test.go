@@ -1896,3 +1896,116 @@ func TestUpsertEntityRefusesUnprintableTextBeforeItReachesPostgres(t *testing.T)
 		t.Fatalf("row.Key = %q, want it stored", row.Key)
 	}
 }
+
+// TestABulkWriteReportsWhatLandedInAWireShape pins Task 7's answer to
+// "what does a successful batch tell an agent". Until Task 7,
+// BulkResult.Succeeded was the only record of it, `json:"-"` and full of
+// database columns, so a marshalled result reported failures and nothing
+// else — a perfect four-hundred-row batch answered with `{}`.
+//
+// Written is the wire half. It carries, per row that landed, the three
+// things an agent cannot derive from what it sent: the row's id (which
+// is what entities.remove takes), its version (which is what
+// expected_version takes on the next edit), and — with type_key and key,
+// which it *can* derive — the address that says which of its own items
+// this row is.
+func TestABulkWriteReportsWhatLandedInAWireShape(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "Alpha", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "b", Name: "Beta", Fields: map[string]any{"min_level": "nope"}},
+		{TypeKey: "quest", Key: "c", Name: "Gamma", Fields: map[string]any{"min_level": float64(3)}},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+	if len(result.Written) != 2 {
+		t.Fatalf("written = %+v, want the two rows that landed", result.Written)
+	}
+	if got := []string{result.Written[0].Key, result.Written[1].Key}; !equalStrings(got, []string{"a", "c"}) {
+		t.Fatalf("written keys = %v, want [a c]", got)
+	}
+	for i, w := range result.Written {
+		if w.TypeKey != "quest" {
+			t.Fatalf("written[%d].TypeKey = %q, want the stored type key", i, w.TypeKey)
+		}
+		if w.ID != result.Succeeded[i].ID {
+			t.Fatalf("written[%d].ID = %s, want the row's own id %s", i, w.ID, result.Succeeded[i].ID)
+		}
+		if w.Version != 1 {
+			t.Fatalf("written[%d].Version = %d, want 1 for a freshly created row", i, w.Version)
+		}
+	}
+
+	// A second pass over the same key moves the version, and Written is
+	// where an agent reads the value its next expected_version needs —
+	// which is not a convenience: an update of an existing row is
+	// *refused* without a matching ExpectedVersion, so a seeding agent
+	// that has only its own input has no way to edit what it just wrote
+	// without a second read.
+	first := result.Written[0].Version
+	again, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "Alpha II",
+			Fields: map[string]any{"min_level": float64(2)}, ExpectedVersion: &first},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertEntities again: %v", err)
+	}
+	if len(again.Written) != 1 || again.Written[0].Version != 2 {
+		t.Fatalf("written = %+v, want version 2 on the second write", again.Written)
+	}
+}
+
+// TestABulkWriteMarshalsWhatLanded pins the same thing through JSON,
+// which is the surface an agent actually reads: the failures-only report
+// this replaced was a marshalling fact, not a Go one, so a test that
+// only read the Go struct would not have caught it and would not catch
+// its return.
+func TestABulkWriteMarshalsWhatLanded(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "Alpha", Fields: map[string]any{"min_level": float64(1)}},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertEntities: %v", err)
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Written []struct {
+			TypeKey string `json:"type_key"`
+			Key     string `json:"key"`
+			ID      string `json:"id"`
+			Version int32  `json:"version"`
+		} `json:"written"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	if len(decoded.Written) != 1 {
+		t.Fatalf("marshalled result %s carries no record of the row that landed", raw)
+	}
+	w := decoded.Written[0]
+	if w.TypeKey != "quest" || w.Key != "a" || w.Version != 1 || w.ID != result.Succeeded[0].ID.String() {
+		t.Fatalf("marshalled written = %+v, want the row's own address, id and version", w)
+	}
+	// A database row's own columns stay off the wire: Succeeded is
+	// json:"-" for the reason BulkResult records, and this pins that
+	// adding Written did not quietly put them back.
+	if strings.Contains(string(raw), "updated_by") || strings.Contains(string(raw), "project_id") {
+		t.Fatalf("marshalled result %s carries database columns", raw)
+	}
+}

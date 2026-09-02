@@ -1878,3 +1878,75 @@ func TestBothBadEndsOfAnEdgeAreAnsweredInOnePass(t *testing.T) {
 		}
 	})
 }
+
+// TestABulkEdgeWriteReportsWhatLandedInAWireShape is the edge half of
+// Task 7's answer to "what does a successful batch tell an agent"; see
+// TestABulkWriteReportsWhatLandedInAWireShape for the entity half and
+// the argument.
+//
+// What an edge reports differs from an entity's in exactly one way, and
+// it is a decision rather than an omission: **there is no version**.
+// relations has no version column at all (Task 5's decision, recorded on
+// RelationInput), so the only things a caller cannot derive from what it
+// sent are the edge's own id — which is what relations.remove takes —
+// and the two endpoint ids the refs resolved to.
+func TestABulkEdgeWriteReportsWhatLandedInAWireShape(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "takes_place_in", Label: "takes place in",
+	}); err != nil {
+		t.Fatalf("seed relation type: %v", err)
+	}
+
+	result, err := svc.UpsertRelations(ctx, project, []metamodel.RelationInput{
+		{
+			TypeKey: "takes_place_in",
+			Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+		},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("UpsertRelations: %v", err)
+	}
+	if len(result.Written) != 1 {
+		t.Fatalf("written = %+v, want the one edge that landed", result.Written)
+	}
+	w := result.Written[0]
+	if w.TypeKey != "takes_place_in" {
+		t.Fatalf("written.TypeKey = %q, want the stored relation type key", w.TypeKey)
+	}
+	row := result.Succeeded[0]
+	if w.ID != row.ID || w.SourceID != row.SourceID || w.TargetID != row.TargetID {
+		t.Fatalf("written = %+v, want the edge's own id and both endpoint ids", w)
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Written []struct {
+			TypeKey  string `json:"type_key"`
+			ID       string `json:"id"`
+			SourceID string `json:"source_id"`
+			TargetID string `json:"target_id"`
+		} `json:"written"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal %s: %v", raw, err)
+	}
+	if len(decoded.Written) != 1 || decoded.Written[0].ID != row.ID.String() {
+		t.Fatalf("marshalled result %s carries no record of the edge that landed", raw)
+	}
+	if decoded.Written[0].SourceID != row.SourceID.String() ||
+		decoded.Written[0].TargetID != row.TargetID.String() {
+		t.Fatalf("marshalled written = %+v, want both endpoint ids", decoded.Written[0])
+	}
+	if strings.Contains(string(raw), "updated_by") {
+		t.Fatalf("marshalled result %s carries database columns", raw)
+	}
+}

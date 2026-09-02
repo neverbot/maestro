@@ -66,17 +66,57 @@ func (u upsertedEntity) event() entityEvent {
 	return entityEvent{ID: u.row.ID, TypeKey: u.typeKey, Key: u.row.Key}
 }
 
+// BulkWrite is one row a batch landed, in the shape a caller reads.
+//
+// It carries exactly what an agent cannot work out from the batch it
+// sent, plus the address that says which of its own items this is:
+//
+//   - ID, because every removal in this package is addressed by id
+//     (RemoveEntity), and a caller that has only ever spoken in keys has
+//     no other way to get one but a second read.
+//   - Version, because that is the value ExpectedVersion takes on the
+//     next edit of this row. Nothing else reports it, and re-reading a
+//     row to learn the version of a write you just made is a round trip
+//     the write already knew the answer to.
+//   - TypeKey and Key, the row's own address, so a partial batch's
+//     report can be matched item by item against what was sent. Both are
+//     the *stored* spellings, not the caller's, for the reason
+//     upsertedEntity exists: keys are matched without regard to case, so
+//     the two can differ and the stored one is the one that is true.
+//
+// It deliberately does not carry the row's fields. A caller that sent
+// them has them, and a four-hundred-row seed would otherwise get its own
+// payload back.
+type BulkWrite struct {
+	TypeKey string    `json:"type_key"`
+	Key     string    `json:"key"`
+	ID      uuid.UUID `json:"id"`
+	Version int32     `json:"version"`
+}
+
 // BulkResult reports what a batch did.
 //
 // Succeeded is `json:"-"` because a dbq.Entity is a database row and not
 // a wire shape — it carries the audit columns and the raw jsonb, and
 // serialising it here would publish a shape no design decision has been
-// made about. The consequence is that a marshalled BulkResult reports
-// failures and nothing else, so **Task 7 must decide what a successful
-// batch tells an agent** — how many rows landed, under which keys, at
-// which versions — because today the honest answer is nothing at all.
+// made about. It stays, unchanged, for the callers inside this repository
+// that want the whole row.
+//
+// **Written is what a successful batch tells an agent**, and it is Task
+// 7's answer to the question this comment used to pose. Until it existed
+// a marshalled BulkResult reported failures and nothing else, so a
+// perfect four-hundred-row batch answered with nothing at all — and the
+// obvious alternative, a count, is the one answer that cannot be acted
+// on: an agent already knows how many items it sent, and subtracting the
+// failures gives it the same number. See BulkWrite for what each entry
+// carries and why.
+//
+// Written and Succeeded are built from the same slice in the same loop
+// and are always the same length in the same order, so they cannot
+// disagree about what landed.
 type BulkResult struct {
 	Succeeded []dbq.Entity  `json:"-"`
+	Written   []BulkWrite   `json:"written"`
 	Failed    []BulkFailure `json:"failed"`
 }
 
@@ -129,11 +169,17 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 	// assembling events after its transaction has committed cannot pair a
 	// row with the wrong type key by getting an index wrong. The pairing
 	// has done its work by here, and what the caller is owed is rows.
-	var rows []dbq.Entity
+	var (
+		rows    []dbq.Entity
+		reports []BulkWrite
+	)
 	for _, w := range written {
 		rows = append(rows, w.row)
+		reports = append(reports, BulkWrite{
+			TypeKey: w.typeKey, Key: w.row.Key, ID: w.row.ID, Version: w.row.Version,
+		})
 	}
-	return BulkResult{Succeeded: rows, Failed: failed}, err
+	return BulkResult{Succeeded: rows, Written: reports, Failed: failed}, err
 }
 
 // entityBulkSpec is the entity half of a bulk write: everything bulk.go

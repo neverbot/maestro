@@ -97,18 +97,44 @@ type RelationPage struct {
 	NextCursor string
 }
 
+// RelationWrite is one edge a batch landed, in the shape a caller reads.
+// It is BulkWrite's edge counterpart; see that type for the argument
+// about what a success report should and should not carry.
+//
+// **It has no Version, and that is a decision rather than an omission.**
+// relations has no version column at all — an edge is identified by its
+// triple and the last writer of its fields wins, which RelationInput's
+// own doc comment records together with what it would take to change.
+// So the only things here a caller cannot derive from what it sent are
+// the edge's own id, which is what RemoveRelation takes, and the two
+// endpoint ids its refs resolved to.
+//
+// TypeKey is the *stored* spelling, for the reason upsertedRelation
+// exists.
+type RelationWrite struct {
+	TypeKey  string    `json:"type_key"`
+	ID       uuid.UUID `json:"id"`
+	SourceID uuid.UUID `json:"source_id"`
+	TargetID uuid.UUID `json:"target_id"`
+}
+
 // RelationBulkResult reports what a batch of edges did.
 //
 // It is a second type rather than BulkResult because BulkResult carries
 // `Succeeded []dbq.Entity`; making that generic would have changed a
 // public type every existing caller and test names. Succeeded is
 // `json:"-"` for the same reason it is there — a dbq.Relation is a
-// database row and not a wire shape — so a marshalled result reports
-// failures and nothing else, and **Task 7 must decide what a successful
-// batch tells an agent**.
+// database row and not a wire shape.
+//
+// **Written is what a successful batch tells an agent**, Task 7's answer
+// to the question this comment used to pose, and the edge half of the
+// one BulkResult gives; see BulkResult.Written for the argument. Written
+// and Succeeded are built from the same slice in the same loop, so they
+// cannot disagree about what landed.
 type RelationBulkResult struct {
-	Succeeded []dbq.Relation `json:"-"`
-	Failed    []BulkFailure  `json:"failed"`
+	Succeeded []dbq.Relation  `json:"-"`
+	Written   []RelationWrite `json:"written"`
+	Failed    []BulkFailure   `json:"failed"`
 }
 
 // relationEvent is the payload of the relation.* events: the identity of
@@ -431,11 +457,18 @@ func endpointEntity(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, ro
 // What is edge-shaped and stays here is relationBulkSpec.
 func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, items []RelationInput, mode BulkMode) (RelationBulkResult, error) {
 	written, failed, err := bulkUpsert(ctx, s, items, mode, s.relationBulkSpec(projectID))
-	var rows []dbq.Relation
+	var (
+		rows    []dbq.Relation
+		reports []RelationWrite
+	)
 	for _, w := range written {
 		rows = append(rows, w.row)
+		reports = append(reports, RelationWrite{
+			TypeKey: w.typeKey, ID: w.row.ID,
+			SourceID: w.row.SourceID, TargetID: w.row.TargetID,
+		})
 	}
-	return RelationBulkResult{Succeeded: rows, Failed: failed}, err
+	return RelationBulkResult{Succeeded: rows, Written: reports, Failed: failed}, err
 }
 
 // relationBulkSpec is the edge half of a bulk write: everything bulk.go

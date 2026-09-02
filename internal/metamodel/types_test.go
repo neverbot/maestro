@@ -1069,3 +1069,69 @@ func newToken(t *testing.T, pool *pgxpool.Pool, project uuid.UUID) uuid.UUID {
 	}
 	return id
 }
+
+// TestAMalformedKeyIsInvalidInputNotASchemaViolation pins which wire code
+// a row-argument problem is published under.
+//
+// Every problem this package reported used to read `schema_violation:
+// key: ...`, which is the code the skill bundle teaches an agent to
+// recover from by fixing *entity values* — advice that cannot help
+// anybody whose types.upsert call carried a key with a space in it. The
+// type is still ValidationError, because a malformed key is the same
+// shape of fault as a malformed value (a path, a message, fixable in
+// place); only the code differs, and it differs because the recovery
+// does.
+func TestAMalformedKeyIsInvalidInputNotASchemaViolation(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+
+	for _, tc := range []struct {
+		name string
+		in   metamodel.EntityTypeInput
+		want string
+	}{
+		{"malformed key", metamodel.EntityTypeInput{Key: "main quest", Label: "Quest"},
+			"invalid_input: key: must be letters, digits, underscores or hyphens, " +
+				"starting with a letter or a digit"},
+		{"missing label", metamodel.EntityTypeInput{Key: "quest"},
+			"invalid_input: label: is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.UpsertEntityType(ctx, project, tc.in)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %s", err, tc.want)
+			}
+			if !errors.Is(err, metamodel.ErrInvalidInput) {
+				t.Fatalf("errors.Is(%v, ErrInvalidInput) = false", err)
+			}
+			if errors.Is(err, metamodel.ErrSchemaViolation) {
+				t.Fatalf("err = %v must not also read as a schema violation", err)
+			}
+		})
+	}
+
+	// The respelling refusal is a row-argument problem too: the argument
+	// to change is the key.
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "Hogger", Label: "Hogger",
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+		Key: "hogger", Label: "Hogger", ExpectedVersion: ptrInt32(1),
+	})
+	if !errors.Is(err, metamodel.ErrInvalidInput) || errors.Is(err, metamodel.ErrSchemaViolation) {
+		t.Fatalf("a respelled key must read as invalid_input, got %v", err)
+	}
+
+	// A value that does not fit a declared schema keeps schema_violation:
+	// splitting the code must not have moved the case it was named for.
+	schema := metamodel.Schema{{Key: "min_level", Type: metamodel.FieldNumber}}
+	if err := schema.CheckValues(map[string]any{"min_level": "ten"}); !errors.Is(err, metamodel.ErrSchemaViolation) {
+		t.Fatalf("errors.Is(%v, ErrSchemaViolation) = false", err)
+	} else if errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v must not read as invalid_input", err)
+	}
+}

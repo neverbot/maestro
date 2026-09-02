@@ -17,6 +17,7 @@ var (
 	ErrInUse                = errors.New("in_use")
 	ErrSchemaViolation      = errors.New("schema_violation")
 	ErrInvalidSchema        = errors.New("invalid_schema")
+	ErrInvalidInput         = errors.New("invalid_input")
 )
 
 // ErrActorNotInGame is what the database's own backstop against a
@@ -54,8 +55,43 @@ func (e FieldError) Error() string { return e.Path + ": " + e.Message }
 
 // ValidationError carries every problem found in one pass, so a seeding agent
 // fixes all of them at once instead of discovering them one round-trip apart.
+//
+// Code names which of two wire codes the problems belong under. Both are
+// the same *kind* of failure — a field path and a message a caller can
+// act on — but they have two different recoveries, and an agent must not
+// have to read paths to tell them apart:
+//
+//   - schema_violation (the zero value, so Schema.Validate needs no
+//     change) is a row of *values* that does not fit a declaration that
+//     can stand. Every path is fields.<key>. The fix is to change the
+//     values and call entities.upsert again.
+//   - invalid_input is a row's own arguments — its key, its label, its
+//     colour — being malformed. The paths are key, label, color, icon.
+//     The fix is to change that argument, and the call it belongs to may
+//     well be types.upsert, where "schema_violation" would send an agent
+//     following the skill bundle off to inspect entity values that have
+//     nothing to do with it.
+//
+// This is deliberately not a third *type*. SchemaError is a separate type
+// because a declaration failing is a different fault (the schema, not the
+// row) and satisfies a different sentinel; key and descriptor problems
+// are the same fault as a value problem — the caller's own input, at a
+// path, fixable in place — so they share the type that already reports
+// exactly that, and differ only in the code they will be published under.
+// Task 7 reads Code; it does not re-derive it from path spelling.
 type ValidationError struct {
+	Code   string
 	Fields []FieldError
+}
+
+// code is the wire code these problems belong under, defaulting to
+// schema_violation so the value validator, which predates the split and
+// reports nothing else, needs no change.
+func (e *ValidationError) code() string {
+	if e.Code == "" {
+		return "schema_violation"
+	}
+	return e.Code
 }
 
 func (e *ValidationError) Error() string {
@@ -63,11 +99,20 @@ func (e *ValidationError) Error() string {
 	for _, f := range e.Fields {
 		parts = append(parts, f.Error())
 	}
-	return fmt.Sprintf("schema_violation: %s", strings.Join(parts, "; "))
+	return fmt.Sprintf("%s: %s", e.code(), strings.Join(parts, "; "))
 }
 
-// Is makes errors.Is(err, ErrSchemaViolation) true for validation failures.
-func (e *ValidationError) Is(target error) bool { return target == ErrSchemaViolation }
+// Is makes errors.Is true against the sentinel this error's own code
+// names, and false against the other — so a caller matching
+// ErrSchemaViolation never catches a malformed key, and vice versa.
+func (e *ValidationError) Is(target error) bool {
+	switch e.code() {
+	case codeInvalidInput:
+		return target == ErrInvalidInput
+	default:
+		return target == ErrSchemaViolation
+	}
+}
 
 // SchemaError carries every problem found in a schema *declaration*, at
 // field_schema[<i>] paths.

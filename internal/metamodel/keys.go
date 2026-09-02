@@ -11,6 +11,11 @@ import (
 // filename or a view-query token without anyone thinking about it.
 const maxRowKeyLen = 64
 
+// codeInvalidInput is the wire code every problem with a row's own
+// arguments — its key, its label, its colour — is reported under. See
+// ValidationError.Code for why these are not schema_violation.
+const codeInvalidInput = "invalid_input"
+
 // rowKeyPattern is the rule for the keys that *address rows* — entity-type
 // keys, relation-type keys and entity keys. It is deliberately wider than
 // keyPattern, the rule for the field keys inside a row's jsonb, and the
@@ -101,7 +106,7 @@ func rowKeyProblems(path, key string) []FieldError {
 // answer a designer needs, and they never have to know an index folds
 // case.
 func keyRespellingError(path, requested, stored string) error {
-	return &ValidationError{Fields: []FieldError{{
+	return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
 		Path: path,
 		Message: fmt.Sprintf(
 			"%q already exists here spelled %q, and keys are matched without regard to case: "+

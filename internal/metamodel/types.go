@@ -61,7 +61,7 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 	problems = append(problems,
 		checkDescriptors(in.Label, in.LabelPlural, in.Description, in.Color, in.Icon)...)
 	if len(problems) > 0 {
-		return dbq.EntityType{}, &ValidationError{Fields: problems}
+		return dbq.EntityType{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
 	if err := in.Schema.Check(); err != nil {
 		return dbq.EntityType{}, err

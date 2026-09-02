@@ -103,6 +103,22 @@ const (
 	codeInvalidInput    = "invalid_input"
 )
 
+// CodeSchemaViolation and CodeInvalidInput are the two wire codes a
+// ValidationError is published under, exported so a sibling domain
+// package can build one without spelling the string.
+//
+// internal/markdown reports every caller-argument problem as
+// &ValidationError{Code: CodeInvalidInput, …}, which is the whole
+// reason these exist: a literal "invalid_input" over there and the
+// constant over here would be two spellings of one decision, and
+// ValidationError.Is matches nothing for a code it does not recognise —
+// so a typo would surface to an agent as internal_error rather than
+// failing anywhere a compiler can see it.
+const (
+	CodeSchemaViolation = codeSchemaViolation
+	CodeInvalidInput    = codeInvalidInput
+)
+
 // code is the wire code these problems belong under, defaulting to
 // schema_violation so the value validator, which predates the split and
 // reports nothing else, needs no change.

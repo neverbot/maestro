@@ -30,7 +30,7 @@ func TestWritingADocumentCreatesItAtVersionOneAndItReadsBackByteForByte(t *testi
 	doc, err := svc.Write(ctx, game, markdown.WriteInput{
 		Path:            "scripts/wanted-hogger",
 		Content:         content,
-		Kind:            "script",
+		Kind:            ptrString("script"),
 		Message:         "first draft",
 		ExpectedVersion: ptrInt32(0),
 	})
@@ -843,7 +843,7 @@ func TestAKindAndAMessageAreBoundedAsTheCallersOwnArguments(t *testing.T) {
 
 	_, err := svc.Write(ctx, game, markdown.WriteInput{
 		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
-		Kind: strings.Repeat("k", markdown.MaxKindLen+1),
+		Kind: ptrString(strings.Repeat("k", markdown.MaxKindLen+1)),
 	})
 	requireFieldError(t, err, "kind", "must be at most")
 
@@ -855,7 +855,7 @@ func TestAKindAndAMessageAreBoundedAsTheCallersOwnArguments(t *testing.T) {
 
 	_, err = svc.Write(ctx, game, markdown.WriteInput{
 		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
-		Kind: "scr\npt",
+		Kind: ptrString("scr\npt"),
 	})
 	requireFieldError(t, err, "kind", "control character")
 
@@ -870,14 +870,14 @@ func TestAKindAndAMessageAreBoundedAsTheCallersOwnArguments(t *testing.T) {
 	// shared with the metamodel rather than copied.
 	_, err = svc.Write(ctx, game, markdown.WriteInput{
 		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
-		Kind: "scr\x80pt",
+		Kind: ptrString("scr\x80pt"),
 	})
 	requireFieldError(t, err, "kind", "is not valid UTF-8")
 
 	// A kind of exactly the bound is accepted, and reads back whole.
 	atTheBound := strings.Repeat("k", markdown.MaxKindLen)
 	if _, err := svc.Write(ctx, game, markdown.WriteInput{
-		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0), Kind: atTheBound,
+		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0), Kind: ptrString(atTheBound),
 	}); err != nil {
 		t.Fatalf("a kind of exactly %d bytes must be accepted: %v", markdown.MaxKindLen, err)
 	}
@@ -890,6 +890,57 @@ func TestAKindAndAMessageAreBoundedAsTheCallersOwnArguments(t *testing.T) {
 	}
 }
 
+// TestAnEditThatOmitsKindLeavesItUnchanged pins review finding 1 on Task
+// 3: `kind` is a property of the document, not of any one edit, so a
+// caller that does not mention it must not erase it. A nil Kind
+// preserves whatever is stored; a Kind pointing at "" is a caller
+// explicitly clearing the label, and that must go through too.
+func TestAnEditThatOmitsKindLeavesItUnchanged(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	doc, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "lore/bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
+		Kind: ptrString("lore"),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// A body-only edit, Kind omitted (nil): the label survives.
+	doc, err = svc.Write(ctx, game, markdown.WriteInput{
+		Path: "lore/bible", Content: "two\n", ExpectedVersion: ptrInt32(doc.CurrentVersion),
+	})
+	if err != nil {
+		t.Fatalf("edit without kind: %v", err)
+	}
+	if doc.Kind != "lore" {
+		t.Fatalf("Kind = %q after an edit that did not mention it, want it preserved as %q",
+			doc.Kind, "lore")
+	}
+	got, err := svc.Read(ctx, game, "lore/bible")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if got.Kind != "lore" {
+		t.Fatalf("Read Kind = %q, want the kind preserved across a body-only edit", got.Kind)
+	}
+
+	// An edit that explicitly clears it, Kind pointing at "": that takes
+	// effect, distinguishing "did not say" from "said empty".
+	doc, err = svc.Write(ctx, game, markdown.WriteInput{
+		Path: "lore/bible", Content: "three\n", ExpectedVersion: ptrInt32(doc.CurrentVersion),
+		Kind: ptrString(""),
+	})
+	if err != nil {
+		t.Fatalf("edit clearing kind: %v", err)
+	}
+	if doc.Kind != "" {
+		t.Fatalf("Kind = %q after explicitly clearing it, want empty", doc.Kind)
+	}
+}
+
 func TestEveryProblemWithOneWriteIsReportedInOnePass(t *testing.T) {
 	svc, _, _, pool := newService(t)
 	ctx := context.Background()
@@ -897,7 +948,7 @@ func TestEveryProblemWithOneWriteIsReportedInOnePass(t *testing.T) {
 
 	_, err := svc.Write(ctx, game, markdown.WriteInput{
 		Path: "lore//duskwood", Content: "one\n", ExpectedVersion: ptrInt32(0),
-		Kind: strings.Repeat("k", markdown.MaxKindLen+1),
+		Kind: ptrString(strings.Repeat("k", markdown.MaxKindLen+1)),
 	})
 	requireFieldError(t, err, "path", "has an empty segment")
 	requireFieldError(t, err, "kind", "must be at most")

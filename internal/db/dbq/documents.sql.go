@@ -84,10 +84,19 @@ type GetDocumentByPathForUpdateParams struct {
 // existence: a conflicting writer is turned away before its body, its
 // frontmatter and its version row are written and rolled back, and the
 // pre-write spelling check in writeWith runs against a row no other
-// transaction can move under it. Both are worth a row lock on a write
-// that is already taking one. Neither is observable through this
-// package's public surface, so no test here distinguishes them, and
-// this comment says so rather than naming a test that would not go red.
+// transaction can move under it. It also serialises this write against a
+// concurrent *delete* of the same row: without the lock, a hard delete
+// landing between this read and the upsert would let the upsert's own
+// INSERT arm fire on the freed path and silently re-create the document
+// at version 1, rather than the writer being told the row is gone. All
+// three are worth a row lock on a write that is already taking one.
+// None is observable through this package's public surface, so no test
+// here distinguishes them, and this comment says so rather than naming a
+// test that would not go red. (The third case cannot fire until Task 4
+// lands deletion, and deletion there is soft, so it is not reachable
+// even then; a *hard* delete racing this read is not something Task 3
+// or 4 need close, only something worth naming so a future hard-delete
+// feature does not skip it.)
 func (q *Queries) GetDocumentByPathForUpdate(ctx context.Context, arg GetDocumentByPathForUpdateParams) (Document, error) {
 	row := q.db.QueryRow(ctx, getDocumentByPathForUpdate, arg.ProjectID, arg.Path)
 	var i Document
@@ -184,13 +193,14 @@ INSERT INTO documents (project_id, path, kind, title, summary, body_md, frontmat
                        current_version,
                        created_by_user_id, created_by_token_id,
                        updated_by_user_id, updated_by_token_id)
-VALUES ($1::uuid, $2::text, $3::text,
+VALUES ($1::uuid, $2::text,
+        COALESCE($3::text, ''),
         $4::text, $5::text, $6::text,
         $7::jsonb, 1,
         $8::uuid, $9::uuid,
         $8::uuid, $9::uuid)
 ON CONFLICT (project_id, lower(path)) DO UPDATE
-SET kind                = excluded.kind,
+SET kind                = COALESCE($3::text, documents.kind),
     title               = excluded.title,
     summary             = excluded.summary,
     body_md             = excluded.body_md,
@@ -206,7 +216,7 @@ RETURNING id, project_id, path, kind, title, summary, body_md, frontmatter, curr
 type UpsertDocumentParams struct {
 	ProjectID       uuid.UUID
 	Path            string
-	Kind            string
+	Kind            *string
 	Title           string
 	Summary         string
 	BodyMd          string
@@ -229,9 +239,10 @@ type UpsertDocumentParams struct {
 //     handed back, so nothing but the project filter keeps either inside
 //     one game. TestReadingAnotherGamesDocumentIsNotFound pins it for
 //     GetDocumentByPath; the FOR UPDATE read's filter is pinned by the
-//     same test only indirectly (a write to another game's path creates
-//     a second document rather than reading the first), so treat that
-//     one as unpinned until Task 4 addresses a row by id.
+//     same test too, if indirectly: dropping it reddens
+//     TestWritingAPathAnotherGameUsesCreatesASecondDocument immediately,
+//     because a write to another game's path would otherwise lock and
+//     resurrect the first game's row instead of creating its own.
 //   - On document_versions, the project filter is load-bearing *as
 //     well*, and this is the one place Maestro deliberately does not
 //     follow the metamodel's reasoning. There, a query reaching entities
@@ -271,6 +282,18 @@ type UpsertDocumentParams struct {
 // respelling *after* this statement runs -- the returned row still
 // carries the stored spelling -- which closes the creation race, where
 // there was nothing yet to lock.
+//
+// kind is in the SET list, but not unconditionally: it is COALESCEd
+// against the stored value rather than overwritten by excluded.kind,
+// because kind is a property of the document -- what shelf it sits on --
+// and not a property of any one edit. A caller passes NULL to mean "say
+// nothing about kind", and every value including the empty string means
+// "set it to this"; SQL's COALESCE already treats a NULL argument as
+// "keep the left side" and a non-NULL one, empty string included, as
+// "replace it," which is exactly that rule. On the insert arm the same
+// COALESCE falls back to ” -- a new document's kind is never left NULL,
+// matching the NOT NULL DEFAULT ” the column already carries.
+// TestAnEditThatOmitsKindLeavesItUnchanged pins both directions.
 //
 // created_by_* are not in the SET list either: the creator of a document
 // is a fact about its first version and does not change when someone

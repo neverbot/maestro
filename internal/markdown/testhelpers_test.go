@@ -63,3 +63,5 @@ func requireFieldError(t *testing.T, err error, wantPath, wantMessage string) {
 }
 
 func ptrInt32(v int32) *int32 { return &v }
+
+func ptrString(v string) *string { return &v }

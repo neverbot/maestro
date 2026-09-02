@@ -28,12 +28,25 @@ import (
 // about the argument gets the useful behaviour, and the Go zero value
 // stays honest.
 //
+// **Kind is a pointer for the same reason ExpectedVersion is: "absent"
+// and "empty" are different instructions, and a plain string cannot
+// distinguish them.** `kind` is a property of the document, not of any
+// one edit — it says what shelf a document sits on, and nothing in a
+// body-only fix to a typo means "move the shelf." A nil Kind leaves
+// whatever is stored alone; a Kind pointing at "" clears it, same as
+// pointing at any other value sets it. TestAnEditThatOmitsKindLeavesIt
+// Unchanged pins both directions. Task 5's revert and Task 10's `docs.write`
+// both read from this: revert never sets it at all, and the tool leaves
+// the argument optional and omits it from the request when the caller
+// does not pass one, rather than defaulting it to the empty string on
+// the wire the way IncludeCurrent defaults the other way.
+//
 // Task 6 adds a Links field to this struct. It is deliberately not here
 // yet: a field no caller sets is a shape pre-committed sight unseen.
 type WriteInput struct {
 	Path            string
 	Content         string
-	Kind            string
+	Kind            *string
 	Message         string
 	ExpectedVersion *int32
 	IncludeCurrent  bool
@@ -59,7 +72,9 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 	// and learning about the other.
 	// TestEveryProblemWithOneWriteIsReportedInOnePass pins it.
 	problems := pathProblems(in.Path)
-	problems = append(problems, checkShortText("kind", in.Kind, MaxKindLen)...)
+	if in.Kind != nil {
+		problems = append(problems, checkShortText("kind", *in.Kind, MaxKindLen)...)
+	}
 	problems = append(problems, checkShortText("message", in.Message, MaxMessageLen)...)
 	if in.ExpectedVersion == nil {
 		problems = append(problems, metamodel.FieldError{
@@ -118,6 +133,17 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		if existing.Path != in.Path {
 			return dbq.Document{}, pathRespellingError(in.Path, existing.Path)
 		}
+		// This check is behaviourally redundant with the SQL guard on
+		// UpsertDocument: deleting it leaves the suite green at
+		// `-count=3`, because the guarded upsert refuses on its own and
+		// conflictAfterFailedUpsert's re-read reports the same current
+		// version and body conflictOn would have. It stays anyway, for
+		// the same reason GetDocumentByPathForUpdate's own comment keeps
+		// FOR UPDATE though nothing here distinguishes its presence: a
+		// caller already known to be wrong is turned away before its
+		// body, its frontmatter and a version row are built, sent and
+		// rolled back. Two identical arguments, stated once rather than
+		// applied to one case and left silent on the other.
 		if expected != existing.CurrentVersion {
 			return dbq.Document{}, conflictOn(existing, in.IncludeCurrent)
 		}

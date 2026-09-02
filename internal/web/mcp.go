@@ -227,6 +227,35 @@ type ScopedArgs struct {
 
 func (a ScopedArgs) requestedProjectID() *string { return a.ProjectID }
 
+// statedProjectProblem is the one place either surface decides what a
+// stated project_id means. It answers with the wire code a refusal
+// carries, or "" when there is nothing to refuse: absent is silence,
+// a value that is not a uuid names no game at all and is therefore the
+// caller's own malformed argument, and a well-formed id that is not the
+// one the caller is working in is a scope violation.
+//
+// It is a shared function rather than two matching switches because the
+// REST mirror claims to enforce "the rule ScopedArgs states", and a
+// review found it enforcing a different one: it reported an unparseable
+// id as scope_violation ("names a different game than the URL", which is
+// false — it names none), and accepted an empty string outright. Each
+// surface still writes its own message: "this token is bound to another
+// game" is true of a token and meaningless to a designer with a session
+// cookie. The decision is shared; the wording is local.
+func statedProjectProblem(stated *string, bound uuid.UUID) string {
+	if stated == nil {
+		return ""
+	}
+	id, err := uuid.Parse(*stated)
+	if err != nil {
+		return errCodeBadRequest
+	}
+	if id != bound {
+		return errCodeScopeViolation
+	}
+	return ""
+}
+
 // scopedInput is what addScopedTool requires of its In type parameter:
 // the ability to report the optional project_id confirmation ScopedArgs
 // carries. Embedding ScopedArgs satisfies this automatically, by Go's
@@ -292,14 +321,11 @@ func addScopedTool[In scopedInput, Out any](s *Server, srv *mcp.Server, deps MCP
 		if !ok {
 			return mcpErrorResult(errCodeScopeViolation, "this caller has no game binding", nil), nil, nil
 		}
-		if requested := in.requestedProjectID(); requested != nil {
-			reqID, err := uuid.Parse(*requested)
-			if err != nil {
-				return mcpErrorResult(errCodeBadRequest, "project_id must be a valid uuid", nil), nil, nil
-			}
-			if reqID != projectID {
-				return mcpErrorResult(errCodeScopeViolation, "this token is bound to another game", nil), nil, nil
-			}
+		switch statedProjectProblem(in.requestedProjectID(), projectID) {
+		case errCodeBadRequest:
+			return mcpErrorResult(errCodeBadRequest, "project_id must be a valid uuid", nil), nil, nil
+		case errCodeScopeViolation:
+			return mcpErrorResult(errCodeScopeViolation, "this token is bound to another game", nil), nil, nil
 		}
 		out, err := handler(ctx, deps, projectID, in)
 		if err != nil {

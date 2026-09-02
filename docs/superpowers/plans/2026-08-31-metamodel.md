@@ -19,6 +19,7 @@
 | Path | Responsibility |
 |---|---|
 | `internal/db/migrations/0004_metamodel.sql` | the four domain tables, indexes, search vector |
+| `internal/db/migrations/0005_entity_listing_index.sql` | `entities_listing_idx`, the entity keyset's own sort order (Task 6's correction 20) |
 | `internal/db/queries/metamodel.sql` | every domain SQL statement |
 | `internal/metamodel/schema.go` | field-schema types and their JSON encoding |
 | `internal/metamodel/validate.go` | the one validator: schema + values → normalised or errors |
@@ -5877,6 +5878,272 @@ shipped; where they differ, the reason is here.
 15. **`ListEntitiesOfType` stays dropped**, as the plan says: still no
     caller.
 
+**Corrections from the review of Task 6** (a second pass over the landed
+package, made against a real database rather than by reading. Five
+findings, three of them medium, plus what the later sub-projects inherit.
+The theme is that every one of them is a *wrong answer with nothing in it
+that says so*, which is the failure mode this whole read surface is most
+exposed to: a cursor that pages the wrong game, a caller's own argument
+reported as a server fault, and a sort agreement defended by a comment.)
+
+16. **The cursor fingerprint digested the filter but not the game, so a
+    cursor paged silently into another game's listing.** Decision 1 above
+    introduced `fingerprintOf` to close exactly this hole — a position is
+    valid in any listing that shares the sort order, so it has to be
+    bound to the listing it came from — and then stopped one step short:
+    the parts were `("entities", typePart, invalidPart)`, and an
+    *unfiltered* listing has no type part at all, so two games' unfiltered
+    listings hashed to one fingerprint. `ListRelations` was worse: its
+    parts are the type and the two endpoints, all optional, and its sort
+    key is `created_at`, which is not game-specific in any way.
+
+    Proved live before the fix. Game A paged to row 8; A's cursor handed
+    to game B's listing was accepted and returned 2 of B's 10 rows,
+    hiding the first 8. On relations, with the two games seeded in
+    sequence so B's edges are all newer than A's, B's cursor fed to A
+    returned **0 of A's 2 edges**, with no error and no cursor — which an
+    agent reads as "this game has no edges" and acts on.
+
+    **Say what this was accurately: a wrong answer, not a leak.** No row
+    of another game was ever returned, and could not be; the listings'
+    project filters see to that, and
+    `TestAForgedCursorCannotReachAnotherGamesRows` already pinned it. What
+    crossed the boundary was the *position*, which is why nothing failed
+    and why it is worth a correction rather than a note.
+
+    **The fix is the project id as the first part of all three
+    `fingerprintOf` calls** (`list.go`'s two, `relations.go`'s one).
+    `TestACursorFromAnotherGameIsRefused` pins each of the three
+    listings, and a fourth subtest pins that a game's own cursor still
+    pages it, since narrowing a fingerprint could as easily have
+    invalidated every cursor as the wrong ones. Every within-game
+    mismatch decision 1 already caught is still caught —
+    `TestACursorIssuedForAnotherListingIsRefused` and
+    `TestARelationCursorBelongsToItsOwnFilter` are untouched and green.
+
+    One honest note on what the new test kills: the traversal subtest
+    passed *before* the fix, because a traversal's fingerprint already
+    carried the anchor entity id and the relation type id, both of which
+    are per-game UUIDs. The traversal was never exposed. It carries the
+    project id anyway, because the next reader adding a listing copies
+    the shape it sees, and a rule with an exception in it is not a rule.
+
+17. **The search query was unbounded and reported the caller's own
+    argument as an internal error.** `checkSearchQuery` asked one
+    question — is there a letter or a digit — and decision 10 above
+    records why. It asked nothing about size or about what the bytes
+    were. Measured live through `Search`, before the fix:
+
+    | query | result |
+    |---|---|
+    | `"hogger"`, a NUL, `"gnoll"` | `ERROR: invalid byte sequence for encoding "UTF8": 0x00 (SQLSTATE 22021)` |
+    | 126 KiB of distinct words | answered in 0.36 s |
+    | 263 KiB | `ERROR: stack depth limit exceeded (SQLSTATE 54001)` after 1.4 s |
+    | 536 KiB | the same, after 5.5 s |
+
+    Both failures were untyped, so both reached an agent as
+    `internal_error` — "the server is broken" — over a value the agent
+    itself supplied. A NUL is six characters of JSON escape, so an agent
+    assembling a query from a file produces one by accident. And the
+    growth is quadratic (four times the text for fifteen times the work),
+    so a handful of concurrent calls carrying text nobody vetted is a
+    denial of service the server does to itself. Correction 25's rule
+    applies without qualification: a caller's own argument, at a path, is
+    `invalid_input`.
+
+    The doc had spent a paragraph on the 128 KiB *index* bound (decision
+    12) while the *query* side was unbounded and undisclosed, which is
+    the worse of the two ways to be wrong about a limit — a caller
+    reading only the disclosed one concludes the other does not exist.
+
+    **The fix bounds the query at `MaxSearchQuery`, 4 KiB, and refuses
+    any control character**, both as `invalid_input` at path `query`,
+    both before a byte reaches Postgres. The bound is *exported* because
+    the point of a bound is that a caller can read it: Task 7 states it
+    in the search tool's description beside the row bound. Control
+    characters are refused rather than stripped — including newline and
+    tab — because deleting part of a caller's query answers a question it
+    did not ask; `simple` can make a lexeme of none of them, and a query
+    carrying one is a caller assembling text wrongly.
+    `TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument` runs
+    the payloads above and pins that a query of exactly the bound still
+    searches while one byte more does not.
+
+18. **The keyset's `ORDER BY` tiebreak was pinned by nothing.** Dropping
+    `id` from `ORDER BY name, id` on `ListEntitiesPage` and from
+    `ORDER BY e.name, e.id` on `ListEntitiesRelatedTo`, regenerating and
+    running the whole 229-test suite left it entirely green. Every test
+    in it seeded distinct names, so the tiebreak never mattered.
+
+    The code was correct; what was missing was the pin, and the SQL
+    comment is what makes that a finding rather than an omission. It
+    argues at length that a keyset whose comparison disagrees with its
+    own `ORDER BY` skips or repeats rows and says nothing about it — and
+    then defends only the collation half of that agreement (decision 2),
+    with a 300,000-pair measurement, while the half a one-line edit could
+    break went undefended. Duplicate names are ordinary in game content:
+    "Kobold", "Bandit", "Wolf" across a dozen zones.
+
+    `TestPagingIsStableWhenEveryRowSharesOneName` seeds ten entities
+    sharing one name and pages by three, over both listings. Under the
+    mutation it returns 5 distinct rows of 10 with 3 of them twice; with
+    `id` restored it walks all ten exactly once. **Both listings were
+    proved red under the mutation and green with it reverted**, and the
+    SQL comment now says which half of the agreement each argument
+    defends.
+
+19. **The cursor's contract was documented where no caller could read
+    it.** The best writing in this task was on the *unexported* `cursor`
+    type. `go doc metamodel EntityFilter` ended with "see cursor";
+    `go doc metamodel cursor` reports no such symbol. `ListEntities` and
+    `RelationFilter.Cursor` pointed at it too — three dangling
+    references, and a caller left holding the headline "a page is a
+    position, not a snapshot" with none of the content behind it.
+
+    The content matters, because the non-snapshot behaviour is real and
+    unreported: a row not yet read, renamed between two pages to sort
+    before the cursor's position, is never returned by that listing
+    again, however many pages remain. An agent walking a game it is also
+    editing can finish the walk having never seen a row that existed
+    throughout.
+
+    **The substance moved to `EntityPage`**, which is where every cursor
+    in the package comes from and which `go doc metamodel EntityPage`
+    resolves: what a position buys, the three ways a mutable sort key
+    lets a row be missed or repeated, that a cursor belongs to its game
+    and filter, and that it is neither signed nor a capability.
+    `EntityFilter.Cursor`, `RelationFilter.Cursor`, `RelationPage`,
+    `ListEntities` and `ListRelations` all now point there;
+    `RelationPage` adds the one difference in its favour, that nothing
+    edits `created_at`. `cursor` keeps only the shape of its three
+    fields. `TestARenamedRowCanMoveBehindTheReader` pins the behaviour
+    the doc now promises, which nothing pinned while it was documented
+    out of reach.
+
+20. **Three smaller ones.**
+
+    - **"The planner evaluates it once" was false.** `SearchEntities`
+      builds `plainto_tsquery` twice, in the projection and in the
+      predicate, because a `WHERE` cannot name an output alias, and the
+      comment claimed the planner folded them. Measured, 200
+      non-constant evaluations: 0.63 ms each written once against
+      1.44 ms written twice at 4 KiB, and 4.09 ms against 8.70 ms at
+      15 KiB. There is no common-subexpression elimination; the second
+      build costs what the first did. The claim is corrected and the
+      measurement recorded. It stays written twice: with correction 17's
+      4 KiB bound the doubling is worth about 0.8 ms on the largest query
+      this surface accepts, and the obvious single-build rewrite
+      (`WITH q AS MATERIALIZED (...)` joined in) was measured too — it
+      keeps the Bitmap Index Scan on `entities_search_idx`, but the
+      tsquery stops being a constant the planner can see, and the row
+      estimate for the match went from 5 (exact) to 100 (a default guess)
+      on the same data. Trading a correct selectivity estimate on every
+      search for 0.8 ms on the worst accepted query is the wrong way
+      round; whoever raises `MaxSearchQuery` should measure both again.
+
+    - **`entities` had no index serving the listing's sort**, only
+      `entities_key_key` and the two GINs. `relations` got
+      `relations_project_idx` in 0004 and its comment rightly says the
+      cursor's position "seeks rather than scans"; the entity keyset,
+      which is read far more often, sorted the whole game on every page.
+      **The index was added**, as `0005_entity_listing_index.sql`:
+      `entities_listing_idx` on `(project_id, name, id)`, the filter and
+      the whole sort key. Measured over 50,000 entities across 20 games,
+      paging the middle game 50 rows at a time: without it, a Bitmap
+      Index Scan over the game's 2,499 rows into a top-N sort, 75 shared
+      buffers a page, 200 pages in 235 ms; with it, an Index Scan with
+      the cursor's `(name, id)` folded into the Index Cond, 50 rows read,
+      52 buffers a page, 200 pages in 49 ms.
+
+      **What it costs**, since an index added without its price is half a
+      decision: 3,320 kB over those 50,000 rows, about 68 bytes a row,
+      and one more b-tree entry on every insert *and on every update that
+      moves `name`* — which is every rename, so this is a cost a content
+      editor pays and not only a bulk import. Over 2,000 single-row
+      inserts it did not rise above the round trip (580 ms with against
+      609 ms without), which is to say the cost is real but below what
+      this workload can measure. The migration carries all of it.
+
+    - **A stale forward reference.** `relationPageSize` still said "Task
+      6 owns the cursor, and when it arrives this stays the per-page
+      bound", sixty lines below the cursor that had arrived. Both that
+      sentence and the const block's "there is no cursor here" now
+      describe what is there.
+
+    One thing changed that the review did not ask for:
+    `TestMigrateUpDownUp` counted its `migrateDown` calls with a
+    hand-written four and a comment saying a fifth migration needs a
+    fifth call. Adding 0005 duly broke it, in a way that reads as a
+    broken rollback and is really a stale literal. It now takes the count
+    from the embedded migrations directory.
+
+**What the later sub-projects inherit from Task 6** (five things analysis
+and the views engine will copy, recorded here because that is where they
+will look for them, and each of them is a decision made once here that
+gets three copies if it is not.)
+
+21. **Fix the fingerprint before there are three copies of it.**
+    Correction 16 is done, and the reason it is recorded as an
+    inheritance rather than only as a bug is that a view query's cursor
+    is *far* likelier to cross games than an entity listing's: a saved
+    view is a named, shared, re-run thing, and its position is the kind
+    of value that ends up in a URL, a config file or an agent's memory of
+    "where I was". Whatever the views engine issues as a cursor carries
+    the project id in its fingerprint, in the first position, and it
+    inherits `fingerprintOf` rather than growing a second digest with its
+    own idea of which parts matter.
+
+22. **The `ORDER BY`/keyset agreement is a convention, not a mechanism.**
+    Correction 18 pinned the two listings that exist. Nothing stops a
+    views query being written with a keyset whose comparison and sort
+    disagree — no type, no test, no generated code; the only defence is
+    that someone reads the comment on the query above. That held for two
+    listings written in one sitting by one author. It will not hold for a
+    query language that emits SQL. **Before the third listing is written,
+    decide whether a shared helper should emit both halves from one
+    declaration of the sort key**, so that they cannot disagree, and
+    record the decision either way. If the answer is no, the reason has
+    to be better than "the comment is clear".
+
+23. **The traversal's join is right for one hop and the wrong shape to
+    recurse with.** `ListEntitiesRelatedTo`'s two arms are exclusive only
+    because `direction` is a scalar constant, which is what makes a
+    self-loop produce one row rather than two (decision 7). Hand that
+    join a `both`, or wrap it in a recursive CTE, and the property
+    evaporates: the same edge satisfies both arms and every walk doubles.
+    A transitive walk needs the edge-row shape the design doc assigns to
+    views — rows that *are* edges, carrying their direction — not this
+    join generalised. Whoever writes the walk should read decision 6's
+    argument for why there is no `"both"` here before deciding what a
+    view's rows are.
+
+24. **Unbounded caller text reaching Postgres is finding 17 today and the
+    D2 query parser tomorrow.** The rule is established here, so that it
+    is inherited rather than rediscovered: **a caller's own argument is
+    bounded before it reaches the database, and a failure over it is
+    `invalid_input` at that argument's path, never an untyped error.** A
+    view query string is exactly the same shape of input as a search
+    query — arbitrary caller text, of arbitrary length, handed to a
+    parser — and it will have the same two failure modes, a byte the
+    parser cannot accept and a length the parser is quadratic in. The
+    views sub-project states its own `MaxQuery`, exports it, and states
+    it in the tool description, the way `MaxSearchQuery` does.
+
+25. **Search ranking is deferred to Task 7, and Task 7 must not ship
+    without settling it.** Decision 11 records that `ts_rank` over the
+    unweighted vector means **a row whose name *is* the query does not
+    outrank a row that merely mentions it in a paragraph**, and that the
+    fix is `setweight` in `UpsertEntity` plus a rewrite of every stored
+    row, since existing vectors carry no weights at all. That deferral
+    currently lives in a Go comment and in decision 11, where a Task 7
+    implementer reading only their own section will not meet it.
+    **Task 7's exit condition therefore includes it explicitly** (see
+    Task 7's requirement list): the search tool does not ship until the
+    question "does a name match outrank a body match" has an answer that
+    is either implemented or written down as a promise the tool
+    description makes. `TestSearchRanksTheStrongerMatchFirst` is the test
+    that has to change when it is implemented, and it says so.
+
 - [x] **Step 1: Add the listing and search queries**
 
 `ListEntitiesPage` is printed in Task 4's Step 1 but was **not** added
@@ -6339,6 +6606,44 @@ handler that forgot to pass one, whereas a handler that merely forgot to
 game's data. Every entity/relation/type table already carries
 `project_id` precisely so this is expressible in SQL; use it in every
 query this task writes, not only the ones that feel like they need it.
+
+**Second requirement, inherited from Task 6 and blocking on the search
+tool alone: settle the ranking before the tool ships.** Task 6's `Search`
+ranks with `ts_rank` over an unweighted vector, which means **a row whose
+name *is* the query does not outrank a row that merely mentions it in a
+paragraph** — `TestSearchRanksTheStrongerMatchFirst` pins that today, and
+pins it as a limitation rather than as a promise. Task 6 deferred the
+call here deliberately (its decision 11 and correction 25), because
+fixing it is `setweight` in `UpsertEntity`'s own statement — a write path
+— plus a rewrite of every row already stored, since existing vectors
+carry no weights at all, and neither belongs in a read-only task.
+
+So this task does not ship `entities.search` until the question "does a
+name match outrank a body match?" has an answer, and the answer is one of
+exactly two things:
+
+1. **Implemented**: `setweight` in the write path, a migration or backfill
+   rewriting stored vectors, `ts_rank` given the weight array, and
+   `TestSearchRanksTheStrongerMatchFirst` rewritten to pin the new order
+   — it is the test that has to change, and it says so.
+2. **Written down**: the tool description states that ranking is
+   frequency-based and unweighted, in the same breath as the two bounds
+   below, so an agent that gets a lore paragraph above the character it
+   named knows why and does not conclude the character is missing.
+
+Shipping it with the deferral living only in a Go comment is the failure
+this requirement exists to prevent: the limitation is invisible from the
+tool surface, and an agent's recovery for a bad top hit is to search
+again, harder, forever.
+
+**The search tool's description states both bounds**, which Task 6 made
+readable for exactly this: `metamodel.MaxSearchQuery` (4 KiB of query
+text, refused above that as `invalid_input` at path `query`, along with
+any control character) and the 128 KiB per-row index bound
+(`searchTextLimit`), which is why a word deep inside a very long lore
+field is stored and re-read but not findable. It also states that the
+answer is a top-N by rank and not a page, since a caller holding exactly
+`limit` rows cannot otherwise tell whether there were more.
 
 **Files:**
 - Create: `internal/web/mcp_metamodel.go`

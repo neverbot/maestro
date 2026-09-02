@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -151,6 +152,17 @@ func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in Enti
 // undisturbed, and in atomic the whole batch is refused before anything
 // is written. Both arguments are at their call sites.
 //
+// In partial mode the later occurrence is refused **whether or not the
+// first one lands**: `[{key x, min_level: "not a number"}, {key x,
+// valid}]` reports index 0 as schema_violation and index 1 as
+// invalid_input, so x does not exist afterwards and the caller needs a
+// second call. Deliberate — the batch as submitted names one row twice
+// and nothing in it says which of the two was meant, so falling back to
+// "whichever survived validation" would make the result depend on the
+// other item's mistakes. Recorded in the core design's "Bulk writes"
+// too, because it costs an agent a round trip it can avoid by folding
+// repeated keys before it sends.
+//
 // Both modes publish only after their transaction has committed, and
 // publish one identity event per row that landed rather than one event
 // carrying a count: a count is a value, not an identity, and a
@@ -178,6 +190,24 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 	repeats := repeatedKeys(items)
 	var result BulkResult
 	for i, in := range items {
+		// Before anything else this loop does with an item, including
+		// the faults it can diagnose without touching the database.
+		// Nothing else stops this loop: every item has its own
+		// transaction, so a cancelled caller would otherwise turn a
+		// 500-row batch into 500 failed round trips whose report nobody
+		// is left to read, and the call would still return nil, which
+		// reads as "the batch ran". The repeat check below used to run
+		// first and `continue` without consulting the context at all, so
+		// a batch whose trailing item was a repeat returned that nil
+		// after the caller had gone — the exact failure this guard
+		// exists to prevent, escaping through the one arm that never
+		// asked. Whatever had already landed is returned with the error,
+		// because rows landing before the cancellation is partial mode's
+		// contract rather than a fact to hide.
+		if err := ctx.Err(); err != nil {
+			return result, fmt.Errorf("bulk upsert stopped at item %d: %w", i, err)
+		}
+
 		// A repeated key is the item's own fault and needs no round trip
 		// to diagnose. In partial mode it fails alone: the first
 		// occurrence is a perfectly good item, and refusing the batch
@@ -187,18 +217,6 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 			result.Failed = append(result.Failed, failureFor(i, in.Key,
 				&ValidationError{Code: codeInvalidInput, Fields: []FieldError{problem}}))
 			continue
-		}
-
-		// Nothing else stops this loop: every item has its own
-		// transaction, so a cancelled caller would otherwise turn a
-		// 500-row batch into 500 failed round trips whose report nobody
-		// is left to read, and the call would still return nil, which
-		// reads as "the batch ran". Whatever had already landed is
-		// returned with the error, because rows landing before the
-		// cancellation is partial mode's contract rather than a fact to
-		// hide.
-		if err := ctx.Err(); err != nil {
-			return result, fmt.Errorf("bulk upsert stopped at item %d: %w", i, err)
 		}
 
 		var written upsertedEntity
@@ -404,6 +422,12 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 		if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 			return upsertedEntity{}, mapped
 		}
+		// searchTextLimit already keeps the search vector under
+		// Postgres's cap, so this is a backstop and not the fix; see
+		// searchLimitExceeded for why it is here anyway.
+		if mapped := searchLimitExceeded(err); errors.Is(mapped, ErrInvalidInput) {
+			return upsertedEntity{}, mapped
+		}
 		return upsertedEntity{}, fmt.Errorf("upsert entity: %w", err)
 	}
 	// The locked read cannot be the only place the spelling is checked:
@@ -487,6 +511,33 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 	return nil
 }
 
+// searchTextLimit bounds, in bytes, what one row hands to to_tsvector.
+//
+// Postgres refuses to build a tsvector larger than 1,048,575 bytes
+// (SQLSTATE 54000), and nothing bounds a text or longtext value: a
+// designer pasting a lore document of a megabyte or two had the row
+// refused outright, which is the wrong trade in both directions. The
+// content is the product — a game's own writing, stored in `fields`
+// untouched — and the index is a convenience, so the index is what
+// gives way.
+//
+// 128 KiB, not something nearer the cap, because the vector is bigger
+// than the text it is built from and by how much depends on the words:
+// 1.5 MB of sixteen-byte distinct words measured 1.79 MB, and short
+// distinct words are worse still, since every entry pays its own
+// per-lexeme and position overhead. Eight times' headroom holds under
+// any of that while still indexing on the order of twenty thousand
+// words, which is more of one row than any search over this domain
+// reaches for.
+//
+// The bound is over the row's whole flattened text, not per field, since
+// the vector is built from the concatenation. A row longer than this is
+// searchable by the words in its first 128 KiB and not by the ones after
+// them; nothing about the stored values changes, and a re-read returns
+// exactly what was written. searchLimitExceeded is the backstop for a
+// value that reaches the cap by some other path.
+const searchTextLimit = 128 << 10
+
 // searchTextOf flattens the text values of a row so search can index
 // them. The keys are sorted so the same values always produce the same
 // tsvector input: map iteration order is randomised, and a search column
@@ -510,10 +561,27 @@ func searchTextOf(values map[string]any) string {
 
 	var b strings.Builder
 	write := func(v any) {
-		if s, ok := v.(string); ok {
-			b.WriteString(s)
-			b.WriteByte(' ')
+		s, ok := v.(string)
+		if !ok || b.Len() >= searchTextLimit {
+			return
 		}
+		if room := searchTextLimit - b.Len(); len(s) > room {
+			s = s[:room]
+			// Cut back off a rune split in half by the slice above: a
+			// partial rune is invalid UTF-8, and Postgres refuses a
+			// parameter that is not valid UTF-8 outright — turning a
+			// bound index into a failed write, which is the failure this
+			// whole bound exists to prevent. At most three bytes go.
+			for len(s) > 0 {
+				r, size := utf8.DecodeLastRuneInString(s)
+				if r != utf8.RuneError || size != 1 {
+					break
+				}
+				s = s[:len(s)-1]
+			}
+		}
+		b.WriteString(s)
+		b.WriteByte(' ')
 	}
 	for _, k := range keys {
 		// Validate normalises a list<text> to []any of strings, whatever

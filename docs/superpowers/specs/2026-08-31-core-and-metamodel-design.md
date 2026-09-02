@@ -468,6 +468,26 @@ and nothing else, and it returns no error of its own: the failures are
 the result. An `atomic` batch that fails returns an error naming the
 failing item and reports nothing as done.
 
+**A key repeated inside one batch** is refused rather than written
+twice, and the two modes answer it differently. In `atomic` the whole
+batch is refused before anything is written, as `invalid_input` naming
+every repeated index: the caller asked for n rows and at most n-1 can
+exist, so the batch cannot be satisfied as submitted. In `partial` only
+the later occurrence fails, as `invalid_input` at `items[<i>].key`
+naming the earlier index, and the rest of the batch is undisturbed.
+
+The consequence worth knowing before it costs a round trip: in
+`partial` the later occurrence is refused *whether or not the first one
+lands*. A batch holding `[{key: "x", min_level: "not a number"},
+{key: "x", <valid>}]` comes back with index 0 as `schema_violation` and
+index 1 as `invalid_input`, so key `x` does not exist afterwards and
+fixing it takes a second call. This is deliberate: the batch as
+submitted names one row twice and there is no reading of it that says
+which of the two the caller meant, so guessing "the one that happened to
+survive validation" would make the result depend on the other item's
+mistakes. An agent that builds a batch from a file should fold repeated
+keys itself before sending.
+
 A `mode` that is neither word is **refused** as `invalid_input` at path
 `mode`, rather than read as the default. Reading a typo as `partial`
 would silently downgrade an all-or-nothing request into one that lands

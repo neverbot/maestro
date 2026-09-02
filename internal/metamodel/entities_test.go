@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1609,5 +1610,215 @@ func TestAnAtomicBatchThatRepeatsAKeyIsRefusedWhole(t *testing.T) {
 		{TypeKey: "zone", Key: "hogger", Name: "Hogger"},
 	}, metamodel.BulkAtomic); err != nil {
 		t.Fatalf("one key under two types is not a repetition: %v", err)
+	}
+}
+
+// TestAnOversizedFieldIsStoredWholeAndFoundByAWordNearItsStart pins the
+// one trade the search index is allowed to make against a game's content.
+//
+// to_tsvector refuses to build a vector larger than 1,048,575 bytes
+// (SQLSTATE 54000), and nothing bounds the length of a text or longtext
+// value: a designer pasting a lore document of a megabyte or two had the
+// whole row refused, reported as internal_error — the code reserved for
+// what nobody planned for, which tells an agent to give up on a call it
+// could have fixed. The row is the product and the index is a
+// convenience, so the index is what gives way: searchTextOf bounds what
+// it hands the vector, `fields` is stored untouched, and the documented
+// consequence is that the tail of a very long field is not searchable.
+func TestAnOversizedFieldIsStoredWholeAndFoundByAWordNearItsStart(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	// Distinct words throughout, so every one of them takes its own
+	// entry in the vector: repeated prose compresses to a handful of
+	// lexemes and would never reach the cap.
+	var lore strings.Builder
+	for i := 0; lore.Len() < 1_500_000; i++ {
+		fmt.Fprintf(&lore, "lorewordnumber%d ", i)
+	}
+	summary := "openingsigil " + lore.String() + "closingsigil"
+
+	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "lore", Name: "The Long Story",
+		Fields: map[string]any{"min_level": float64(1), "summary": summary},
+	})
+	if err != nil {
+		t.Fatalf("a long field must not make the row unsavable: %v", err)
+	}
+
+	stored, err := svc.EntityByKey(ctx, project, "quest", "lore")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var fields struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(stored.Fields, &fields); err != nil {
+		t.Fatalf("decode stored fields: %v", err)
+	}
+	if fields.Summary != summary {
+		t.Fatalf("the stored field was altered: %d bytes stored, %d written",
+			len(fields.Summary), len(summary))
+	}
+
+	if !entityMatches(t, pool, row.ID, "openingsigil") {
+		t.Fatal("a word near the start of a long field is not searchable")
+	}
+	// The trade, asserted so it cannot be quietly widened or dropped: the
+	// tail of a field this long is outside the index.
+	if entityMatches(t, pool, row.ID, "closingsigil") {
+		t.Fatal("the whole of an oversized field reached the index; the bound is gone")
+	}
+}
+
+// cancelWhenLanded is a context that reports cancellation from the moment
+// a given entity key exists in the database.
+//
+// The finding it exists for is an ordering one: in UpsertEntities the
+// cancellation guard must be consulted before anything else the loop
+// does with an item, and a repeated key is the one thing that used to be
+// answered ahead of it. Forcing that ordering to matter needs a
+// cancellation landing *after* the last item that writes has committed
+// and *before* the loop reaches a trailing repeat — a window a
+// concurrent cancel() cannot be aimed at.
+//
+// So the context arms itself, synchronously, from inside Err(): the row
+// item 0 writes is visible to a second connection only once item 0's
+// transaction has committed, which is exactly the edge wanted. It cannot
+// disturb the item it observes — nothing in that item's transaction can
+// see the row before the commit that ends it — and it needs no timing
+// assumption at all.
+type cancelWhenLanded struct {
+	context.Context
+	t       *testing.T
+	pool    *pgxpool.Pool
+	project uuid.UUID
+	key     string
+
+	mu     sync.Mutex
+	closed chan struct{}
+	fired  bool
+}
+
+func (c *cancelWhenLanded) armed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fired {
+		return true
+	}
+	var exists bool
+	if err := c.pool.QueryRow(context.Background(),
+		`SELECT EXISTS (SELECT 1 FROM entities WHERE project_id = $1 AND key = $2)`,
+		c.project, c.key).Scan(&exists); err != nil {
+		c.t.Errorf("watch for the landed row: %v", err)
+		return false
+	}
+	if exists {
+		c.fired = true
+		close(c.closed)
+	}
+	return exists
+}
+
+func (c *cancelWhenLanded) Done() <-chan struct{} {
+	c.armed()
+	return c.closed
+}
+
+func (c *cancelWhenLanded) Err() error {
+	if c.armed() {
+		return context.Canceled
+	}
+	return nil
+}
+
+// TestACancelledBatchDoesNotAnswerARepeatedKeyInstead pins the order of
+// the two checks at the top of the bulk loop.
+//
+// A repeated key is a per-item failure and a cancellation stops the
+// batch, so which is consulted first decides what the caller is told
+// when both apply. With the repeat check first, a batch whose trailing
+// item is a repeat reported that repeat and returned a nil error —
+// which reads as "the batch ran" — even though the caller had gone
+// before the loop reached it. That is precisely the failure the
+// cancellation guard exists to prevent, escaping through the one arm
+// that never consulted it.
+func TestACancelledBatchDoesNotAnswerARepeatedKeyInstead(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	base := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	ctx := &cancelWhenLanded{
+		Context: base, t: t, pool: pool, project: project, key: "a",
+		closed: make(chan struct{}),
+	}
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "a", Name: "A", Fields: map[string]any{"min_level": float64(1)}},
+		{TypeKey: "quest", Key: "a", Name: "Again", Fields: map[string]any{"min_level": float64(2)}},
+	}, metamodel.BulkPartial)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if !strings.Contains(err.Error(), "item 1") {
+		t.Fatalf("err = %v, want it to name the item the batch stopped at", err)
+	}
+	for _, failure := range result.Failed {
+		t.Fatalf("a batch that stopped must report no per-item failure, got %+v", failure)
+	}
+	// Partial mode's contract is unchanged: what landed before the
+	// cancellation comes back rather than being hidden.
+	if len(result.Succeeded) != 1 || result.Succeeded[0].Key != "a" {
+		t.Fatalf("Succeeded = %+v, want only item 0", result.Succeeded)
+	}
+}
+
+// TestARepeatIsRefusedEvenWhenTheFirstOccurrenceIsDoomed pins the corner
+// of the repeated-key rule that costs an agent a round trip, so that the
+// core design's claim about it stays true.
+//
+// The first occurrence fails validation and the second is well formed,
+// so a caller could reasonably expect the good one to land. It does not:
+// the repeat is decided from the batch as submitted, before any item
+// runs, and the key ends up written by neither. Falling back to
+// "whichever survived validation" would make one item's outcome depend
+// on another item's mistakes, in a batch that never said which of the
+// two rows it meant.
+func TestARepeatIsRefusedEvenWhenTheFirstOccurrenceIsDoomed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	result, err := svc.UpsertEntities(ctx, project, []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "x", Name: "Doomed",
+			Fields: map[string]any{"min_level": "not a number"}},
+		{TypeKey: "quest", Key: "x", Name: "Fine",
+			Fields: map[string]any{"min_level": float64(1)}},
+	}, metamodel.BulkPartial)
+	if err != nil {
+		t.Fatalf("a partial batch reports its failures rather than erroring: %v", err)
+	}
+	if len(result.Succeeded) != 0 {
+		t.Fatalf("Succeeded = %+v, want nothing written", result.Succeeded)
+	}
+	if len(result.Failed) != 2 {
+		t.Fatalf("Failed = %+v, want both items reported", result.Failed)
+	}
+	if result.Failed[0].Index != 0 || result.Failed[0].Code != "schema_violation" {
+		t.Fatalf("Failed[0] = %+v, want index 0 as schema_violation", result.Failed[0])
+	}
+	if result.Failed[1].Index != 1 || result.Failed[1].Code != "invalid_input" {
+		t.Fatalf("Failed[1] = %+v, want index 1 as invalid_input", result.Failed[1])
+	}
+	if _, err := svc.EntityByKey(ctx, project, "quest", "x"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the key must be written by neither item, got %v", err)
 	}
 }

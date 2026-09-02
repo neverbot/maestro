@@ -143,6 +143,36 @@ func actorConstraintViolation(err error) error {
 	return err
 }
 
+// searchLimitExceeded recognises a write refused because a value was too
+// large for something the database had to build from it, and reports it
+// as the caller's own input rather than as a server fault; every other
+// error passes through unchanged.
+//
+// The only path that reaches it today is the search vector, and
+// searchTextLimit is what keeps that path from being reached at all: the
+// text handed to to_tsvector is bounded well below the 1,048,575-byte
+// cap, so no field a designer can write gets here. This is the backstop
+// for the case where something else does — a future write path that
+// builds an index from a value without going through searchTextOf, or a
+// Postgres limit on a column nobody has hit yet. 54000 is
+// program_limit_exceeded, and every instance of it is the same shape of
+// fault: something the caller sent is too big, and shortening it is a
+// fix the caller can make. Left unmapped it lands on failureFor's
+// default arm as internal_error, which tells an agent to give up on a
+// call it could have fixed.
+//
+// The database's own message is carried through rather than paraphrased:
+// it names the limit and the size that broke it, which is the only part
+// of this a caller can act on numerically.
+func searchLimitExceeded(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "54000" {
+		return err
+	}
+	return fmt.Errorf("%w: a value of this row is too large to index (%s): %w",
+		ErrInvalidInput, pgErr.Message, err)
+}
+
 // notFound maps pgx's no-rows sentinel onto the domain's, leaving every
 // other error wrapped with what was being looked up.
 func notFound(err error, what string) error {

@@ -1,6 +1,7 @@
 -- name: UpsertEntityType :one
--- Every statement in this file filters on the resolved project id,
--- including the ones addressing a row by its primary key: isolation
+-- Every statement in this file carries the resolved project id -- the
+-- reads and deletes as a filter, including the ones addressing a row by
+-- its primary key, and the upserts as the column they write. Isolation
 -- between games is enforced in SQL, not in Go, so a query trusting an id
 -- alone would hand a caller another game's row the moment an id leaked.
 --
@@ -18,12 +19,12 @@
 --
 -- It is *not* the mechanism for the statements reaching entities through
 -- an entity_type_id (ListEntityFieldsOfType, MarkEntitiesOfTypeInvalid,
--- DeleteEntitiesOfType, GetEntityByKey, GetEntityByKeyForUpdate,
--- UpsertEntity). 0004_metamodel.sql gives entities a composite
+-- DeleteEntitiesOfType, GetEntityByKey, GetEntityByKeyForUpdate).
+-- 0004_metamodel.sql gives entities a composite
 -- FOREIGN KEY (entity_type_id, project_id) REFERENCES
 -- entity_types (id, project_id), so an entity's project is already
 -- determined by its type's: no row can match a type id under one project
--- id and not another, and dropping the filter from any of those six
+-- id and not another, and dropping the filter from any of those five
 -- changes no result and can be caught by no test. They keep it as
 -- defence in depth, against a future schema that relaxes that composite
 -- key, and so that a
@@ -31,6 +32,13 @@
 -- having to work out which statements happen to be covered by a
 -- constraint. Written down here because a comment claiming these filters
 -- are what isolates games would be relied on as if it were true.
+--
+-- UpsertEntity is deliberately not in that list, and is not unobservable
+-- either: it has no project filter at all. Its project_id is a NOT NULL
+-- column value it writes and part of its ON CONFLICT
+-- (project_id, entity_type_id, lower(key)) target, so removing it is a
+-- syntax or constraint error rather than a silently widened query --
+-- nothing about it can be dropped and still compile.
 --
 -- No write here sets updated_at. 0004_metamodel.sql puts a set_updated_at
 -- trigger on all four tables, so the column has one mechanism behind it

@@ -3696,6 +3696,12 @@ rather than on what was planned):
    slices, which is also what removed the atomic path's index pairing
    (correction 4). `TestEntityEventsCarryTheStoredIdentity` pins it,
    proved red by publishing `in.TypeKey`.
+
+   **Superseded by correction 14 — read that before relying on this
+   one.** "The events carry the stored spellings" was true of the code
+   and pinned only on the single path: both bulk paths could publish the
+   caller's own spelling of the type key and leave the whole suite
+   green. Correction 14 is where all three paths are actually pinned.
 3. **`RemoveEntity` reads the type as well as the row.** The block
    published `entityEvent{ID: id, Key: removed.Key}`, leaving `type_key`
    empty on every removal — Task 3's correction 22 exactly, under a
@@ -3944,6 +3950,100 @@ no-leakage claim survived probing with secret-marked neighbours):
     reports failures and nothing else. **Task 7 must decide what a
     successful batch tells an agent**: how many rows landed, under which
     keys, at which versions. Recorded on the struct as well.
+
+**Corrections from the second review of Task 4** (a third pass over the
+same package, closing what the review of the corrections above found;
+the design was approved again, and what follows is one real defect, two
+ordering-and-wording fixes, and two things the plan was not saying):
+
+21. **A long field no longer makes the row unsavable.** `to_tsvector`
+    refuses to build a vector larger than 1,048,575 bytes (SQLSTATE
+    54000) and nothing bounded a `text` or `longtext` value — `coerce`
+    checks the type and not the length. A `longtext` of 1.49 MB of
+    distinct words came back as `ERROR: string is too long for tsvector
+    (2197988 bytes, max 1048575 bytes)`, filed under `internal_error` in
+    a partial batch and taking the whole batch down in atomic mode: the
+    code reserved for what nobody planned for, telling an agent to give
+    up on a call it could have fixed. Correction 13 enlarged the surface,
+    since list elements now feed the vector too. **A designer pasting a
+    lore document simply could not save the row.**
+
+    What gives way is the index, not the content. `fields` is stored
+    untouched — a game's writing is the product, and refusing it over an
+    index limit is the wrong trade — and `searchTextOf` now bounds what
+    it hands the vector at `searchTextLimit`, 128 KiB over the row's
+    whole flattened text, cutting back off any rune the bound splits (a
+    partial rune is invalid UTF-8, which Postgres refuses outright, which
+    would have turned the fix back into the bug). 128 KiB and not
+    something nearer the cap because the vector is *bigger* than the text
+    it is built from and by how much depends on the words: 1.5 MB of
+    sixteen-byte distinct words measured 1.79 MB, and shorter distinct
+    words are worse, every entry paying its own lexeme and position
+    overhead. Eight times' headroom survives any of that and still
+    indexes on the order of twenty thousand words. The documented
+    consequence, in the code and in `entities.upsert`'s behaviour: a row
+    longer than that is searchable by the words in its first 128 KiB and
+    not by the ones after them, and nothing about the stored values
+    changes.
+
+    `searchLimitExceeded` maps SQLSTATE 54000 to `invalid_input` as a
+    backstop, carrying Postgres's own message, for a future path that
+    builds an index from a value without going through `searchTextOf`;
+    every other SQLSTATE passes through untouched.
+    `TestAnOversizedFieldIsStoredWholeAndFoundByAWordNearItsStart` writes
+    1.5 MB of distinct words, requires the row to save, reads the field
+    back byte-identical, requires a word near the start to be found and
+    requires a word at the end **not** to be — so the bound cannot be
+    quietly widened or dropped either way. Proved red on the landed code
+    (the exact reported error) and again by raising the limit past the
+    cap. `TestAValueTooLargeToIndexIsCallerFixable` pins the mapping,
+    proved red by changing the SQLSTATE it matches.
+22. **The cancellation guard is consulted before the repeat check.** The
+    `repeats[i]` arm ran first and `continue`d without ever asking
+    `ctx.Err()`, so a batch whose trailing item was a repeated key
+    reported that repeat and returned `(result, nil)` — "the batch ran"
+    — after the caller had gone. The guard's whole purpose escaped
+    through the one arm that never asked. The check is hoisted above
+    everything else the loop does with an item.
+
+    The review that found it could not force it deterministically and
+    reported it from the code path; it is forceable.
+    `TestACancelledBatchDoesNotAnswerARepeatedKeyInstead` supplies a
+    context that arms itself *from inside `Err()`* by asking a second
+    connection whether item 0's row exists: that row is visible only once
+    item 0's transaction has committed, which is exactly the window
+    wanted, and it cannot disturb the item it observes. No timing
+    assumption, no `cancel()` aimed at a window a scheduler owns. Proved
+    red on the landed code, which returned a nil error and an
+    `invalid_input` failure for item 1.
+23. **The SQL header's own overclaim.** Correction 17 listed
+    `UpsertEntity` among six statements whose `project_id` filter "can be
+    caught by no test" and is kept as defence in depth. `UpsertEntity`
+    has no project *filter*: `project_id` is a `NOT NULL` column value it
+    writes and part of its `ON CONFLICT (project_id, entity_type_id,
+    lower(key))` target, so removing it is a hard error and trivially
+    observable — the opposite of unobservable. The other five are
+    correctly classified; the sentence now names five, `UpsertEntity` is
+    called out separately for what it actually is, and the header's
+    opening line no longer says every statement "filters on" the project
+    id when the upserts carry it as the column they write.
+24. **Correction 2 now points forward to correction 14.** A reader
+    reaching it first was told the events carry the stored spellings,
+    backed by a test that exercised one of the three write paths.
+25. **A repeated key is refused even when its first occurrence is
+    doomed, and that is now written down.** In partial mode
+    `[{key x, min_level: "not a number"}, {key x, valid}]` returns index
+    0 as `schema_violation` and index 1 as `invalid_input`, so `x` is
+    written by neither item and fixing it costs a second round trip. It
+    is the right answer — the batch as submitted names one row twice and
+    nothing in it says which was meant, and falling back to "whichever
+    survived validation" would make one item's outcome depend on
+    another's mistakes — but it was undocumented, and an agent meets it
+    the first time it builds a batch from a file. Recorded in the core
+    design's "Bulk writes", where an agent's author reads, and on
+    `UpsertEntities`. `TestARepeatIsRefusedEvenWhenTheFirstOccurrenceIsDoomed`
+    pins it so the claim stays true, proved red by disabling the partial
+    path's repeat arm.
 
 **The partial-failure contract, stated once.** In `BulkPartial` each item
 is its own transaction: the rows that fit land, the ones that do not come

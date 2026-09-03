@@ -5708,6 +5708,120 @@ git add internal/db/queries internal/db/dbq internal/metamodel
 git commit -m "feat: relation types and relations with endpoint validation"
 ```
 
+**Corrections from Metamodel 12 (a fifth pass, made long after Tasks 7
+and 8 shipped the two surfaces, against the one thing nine review rounds
+never asked: whether anything could read back what this task had built a
+writer for. It could not. One finding, closed on both surfaces and in the
+domain; one adjacent hole recorded and deliberately not closed here.)**
+
+30. **An edge's field values were write-only.** This task gave relation
+    types a field schema and gave `UpsertRelation` the validation that
+    enforces it, and `TestRelationCarriesItsOwnFields` proved a value
+    goes in and lands in the row. Nothing ever proved one comes back
+    out, because nothing could: `RelationOutput` carried no fields,
+    there was no `relations.get`, and `relations.list` — the only tool
+    that returns an edge at all — answered with identity and endpoints
+    and nothing else. Task 9's end-to-end seeding wrote a validated
+    `seat` and `season` onto 120 `drives` edges and could not read one
+    of them back by any means short of SQL. It is the readme's own
+    example of why typed edges exist — a door declaring which ability
+    opens it — written and unreadable, and it blocked the views
+    sub-project, which renders an edge's declared values.
+
+    Every review round verified the write. The defect was found by using
+    the product end to end, which is the general lesson: a feature is
+    not shipped until a public reader returns what a public writer
+    accepted, and a test that only writes proves half of it.
+
+    **The fix is three pieces, and the shape was the decision.**
+
+    - `RelationByEdge` (internal/metamodel/relations.go) reads one edge
+      by the triple that identifies it — the relation type's key plus
+      both endpoints as `(type_key, key)` refs — over a new
+      `GetRelationByEdge`, which seeks the `relations_edge_key` unique
+      index and so returns at most one row. It is `EntityByKey`'s
+      counterpart, and the address is deliberately the one
+      `relations.upsert` writes an edge under, not the endpoint *ids*
+      `relations.list` filters on: an agent that has just written an
+      edge holds the three strings and not the ids, and Task 9's own
+      finding 8 measured what a by-id-only address costs. The three
+      not_founds stay distinct — an unknown relation type, an unknown
+      endpoint, and a real address holding no edge are three different
+      mistakes.
+    - `RelationOutput` grows `fields`, and `relations.list` grows the
+      `verbose` flag that fills it. **Both surfaces, one core**: they
+      share `relationsList`/`relationsGet` and one `relationOf`, which
+      is what stops a later change from putting the fields back on one
+      surface only.
+    - `relations.get` on MCP and `GET /relations/one` on REST, with the
+      address in the query string because an edge is named by five keys
+      and this file's route rule keeps a row key out of a path segment
+      it shares with anything — `/docs/one` already does this.
+
+    **On `verbose`: the same default as `entities.list`, for a stronger
+    version of the same reason.** That listing defaults its fields off
+    arguing that five hundred rows with their values is the whole game
+    back in one answer. A graph has more edges than nodes and the edge
+    listing has the same 500-row cap, so a full verbose page of edges is
+    strictly more of the game than the page that argument was written
+    for, and an agent walking a graph almost always wants what each edge
+    *joins* rather than what it carries. So: off by default on the
+    listing, and always on for `relations.get`, exactly as
+    `entities.get` always answers with an entity's fields — a caller
+    naming one edge is asking for its content. A caller that wants one
+    edge's values now pays one call instead of a filtered page, which is
+    the second reason the `get` earned its place rather than the flag
+    alone carrying the fix.
+
+    **The relation type's schema was already discoverable**, and stays
+    where it is: `relation_types.get` publishes `field_schema` in full,
+    and both tool descriptions now point a caller reading an edge's
+    values at it. `relation_types.list` remains slim, the same shape
+    `types.list` has.
+
+    **Task 9's pin was a test that passed for the wrong reason**, and
+    that is worth recording separately. It asserted that a marshalled
+    edge contains neither `season` nor `seat`, with a note to delete the
+    case once an edge reports its fields — but it listed without
+    `verbose`, so it stayed green through the entire fix. It is replaced
+    by the read-back it was standing in for: the seeded values go in
+    through `relations.upsert` and come out through `relations.get` and
+    a verbose listing, on a driver whose `seat` was written explicitly
+    rather than defaulted, so a reader that echoed the schema instead of
+    the row would fail it.
+
+31. **Recorded, not fixed: the write path can still be made to answer
+    with a Postgres error.** `RelationByEdge` bounds all five of its
+    keys with `rowKeyProblems` before any lookup, the guard
+    `ListRelations` already runs on its own type key filter, because a
+    by-key statement matches on `lower(key)` and `lower()` on a string
+    carrying a NUL byte is SQLSTATE 22021 — the caller's bad argument
+    leaving the domain as a server fault. `UpsertRelation` has no such
+    guard: measured, a NUL byte in the type key answers `lookup relation
+    type: ERROR: invalid byte sequence for encoding "UTF8" (SQLSTATE
+    22021)`, and one in an endpoint key aborts the transaction and
+    reports both that and a 25P02. Closing it changes a write path and
+    the per-item failure codes a bulk batch reports, which a read defect
+    is not the place for; `Ref`'s own doc comment now says the hole is
+    there rather than implying it is closed.
+
+**Does this change the case for Metamodel 10?** Metamodel 10 records
+that relations have no `invalid` flag and no re-validation path, so
+editing a relation type's field schema leaves existing edges unchecked
+where entities get flagged. **It strengthens it, and changes its
+character from cosmetic to substantive.** While an edge's values were
+write-only the gap was invisible: nothing could show a caller a value
+that no longer fits its schema, so "unflagged" and "unreadable" looked
+the same from outside. Now `relations.get` and a verbose
+`relations.list` hand a caller values that may not satisfy the schema
+they claim to answer to, with nothing in the answer saying so — and the
+views sub-project is about to render exactly those values beside the
+relation type that declares them. An entity in the same state carries
+`invalid: true`; an edge carries silence. It is still not this task's
+change — it wants a migration for the column and a re-validation pass —
+but the argument for doing it is no longer "for symmetry with
+entities".
+
 ---
 
 ### Task 6: Listing, one-hop traversal, pagination and search
@@ -8674,8 +8788,14 @@ and over what seeding a real game found in the eight tasks under it):
    and no tool on either surface returns them: `RelationOutput` carries
    no fields, there is no `relations.get`, and `relations.list` is the
    only way to see an edge. This is the largest gap the seed found — a
-   whole declared feature is write-only — and it is pinned as a failing
+   whole declared feature is write-only — and it was pinned as an
    expectation to delete rather than left in prose.
+
+   **Closed by Metamodel 12**, whose corrections block sits at the end
+   of Task 5, where the schema and its validation were built. The pin
+   itself turned out to pass for the wrong reason — it listed without
+   `verbose`, so it stayed green through the fix — and is replaced by
+   the read-back it stood for.
 
 7. **Search is unconditionally verbose and search does not index keys.**
    `entities.list` defaults `verbose` off, arguing that five hundred rows

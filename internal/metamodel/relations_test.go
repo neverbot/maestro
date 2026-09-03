@@ -2252,7 +2252,7 @@ func TestAnEdgeIsReadableByTheTripleItWasWrittenUnder(t *testing.T) {
 }
 
 // TestEachMissingPieceOfAnEdgeRead names what a reader got wrong, the
-// same way TestEachMissingPieceOfAnEdge does for a write: three
+// same way TestEachMissingPieceOfAnEdgeIsNamed does for a write: three
 // addresses in one call means three ways to be wrong, and "not found"
 // alone leaves a caller guessing which.
 func TestEachMissingPieceOfAnEdgeRead(t *testing.T) {

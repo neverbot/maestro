@@ -626,7 +626,37 @@ func checkAllText(v any) []metamodel.FieldError {
 // bound, which is the defect this whole walk exists to close; visiting it
 // at the container's pointer addresses the caller's own document, since
 // that is where the caller wrote it.
+//
+// **An anonymous (embedded) field is walked at its container's pointer
+// too, whether or not reflection calls it exported**, and that is the
+// same rule stated for the other way a Go field and a document member can
+// disagree. `reflect` reports an anonymous field whose *type* is
+// unexported as unexported, while encoding/json promotes and populates
+// that type's exported fields as ordinary top-level members of the
+// document — so an `IsExported` guard used as a membership test drops
+// real caller text on the floor. It can be read through even though it
+// cannot be set, which is all a walk needs. The promoted members are
+// addressed at the container's pointer because that is where the caller
+// wrote them: an embedded type's Go name never appears in the document,
+// and the pointer is the whole product of a QueryError.
+// TestAnEmbeddedTypesPromotedFieldIsBounded pins both halves.
+//
+// A `json.RawMessage` is decoded and walked rather than treated as the
+// byte slice it is, because it is a *deferred* document member: its bytes
+// are caller text that no later stage would ever bound. A plain `[]byte`
+// is not walked, and must not be used for caller text: it decodes from
+// base64, so its bytes are not a string the caller wrote.
 func walkStrings(v reflect.Value, ptr string, visit func(ptr, value string)) {
+	if v.Kind() == reflect.Slice && v.Type() == rawMessageType && !v.IsNil() {
+		var deferred any
+		// Bytes rather than Interface: the latter panics on a value
+		// reached through an unexported field, which the embedded case
+		// below reaches on purpose.
+		if err := json.Unmarshal(v.Bytes(), &deferred); err == nil {
+			walkStrings(reflect.ValueOf(deferred), ptr, visit)
+		}
+		return
+	}
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Interface:
 		if !v.IsNil() {
@@ -640,30 +670,51 @@ func walkStrings(v reflect.Value, ptr string, visit func(ptr, value string)) {
 		}
 	case reflect.Map:
 		for _, key := range v.MapKeys() {
-			name := fmt.Sprint(key.Interface())
+			// Formatted through the reflect.Value rather than through
+			// Interface(), which panics on anything reached through an
+			// unexported field — and an embedded unexported type is now
+			// reached on purpose.
+			name := key.String()
 			if key.Kind() == reflect.String {
 				visit(ptr+pointer(name), key.String())
+			} else {
+				name = fmt.Sprint(key)
 			}
 			walkStrings(v.MapIndex(key), ptr+pointer(name), visit)
 		}
 	case reflect.Struct:
 		t := v.Type()
 		for i := 0; i < v.NumField(); i++ {
-			if !t.Field(i).IsExported() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			// The membership rules encoding/json itself applies: an
+			// untagged anonymous struct field is promoted, and only a
+			// non-anonymous unexported field is genuinely absent from the
+			// document.
+			ft := f.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			promoted := f.Anonymous && name == "" && ft.Kind() == reflect.Struct
+			if !f.IsExported() && !promoted {
 				continue
 			}
-			name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
 			at := ptr + pointer(name)
-			switch name {
-			case "-":
+			switch {
+			case promoted, name == "-":
 				at = ptr
-			case "":
-				at = ptr + pointer(t.Field(i).Name)
+			case name == "":
+				at = ptr + pointer(f.Name)
 			}
 			walkStrings(v.Field(i), at, visit)
 		}
 	}
 }
+
+// rawMessageType is compared by identity rather than by assignability: a
+// named type whose underlying type is []byte is base64 in a document,
+// while a json.RawMessage is a document member the decode postponed.
+var rawMessageType = reflect.TypeOf(json.RawMessage(nil))
 
 // -----------------------------------------------------------------------
 // Task 3 owns everything below this line. It lands here rather than in

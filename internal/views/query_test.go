@@ -327,3 +327,77 @@ func TestAParamCapIsRefusedAtParseTime(t *testing.T) {
 	b.WriteString(`],"from":[{"type":"quest"}]}`)
 	parseFails(t, b.String(), "/params", "at most 16")
 }
+
+// TestEveryPredicateInAParsedQueryIsNormalised pins the other half of
+// applyDefaults, and it is deliberately spelled over *all three* predicate
+// positions the document has. A selector's `where` was normalised while a
+// step's `where` and `edge_where` were not, which is an asymmetry that
+// costs Task 4 a nil FieldRef in exactly the branch a two-branch query
+// needs; nothing pinned either the calls or what they fill, so the fix
+// could be deleted and the package would stay green.
+//
+// It also pins the nesting: normalise recurses through `all`, `any` and
+// `not`, so a leaf three levels down carries its reference too.
+func TestEveryPredicateInAParsedQueryIsNormalised(t *testing.T) {
+	q, err := ParseQuery([]byte(`{"v":1,
+	  "from":[{"type":"quest","as":"q",
+	           "where":{"all":[{"field":"rank","op":"eq","value":1},
+	                           {"not":{"any":[{"field":"@name","op":"eq","value":"x"}]}}]}}],
+	  "traverse":[{"from":"q","via":"requires","as":"r",
+	               "where":{"field":"tier","op":"eq","value":2},
+	               "edge_where":{"field":"weight","op":"eq","value":3}}]}`))
+	if err != nil {
+		t.Fatalf("must parse: %v", err)
+	}
+
+	// Every leaf reachable from every predicate position, and the
+	// reference each one must carry.
+	leaves := map[string]*Predicate{
+		"/from/0/where/all/0":           &q.From[0].Where.All[0],
+		"/from/0/where/all/1/not/any/0": &q.From[0].Where.All[1].Not.Any[0],
+		"/traverse/0/where":             q.Traverse[0].Where,
+		"/traverse/0/edge_where":        q.Traverse[0].EdgeWhere,
+	}
+	for at, leaf := range leaves {
+		if leaf.FieldRef.Key != leaf.Field {
+			t.Errorf("the predicate at %s was not normalised: field %q, FieldRef %+v — "+
+				"Task 4 reads FieldRef and never Field", at, leaf.Field, leaf.FieldRef)
+		}
+		if want := strings.HasPrefix(leaf.Field, "@"); leaf.FieldRef.Builtin != want {
+			t.Errorf("the predicate at %s must record that %q is a built-in: %v, want %v",
+				at, leaf.Field, leaf.FieldRef.Builtin, want)
+		}
+	}
+	// The built-in leaf is the one that makes Builtin mean something: with
+	// it missing, every reference above could be a declared field key and
+	// the assertion would hold with the flag hard-wired to false.
+	if !q.From[0].Where.All[1].Not.Any[0].FieldRef.Builtin {
+		t.Fatal("@name must be recorded as a built-in")
+	}
+}
+
+// TestALabelDefaultsToTheEntityName pins the last default applyDefaults
+// applies, which every renderer in this sub-project reads: a node with no
+// projection is drawn with its name, not with nothing. Every sibling
+// default in this file is pinned; this one was not.
+func TestALabelDefaultsToTheEntityName(t *testing.T) {
+	q, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}]}`))
+	if err != nil {
+		t.Fatalf("must parse: %v", err)
+	}
+	if q.Project == nil {
+		t.Fatal("project must default to an empty projection rather than staying nil")
+	}
+	if q.Project.Label == nil || q.Project.Label.Attr != AttrName {
+		t.Fatalf("label must default to %q, got %+v", AttrName, q.Project.Label)
+	}
+	// A document that said what it wanted keeps it: the default is a
+	// default and not an overwrite.
+	q, err = ParseQuery([]byte(`{"v":1,"from":[{"type":"quest"}],"project":{"label":"title"}}`))
+	if err != nil {
+		t.Fatalf("must parse: %v", err)
+	}
+	if q.Project.Label.Attr != "title" {
+		t.Fatalf("an explicit label must survive the default, got %+v", q.Project.Label)
+	}
+}

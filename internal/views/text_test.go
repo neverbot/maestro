@@ -259,3 +259,156 @@ func TestAnOverlongStringIsRefusedWhereverItSits(t *testing.T) {
 		t.Fatalf("a value of exactly %d bytes must be accepted: %v", MaxStringLen, err)
 	}
 }
+
+// The three shapes TestAnEmbeddedTypesPromotedFieldIsBounded needs.
+// embeddedUnexported is deliberately an *unexported type*: reflection
+// reports the anonymous field holding it as unexported, while
+// encoding/json promotes and populates its exported fields as ordinary
+// top-level members of the document. A walk that read `IsExported` as a
+// statement about document membership would drop `promoted_hidden` on the
+// floor, which is the seventh instance of this project's standing defect
+// and the one hiding inside the mechanism written to close the class.
+type embeddedUnexported struct {
+	PromotedHidden string `json:"promoted_hidden"`
+}
+
+// EmbeddedExported is the other half: the field is exported, so the walk
+// reached it before — but at `/EmbeddedExported/promoted_visible`, which
+// is the *Go* name of a type that never appears in the caller's document.
+type EmbeddedExported struct {
+	PromotedVisible string `json:"promoted_visible"`
+}
+
+type embeddingHost struct {
+	embeddedUnexported
+	EmbeddedExported
+	Named string `json:"named"`
+	// Not a member of the document at all: encoding/json can neither read
+	// nor write it, so nothing a caller wrote can be in it.
+	notAMember string
+}
+
+// TestAnEmbeddedTypesPromotedFieldIsBounded closes the seventh instance
+// of the class this walk exists to close, and it is latent only because
+// no document type embeds anything *today*: fourteen later tasks add
+// types under this walk's promise that a walk cannot forget a field, and
+// sharing a common struct across them is the most natural refactor there
+// is.
+//
+// The test asserts three things at once, and the first is what makes the
+// other two mean anything:
+//
+//  1. **All three strings are really members of the decoded document.**
+//     The decode is done here rather than assumed, so if encoding/json
+//     ever stops promoting an unexported type's exported fields this test
+//     says so rather than quietly pinning a walk of something nobody can
+//     write.
+//  2. Both promoted strings are bounded.
+//  3. Both are reported **at the container's own pointer** — `/named`'s
+//     neighbours, not `/EmbeddedExported/promoted_visible`. The pointer is
+//     the whole product of a QueryError: an agent that gets one knows
+//     which member to rewrite, and an embedded type's Go name is not a
+//     member it can find.
+func TestAnEmbeddedTypesPromotedFieldIsBounded(t *testing.T) {
+	var host embeddingHost
+	doc := `{"promoted_hidden":"a` + badChar + `","promoted_visible":"b` + badChar +
+		`","named":"c` + badChar + `"}`
+	if err := json.Unmarshal([]byte(doc), &host); err != nil {
+		t.Fatalf("the document must decode: %v", err)
+	}
+	if host.embeddedUnexported.PromotedHidden == "" {
+		t.Fatal("encoding/json is expected to promote an unexported type's exported field: " +
+			"if it no longer does, the walk's embedded arm is pinning something unreachable")
+	}
+	if host.EmbeddedExported.PromotedVisible == "" {
+		t.Fatal("an exported embedded type's field must be populated by the decode")
+	}
+	host.notAMember = "d" + controlChar
+
+	got := map[string]bool{}
+	for _, f := range checkAllText(&host) {
+		got[f.Path] = true
+	}
+	want := []string{"/promoted_hidden", "/promoted_visible", "/named"}
+	for _, ptr := range want {
+		if !got[ptr] {
+			t.Errorf("the string at %s was not bounded at the pointer the caller wrote it at; "+
+				"got %v", ptr, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("bounded %d positions, expected %d: a field the document does not have is "+
+			"being walked, or one it does have is not; got %v", len(got), len(want), got)
+	}
+}
+
+// TestADeferredRawMessageIsBounded pins the one byte slice whose contents
+// are caller text. A json.RawMessage is a document member the decode
+// postponed, not bytes: walking it as the []byte it is would visit
+// numbers and bound nothing, and no later stage would ever look at it
+// again. Nothing uses one today; Task 3's predicate values and Task 11's
+// stored documents are both natural places for one to appear, and it
+// would silently reopen the class.
+//
+// The second half of the test states the other side of the rule the
+// walk's comment carries: a plain []byte is *not* caller text, because it
+// decodes from base64 rather than from a string the caller wrote, and it
+// is not walked.
+func TestADeferredRawMessageIsBounded(t *testing.T) {
+	type deferredDoc struct {
+		Raw   json.RawMessage `json:"raw"`
+		Bytes []byte          `json:"bytes"`
+		Named string          `json:"named"`
+	}
+	var doc deferredDoc
+	body := `{"raw":{"deep":["x` + badChar + `"]},"bytes":"AAEC","named":"y` + badChar + `"}`
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("the document must decode: %v", err)
+	}
+	if doc.Bytes[1] != 0x01 {
+		t.Fatalf("the []byte member is expected to decode from base64, got %v", doc.Bytes)
+	}
+	got := map[string]bool{}
+	for _, f := range checkAllText(&doc) {
+		got[f.Path] = true
+	}
+	want := []string{"/raw/deep/0", "/named"}
+	for _, ptr := range want {
+		if !got[ptr] {
+			t.Errorf("the string at %s escaped the bound; got %v", ptr, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("bounded %d positions, expected %d: got %v", len(got), len(want), got)
+	}
+}
+
+// TestTheWalkReachesAnArrayAndAMapKey pins three arms of the walk that
+// nothing else in this file distinguishes: a Go array (as opposed to a
+// slice), a map *key* (as opposed to its value), and the skip that keeps
+// a field the document does not have out of the report.
+func TestTheWalkReachesAnArrayAndAMapKey(t *testing.T) {
+	type arrayAndMap struct {
+		Fixed [2]string         `json:"fixed"`
+		Table map[string]string `json:"table"`
+	}
+	value := &arrayAndMap{
+		Fixed: [2]string{"one" + controlChar, "two" + controlChar},
+		// The key holds the fault and the value does not: a walk that
+		// visited only values would report nothing here.
+		Table: map[string]string{"key" + controlChar: "clean"},
+	}
+	got := map[string]bool{}
+	for _, f := range checkAllText(value) {
+		got[f.Path] = true
+	}
+	want := []string{"/fixed/0", "/fixed/1", "/table/key" + controlChar}
+	for _, ptr := range want {
+		if !got[ptr] {
+			t.Errorf("the string at %q escaped the bound; got %v", ptr, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("bounded %d positions, expected %d: got %v", len(got), len(want), got)
+	}
+}

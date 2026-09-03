@@ -50,6 +50,22 @@ const (
 	// `contains_all`. Task 3 applies it.
 	MaxValueList = 500
 
+	// MaxValueDepth bounds how deeply a predicate's `value` nests, and it
+	// is a separate bound from MaxPredicateDepth on purpose: that one
+	// bounds the predicate *tree*, and a `value` is an `any` the tree
+	// bound never looks inside. Two is the deepest a legal value goes — a
+	// list of scalars, or a {"param": "…"} reference — so anything deeper
+	// is a shape this language has no meaning for.
+	//
+	// Without it the only bound on a value is encoding/json's own, at ten
+	// thousand: nothing overflows, but the refusal comes back at pointer
+	// "" in the decoder's wording, and a four-deep object inside `in`
+	// passes every check `in` makes, because a list operator counts its
+	// list and never looks into it. Task 3 applies it, in checkValueShape,
+	// and TestAPredicateValueHasItsOwnDepthBound pins both the refusal and
+	// the two legal shapes that sit exactly on it.
+	MaxValueDepth = 2
+
 	// MaxStringLen bounds every individual string anywhere in the
 	// document that is not covered by a narrower rule (a type key is 64
 	// by metamodel.RowKeyProblems; a field key is 64 by Task 3's
@@ -282,6 +298,16 @@ func ParseQuery(raw []byte) (*Query, error) {
 	if len(problems) > 0 {
 		sort.SliceStable(problems, func(i, j int) bool { return problems[i].Path < problems[j].Path })
 		return nil, invalidQueryProblems(problems)
+	}
+	// The limits are judged in their own pass because they answer with
+	// their own code: a limit above its cap is limit_exceeded, and a
+	// []metamodel.FieldError cannot carry a second code alongside
+	// query_invalid. It runs after the structural pass, so a document that
+	// is both malformed and over-cap reports the malformation first —
+	// limit_exceeded's advice is "lower this number", which is only
+	// actionable on a document that is otherwise well formed.
+	if err := checkLimits(q.Limits); err != nil {
+		return nil, err
 	}
 	applyDefaults(&q)
 	return &q, nil
@@ -537,7 +563,6 @@ func checkQuery(q *Query) []metamodel.FieldError {
 	}
 
 	problems = append(problems, checkProjection(q.Project)...)
-	problems = append(problems, checkLimits(q.Limits)...)
 	return problems
 }
 
@@ -716,19 +741,11 @@ func walkStrings(v reflect.Value, ptr string, visit func(ptr, value string)) {
 // while a json.RawMessage is a document member the decode postponed.
 var rawMessageType = reflect.TypeOf(json.RawMessage(nil))
 
-// -----------------------------------------------------------------------
-// Task 3 owns everything below this line. It lands here rather than in
-// predicate.go because Task 2's document types name these shapes and the
-// package has to compile: a Selector holds a *Predicate and a Projection
-// holds an *AttrRef. Task 3 replaces the three stub checks with the real
-// ones and takes these declarations with it; it must not declare them a
-// second time. The corrections block appended to Task 2 of the plan says
-// so, so the later task's code block moves with this one.
-// -----------------------------------------------------------------------
-
-// AttrName is the one built-in attribute Task 2 needs: applyDefaults
-// labels a node with it when the document said nothing. Task 3 adds the
-// rest of the @-sigil vocabulary alongside it.
+// AttrName is the built-in attribute Task 2's applyDefaults needs: it
+// labels a node with the entity's own name when the document said
+// nothing. The rest of the @-sigil vocabulary, and the table giving each
+// built-in the declared type its operators are judged against, live in
+// predicate.go beside the operator table they are judged by.
 const AttrName = "@name"
 
 // FieldRef is a resolved-enough reference to something comparable: either
@@ -739,9 +756,9 @@ type FieldRef struct {
 }
 
 // Predicate is a boolean tree. Exactly one of the four shapes is set, and
-// Task 3's checkPredicate refuses anything else: a document that set both
-// `all` and `field` would otherwise have a meaning decided by whichever
-// arm the compiler read first.
+// checkPredicate (predicate.go) refuses anything else: a document that
+// set both `all` and `field` would otherwise have a meaning decided by
+// whichever arm the compiler read first.
 type Predicate struct {
 	All []Predicate `json:"all,omitempty"`
 	Any []Predicate `json:"any,omitempty"`
@@ -758,6 +775,8 @@ type Predicate struct {
 // normalise fills FieldRef for this node and every node below it. It runs
 // from applyDefaults, which runs only after checkQuery has passed, so it
 // never has to decide what a malformed node means.
+// TestEveryPredicateInAParsedQueryIsNormalised pins it over all three
+// predicate positions and through all/any/not.
 func (p *Predicate) normalise() {
 	if p == nil {
 		return
@@ -779,7 +798,11 @@ func (p *Predicate) normalise() {
 //
 // One hop, and not many, deliberately: a multi-hop colour source is a
 // traversal, and traversals belong in `traverse` where they are bounded
-// and visible in the document rather than hidden in a projection.
+// and visible in the document rather than hidden in a projection. A
+// second hop is refused by the decoder rather than by a check, because
+// RelHop has no member to hold one and DisallowUnknownFields is on:
+// TestAnAttributeReferenceIsAStringOrAOneHopRelated sends `then` and
+// reads the unknown-key refusal back.
 //
 // Attr carries `json:"-"` because it is not a member of the document —
 // it holds what the *scalar* spelling said, so walkStrings visits it at
@@ -825,10 +848,3 @@ func (a AttrRef) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(a.Attr)
 }
-
-// Stubs replaced in Task 3. They return no problems so that Task 2's
-// structural tests can run; every predicate test in this package belongs
-// to Task 3 and none of them passes against these.
-func checkPredicate(p *Predicate, ptr string) []metamodel.FieldError { return nil }
-func checkProjection(p *Projection) []metamodel.FieldError           { return nil }
-func checkLimits(l *Limits) []metamodel.FieldError                   { return nil }

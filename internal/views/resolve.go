@@ -170,10 +170,9 @@ type ResolvedLimits struct {
 // the compiler binds as a jsonb path parameter, and every value becomes a
 // Go value. After this pass the compiler has nothing left that a caller
 // controls except bind parameters — which is the property that makes the
-// injection question answerable rather than a matter of care. The
-// property is pinned on the compiler's side, by Task 6's
-// TestNoCallerValueEverReachesTheStatementText, because it is a statement
-// about emitted SQL and this pass emits none.
+// injection question answerable rather than a matter of care. **Nothing
+// here pins it**, and cannot: it is a statement about emitted SQL and
+// this pass emits none, so the assertion belongs to Task 6's compiler.
 //
 // **Every lookup it makes is scoped to the caller's game**, because the
 // only catalogue it can see is the one LoadCatalogue read for that

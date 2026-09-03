@@ -511,9 +511,14 @@ func allOperatorNames() string {
 // projection's references are five *named* members with five different
 // pointers, not a homogeneous collection.
 //
-// TestEveryProjectionAttributeIsChecked drives all five through
-// ParseQuery, so a sixth reference added to Projection without a line
-// here fails a test rather than reaching the compiler unchecked.
+// Two tests hold this enumeration to the type, because one of them alone
+// cannot. TestEveryProjectionAttributeIsChecked drives all five names
+// through ParseQuery, which proves the five that exist are checked and
+// nothing about a sixth. TestEveryProjectionAttributeReferenceHasALineInTheTable
+// asks Projection itself which of its members are *AttrRef and refuses
+// one this table does not name, so a sixth reference added to Projection
+// without a line here fails a test rather than reaching the compiler
+// unchecked.
 var projectionAttrs = []struct {
 	Name string
 	Of   func(*Projection) *AttrRef
@@ -644,7 +649,11 @@ const (
 // number to at most N", which is different advice from "this document is
 // malformed". TestALimitAboveItsHardCapIsRefusedWithTheCap pins the code,
 // the pointer and the cap in the message; TestEveryLimitIsJudgedAgainstItsOwnCap
-// pins that all three limits are judged and reported in one pass.
+// pins that all three limits are judged and reported in one pass; and
+// TestEveryLimitInTheDocumentIsJudged reads the members off Limits
+// itself, so a fourth limit added there without a line below is a bound
+// the engine promises and never applies, and is caught rather than
+// shipped.
 func checkLimits(l *Limits) error {
 	if l == nil {
 		return nil

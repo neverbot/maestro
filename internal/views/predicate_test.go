@@ -611,3 +611,133 @@ func TestNoDocumentTypeCarriesCallerTextInAByteSlice(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryProjectionAttributeReferenceHasALineInTheTable is the half of
+// the projection guard that a hardcoded list cannot be: it asks
+// Projection itself which of its members are attribute references, and
+// refuses one that projectionAttrs does not name.
+//
+// TestEveryProjectionAttributeIsChecked above drives five *known* names
+// through ParseQuery, which proves the five that exist are checked and
+// nothing about a sixth — a member added to Projection with no line in
+// projectionAttrs leaves that test, and the whole suite, green while the
+// reference reaches the compiler unchecked. Task 9 adds projection
+// attributes. This is what fails for it.
+//
+// The walk is over reflect.Type, like
+// TestNoDocumentTypeCarriesCallerTextInAByteSlice, so it covers a shape
+// no test document populates.
+func TestEveryProjectionAttributeReferenceHasALineInTheTable(t *testing.T) {
+	named := map[string]bool{}
+	for _, attr := range projectionAttrs {
+		named[attr.Name] = true
+	}
+	attrRef := reflect.TypeOf((*AttrRef)(nil))
+	projection := reflect.TypeOf(Projection{})
+	found := 0
+	for i := 0; i < projection.NumField(); i++ {
+		f := projection.Field(i)
+		if f.Type != attrRef {
+			continue
+		}
+		found++
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" {
+			t.Errorf("Projection.%s is an attribute reference with no json tag: the pointer a "+
+				"refusal reports is the member name the caller wrote", f.Name)
+			continue
+		}
+		if !named[name] {
+			t.Errorf("Projection.%s (json %q) is an attribute reference with no line in "+
+				"projectionAttrs, so checkProjection never sees it and a misspelled built-in "+
+				"in it reaches the compiler unchecked: add {%q, func(p *Projection) *AttrRef "+
+				"{ return p.%s }} to the table", f.Name, name, name, f.Name)
+		}
+	}
+	// The sanity half, for the same reason the type-graph test has one: a
+	// walk that matched nothing would pass every assertion above.
+	if found != len(projectionAttrs) {
+		t.Errorf("Projection declares %d attribute references and projectionAttrs has %d lines: "+
+			"either a member has no line, or the table names one that no longer exists",
+			found, len(projectionAttrs))
+	}
+}
+
+// TestEveryLimitInTheDocumentIsJudged is the same guard for Limits, and
+// it exists for the same reason: TestEveryLimitIsJudgedAgainstItsOwnCap
+// drives three known names, so a fourth *int added to Limits without a
+// line in checkLimits is a limit nothing bounds and nothing notices.
+// Task 12 adds limits.
+//
+// It drives each member ParseQuery rather than reading checkLimits, so
+// what it pins is the observable behaviour — an over-cap limit is
+// refused — rather than the shape of the function that produces it.
+func TestEveryLimitInTheDocumentIsJudged(t *testing.T) {
+	limits := reflect.TypeOf(Limits{})
+	intPtr := reflect.TypeOf((*int)(nil))
+	found := 0
+	for i := 0; i < limits.NumField(); i++ {
+		f := limits.Field(i)
+		if f.Type != intPtr {
+			continue
+		}
+		found++
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" {
+			t.Errorf("Limits.%s has no json tag", f.Name)
+			continue
+		}
+		// Above every cap this engine could plausibly declare, so the
+		// test does not have to know which cap belongs to this member.
+		_, err := ParseQuery([]byte(
+			`{"v":1,"from":[{"type":"quest"}],"limits":{"` + name + `":2000000000}}`))
+		if !errors.Is(err, ErrLimitExceeded) {
+			t.Errorf("Limits.%s (json %q) set to 2000000000 parses: checkLimits has no line for "+
+				"it, so it is a bound the engine promises and never applies (got %v)",
+				f.Name, name, err)
+			continue
+		}
+		if _, err := ParseQuery([]byte(
+			`{"v":1,"from":[{"type":"quest"}],"limits":{"` + name + `":0}}`)); !errors.Is(
+			err, ErrLimitExceeded) {
+			t.Errorf("Limits.%s (json %q) set to 0 parses: a bound of zero returns nothing, "+
+				"which is not what any caller means by a limit (got %v)", f.Name, name, err)
+		}
+	}
+	if found != 3 {
+		t.Errorf("Limits declares %d int members and this test expected 3: if a limit was added, "+
+			"give it a line in checkLimits and update this count", found)
+	}
+}
+
+// TestEveryPredicateInAStepIsChecked is the third of the same guard. A
+// Step carries two predicate trees under two different pointers, each
+// with its own checkPredicate call written out by hand in checkQuery, and
+// a third added without a call would be an unbounded, unvalidated tree
+// stored in a saved view. Tasks 7 and 8 add step members.
+func TestEveryPredicateInAStepIsChecked(t *testing.T) {
+	step := reflect.TypeOf(Step{})
+	predicate := reflect.TypeOf((*Predicate)(nil))
+	found := 0
+	for i := 0; i < step.NumField(); i++ {
+		f := step.Field(i)
+		if f.Type != predicate {
+			continue
+		}
+		found++
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" {
+			t.Errorf("Step.%s has no json tag", f.Name)
+			continue
+		}
+		// A field key no grammar admits, so the refusal can only come
+		// from checkPredicate having walked this member.
+		parseFails(t, `{"v":1,"from":[{"type":"quest","as":"q"}],"traverse":[{"from":"q",`+
+			`"via":"leads_to","`+name+`":{"field":"Min Level","op":"eq","value":1}}]}`,
+			"/traverse/0/"+name+"/field", "must be lower_snake_case")
+	}
+	if found != 2 {
+		t.Errorf("Step declares %d predicate members and this test expected 2: if one was added, "+
+			"give it a checkPredicate call in checkQuery and update this count", found)
+	}
+}

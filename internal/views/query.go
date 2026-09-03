@@ -515,6 +515,10 @@ func checkQuery(q *Query) []metamodel.FieldError {
 				metamodel.RowKeyProblems("as", step.As))...)
 		}
 		declare(ptr+"/as", step.As)
+		// Every *Predicate member of Step needs its own call here, and
+		// TestEveryPredicateInAStepIsChecked reads the members off the
+		// type so that a third added without one is caught: an unchecked
+		// tree is an unbounded tree, stored in a saved view.
 		problems = append(problems, checkPredicate(step.Where, ptr+"/where")...)
 		problems = append(problems, checkPredicate(step.EdgeWhere, ptr+"/edge_where")...)
 	}

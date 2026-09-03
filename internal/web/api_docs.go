@@ -112,12 +112,19 @@ type DocRenderedOutput struct {
 // that wants to count changed lines should not have to parse the markup
 // back apart. Coarse means the two versions were too large to compare
 // line by line — see DocsDiffOutput.
+//
+// FromDeleted and ToDeleted are the pair DocsDiffOutput carries and for
+// the same reason: a comparison that spans a deletion has an empty
+// unified diff, and the page said "These two versions are identical"
+// about it until this run. doc.js's describeComparison reads them.
 type DocComparisonOutput struct {
 	Path        string `json:"path"`
 	FromVersion int32  `json:"from_version"`
 	ToVersion   int32  `json:"to_version"`
 	Unified     string `json:"unified"`
 	Coarse      bool   `json:"coarse"`
+	FromDeleted bool   `json:"from_deleted"`
+	ToDeleted   bool   `json:"to_deleted"`
 	HTML        string `json:"html"`
 }
 
@@ -460,6 +467,8 @@ func (s *Server) handleCompareDoc(w http.ResponseWriter, r *http.Request, _ Call
 		ToVersion:   diff.ToVersion,
 		Unified:     diff.Unified,
 		Coarse:      diff.Coarse,
+		FromDeleted: diff.FromDeleted,
+		ToDeleted:   diff.ToDeleted,
 		HTML:        markdown.RenderDiff(diff.Unified),
 	})
 }

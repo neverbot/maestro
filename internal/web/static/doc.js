@@ -446,7 +446,7 @@ function historyRow(gameID, docPath, currentVersion, version, membersByID, role)
   return item;
 }
 
-// describeComparison names the two things a rendered diff cannot say
+// describeComparison names the three things a rendered diff cannot say
 // for itself, and says nothing at all otherwise.
 //
 // A `coarse` comparison is the whole document replaced because the two
@@ -455,12 +455,30 @@ function historyRow(gameID, docPath, currentVersion, version, membersByID, role)
 // unified diff of nothing but its own file headers, which renders as two
 // grey lines and looks like a page that failed to load rather than like
 // an answer.
+//
+// The third is a comparison that spans a deletion, and it is the one
+// this function got *wrong* rather than merely left unsaid until the
+// prose sub-project's end-to-end run: a tombstone version carries the
+// body the document had when it was deleted, so the unified diff between
+// the last live version and the tombstone is empty, and this function
+// answered "These two versions are identical" about a comparison whose
+// whole content is that the document was deleted. The deletion is
+// checked before the emptiness for exactly that reason. from_deleted and
+// to_deleted come from the server (DocComparisonOutput), because the
+// page cannot tell a tombstone from an unchanged version by looking at
+// the diff.
 function describeComparison(comparison) {
   if (comparison.coarse) {
     return (
       "These two versions were too large to compare line by line, " +
       "so this shows the whole document replaced."
     );
+  }
+  if (comparison.to_deleted && !comparison.from_deleted) {
+    return "The document was deleted at this version; the text is what it held when it went.";
+  }
+  if (comparison.from_deleted && !comparison.to_deleted) {
+    return "The document was deleted at the earlier of these two versions and written again after it.";
   }
   const unified = typeof comparison.unified === "string" ? comparison.unified : "";
   const changed = unified.split("\n").some(

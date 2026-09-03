@@ -305,12 +305,23 @@ type DocsVersionOutput struct {
 // because a client cannot tell the difference from the diff itself, and
 // would otherwise render "everything changed" for two versions that
 // differ by a word.
+//
+// FromDeleted and ToDeleted say whether either endpoint is a tombstone,
+// and they are on the wire for a reason the unified text cannot supply:
+// a tombstone carries the body the document had when it was deleted, so
+// a diff spanning a deletion is empty and reads as "nothing changed".
+// markdown.DiffResult's own comment carries the argument, and
+// TestADiffAcrossATombstoneSaysWhichSideIsDeleted pins it there;
+// TestDocumentsEndToEnd asserts both of them on this type. Neither is
+// omitempty: false is a statement about a live version.
 type DocsDiffOutput struct {
 	Path        string `json:"path"`
 	FromVersion int32  `json:"from_version"`
 	ToVersion   int32  `json:"to_version"`
 	Unified     string `json:"unified"`
 	Coarse      bool   `json:"coarse"`
+	FromDeleted bool   `json:"from_deleted"`
+	ToDeleted   bool   `json:"to_deleted"`
 }
 
 // LinkedDocumentRef is one document an entity is attached to: the
@@ -575,6 +586,8 @@ func docsDiff(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 		ToVersion:   result.ToVersion,
 		Unified:     result.Unified,
 		Coarse:      result.Coarse,
+		FromDeleted: result.FromDeleted,
+		ToDeleted:   result.ToDeleted,
 	}, nil
 }
 

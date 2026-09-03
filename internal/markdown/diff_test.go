@@ -351,3 +351,89 @@ func TestDiffingAnotherGamesDocumentIsNotFoundAtThePath(t *testing.T) {
 	// itself is not there would be the wrong instruction.
 	requireMissing(t, err, "path", `this game has no document at "bible"`)
 }
+
+// TestADiffAcrossATombstoneSaysWhichSideIsDeleted pins the defect the
+// prose sub-project's end-to-end run found, and it is the same class of
+// defect that run exists for: a state change that is stored, is readable
+// through one call, and is invisible through the one a caller actually
+// uses to ask "what changed between these two versions".
+//
+// A delete appends a tombstone version carrying the document exactly as
+// it stood (Delete's own comment says so, and
+// TestATombstonesBodyIsStillReadableAsAVersion pins it). So the body of
+// the last live version and the body of the tombstone are identical, and
+// a diff between them is empty — byte for byte the same answer as
+// diffing a version against itself. Nothing on DiffResult told the two
+// apart, and the reading view's own describeComparison turned that empty
+// diff into the sentence "These two versions are identical", which is a
+// false statement about a comparison that spans a deletion.
+//
+// FromDeleted and ToDeleted are the two bools that make the difference
+// visible, and they are separate fields rather than one "spans a delete"
+// flag because a comparison can run in either direction: reverting a
+// deletion and deleting are different events and a client renders them
+// differently.
+func TestADiffAcrossATombstoneSaysWhichSideIsDeleted(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "notes/scrapped", Content: "the kobold arc\n", ExpectedVersion: ptrInt32(0),
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := svc.Delete(ctx, game, markdown.DeleteInput{
+		Path: "notes/scrapped", Message: "cut", ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	across, err := svc.Diff(ctx, game, "notes/scrapped", 1, 2)
+	if err != nil {
+		t.Fatalf("Diff across the tombstone: %v", err)
+	}
+	// The premise: the two bodies really are identical, so the unified
+	// text cannot be what tells a caller a deletion happened.
+	for _, line := range strings.Split(across.Unified, "\n") {
+		if strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			continue // the two file headers, which every diff carries
+		}
+		if strings.HasPrefix(line, "-") || strings.HasPrefix(line, "+") {
+			t.Fatalf("the tombstone changed the body after all; this test's premise is gone:\n%s", across.Unified)
+		}
+	}
+	if across.FromDeleted {
+		t.Fatal("version 1 is a live version and the diff says it is deleted")
+	}
+	if !across.ToDeleted {
+		t.Fatal("a diff onto a tombstone does not say the document was deleted; " +
+			"an empty unified diff is all the caller gets, and it reads as 'nothing changed'")
+	}
+
+	// And the opposite direction, which is a resurrection rather than a
+	// deletion and must not be reported as the same thing.
+	back, err := svc.Diff(ctx, game, "notes/scrapped", 2, 1)
+	if err != nil {
+		t.Fatalf("Diff back across the tombstone: %v", err)
+	}
+	if !back.FromDeleted || back.ToDeleted {
+		t.Fatalf("reading the comparison backwards = (%v, %v), want (true, false)",
+			back.FromDeleted, back.ToDeleted)
+	}
+
+	// A comparison between two live versions says nothing about
+	// deletion, so the flags cannot be read as decoration.
+	if _, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "notes/scrapped", Content: "back, with gnolls\n", ExpectedVersion: ptrInt32(2),
+	}); err != nil {
+		t.Fatalf("resurrect: %v", err)
+	}
+	live, err := svc.Diff(ctx, game, "notes/scrapped", 1, 3)
+	if err != nil {
+		t.Fatalf("Diff between two live versions: %v", err)
+	}
+	if live.FromDeleted || live.ToDeleted {
+		t.Fatalf("two live versions reported (%v, %v)", live.FromDeleted, live.ToDeleted)
+	}
+}

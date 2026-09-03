@@ -575,6 +575,49 @@ async function runCase({
   }
 }
 
+// Case 9b: a comparison that spans a deletion. A tombstone version
+// carries the body the document had when it was deleted, so the unified
+// diff between the last live version and the tombstone is empty — byte
+// for byte the answer Case 8 above is about. The page said "These two
+// versions are identical" about it, which is a false statement about a
+// comparison whose whole content is that the document was deleted. The
+// server now says which endpoint is a tombstone (from_deleted /
+// to_deleted) and the page has to read it.
+{
+  const { elements } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 3, html: "<p>x</p>", links: [] },
+    history: {
+      items: [
+        { version: 2, message: "cut", author_kind: "user", author_id: ANA, deleted: true, created_at: "2026-09-02T10:00:00Z" },
+        { version: 1, message: "a", author_kind: "user", author_id: ANA, created_at: "2026-08-31T10:00:00Z" },
+      ],
+    },
+    comparison: {
+      path: "lore/duskwood",
+      from_version: 1,
+      to_version: 2,
+      unified: "--- lore/duskwood@1\n+++ lore/duskwood@2\n",
+      coarse: false,
+      from_deleted: false,
+      to_deleted: true,
+      html: '<div class="diff"><div class="diff-file">--- lore/duskwood@1</div><div class="diff-file">+++ lore/duskwood@2</div></div>',
+    },
+  });
+
+  await elements["compare-form"].fire("submit");
+  const note = elements["compare-note"].textContent;
+  if (note.includes("identical")) {
+    fail(`a comparison spanning a deletion was described as ${JSON.stringify(note)}`);
+  }
+  if (!note.includes("deleted")) {
+    fail(`a comparison spanning a deletion says ${JSON.stringify(note)}, which names no deletion at all`);
+  }
+  assertVisible(elements["compare-note"], "compare-note", "the deletion sentence was written but never revealed");
+  if (elements["compare-error"].textContent !== "") {
+    fail(`a successful comparison wrote to the error line: ${JSON.stringify(elements["compare-error"].textContent)}`);
+  }
+}
+
 // Case 10: two comparisons in a row. The first is coarse and says so;
 // the second is an ordinary line-by-line diff and must say nothing —
 // a sentence the page wrote once and never cleared would tell a reader

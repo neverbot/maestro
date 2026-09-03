@@ -76,12 +76,30 @@ const lcsLimit = 1000
 // its own because a client cannot reconstruct from the diff itself why
 // the diff looks like that. TestAHugeChangeComesBackCoarseAndSaysSo
 // pins the true case and every other diff test the false one.
+//
+// **FromDeleted and ToDeleted are not decoration either**, and they were
+// added by the sub-project's end-to-end run rather than designed in. A
+// delete appends a tombstone version carrying the document exactly as it
+// stood, so the last live version and the tombstone hold the same body
+// and the diff between them is empty — the same answer, byte for byte,
+// as diffing a version against itself. Without these two bools nothing
+// in this result tells a caller that a deletion is what it is looking
+// at, and the reading view turned that empty diff into the sentence
+// "These two versions are identical", which is false.
+// TestADiffAcrossATombstoneSaysWhichSideIsDeleted pins all three cases:
+// onto a tombstone, back off one, and between two live versions.
+//
+// They are two fields rather than one "spans a delete" flag because the
+// comparison reads in whichever direction it was asked, and a deletion
+// and a resurrection are different events to show.
 type DiffResult struct {
 	Path        string
 	FromVersion int32
 	ToVersion   int32
 	Unified     string
 	Coarse      bool
+	FromDeleted bool
+	ToDeleted   bool
 }
 
 // Diff compares two versions of one document and returns a unified diff.
@@ -108,6 +126,7 @@ func (s *Service) Diff(ctx context.Context, projectID uuid.UUID, path string, fr
 		fromRow.BodyMd, toRow.BodyMd)
 	return DiffResult{
 		Path: path, FromVersion: from, ToVersion: to, Unified: unified, Coarse: coarse,
+		FromDeleted: fromRow.Deleted, ToDeleted: toRow.Deleted,
 	}, nil
 }
 

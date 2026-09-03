@@ -1,7 +1,9 @@
 package views
 
 import (
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -534,5 +536,78 @@ func TestEveryLimitIsJudgedAgainstItsOwnCap(t *testing.T) {
 	}
 	if len(qe.Fields) != 3 {
 		t.Fatalf("all three limits must be reported in one pass, got %v", qe.Fields)
+	}
+}
+
+// TestNoDocumentTypeCarriesCallerTextInAByteSlice verifies, rather than
+// assumes, the claim Task 3 inherited: everything added under the text
+// walk is bounded by construction.
+//
+// It lives here rather than beside the walk because the question is not
+// about the walk's own behaviour — TestEveryStringInAQueryIsBounded pins
+// that over the twenty-seven positions the document has — but about the
+// *shapes* later tasks are allowed to add. walkStrings visits a
+// json.RawMessage by decoding it and skips every other byte slice
+// deliberately, because a plain []byte decodes from base64 and its bytes
+// are not a string the caller wrote. That rule is stated in a comment and
+// was pinned by nothing: a field declared []byte anywhere in the document
+// would be caller text the bound never sees, and the walk would report
+// nothing at all rather than failing.
+//
+// The graph is walked over reflect.Type, so it covers every type
+// reachable from Query whether or not a test document happens to populate
+// it, which is what makes it a guard for the fourteen tasks that add
+// types under this walk rather than a restatement of today's shapes.
+func TestNoDocumentTypeCarriesCallerTextInAByteSlice(t *testing.T) {
+	rawMessage := reflect.TypeOf(json.RawMessage(nil))
+	seen := map[reflect.Type]bool{}
+	structs := map[string]bool{}
+
+	var walk func(typ reflect.Type, at string)
+	walk = func(typ reflect.Type, at string) {
+		if typ == nil || seen[typ] {
+			return
+		}
+		seen[typ] = true
+		switch typ.Kind() {
+		case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+			t.Errorf("%s is a %s, which walkStrings ignores in silence: a document member must "+
+				"be a shape the walk descends into", at, typ.Kind())
+			return
+		case reflect.Slice:
+			if typ.Elem().Kind() == reflect.Uint8 && typ != rawMessage {
+				t.Errorf("%s is a byte slice (%s): walkStrings skips one deliberately, because a "+
+					"plain []byte decodes from base64 and its bytes are not a string the caller "+
+					"wrote — so caller text here would escape the text bound entirely. Use a "+
+					"string, or json.RawMessage for a deferred document member", at, typ)
+				return
+			}
+			walk(typ.Elem(), at+"[]")
+		case reflect.Array:
+			walk(typ.Elem(), at+"[]")
+		case reflect.Pointer:
+			walk(typ.Elem(), at)
+		case reflect.Map:
+			walk(typ.Key(), at+"{key}")
+			walk(typ.Elem(), at+"{}")
+		case reflect.Struct:
+			structs[typ.Name()] = true
+			for i := 0; i < typ.NumField(); i++ {
+				f := typ.Field(i)
+				walk(f.Type, at+"."+f.Name)
+			}
+		}
+	}
+	walk(reflect.TypeOf(Query{}), "Query")
+
+	// The sanity half: a walk that reached nothing would pass every
+	// assertion above. The three types this task owns must be in the
+	// graph, along with the document's own root shapes.
+	for _, name := range []string{"Query", "Selector", "Step", "Projection", "Limits",
+		"Predicate", "FieldRef", "AttrRef", "RelHop"} {
+		if !structs[name] {
+			t.Errorf("the type graph reachable from Query does not include %s: this test is "+
+				"passing over a graph it never walked", name)
+		}
 	}
 }

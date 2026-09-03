@@ -372,7 +372,14 @@ func TestTheComparisonViewRendersADiff(t *testing.T) {
 func TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML(t *testing.T) {
 	f := newRESTFixture(t)
 	writeDocREST(t, f, "lore/trap",
-		"[click](javascript:alert(1)) and [also](javascript&#58;alert(1))\n\n<script>alert(2)</script>\n", 0)
+		"[click](javascript:alert(1)) and [also](javascript&#58;alert(1))\n\n"+
+			// The autolink spelling is here because it is the one
+			// goldmark itself does not defend: renderAutoLink has no
+			// IsDangerousURL check, so this arrived on the page as a
+			// live href until safeLinks started rewriting the kind.
+			"Read <javascript:alert(document.domain)> and <vbscript:msgbox> "+
+			"and <data:text/html;base64,PHNjcmlwdD4=> and <file:///etc/passwd>.\n\n"+
+			"<script>alert(2)</script>\n", 0)
 
 	rec := f.as(t, http.MethodGet, docsPath("/docs/rendered", map[string]string{"path": "lore/trap"}), nil)
 	if rec.Code != http.StatusOK {
@@ -382,7 +389,15 @@ func TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML(t *test
 		HTML string `json:"html"`
 	}
 	decodeBody(t, rec, &rendered)
-	for _, forbidden := range []string{"javascript:", "<script>"} {
+	// The forms are `href="scheme:` and not the bare scheme because an
+	// autolink's *label* is its own URL: the page legitimately shows the
+	// text `javascript:alert(document.domain)`, greyed out and pointing
+	// at "#", which is the neutralisation working and not a leak. What
+	// must not appear is the scheme in an attribute a browser follows.
+	for _, forbidden := range []string{
+		`href="javascript:`, `href="vbscript:`, `href="data:`,
+		`href="file:`, "<script>",
+	} {
 		if strings.Contains(rendered.HTML, forbidden) {
 			t.Fatalf("html = %q still carries %q", rendered.HTML, forbidden)
 		}

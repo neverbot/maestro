@@ -45,16 +45,38 @@ var renderer = goldmark.New(
 	)),
 )
 
-// safeLinks rewrites any link or image destination whose scheme is not
-// one of the three a design document has any business using.
+// safeLinks rewrites any link, image or autolink destination whose
+// scheme is not one of the three a design document has any business
+// using.
 //
 // The allowed set is deliberately tiny and deliberately an *allowlist*: a
 // denylist of "javascript:" and "data:" is one novel scheme away from
 // being wrong, and the schemes a game bible needs are http, https,
 // mailto and a relative reference to another document.
+//
+// **The autolink is the kind that most needs this, not the one that
+// needs it least.** An earlier version of this transformer skipped
+// *ast.AutoLink on the claim that goldmark only produces http, https
+// and mailto ones; that was false twice over. util.FindURLIndex — the
+// parser behind `<scheme:rest>` — accepts *any* scheme of two to
+// thirty-three URL-safe bytes, and goldmark's renderAutoLink is the one
+// destination writer in the package with no IsDangerousURL check at all
+// (renderLink and renderImage both have one). So `<javascript:alert(1)>`
+// in a document body rendered as a live href, stored and cross-user, on
+// the same page doc.js feeds into innerHTML. The CSP was carrying that
+// case alone.
 type safeLinks struct{}
 
-func (safeLinks) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
+func (safeLinks) Transform(doc *ast.Document, reader text.Reader, _ parser.Context) {
+	source := reader.Source()
+	// Autolinks are collected first and replaced after the walk.
+	// Replacing a node mid-walk unlinks it from its siblings, and
+	// ast.Walk reads NextSibling off the node it has just visited — so
+	// an in-place rewrite judges the first autolink in a paragraph and
+	// never sees the ones behind it. That is invisible in any body with
+	// one autolink in it; TestEveryAutolinkInAParagraphIsJudged puts the
+	// dangerous spelling last, behind two harmless ones, so it is not.
+	var autolinks []*ast.AutoLink
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
@@ -65,13 +87,54 @@ func (safeLinks) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
 		case *ast.Image:
 			node.Destination = safeDestination(node.Destination)
 		case *ast.AutoLink:
-			// An autolink's destination is derived from its own text and
-			// goldmark only produces http, https and mailto ones, so
-			// there is nothing to rewrite. Named here so a reader does
-			// not have to work out whether it was forgotten.
+			autolinks = append(autolinks, node)
 		}
 		return ast.WalkContinue, nil
 	})
+	for _, node := range autolinks {
+		if parent := node.Parent(); parent != nil {
+			parent.ReplaceChild(parent, node, linkFromAutoLink(node, source))
+		}
+	}
+}
+
+// linkFromAutoLink turns an autolink into the ordinary link it renders
+// as, so that its destination is judged by safeDestination and written
+// by renderLink — the same one judge and the same one writer the
+// bracketed spelling already goes through.
+//
+// Rewriting the node rather than registering a rival renderAutoLink is
+// what makes the two impossible to drift apart: there is no second copy
+// of goldmark's escaping to keep in step, and a change to safeDestination
+// reaches every destination on the page by construction.
+//
+// The label is carried across as a *raw* ast.String, which is what
+// goldmark's own renderAutoLink writes (util.EscapeHTML(label), which
+// resolves nothing). Non-raw would send it through the ordinary text
+// writer, unescaping backslash escapes and resolving character
+// references — showing the reader `?x=&y` for a URL whose href says
+// `?x=&amp;y`, a label and a destination telling different stories.
+//
+// One deliberate difference from renderAutoLink survives the rewrite:
+// the href is now escaped by renderLink, with reference resolution on,
+// where renderAutoLink had it off. That is the *stricter* of the two —
+// it is the resolution safeDestination already judges against — and
+// taking goldmark's link path whole is the point of doing it this way.
+func linkFromAutoLink(node *ast.AutoLink, source []byte) *ast.Link {
+	url := node.URL(source)
+	// renderAutoLink prepends the scheme a bare address is missing;
+	// without it `<a@b.c>` would become a relative link to a file named
+	// after somebody's inbox.
+	if node.AutoLinkType == ast.AutoLinkEmail &&
+		!bytes.HasPrefix(bytes.ToLower(url), []byte("mailto:")) {
+		url = append([]byte("mailto:"), url...)
+	}
+	link := ast.NewLink()
+	link.Destination = safeDestination(url)
+	label := ast.NewString(node.Label(source))
+	label.SetRaw(true)
+	link.AppendChild(link, label)
+	return link
 }
 
 // safeDestination answers dest unchanged when it is safe to render, and

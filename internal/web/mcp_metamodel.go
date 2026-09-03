@@ -273,6 +273,14 @@ type RefInput struct {
 }
 
 // RelationsListInput is the argument shape of relations.list.
+//
+// Verbose is off by default, the same rule EntitiesListInput states and
+// for a stronger version of the same reason: a graph has more edges than
+// nodes, so a page of five hundred edges carrying their fields is more
+// of the game back in one answer than the listing that rule was written
+// for. An agent walking a game's graph wants what each edge joins; it
+// asks for the values when it means to read them, and when it wants one
+// edge's values it has relations.get, which never needs the flag.
 type RelationsListInput struct {
 	ScopedArgs
 	TypeKey  string `json:"type_key,omitempty"`
@@ -280,6 +288,24 @@ type RelationsListInput struct {
 	TargetID string `json:"target_id,omitempty"`
 	Cursor   string `json:"cursor,omitempty"`
 	Limit    int32  `json:"limit,omitempty"`
+	Verbose  bool   `json:"verbose,omitempty"`
+}
+
+// RelationsGetInput reads one edge by the address it was written under:
+// the relation type's key and both endpoints as (type_key, key) refs.
+//
+// It is deliberately the same address relations.upsert takes, and not
+// the endpoint *ids* relations.list filters on. An agent that has just
+// written an edge holds the three strings, not the ids; the rest of this
+// surface addresses a row the way a designer names it (entities.get,
+// relation_types.get), and Task 9 recorded the resolving read a
+// by-id-only address costs. The ids remain in the answer, where a
+// removal still needs them.
+type RelationsGetInput struct {
+	ScopedArgs
+	TypeKey string   `json:"type_key"`
+	Source  RefInput `json:"source"`
+	Target  RefInput `json:"target"`
 }
 
 // RelationsRemoveInput removes one edge by id.
@@ -411,13 +437,29 @@ type RefOutput struct {
 // the ref is simply absent, which is the honest answer rather than a
 // ref with empty strings in it that a client would render as a row
 // named "".
+//
+// **Fields is the edge's own declared values**, and its absence was the
+// defect Metamodel 12 closed. A relation type may declare a field
+// schema, relations.upsert validates an edge's values against it and
+// stores them, and until this task nothing on either surface returned
+// them: a whole declared feature was write-only, and the readme's own
+// example of why typed edges exist — a door declaring which ability
+// opens it — could be written and never shown. relation_types.get is
+// where the schema those values answer to is published.
+//
+// It is present only when the caller asked to be verbose, exactly as
+// EntityOutput.Fields is; relations.get always fills it, because a
+// caller naming one edge is asking for its content. `omitempty` is
+// load-bearing on both: a client must be able to tell "not asked for"
+// from "asked for and empty".
 type RelationOutput struct {
-	ID       uuid.UUID  `json:"id"`
-	TypeKey  string     `json:"type_key"`
-	SourceID uuid.UUID  `json:"source_id"`
-	TargetID uuid.UUID  `json:"target_id"`
-	Source   *RefOutput `json:"source,omitempty"`
-	Target   *RefOutput `json:"target,omitempty"`
+	ID       uuid.UUID      `json:"id"`
+	TypeKey  string         `json:"type_key"`
+	SourceID uuid.UUID      `json:"source_id"`
+	TargetID uuid.UUID      `json:"target_id"`
+	Source   *RefOutput     `json:"source,omitempty"`
+	Target   *RefOutput     `json:"target,omitempty"`
+	Fields   map[string]any `json:"fields,omitempty"`
 }
 
 // RelationsListOutput is one page of edges.
@@ -898,14 +940,11 @@ func relationsList(ctx context.Context, deps MCPDeps, caller Caller, projectID u
 	}
 	items := make([]RelationOutput, 0, len(page.Relations))
 	for _, row := range page.Relations {
-		items = append(items, RelationOutput{
-			ID:       row.ID,
-			TypeKey:  names[row.RelationTypeID],
-			SourceID: row.SourceID,
-			TargetID: row.TargetID,
-			Source:   refs[row.SourceID],
-			Target:   refs[row.TargetID],
-		})
+		out, err := relationOf(row, names, refs, in.Verbose)
+		if err != nil {
+			return RelationsListOutput{}, err
+		}
+		items = append(items, out)
 	}
 	result := RelationsListOutput{Items: items}
 	if page.NextCursor != "" {
@@ -914,6 +953,41 @@ func relationsList(ctx context.Context, deps MCPDeps, caller Caller, projectID u
 		result.Truncated = true
 	}
 	return result, nil
+}
+
+// MCPRelationsGet implements relations.get. It always answers with the
+// edge's fields, for the reason entities.get does: a caller naming one
+// edge is asking for what it carries, which is the opposite of the
+// listing's default.
+func MCPRelationsGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsGetInput) (RelationOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return RelationOutput{}, err
+	}
+	return relationsGet(ctx, deps, caller, projectID, in)
+}
+
+// relationsGet is MCPRelationsGet without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func relationsGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsGetInput) (RelationOutput, error) {
+	row, err := deps.Metamodel.RelationByEdge(ctx, projectID, in.TypeKey,
+		metamodel.Ref{TypeKey: in.Source.TypeKey, Key: in.Source.Key},
+		metamodel.Ref{TypeKey: in.Target.TypeKey, Key: in.Target.Key})
+	if err != nil {
+		return RelationOutput{}, err
+	}
+	names, err := relationTypeKeys(ctx, deps, projectID)
+	if err != nil {
+		return RelationOutput{}, err
+	}
+	// The same endpoint resolution a page gets, over a slice of one: an
+	// edge read on its own must not answer in a poorer shape than the
+	// same edge read in a listing.
+	refs, err := endpointRefs(ctx, deps, projectID, []dbq.Relation{row})
+	if err != nil {
+		return RelationOutput{}, err
+	}
+	return relationOf(row, names, refs, true)
 }
 
 // MCPRelationsRemove implements relations.remove.
@@ -1092,6 +1166,42 @@ func entityOf(row dbq.Entity, names map[uuid.UUID]string, verbose bool) (EntityO
 	if len(row.Fields) > 0 {
 		if err := json.Unmarshal(row.Fields, &fields); err != nil {
 			return EntityOutput{}, fmt.Errorf("decode stored fields: %w", err)
+		}
+	}
+	out.Fields = fields
+	return out, nil
+}
+
+// relationOf builds one edge's answer: its identity, both endpoints in
+// both addressings, and — when the caller asked for them — the values
+// the edge itself carries.
+//
+// It is entityOf's counterpart and exists for the same reason: both
+// relations.list and relations.get answer with a RelationOutput, and two
+// hand-built copies are two chances for one of them to leave the fields
+// out again, which is the whole of Metamodel 12.
+//
+// An edge whose relation type is missing from names is impossible (the
+// row's relation_type_id is a foreign key into the same game's types)
+// and answers with an empty type key rather than a panic if it happens.
+// A missing endpoint ref is not impossible, and is left nil; see
+// RelationOutput.
+func relationOf(row dbq.Relation, names map[uuid.UUID]string, refs map[uuid.UUID]*RefOutput, verbose bool) (RelationOutput, error) {
+	out := RelationOutput{
+		ID:       row.ID,
+		TypeKey:  names[row.RelationTypeID],
+		SourceID: row.SourceID,
+		TargetID: row.TargetID,
+		Source:   refs[row.SourceID],
+		Target:   refs[row.TargetID],
+	}
+	if !verbose {
+		return out, nil
+	}
+	fields := map[string]any{}
+	if len(row.Fields) > 0 {
+		if err := json.Unmarshal(row.Fields, &fields); err != nil {
+			return RelationOutput{}, fmt.Errorf("decode stored fields: %w", err)
 		}
 	}
 	out.Fields = fields
@@ -1388,16 +1498,40 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"ids the row holds and the ones relations.remove and this tool's own "+
 				"endpoint filters take, and `source`/`target`, the (type_key, key, name) "+
 				"refs the edge was written with. An endpoint whose entity was removed while "+
-				"the page was being read has its id but no ref. Use entities.list with "+
+				"the page was being read has its id but no ref. "+
+				"**An edge's own fields are omitted unless verbose is true**, for the reason "+
+				"entities.list omits an entity's: a game has more edges than entities, so a "+
+				"full page of them with their values is most of the game in one answer. What "+
+				"those values mean is declared by the relation type's field_schema, which "+
+				"relation_types.get publishes. To read one edge's values, prefer "+
+				"relations.get, which takes the address the edge was written under. "+
+				"Use entities.list with "+
 				"related_to to walk a game's graph; use this tool when the answer is about "+
-				"the edges themselves — removing one, or reading an edge's own fields, which "+
-				"a traversal over entities never returns. %s",
+				"the edges themselves. %s",
 			metamodel.DefaultRelationPage, metamodel.MaxRelationPage, retryAdvice),
 		OutputSchema: relationsListOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsListInput) (RelationsListOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPRelationsList(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "relations.get",
+		Description: "Read one edge by the address it was written under — its relation " +
+			"type's key plus both endpoints as (type_key, key) — with all of its fields. " +
+			"This is the only way to read the values an edge carries without paging a " +
+			"listing: relations.upsert validates them against the relation type's " +
+			"field_schema and stores them, and relation_types.get is where that schema is " +
+			"published. Keys are matched without regard to case. An unknown relation type, " +
+			"an unknown endpoint and a real address holding no edge are all not_found, and " +
+			"the message says which of the three it was. The answer is one edge in the same " +
+			"shape relations.list returns, ids and refs included.",
+		OutputSchema: relationOutputSchema(),
+		Annotations:  readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsGetInput) (RelationOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPRelationsGet(ctx, deps, caller, projectID, in)
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
@@ -1706,20 +1840,30 @@ func refOutputSchema() *jsonschema.Schema {
 	}
 }
 
-var relationOutputSchema = &jsonschema.Schema{
-	Type:     "object",
-	Required: []string{"id", "type_key", "source_id", "target_id"},
-	Properties: map[string]*jsonschema.Schema{
-		"id":        stringSchema(),
-		"type_key":  stringSchema(),
-		"source_id": stringSchema(),
-		"target_id": stringSchema(),
-		"source":    refOutputSchema(),
-		"target":    refOutputSchema(),
-	},
+// relationOutputSchema is one edge, and it is a function for the reason
+// refOutputSchema is: relations.list embeds it in a page envelope while
+// relations.get answers with it whole, and the SDK refuses a schema
+// whose nodes do not form a tree.
+//
+// `fields` is not in Required, because it is absent from a listing that
+// was not asked to be verbose.
+func relationOutputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:     "object",
+		Required: []string{"id", "type_key", "source_id", "target_id"},
+		Properties: map[string]*jsonschema.Schema{
+			"id":        stringSchema(),
+			"type_key":  stringSchema(),
+			"source_id": stringSchema(),
+			"target_id": stringSchema(),
+			"source":    refOutputSchema(),
+			"target":    refOutputSchema(),
+			"fields":    objectSchema(),
+		},
+	}
 }
 
-var relationsListOutputSchema = listEnvelopeSchema(relationOutputSchema)
+var relationsListOutputSchema = listEnvelopeSchema(relationOutputSchema())
 
 // bulkFailureSchema is metamodel.BulkFailure's wire shape, shared by both
 // batch answers.

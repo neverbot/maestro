@@ -315,6 +315,7 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("GET /api/games/{game}/entities/by-key/{type}/{key}", s.handleGetEntity)
 	s.registerContentRoute("DELETE /api/games/{game}/entities/by-id/{id}", s.handleRemoveEntity)
 	s.registerContentRoute("GET /api/games/{game}/relations", s.handleListRelations)
+	s.registerContentRoute("GET /api/games/{game}/relations/one", s.handleGetRelation)
 	s.registerContentRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
 	s.registerContentRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
 	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)

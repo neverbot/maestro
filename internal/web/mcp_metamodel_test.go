@@ -157,8 +157,8 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 // bound to, and every one must refuse before touching the database.
 //
 // One table rather than one test per tool, because the invariant is the
-// same one sixteen times and a per-tool test is sixteen chances to
-// forget the seventeenth.
+// same one seventeen times and a per-tool test is seventeen chances
+// to forget the eighteenth.
 func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
@@ -227,6 +227,14 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 		},
 		"relations.list": func() error {
 			_, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.other, web.RelationsListInput{})
+			return err
+		},
+		"relations.get": func() error {
+			_, err := web.MCPRelationsGet(ctx, f.deps, f.caller, f.other, web.RelationsGetInput{
+				TypeKey: "races_on",
+				Source:  web.RefInput{TypeKey: "circuit", Key: "spa"},
+				Target:  web.RefInput{TypeKey: "circuit", Key: "monza"},
+			})
 			return err
 		},
 		"relations.remove": func() error {
@@ -978,6 +986,12 @@ func seedOneEdge(t *testing.T, f metamodelFixture) (source, target uuid.UUID) {
 		Key: "takes_place_in", Label: "takes place in",
 		SourceTypeIDs: []string{quest.ID.String()},
 		TargetTypeIDs: []string{zone.ID.String()},
+		// The edge carries a declared field, because the tests below are
+		// about whether an edge's own values can be read back at all and
+		// a schemaless edge cannot tell a working reader from a broken
+		// one. Every relation-level test in this file goes through this
+		// helper, so the value is written once and read by each of them.
+		Schema: []web.FieldInput{{Key: "act", Type: "text"}},
 	}); err != nil {
 		t.Fatalf("MCPRelationTypesUpsert: %v", err)
 	}
@@ -998,6 +1012,7 @@ func seedOneEdge(t *testing.T, f metamodelFixture) (source, target uuid.UUID) {
 			TypeKey: "takes_place_in",
 			Source:  web.RefInput{TypeKey: "quest", Key: "hogger"},
 			Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
+			Fields:  map[string]any{"act": "one"},
 		}},
 	}); err != nil {
 		t.Fatalf("MCPRelationsUpsert: %v", err)
@@ -1096,5 +1111,214 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 	// 7 shipped it saying the opposite of what the tool now does.
 	if strings.Contains(list.Description, "not as the (type_key, key) refs") {
 		t.Fatalf("relations.list still tells an agent its endpoints are ids only: %s", list.Description)
+	}
+}
+
+// TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge is Metamodel
+// 12's own test. A relation type may declare a field schema, the values
+// were validated on write and stored, and until this task no tool on
+// either surface returned them: RelationOutput carried no fields, there
+// was no relations.get, and relations.list was the only way to see an
+// edge at all. Nine review rounds verified the write and none asked
+// whether anything could read it.
+//
+// Both readers are asserted here, in one test, because the defect was
+// precisely that one surface could write what no surface could read: a
+// case that proved only relations.get would leave a listing that still
+// cannot show an edge's values, which is what the views sub-project
+// renders from.
+func TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	sourceID, targetID := seedOneEdge(t, f)
+
+	got, err := web.MCPRelationsGet(ctx, f.deps, f.caller, f.game, web.RelationsGetInput{
+		TypeKey: "takes_place_in",
+		Source:  web.RefInput{TypeKey: "quest", Key: "hogger"},
+		Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
+	})
+	if err != nil {
+		t.Fatalf("MCPRelationsGet: %v", err)
+	}
+	if got.Fields["act"] != "one" {
+		t.Fatalf("relations.get fields = %v, want act one", got.Fields)
+	}
+	// One edge, addressed two ways: what relations.get answers is the
+	// same row relations.list pages over, endpoint refs included.
+	if got.SourceID != sourceID || got.TargetID != targetID {
+		t.Fatalf("relations.get ids = (%s, %s), want (%s, %s)",
+			got.SourceID, got.TargetID, sourceID, targetID)
+	}
+	if got.TypeKey != "takes_place_in" {
+		t.Fatalf("relations.get type key = %q, want takes_place_in", got.TypeKey)
+	}
+	if got.Source == nil || got.Source.Name != "Wanted: Hogger" ||
+		got.Target == nil || got.Target.Name != "Elwynn Forest" {
+		t.Fatalf("relations.get endpoints = %+v / %+v, want both resolved", got.Source, got.Target)
+	}
+
+	verbose, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game,
+		web.RelationsListInput{Verbose: true})
+	if err != nil {
+		t.Fatalf("MCPRelationsList verbose: %v", err)
+	}
+	if len(verbose.Items) != 1 || verbose.Items[0].Fields["act"] != "one" {
+		t.Fatalf("verbose listing = %+v, want the edge with act one", verbose.Items)
+	}
+
+	// Off by default, for the reason entities.list defaults it off and
+	// then some: a game has more edges than entities, so a page of five
+	// hundred of them carrying their fields is more of the game back in
+	// one answer than the listing this rule was written for.
+	plain, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game, web.RelationsListInput{})
+	if err != nil {
+		t.Fatalf("MCPRelationsList: %v", err)
+	}
+	if len(plain.Items) != 1 {
+		t.Fatalf("items = %+v, want the one edge", plain.Items)
+	}
+	if plain.Items[0].Fields != nil {
+		t.Fatalf("a listing that was not asked to be verbose carried fields: %+v", plain.Items[0])
+	}
+	// Absent from the JSON too, not merely nil in Go: `fields` is
+	// omitempty on the wire and a client must be able to tell "not
+	// asked for" from "asked for and empty".
+	raw, err := json.Marshal(plain.Items[0])
+	if err != nil {
+		t.Fatalf("marshal edge: %v", err)
+	}
+	if strings.Contains(string(raw), "fields") {
+		t.Fatalf("non-verbose edge carries a fields key on the wire: %s", raw)
+	}
+}
+
+// TestRelationsGetNamesWhichPieceOfAnAddressIsWrong: an edge is
+// addressed by three things, so there are three ways to miss, and the
+// tool passes the domain's own distinction through rather than
+// flattening all of them onto "not found".
+func TestRelationsGetNamesWhichPieceOfAnAddressIsWrong(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	seedOneEdge(t, f)
+
+	hogger := web.RefInput{TypeKey: "quest", Key: "hogger"}
+	elwynn := web.RefInput{TypeKey: "zone", Key: "elwynn"}
+	for _, tc := range []struct {
+		name        string
+		in          web.RelationsGetInput
+		want        string
+		wantInvalid bool
+	}{
+		{
+			name: "unknown relation type",
+			in:   web.RelationsGetInput{TypeKey: "unlocks", Source: hogger, Target: elwynn},
+			want: `no relation type "unlocks"`,
+		},
+		{
+			name: "unknown endpoint",
+			in: web.RelationsGetInput{TypeKey: "takes_place_in", Source: hogger,
+				Target: web.RefInput{TypeKey: "zone", Key: "westfall"}},
+			want: `no entity "westfall"`,
+		},
+		{
+			name: "the address is real and holds no edge",
+			in:   web.RelationsGetInput{TypeKey: "takes_place_in", Source: elwynn, Target: hogger},
+			want: `no "takes_place_in" edge`,
+		},
+		{
+			name:        "a key that could never have been stored",
+			in:          web.RelationsGetInput{TypeKey: "takes place in", Source: hogger, Target: elwynn},
+			want:        "type_key",
+			wantInvalid: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := web.MCPRelationsGet(ctx, f.deps, f.caller, f.game, tc.in)
+			if err == nil {
+				t.Fatal("err = nil, want a refusal")
+			}
+			want := metamodel.ErrNotFound
+			if tc.wantInvalid {
+				want = metamodel.ErrInvalidInput
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("err = %v, want %v", err, want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheServedEdgeSchemasAdvertiseAnEdgesFields is the paired guard
+// against this project's most repeated fault: an answer growing a field
+// its published contract does not mention. The output schemas are
+// hand-written, so nothing but a test connects them to the structs they
+// describe — and relations.list's description claimed an agent could
+// read an edge's own fields through it a whole task before it could.
+func TestTheServedEdgeSchemasAdvertiseAnEdgesFields(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+
+	session := connectMCP(t, httpSrv.URL, f.token)
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	served := map[string]*mcp.Tool{}
+	for _, tool := range tools.Tools {
+		served[tool.Name] = tool
+	}
+	get, ok := served["relations.get"]
+	if !ok {
+		t.Fatal("relations.get is not served")
+	}
+	rawGet, err := json.Marshal(get.OutputSchema)
+	if err != nil {
+		t.Fatalf("marshal relations.get output schema: %v", err)
+	}
+	var edge struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(rawGet, &edge); err != nil {
+		t.Fatalf("decode relations.get output schema: %v", err)
+	}
+	if _, ok := edge.Properties["fields"]; !ok {
+		t.Fatalf("relations.get advertises no fields: %s", rawGet)
+	}
+
+	list, ok := served["relations.list"]
+	if !ok {
+		t.Fatal("relations.list is not served")
+	}
+	rawList, err := json.Marshal(list.OutputSchema)
+	if err != nil {
+		t.Fatalf("marshal relations.list output schema: %v", err)
+	}
+	var page struct {
+		Properties struct {
+			Items struct {
+				Items struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"items"`
+			} `json:"items"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(rawList, &page); err != nil {
+		t.Fatalf("decode relations.list output schema: %v", err)
+	}
+	if _, ok := page.Properties.Items.Items.Properties["fields"]; !ok {
+		t.Fatalf("relations.list advertises no fields: %s", rawList)
+	}
+	// The input half: a caller cannot ask for the fields unless the
+	// input schema says the flag exists.
+	rawIn, err := json.Marshal(list.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal relations.list input schema: %v", err)
+	}
+	if !strings.Contains(string(rawIn), "verbose") {
+		t.Fatalf("relations.list takes no verbose flag: %s", rawIn)
 	}
 }

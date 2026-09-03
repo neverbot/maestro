@@ -17,7 +17,7 @@ import (
 
 // This file is the human half of the game-content surface: the REST
 // routes a browser reads and writes a game's types, entities and
-// relations through. It mirrors the sixteen MCP tools
+// relations through. It mirrors the seventeen MCP tools
 // (mcp_metamodel.go), and "mirrors" is meant literally — every handler
 // here decodes into that file's own input struct, calls that file's own
 // unexported core, and answers with that file's own output struct. There
@@ -513,7 +513,11 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 	if !ok {
 		return
 	}
-	in := RelationsListInput{Limit: limit}
+	verbose, ok := queryBool(w, r, "verbose")
+	if !ok {
+		return
+	}
+	in := RelationsListInput{Limit: limit, Verbose: verbose}
 	for _, part := range []struct {
 		name  string
 		field *string
@@ -528,6 +532,45 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 		*part.field = value
 	}
 	out, err := relationsList(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGetRelation reads one edge by its triple.
+//
+// The address is in the query string rather than in the path, and that
+// is this file's route rule doing its job: an edge is named by five
+// keys, and /relations/{type}/{source_type}/{source_key}/... would put
+// five row keys in five path segments where the header's own argument
+// says a key never shares a segment with anything. `/docs/one` already
+// addresses a row by query string on this surface for the same reason.
+//
+// Every part is required, and an absent one is refused by the domain as
+// invalid_input naming the part, not read as an empty key: an edge with
+// four fifths of an address is not a request anyone meant.
+func (s *Server) handleGetRelation(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	in := RelationsGetInput{}
+	for _, part := range []struct {
+		name  string
+		field *string
+	}{
+		{"type_key", &in.TypeKey},
+		{"source_type_key", &in.Source.TypeKey}, {"source_key", &in.Source.Key},
+		{"target_type_key", &in.Target.TypeKey}, {"target_key", &in.Target.Key},
+	} {
+		value, ok := queryString(w, r, part.name)
+		if !ok {
+			return
+		}
+		*part.field = value
+	}
+	out, err := relationsGet(r.Context(), s.deps(), caller, scope.ProjectID, in)
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return

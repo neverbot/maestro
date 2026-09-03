@@ -440,8 +440,16 @@ Schema — `types.list`, `types.get`, `types.upsert`, `types.remove`,
 `relation_types.remove`.
 
 Content — `entities.list`, `entities.get`, `entities.upsert`,
-`entities.remove`, `relations.list`, `relations.upsert`,
-`relations.remove`.
+`entities.remove`, `relations.list`, `relations.get`,
+`relations.upsert`, `relations.remove`.
+
+`relations.get` was not in this spec's own list and was added by
+Metamodel 12: a relation type may declare a field schema and the values
+an edge carries were validated on write, stored, and returned by
+nothing. An edge is read by the address it was written under — the
+relation type's key plus both endpoints as `(type_key, key)` — and
+`relations.list` grows the same `verbose` flag `entities.list` has, off
+by default for the same reason.
 
 Cross-cutting — `search` (free text over names and text fields,
 filterable by type).

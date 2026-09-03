@@ -1271,3 +1271,105 @@ func TestRemovingATypeStillInUseIsAConflict(t *testing.T) {
 		t.Fatalf("cascade remove = %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestRESTReadsAnEdgesOwnFields chases Metamodel 12 into the human half
+// of the surface. The two surfaces share one core and one wire
+// vocabulary, so a fix landing only on the MCP side would leave the
+// graph view — the thing the views sub-project renders an edge's
+// declared values from — still unable to see them.
+func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
+	f := newRESTFixture(t)
+
+	quest := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests"})
+	zone := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "zone", "label": "Zone", "label_plural": "Zones"})
+	var questID, zoneID struct {
+		ID string `json:"id"`
+	}
+	decodeBody(t, quest, &questID)
+	decodeBody(t, zone, &zoneID)
+
+	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
+		"key": "connects_to", "label": "connects to",
+		"source_type_ids": []string{zoneID.ID}, "target_type_ids": []string{zoneID.ID},
+		"field_schema": []any{map[string]any{"key": "requires_ability", "type": "text"}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("relation type = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
+		map[string]any{"type_key": "zone", "key": "elwynn", "name": "Elwynn Forest"},
+		map[string]any{"type_key": "zone", "key": "westfall", "name": "Westfall"},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("entities = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/relations", map[string]any{"items": []any{
+		map[string]any{"type_key": "connects_to",
+			"source": map[string]any{"type_key": "zone", "key": "elwynn"},
+			"target": map[string]any{"type_key": "zone", "key": "westfall"},
+			"fields": map[string]any{"requires_ability": "mothwing_cloak"}},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("relation = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	type edgeBody struct {
+		TypeKey string                `json:"type_key"`
+		Fields  map[string]any        `json:"fields"`
+		Source  *struct{ Key string } `json:"source"`
+	}
+
+	one := f.as(t, http.MethodGet,
+		"/relations/one?type_key=connects_to&source_type_key=zone&source_key=elwynn"+
+			"&target_type_key=zone&target_key=westfall", nil)
+	if one.Code != http.StatusOK {
+		t.Fatalf("read one edge = %d: %s", one.Code, one.Body.String())
+	}
+	var got edgeBody
+	decodeBody(t, one, &got)
+	if got.Fields["requires_ability"] != "mothwing_cloak" {
+		t.Fatalf("edge = %+v, want the ability it was written with", got)
+	}
+	if got.TypeKey != "connects_to" || got.Source == nil || got.Source.Key != "elwynn" {
+		t.Fatalf("edge = %+v, want the identity the listing gives too", got)
+	}
+
+	// A fresh decode target per read: json.Unmarshal reuses the elements
+	// of a slice it is given, so one shared page struct would let the
+	// verbose answer be satisfied by what the plain one left behind.
+	listing := func(path string) []edgeBody {
+		t.Helper()
+		rec := f.as(t, http.MethodGet, path, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var page struct {
+			Items []edgeBody `json:"items"`
+		}
+		decodeBody(t, rec, &page)
+		if len(page.Items) != 1 {
+			t.Fatalf("GET %s items = %+v, want the one edge", path, page.Items)
+		}
+		return page.Items
+	}
+	if fields := listing("/relations")[0].Fields; fields != nil {
+		t.Fatalf("a listing nobody asked to be verbose carried fields: %+v", fields)
+	}
+	if fields := listing("/relations?verbose=true")[0].Fields; fields["requires_ability"] != "mothwing_cloak" {
+		t.Fatalf("verbose listing fields = %+v, want the edge's own values", fields)
+	}
+
+	// The refusals are this surface's own spelling of the domain's: a
+	// bad address is 404 with the code and the message the tool gives,
+	// and a key that could never have been stored is 400.
+	missing := assertError(t, f.as(t, http.MethodGet,
+		"/relations/one?type_key=connects_to&source_type_key=zone&source_key=westfall"+
+			"&target_type_key=zone&target_key=elwynn", nil),
+		http.StatusNotFound, "not_found", "")
+	if !strings.Contains(missing.Message, `no "connects_to" edge`) {
+		t.Fatalf("message = %q, want it to name the edge that is missing", missing.Message)
+	}
+	assertError(t, f.as(t, http.MethodGet,
+		"/relations/one?type_key=connects+to&source_type_key=zone&source_key=elwynn"+
+			"&target_type_key=zone&target_key=westfall", nil),
+		http.StatusBadRequest, "invalid_input", "type_key")
+}

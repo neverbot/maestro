@@ -1028,35 +1028,83 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		}
 	})
 
+	// The gap this run found first, and the largest: an edge's own field
+	// values were write-only. `drives` declares a schema, the seed wrote
+	// `seat` and `season` onto 120 edges and every one of them was
+	// validated against that schema — and nothing on either surface
+	// returned them. Metamodel 12 closed it, and this case is the
+	// read-back the original run could not perform: the values go in
+	// through relations.upsert and come out through a public reader, the
+	// address they were written under, never through SQL.
+	t.Run("an edge's own values come back out through the surface", func(t *testing.T) {
+		// driver-000 is the i%10 == 0 case, so its seat was written
+		// explicitly and its season is 2014; a driver whose seat came
+		// from the schema's own default would not distinguish a reader
+		// that returns stored values from one that returns the schema.
+		edge, err := web.MCPRelationsGet(ctx, s.deps, s.caller, s.game, web.RelationsGetInput{
+			TypeKey: "drives",
+			Source:  web.RefInput{TypeKey: "driver", Key: "driver-000"},
+			Target:  web.RefInput{TypeKey: "car", Key: "car-000"},
+		})
+		if err != nil {
+			t.Fatalf("relations.get: %v", err)
+		}
+		if edge.Fields["seat"] != "reserve" || edge.Fields["season"] != float64(2014) {
+			t.Fatalf("edge fields = %v, want the seat and season the seed wrote", edge.Fields)
+		}
+		// driver-001 took the default seat, which is the other half of
+		// the same contract: a defaulted value is stored on the row and
+		// reads back like any other.
+		defaulted, err := web.MCPRelationsGet(ctx, s.deps, s.caller, s.game, web.RelationsGetInput{
+			TypeKey: "drives",
+			Source:  web.RefInput{TypeKey: "driver", Key: "driver-001"},
+			Target:  web.RefInput{TypeKey: "car", Key: "car-001"},
+		})
+		if err != nil {
+			t.Fatalf("relations.get: %v", err)
+		}
+		if defaulted.Fields["seat"] != "race" || defaulted.Fields["season"] != float64(2015) {
+			t.Fatalf("edge fields = %v, want the defaulted seat and the written season",
+				defaulted.Fields)
+		}
+
+		// And the listing, which is what a view renders from: off by
+		// default, because a page of edges with their values is most of
+		// the game in one answer, and complete when asked for.
+		plain, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
+			web.RelationsListInput{TypeKey: "drives", Limit: 5})
+		if err != nil {
+			t.Fatalf("relations.list: %v", err)
+		}
+		if len(plain.Items) != 5 {
+			t.Fatalf("no drives edges: %+v", plain.Items)
+		}
+		raw, err := json.Marshal(plain.Items[0])
+		if err != nil {
+			t.Fatalf("marshal edge: %v", err)
+		}
+		if strings.Contains(string(raw), "season") || strings.Contains(string(raw), "seat") {
+			t.Fatalf("a listing nobody asked to be verbose carried an edge's fields: %s", raw)
+		}
+		verbose, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
+			web.RelationsListInput{TypeKey: "drives", Limit: 5, Verbose: true})
+		if err != nil {
+			t.Fatalf("relations.list verbose: %v", err)
+		}
+		for _, item := range verbose.Items {
+			if item.Fields["season"] == nil {
+				t.Fatalf("a verbose listing left an edge's values out: %+v", item)
+			}
+		}
+	})
+
 	// TestSeedARacingGameEndToEnd's job is to find out what seeding a real
 	// game costs, so the gaps it found are pinned here rather than only
 	// written up. Each of these passes today and describes something an
 	// agent has to work around; a change that closes one of them should
 	// fail here and be deleted from this list.
 	t.Run("what the surface makes an agent do the long way", func(t *testing.T) {
-		// 1. **An edge's field values cannot be read back.** `drives`
-		// declares a schema, the seed wrote `seat` and `season` onto 120
-		// edges, and every one of them was validated against that schema
-		// — but RelationOutput carries no fields, there is no
-		// relations.get, and relations.list is the only way to see an
-		// edge. The values are stored and unreachable.
-		edges, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
-			web.RelationsListInput{TypeKey: "drives", Limit: 5})
-		if err != nil {
-			t.Fatalf("relations.list: %v", err)
-		}
-		if len(edges.Items) == 0 {
-			t.Fatalf("no drives edges")
-		}
-		raw, err := json.Marshal(edges.Items[0])
-		if err != nil {
-			t.Fatalf("marshal edge: %v", err)
-		}
-		if strings.Contains(string(raw), "season") || strings.Contains(string(raw), "seat") {
-			t.Fatalf("an edge now reports its fields; delete this case and the note above it: %s", raw)
-		}
-
-		// 2. **Nothing on this surface counts.** There is no tool that
+		// 1. **Nothing on this surface counts.** There is no tool that
 		// answers "how many races are there"; the REST home page has
 		// EntityCountsByType and an agent has only the listing, so a
 		// count is a full walk of every page.
@@ -1077,18 +1125,20 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("counting %d races took %d pages", total, pages)
 		}
 
-		// 3. **Search does not index keys.** A designer who types the
+		// 2. **Search does not index keys.** A designer who types the
 		// handle they see everywhere else gets nothing, and has to know
 		// to use entities.get instead.
 		if hits := s.search(t, "circuit-000", ""); len(hits) != 0 {
 			t.Fatalf("search now finds a row by its key; delete this case: %+v", hits)
 		}
 
-		// 4. **Two of the sixteen tools address rows by uuid only.**
+		// 3. **Two of the seventeen tools address rows by uuid only.**
 		// entities.remove and relations.remove take an id, and
 		// relations.list filters endpoints by id, so an agent holding the
 		// (type key, key) every other tool speaks has to resolve it
-		// first. Here is that extra round trip.
+		// first. Here is that extra round trip. relations.get, added by
+		// Metamodel 12, is addressed by key, so the one read this case
+		// used to stand for is no longer among them.
 		race, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
 			web.EntitiesGetInput{TypeKey: "race", Key: "race-000"})
 		if err != nil {
@@ -1103,7 +1153,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("race-000 has %d outgoing edges, want 3", len(out.Items))
 		}
 
-		// 5. **Search is unconditionally verbose, and cannot be asked not
+		// 4. **Search is unconditionally verbose, and cannot be asked not
 		// to be.** entities.list defaults `verbose` off, arguing that a
 		// page of five hundred rows with their fields is the whole game
 		// back in one answer; search has no such argument and hands back
@@ -1126,7 +1176,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("search no longer returns a whole longtext; delete this case: %+v", hits)
 		}
 
-		// 6. **A relation type states its endpoints as entity type ids**,
+		// 5. **A relation type states its endpoints as entity type ids**,
 		// so a second seeding session — one that did not itself declare
 		// the types and so never saw the ids — has to call types.list and
 		// build the key-to-id map by hand before it can declare or edit a

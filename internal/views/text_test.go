@@ -321,11 +321,16 @@ func TestAnEmbeddedTypesPromotedFieldIsBounded(t *testing.T) {
 	if err := json.Unmarshal([]byte(doc), &host); err != nil {
 		t.Fatalf("the document must decode: %v", err)
 	}
-	if host.embeddedUnexported.PromotedHidden == "" {
+	// Read through the promoted names rather than through the embedded
+	// field, because promotion is the thing under test: if encoding/json
+	// ever stops promoting, these stop compiling or stop being populated,
+	// and either way the walk's embedded arm is pinning something
+	// unreachable rather than guarding a real document member.
+	if host.PromotedHidden == "" {
 		t.Fatal("encoding/json is expected to promote an unexported type's exported field: " +
 			"if it no longer does, the walk's embedded arm is pinning something unreachable")
 	}
-	if host.EmbeddedExported.PromotedVisible == "" {
+	if host.PromotedVisible == "" {
 		t.Fatal("an exported embedded type's field must be populated by the decode")
 	}
 	host.notAMember = "d" + controlChar

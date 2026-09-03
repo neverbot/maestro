@@ -95,3 +95,20 @@ func TestGameHomePageRendersItsSummary(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/game_summary_test.mjs")
 }
+
+// TestTheDocumentPageRendersADocument drives the reading view the same
+// way: internal/web/jstest/document_page_test.mjs loads the real
+// internal/web/static/doc.js as an ES module in a DOM stub and asserts
+// what the page renders and what it posts.
+//
+// It is the only place any of this is checked. doc.js is the one file in
+// this product that writes markup, and the properties that matter — that
+// only a rendered view's html reaches that sink, that a history names
+// people rather than uuids, that a revert sends the document's current
+// version as expected_version, that a failed read does not render a
+// plausible blank — are properties of the page, not of any route, so no
+// Go test against internal/web/api_docs.go can see one of them.
+func TestTheDocumentPageRendersADocument(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/document_page_test.mjs")
+}

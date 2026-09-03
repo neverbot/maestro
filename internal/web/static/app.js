@@ -79,7 +79,7 @@ function safeReturnPath() {
 // writeError and its call sites) — this file always prefers that text
 // over inventing its own, so a wording change on the server is never
 // duplicated, and never drifts, here.
-const fallbackMessage = "Could not reach the server. Please try again.";
+export const fallbackMessage = "Could not reach the server. Please try again.";
 
 // parseErrorBody reads {"error": code, "message": text} defensively: a
 // response that isn't JSON, or is JSON but not that shape, must not throw
@@ -104,7 +104,7 @@ async function parseErrorBody(response) {
 // a handler that returns 201 with a created resource (POST /api/games) has
 // something a caller needs; one that returns 204 (nothing) or 200 with a
 // body a caller doesn't care about (login) simply gets an empty object.
-async function postJSON(url, payload) {
+export async function postJSON(url, payload) {
   let response;
   try {
     response = await fetch(url, {
@@ -154,7 +154,7 @@ function setFormBusy(form, busy, busyLabel) {
 // visitor that isn't back to /login. Built with createElement/textContent
 // throughout, never innerHTML, the same rule every other DOM write in
 // this file follows.
-function renderHeader() {
+export function renderHeader() {
   const header = document.createElement("header");
   header.className = "site-header";
 
@@ -351,7 +351,7 @@ if (inviteForm) {
 // or was revoked in another tab, mid-browse — is treated as "sign in
 // again", not as a blank or broken page, since staying on a page that
 // can no longer authenticate anything it fetches serves nobody.
-async function fetchAPI(path) {
+export async function fetchAPI(path) {
   let response;
   try {
     response = await fetch(path);
@@ -375,7 +375,7 @@ async function fetchAPI(path) {
 // every caller of it would otherwise repeat: a body whose "games" is not
 // an array is treated as no games rather than crashing the page that is
 // about to iterate it.
-async function fetchGames() {
+export async function fetchGames() {
   const result = await fetchAPI("/api/games");
   if (!result.ok) {
     return result;
@@ -387,7 +387,7 @@ async function fetchGames() {
 // on so a successful sign-in (safeReturnPath, above) can send it right
 // back instead of stranding it on "/" regardless of where the session
 // actually expired.
-function goToLogin() {
+export function goToLogin() {
   const here = window.location.pathname + window.location.search;
   window.location.href = "/login?return=" + encodeURIComponent(here);
 }
@@ -481,7 +481,7 @@ if (createGameForm) {
 
 // countLabel spells a count with the right noun, so "1 entities" never
 // reaches a designer's screen.
-function countLabel(count, singular, plural) {
+export function countLabel(count, singular, plural) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
@@ -579,12 +579,146 @@ function fillCatalogue(listEl, emptyEl, rows) {
   }
 }
 
+// describeWhoWritesDocuments is the documents empty state's second half,
+// the same shape describeWhoDeclaresTypes has and for the same reason: a
+// viewer's write is refused by registerContentRoute (internal/web/
+// server.go) on every prose route, so telling a viewer to write one
+// would be promising an action this instance will not perform. Nothing
+// on this page writes a document either way — said outright rather than
+// implied by the absence of a button.
+function describeWhoWritesDocuments(role) {
+  if (role === "viewer") {
+    return (
+      "Your role in this game is viewer, so this instance will refuse a write from you: " +
+      "an editor, an admin or the owner writes them."
+    );
+  }
+  return (
+    "You write them through this instance's API, either from an agent over MCP or " +
+    "over the game's content routes. Nothing on this page creates one yet."
+  );
+}
+
+// documentRow is catalogueRow with a link where the label goes: a
+// document's title is the one thing on either catalogue that leads
+// somewhere, so it is an <a> rather than a <span>, and the path it links
+// to travels in the query string exactly as the API's own does (see
+// internal/web/api_docs.go's header for why a document path never
+// occupies a URL segment).
+//
+// Every string here is game content — a title a designer wrote, a path
+// an agent sent — so every one goes in through textContent, the rule
+// this whole file follows.
+function documentRow(slug, doc) {
+  const item = document.createElement("li");
+
+  const link = document.createElement("a");
+  link.className = "catalogue-label";
+  link.href = `/g/${encodeURIComponent(slug)}/doc?path=${encodeURIComponent(doc.path ?? "")}`;
+  link.textContent = doc.title || doc.path || "Untitled";
+  item.append(link);
+
+  const handle = document.createElement("code");
+  handle.className = "catalogue-key";
+  handle.textContent = doc.path ?? "";
+  item.append(handle);
+
+  const kind = document.createElement("span");
+  kind.className = "catalogue-count";
+  // A document need not have a kind — DocumentSummaryOutput omits an
+  // empty one — and an empty cell reads better than the word "none",
+  // which would look like a kind called "none".
+  kind.textContent = doc.kind ?? "";
+  item.append(kind);
+
+  return item;
+}
+
+// renderDocuments fills the game page's Documents catalogue from GET
+// /api/games/{game}/docs, one page at a time, and keeps the cursor the
+// server issued so "Show more documents" can ask for the next.
+//
+// A failed request shows the server's own message and leaves both the
+// list and the empty state hidden. That distinction is the point: an
+// empty list and a request that never answered look identical on a page
+// that renders a plausible blank, and only one of them means "this game
+// has no documents".
+async function renderDocuments(gameID, slug, role) {
+  const listEl = document.getElementById("docs");
+  const emptyEl = document.getElementById("docs-empty");
+  const errorEl = document.getElementById("docs-error");
+  const moreEl = document.getElementById("docs-more");
+  if (!listEl) {
+    return;
+  }
+  const actionEl = document.getElementById("docs-empty-action");
+  if (actionEl) {
+    actionEl.textContent = describeWhoWritesDocuments(role);
+  }
+
+  let cursor = null;
+  let rendered = 0;
+
+  async function loadPage() {
+    if (moreEl) moreEl.disabled = true;
+    const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    const result = await fetchAPI(`/api/games/${gameID}/docs${query}`);
+    if (!result.ok) {
+      if (result.expired) {
+        goToLogin();
+        return;
+      }
+      // Hidden, not emptied: a page that has already rendered two
+      // documents and then fails to fetch the third page must keep the
+      // two it has and say what went wrong beside them.
+      if (emptyEl) emptyEl.hidden = true;
+      if (moreEl) moreEl.hidden = true;
+      if (errorEl) {
+        errorEl.textContent = result.message;
+        errorEl.hidden = false;
+      }
+      return;
+    }
+    if (errorEl) {
+      errorEl.textContent = "";
+      errorEl.hidden = true;
+    }
+    const body = result.body ?? {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    for (const doc of items) {
+      listEl.append(documentRow(slug, doc));
+    }
+    rendered += items.length;
+    listEl.hidden = rendered === 0;
+    if (emptyEl) emptyEl.hidden = rendered > 0;
+
+    // The listing issues a cursor whenever a page came back full, so the
+    // page that reports the end is the empty one after the last row —
+    // which is why the button stays until the server stops sending a
+    // cursor, rather than being hidden on a short page.
+    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    if (moreEl) {
+      moreEl.hidden = cursor === null;
+      moreEl.disabled = false;
+    }
+  }
+
+  if (moreEl) {
+    // The handler returns loadPage's promise rather than discarding it:
+    // a browser ignores the return value, and the Node harness in
+    // internal/web/jstest awaits it, which is what lets a test press this
+    // button and then assert what the next page rendered.
+    moreEl.addEventListener("click", () => loadPage());
+  }
+  await loadPage();
+}
+
 // renderGameSummary draws the whole page body from one request. A
 // failure leaves the game's name in place and puts the server's own
 // message where the totals would have gone: a page that says what went
 // wrong beats one that silently shows an empty catalogue, which is
 // indistinguishable from a game with nothing in it.
-async function renderGameSummary(gameID) {
+async function renderGameSummary(gameID, slug) {
   const summaryEl = document.getElementById("game-summary");
   const result = await fetchAPI(`/api/games/${gameID}/summary`);
   if (!result.ok) {
@@ -637,6 +771,8 @@ async function renderGameSummary(gameID) {
     ),
   );
 
+  await renderDocuments(gameID, slug, summary.role);
+
   const content = document.getElementById("game-content");
   if (content) {
     // Revealed only now, with both catalogues already filled, so the
@@ -680,7 +816,7 @@ if (gameNameEl) {
       // that cannot be reached; see LAST_GAME_KEY's own comment above for
       // why a wrong remembered value is never merely harmless.
       if (slug) rememberGame(slug);
-      await renderGameSummary(game.id);
+      await renderGameSummary(game.id, slug);
     } else {
       gameNameEl.textContent = "Game not found";
       if (summaryEl) {

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<p class="muted"><a id="back-to-game" href="/">Back to the game</a></p>
+
+<h1 id="doc-title">Loading…</h1>
+<p class="muted" id="doc-meta" aria-live="polite">Loading this document…</p>
+<!-- Every failure on this page lands here, and nothing else renders
+     behind it: a document that could not be read must not look like a
+     document with nothing in it. -->
+<p class="error" id="doc-error" hidden></p>
+
+<article class="prose" id="doc-body" hidden></article>
+
+<section id="doc-content" hidden>
+  <h2>Attached to</h2>
+  <ul class="catalogue" id="doc-entities"></ul>
+  <p class="muted" id="doc-entities-empty" hidden>
+    This document is attached to no entity. An agent attaches one over MCP
+    (docs.links.add) or over this game's content routes; nothing on this page
+    attaches one.
+  </p>
+
+  <h2>History</h2>
+  <ul class="history" id="doc-history"></ul>
+  <p class="error" id="doc-history-error" hidden></p>
+  <button type="button" class="link-button" id="doc-history-more" hidden>Show older versions</button>
+  <p class="muted" id="doc-revert-note" hidden></p>
+
+  <h2>Compare</h2>
+  <form id="compare-form">
+    <label for="compare-from">From version</label>
+    <select id="compare-from" name="from_version"></select>
+    <label for="compare-to">To version</label>
+    <select id="compare-to" name="to_version"></select>
+    <button type="submit">Compare</button>
+  </form>
+  <p class="error" id="compare-error"></p>
+  <div id="comparison" hidden></div>
+</section>
+
+<script type="module" src="/static/doc.js"></script>

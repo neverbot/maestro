@@ -76,6 +76,50 @@ func TestGamePageIsServedForAnySlug(t *testing.T) {
 	}
 }
 
+// TestDocumentPageIsServedForAnySlug pins that GET /g/{slug}/doc serves
+// the reading view's shell whatever the slug is, exactly as /g/{slug}
+// serves the game page's: this route resolves nothing server-side
+// either, and doc.js is what discovers from GET /api/games whether the
+// caller can reach the game at all.
+//
+// The document's own path is not in the URL's path and is not read here:
+// it travels in the query string (see internal/web/api_docs.go's header),
+// so this route never sees it.
+func TestDocumentPageIsServedForAnySlug(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/g/does-not-exist/doc?path=lore%2Fduskwood", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "doc-title") {
+		t.Fatal("the document page has no #doc-title element")
+	}
+}
+
+// TestDocumentScriptIsServed pins the second ES module this product
+// ships. It is a separate file rather than more of app.js because it is
+// the only one allowed to write markup — see
+// TestTheDocumentScriptHasExactlyOneHTMLSink.
+func TestDocumentScriptIsServed(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/static/doc.js", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/javascript") {
+		t.Fatalf("Content-Type = %q, want text/javascript", ct)
+	}
+}
+
 func TestUnknownStaticAssetIsNotFound(t *testing.T) {
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/static/does-not-exist.js", nil)
@@ -96,7 +140,7 @@ func TestUnknownStaticAssetIsNotFound(t *testing.T) {
 // under /static/ ending in .html for exactly this reason.
 func TestStaticDoesNotServeHTMLShellsAgain(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	for _, name := range []string{"index.html", "login.html", "game.html"} {
+	for _, name := range []string{"index.html", "login.html", "game.html", "document.html"} {
 		req := httptest.NewRequest(http.MethodGet, "/static/"+name, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

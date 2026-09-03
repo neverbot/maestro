@@ -41,7 +41,19 @@ function fakeElement(tag = "div") {
     replaceChildren(...nodes) {
       this.children = [...nodes];
     },
-    addEventListener() {},
+    disabled: false,
+    listeners: {},
+    addEventListener(name, handler) {
+      (this.listeners[name] ??= []).push(handler);
+    },
+    // click drives the real handler app.js registered, so a paging
+    // button is tested by pressing it rather than by asserting it was
+    // wired.
+    async click() {
+      for (const handler of this.listeners.click ?? []) {
+        await handler();
+      }
+    },
     querySelector() {
       return null;
     },
@@ -54,7 +66,7 @@ function text(node) {
   return own + node.children.map(text).join(" ");
 }
 
-async function runCase({ summary, summaryStatus = 200 }) {
+async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }], docsStatus = 200 }) {
   const elements = {
     "game-name": fakeElement("h1"),
     "game-summary": fakeElement("p"),
@@ -64,6 +76,11 @@ async function runCase({ summary, summaryStatus = 200 }) {
     "types-empty-action": fakeElement("span"),
     "relation-types": fakeElement("ul"),
     "relation-types-empty": fakeElement("p"),
+    docs: fakeElement("ul"),
+    "docs-empty": fakeElement("p"),
+    "docs-empty-action": fakeElement("span"),
+    "docs-error": fakeElement("p"),
+    "docs-more": fakeElement("button"),
     // The picker's own ids, absent on this page.
     games: null,
     status: null,
@@ -112,6 +129,22 @@ async function runCase({ summary, summaryStatus = 200 }) {
         json: async () => summary,
       };
     }
+    if (url.startsWith(`/api/games/${game.id}/docs`)) {
+      if (docsStatus !== 200) {
+        return {
+          ok: false,
+          status: docsStatus,
+          json: async () => ({ error: "internal_error", message: "the documents could not be listed" }),
+        };
+      }
+      // The cursor decides which page answers, exactly as the keyset
+      // listing does: no cursor is the first page, and the cursor the
+      // previous page issued is the next one.
+      const cursor = new URLSearchParams(url.slice(url.indexOf("?") + 1)).get("cursor");
+      const index = cursor ? Number(cursor) : 0;
+      const page = docPages[index] ?? { items: [] };
+      return { ok: true, status: 200, json: async () => page };
+    }
     return { ok: false, status: 404, json: async () => ({ error: "not_found", message: "unexpected fetch: " + url }) };
   };
 
@@ -124,6 +157,14 @@ async function runCase({ summary, summaryStatus = 200 }) {
 // never asks for a listing to build a summary.
 {
   const { elements, requested } = await runCase({
+    docPages: [
+      {
+        items: [
+          { id: "d1", path: "lore/duskwood", title: "<img src=x onerror=alert(1)>Duskwood", kind: "lore", version: 3 },
+          { id: "d2", path: "scripts/wanted-hogger", title: "Wanted: Hogger", version: 1 },
+        ],
+      },
+    ],
     summary: {
       entity_types: [
         { id: "a", key: "quest", label: "Quest", label_plural: "<img src=x onerror=alert(1)>Quests", entity_count: 400, invalid_count: 3 },
@@ -163,11 +204,113 @@ async function runCase({ summary, summaryStatus = 200 }) {
   if (!elements["types-empty"].hidden || !elements["relation-types-empty"].hidden) {
     fail("an empty state is showing on a game that has content");
   }
-  // The whole page is two requests, and neither of them is a listing:
-  // this is the property that keeps a game with four hundred entities
-  // rendering like a game with four.
-  if (requested.length !== 2 || requested.some((url) => url.includes("/entities") || url.includes("/relations"))) {
-    fail(`the page fetched ${JSON.stringify(requested)}, want only the game list and the summary`);
+  // The whole page is three requests — the game list, the summary and
+  // the first page of documents — and none of them is an entity or
+  // relation listing: that is the property that keeps a game with four
+  // hundred entities rendering like a game with four. The documents
+  // *are* a listing, deliberately and boundedly: it is a keyset page
+  // with a cursor, not the whole game.
+  if (requested.length !== 3 || requested.some((url) => url.includes("/entities") || url.includes("/relations"))) {
+    fail(`the page fetched ${JSON.stringify(requested)}, want the game list, the summary and one page of documents`);
+  }
+
+  // The documents catalogue: a title reaches the page as text (the same
+  // proof the entity-type labels get — the stub cannot parse markup, so
+  // finding the raw string means it went through textContent), the path
+  // is beside it, and a document with no kind renders without inventing
+  // one.
+  const docs = text(elements.docs);
+  if (!docs.includes("<img src=x onerror=alert(1)>Duskwood")) {
+    fail(`a document title did not reach the page as text: ${JSON.stringify(docs)}`);
+  }
+  if (!docs.includes("lore/duskwood") || !docs.includes("scripts/wanted-hogger")) {
+    fail(`the documents catalogue is missing a path: ${JSON.stringify(docs)}`);
+  }
+  if (docs.includes("undefined") || docs.includes("null")) {
+    fail(`a document with no kind rendered a placeholder: ${JSON.stringify(docs)}`);
+  }
+  // Each row links into the reading view, with the document's path in
+  // the query string and never in a URL segment — the same shape the API
+  // uses, for the same reason.
+  const first = elements.docs.children[0].children[0];
+  if (first.href !== "/g/azeroth/doc?path=lore%2Fduskwood") {
+    fail(`the first document links to ${JSON.stringify(first.href)}`);
+  }
+  if (!elements["docs-empty"].hidden) {
+    fail("the documents empty state is showing on a game that has documents");
+  }
+  if (!elements["docs-error"].hidden) {
+    fail("the documents error line is showing after a successful listing");
+  }
+  if (!elements["docs-more"].hidden) {
+    fail("the paging button is offered when the server issued no cursor");
+  }
+}
+
+// Case 1b: paging. The listing issues a cursor whenever a page came back
+// full, so the page that reports the end of a listing is the empty one
+// after the last row — pressing the button is what proves this page
+// follows that rule rather than hiding the button on a short page.
+{
+  const { elements, requested } = await runCase({
+    docPages: [
+      { items: [{ id: "d1", path: "a", title: "A" }], next_cursor: "1" },
+      { items: [{ id: "d2", path: "b", title: "B" }], next_cursor: "2" },
+      { items: [] },
+    ],
+    summary: {
+      entity_types: [],
+      relation_types: [],
+      totals: { entities: 0, relations: 0, invalid: 0 },
+      role: "editor",
+    },
+  });
+
+  if (elements["docs-more"].hidden) {
+    fail("the server issued a cursor and the page offered no way to ask for the next page");
+  }
+  await elements["docs-more"].click();
+  if (!text(elements.docs).includes("B")) {
+    fail(`the second page was not appended: ${JSON.stringify(text(elements.docs))}`);
+  }
+  if (!text(elements.docs).includes("A")) {
+    fail("the second page replaced the first instead of appending to it");
+  }
+  await elements["docs-more"].click();
+  if (!elements["docs-more"].hidden) {
+    fail("the empty page after the last row did not retire the paging button");
+  }
+  if (!requested.some((url) => url.includes("cursor=2"))) {
+    fail(`the page never followed the second cursor: ${JSON.stringify(requested)}`);
+  }
+}
+
+// Case 1c: the documents listing fails. The server's own message shows,
+// and neither the list nor the empty state does — an empty catalogue and
+// a request that never answered look identical otherwise, and only one
+// of them means "this game has no documents".
+{
+  const { elements } = await runCase({
+    docsStatus: 500,
+    summary: {
+      entity_types: [],
+      relation_types: [],
+      totals: { entities: 0, relations: 0, invalid: 0 },
+      role: "editor",
+    },
+  });
+
+  if (elements["docs-error"].hidden) {
+    fail("a failed documents listing said nothing");
+  }
+  if (elements["docs-error"].textContent !== "the documents could not be listed") {
+    fail(`the failure message reads ${JSON.stringify(elements["docs-error"].textContent)}`);
+  }
+  if (!elements["docs-empty"].hidden) {
+    fail("a failed documents listing rendered the empty state, which claims the game has no documents");
+  }
+  if (!elements["docs-more"].hidden) {
+    fail("a failed documents listing still offers to fetch more");
   }
 }
 
@@ -243,6 +386,27 @@ async function runCase({ summary, summaryStatus = 200 }) {
   if (viewerAction.includes("You declare")) {
     fail(`a viewer is still told to declare a type: ${JSON.stringify(viewerAction)}`);
   }
+
+  // The documents empty state follows the same rule, and it is a
+  // separate sentence written by a separate function, so it needs its
+  // own assertion rather than being assumed from the one above.
+  const editorDocs = editor.elements["docs-empty-action"].textContent;
+  const viewerDocs = viewer.elements["docs-empty-action"].textContent;
+  if (editor.elements["docs-empty"].hidden) {
+    fail("a game with no documents is missing its empty state");
+  }
+  if (!editorDocs.includes("MCP")) {
+    fail(`an editor is not told how a document gets written: ${JSON.stringify(editorDocs)}`);
+  }
+  if (viewerDocs === editorDocs) {
+    fail("a viewer is shown the editor's sentence about writing documents, which the server refuses them");
+  }
+  if (!viewerDocs.includes("viewer") || !viewerDocs.includes("refuse")) {
+    fail(`a viewer is not told the write would be refused: ${JSON.stringify(viewerDocs)}`);
+  }
+  if (viewerDocs.includes("You write")) {
+    fail(`a viewer is still told to write a document: ${JSON.stringify(viewerDocs)}`);
+  }
 }
 
-console.log("ok: game summary page renders counts, empty states, roles and failures");
+console.log("ok: game page renders counts, documents, empty states, roles, paging and failures");

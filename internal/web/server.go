@@ -266,6 +266,17 @@ func NewServer(opts Options) *Server {
 	// named path variable keeps the safety net from misreading it as a
 	// bypass.
 	s.routeFunc("GET /g/{slug}", func(w http.ResponseWriter, r *http.Request) { s.serveAsset(w, r, "game.html") })
+	// The reading view, one document of one game. Same shell-only
+	// contract as /g/{slug} above and the same {slug} spelling for the
+	// same reason: this route resolves nothing server-side, and doc.js
+	// discovers from GET /api/games whether the caller can reach the
+	// game at all. The document's own path travels in the query string
+	// (/g/{slug}/doc?path=…), mirroring the API's own shape — see
+	// api_docs.go's header for why a document path never occupies a URL
+	// segment.
+	s.routeFunc("GET /g/{slug}/doc", func(w http.ResponseWriter, r *http.Request) {
+		s.serveAsset(w, r, "document.html")
+	})
 	s.route("GET /static/", s.staticFileServer())
 	s.routeFunc("GET /api/config", s.handleConfig)
 	s.route("GET /api/games", requireCaller(s.handleListGames))

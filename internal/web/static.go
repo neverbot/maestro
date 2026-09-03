@@ -58,10 +58,11 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, name string)
 }
 
 // staticFileServer serves every embedded asset under /static/ except the
-// three HTML shells (login.html, index.html, game.html). Those are only
-// ever reachable through GET /login, GET /{$} and GET /g/{slug}
-// (server.go) — each with its own dispatch logic, handleRoot's redirect
-// decision in particular — so serving them again, unconditionally, under
+// four HTML shells (login.html, index.html, game.html, document.html).
+// Those are only ever reachable through GET /login, GET /{$},
+// GET /g/{slug} and GET /g/{slug}/doc (server.go) — each with its own
+// dispatch logic, handleRoot's redirect decision in particular — so
+// serving them again, unconditionally, under
 // /static/ as well would hand every one of those pages a second URL that
 // bypasses all of that (a quality review found exactly this: /static/
 // index.html, wired up through http.FileServerFS with no filtering,

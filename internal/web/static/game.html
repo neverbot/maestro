@@ -24,6 +24,20 @@
     <span id="types-empty-action"></span>
   </p>
 
+  <h2>Documents</h2>
+  <ul class="catalogue" id="docs"></ul>
+  <p class="muted" id="docs-empty" hidden>
+    This game has no documents yet. A document is prose addressed by a path
+    inside this game — lore/duskwood, scripts/wanted-hogger — versioned on
+    every save.
+    <!-- Same rule as the entity-types empty state above: the sentence
+         that says what to do about it depends on who is reading, and a
+         viewer must not be told to do what the server will refuse. -->
+    <span id="docs-empty-action"></span>
+  </p>
+  <p class="error" id="docs-error" hidden></p>
+  <button type="button" class="link-button" id="docs-more" hidden>Show more documents</button>
+
   <h2>Relation types</h2>
   <ul class="catalogue" id="relation-types"></ul>
   <p class="muted" id="relation-types-empty" hidden>

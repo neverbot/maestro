@@ -1,0 +1,480 @@
+// The reading view: one document of one game, rendered, with the
+// entities it is attached to, its history, a comparison between two of
+// its versions and a revert.
+//
+// It shares app.js's helpers by importing them rather than repeating
+// them — one fetch wrapper, one 401 policy, one header — and app.js's
+// own page blocks are guarded on elements this page does not have
+// (#games, #login, #game-name), so importing it runs none of them.
+//
+// **This file is the one place in internal/web/static that inserts
+// server-supplied HTML into the DOM**, and setRenderedHTML below is the
+// only sink. app.js has none at all and must keep none:
+// TestAppScriptNeverWritesRawHTML pins that, and
+// TestTheDocumentScriptHasExactlyOneHTMLSink pins that this file has
+// exactly one and that it is fed from a rendered view.
+import {
+  fallbackMessage,
+  fetchAPI,
+  fetchGames,
+  goToLogin,
+  postJSON,
+  renderHeader,
+} from "./app.js";
+// A relative specifier, not "/static/app.js": the browser resolves it
+// against this module's own URL and gets the same file either way, and
+// Node — which internal/web/jstest drives this page with — can resolve
+// only the relative one.
+
+// The two routes whose answers are markup rather than text. Both are
+// produced by internal/markdown: Render for a body (goldmark with no
+// html.WithUnsafe, so raw HTML in a document is never emitted, and every
+// link and image destination whose scheme is not http, https or mailto
+// is rewritten to "#") and RenderDiff for a comparison (every line
+// escaped, then wrapped in a classed <div>). Neither can carry a tag a
+// designer typed, which is why this page may insert them and why nothing
+// else on it may.
+//
+// The Content-Security-Policy on every response from this server
+// (default-src 'self', internal/web's securityHeaders) is a second line
+// and not the first: innerHTML never executes a <script> it inserts, but
+// an event-handler attribute would run without one, and the renderer not
+// emitting attributes at all is what actually stops that.
+function setRenderedHTML(el, html) {
+  el.innerHTML = typeof html === "string" ? html : "";
+}
+
+// showFailure is the page's one failure state: the server's own words,
+// with everything else hidden. A reading view that failed to load must
+// never look like a document that happens to be empty — which is
+// precisely what leaving the (empty) article and the (empty) history
+// visible would look like.
+function showFailure(message) {
+  const errorEl = document.getElementById("doc-error");
+  const metaEl = document.getElementById("doc-meta");
+  const bodyEl = document.getElementById("doc-body");
+  const contentEl = document.getElementById("doc-content");
+  if (metaEl) metaEl.textContent = "";
+  if (bodyEl) bodyEl.hidden = true;
+  if (contentEl) contentEl.hidden = true;
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.hidden = false;
+  }
+}
+
+// describeAuthor turns a version's author_kind and author_id into a
+// sentence a designer can read. VersionOutput carries no name — only a
+// kind and an id — so a user is resolved against the member list this
+// page already loads, and a token is not resolved at all: its label
+// lives behind GET /api/games/{game}/tokens, which only an admin may
+// read, so calling every token "an agent" is what this page can say to
+// every reader without asking for a permission it does not need.
+//
+// A raw uuid never reaches the screen. A designer reading a history does
+// not know what one is, and a user id that is not in the member list is
+// somebody who has since left the game, which is a sentence rather than
+// a hex string.
+function describeAuthor(version, membersByID) {
+  if (version.author_kind === "token") {
+    return "an agent";
+  }
+  if (version.author_kind === "user") {
+    const name = version.author_id ? membersByID.get(version.author_id) : null;
+    return name || "a former member";
+  }
+  return "an unknown author";
+}
+
+// describeTime formats a timestamp in the reader's own locale, and falls
+// back to the server's ISO string rather than to "Invalid Date" if it is
+// not parseable.
+function describeTime(raw) {
+  const when = new Date(raw);
+  return Number.isNaN(when.getTime()) ? String(raw ?? "") : when.toLocaleString();
+}
+
+// entityRow is one line of the "Attached to" list: the entity's name,
+// the type key and key an agent addresses it by, and the free-text role
+// the link carries when it has one.
+function entityRow(link) {
+  const item = document.createElement("li");
+
+  const name = document.createElement("span");
+  name.className = "catalogue-label";
+  name.textContent = link.name || link.entity_key || "";
+  item.append(name);
+
+  const handle = document.createElement("code");
+  handle.className = "catalogue-key";
+  handle.textContent = `${link.entity_type_key ?? ""}/${link.entity_key ?? ""}`;
+  item.append(handle);
+
+  const role = document.createElement("span");
+  role.className = "catalogue-count";
+  role.textContent = link.role ?? "";
+  item.append(role);
+
+  return item;
+}
+
+const backLink = document.getElementById("back-to-game");
+const titleEl = document.getElementById("doc-title");
+if (titleEl) {
+  renderHeader();
+
+  // /g/{slug}/doc?path=… — the slug in the path, the document's path in
+  // the query string, mirroring the API's own shape (a document path
+  // never occupies a URL segment; see internal/web/api_docs.go).
+  const slugMatch = window.location.pathname.match(/^\/g\/([^/]+)\/doc$/);
+  const slug = slugMatch ? decodeURIComponent(slugMatch[1]) : null;
+  const docPath = new URLSearchParams(window.location.search).get("path") ?? "";
+  if (slug && backLink) {
+    backLink.href = `/g/${encodeURIComponent(slug)}`;
+  }
+
+  if (!docPath) {
+    titleEl.textContent = "No document asked for";
+    showFailure("This address names no document. Open one from the game's Documents list.");
+  } else {
+    // The game's id, from the same list every other page resolves a slug
+    // against: there is no server-side slug resolution on /g/{slug}
+    // (Task 8's Round 2 Correction 12) and this page adds none.
+    const games = await fetchGames();
+    if (!games.ok) {
+      if (games.expired) {
+        goToLogin();
+      } else {
+        titleEl.textContent = "Could not load this document";
+        showFailure(games.message);
+      }
+    } else {
+      const game = games.games.find((g) => g.slug === slug);
+      if (!game) {
+        titleEl.textContent = "Game not found";
+        showFailure("You may not have access to this game, or it no longer exists.");
+      } else {
+        await renderDocument(game.id, docPath);
+      }
+    }
+  }
+}
+
+// renderDocument draws the whole page from four requests: the rendered
+// reading view, the member list (for the history's author names), the
+// game summary (for the caller's role, which decides whether a revert
+// button is offered at all) and the first page of history.
+//
+// The reading view comes first and its failure is the page's failure:
+// there is nothing worth showing beside a document that could not be
+// read.
+async function renderDocument(gameID, docPath) {
+  const titleEl = document.getElementById("doc-title");
+  const metaEl = document.getElementById("doc-meta");
+  const bodyEl = document.getElementById("doc-body");
+
+  const rendered = await fetchAPI(
+    `/api/games/${gameID}/docs/rendered?path=${encodeURIComponent(docPath)}`,
+  );
+  if (!rendered.ok) {
+    if (rendered.expired) {
+      goToLogin();
+      return;
+    }
+    if (titleEl) titleEl.textContent = "Could not read this document";
+    showFailure(rendered.message);
+    return;
+  }
+
+  const doc = rendered.body ?? {};
+  const version = Number(doc.version ?? 0);
+  if (titleEl) titleEl.textContent = doc.title || doc.path || docPath;
+  if (metaEl) {
+    // The kind is optional on the wire, so the line is assembled from
+    // the parts that are actually there rather than printing an empty
+    // one.
+    const parts = [doc.path ?? docPath];
+    if (doc.kind) parts.push(doc.kind);
+    parts.push(`version ${version}`);
+    metaEl.textContent = parts.join(" · ");
+  }
+  if (bodyEl) {
+    setRenderedHTML(bodyEl, doc.html);
+    bodyEl.hidden = false;
+  }
+
+  fillEntities(Array.isArray(doc.links) ? doc.links : []);
+
+  const membersByID = await loadMembers(gameID);
+  const role = await loadRole(gameID);
+  await renderHistory(gameID, docPath, version, membersByID, role);
+
+  const content = document.getElementById("doc-content");
+  if (content) {
+    content.hidden = false;
+  }
+}
+
+// fillEntities renders the attachments the reading view already carried,
+// so this page does not ask /docs/links for what /docs/rendered just
+// answered with.
+function fillEntities(links) {
+  const listEl = document.getElementById("doc-entities");
+  const emptyEl = document.getElementById("doc-entities-empty");
+  if (!listEl) {
+    return;
+  }
+  listEl.replaceChildren();
+  for (const link of links) {
+    listEl.append(entityRow(link));
+  }
+  listEl.hidden = links.length === 0;
+  if (emptyEl) emptyEl.hidden = links.length > 0;
+}
+
+// loadMembers maps a user id to a display name. A failure is not the
+// page's failure: the history still renders, with "a former member"
+// where a name would have been, which is the same sentence a departed
+// author gets and is honest in both cases — the page genuinely does not
+// know who that id is.
+async function loadMembers(gameID) {
+  const result = await fetchAPI(`/api/games/${gameID}/members`);
+  const byID = new Map();
+  if (!result.ok) {
+    return byID;
+  }
+  const members = Array.isArray(result.body?.members) ? result.body.members : [];
+  for (const member of members) {
+    if (member && member.id) {
+      byID.set(member.id, member.display_name || "");
+    }
+  }
+  return byID;
+}
+
+// loadRole reads the caller's own role off the game summary, which is
+// the only place this instance publishes it to a browser.
+//
+// **The role decides what is offered, never what is allowed.** A viewer
+// is refused a revert by registerContentRoute (internal/web/server.go)
+// on every request, whatever this page renders; hiding the button only
+// stops offering an action the server will refuse. An unreadable summary
+// therefore falls back to showing the button — the server is the check,
+// and a page that hid every action whenever a side request failed would
+// be lying about what the reader may do.
+async function loadRole(gameID) {
+  const result = await fetchAPI(`/api/games/${gameID}/summary`);
+  if (!result.ok) {
+    return null;
+  }
+  return result.body?.role ?? null;
+}
+
+// renderHistory fills the version list, one page at a time, and wires
+// the compare form's two pickers and each row's revert button as it
+// goes.
+//
+// currentVersion is the document's own version, and it is what every
+// revert sends as expected_version: a revert is a compare-and-set like
+// any other write, so if somebody else saved while this page was open
+// the server answers version_conflict and the page says so rather than
+// overwriting them.
+async function renderHistory(gameID, docPath, currentVersion, membersByID, role) {
+  const listEl = document.getElementById("doc-history");
+  const errorEl = document.getElementById("doc-history-error");
+  const moreEl = document.getElementById("doc-history-more");
+  const noteEl = document.getElementById("doc-revert-note");
+  const fromEl = document.getElementById("compare-from");
+  const toEl = document.getElementById("compare-to");
+  if (!listEl) {
+    return;
+  }
+  if (noteEl && role === "viewer") {
+    noteEl.textContent =
+      "Your role in this game is viewer, so this instance will refuse a revert from you: " +
+      "an editor, an admin or the owner reverts a document.";
+    noteEl.hidden = false;
+  }
+
+  let cursor = null;
+
+  function addOption(select, version) {
+    if (!select) return;
+    const option = document.createElement("option");
+    option.value = String(version);
+    option.textContent = `Version ${version}`;
+    select.append(option);
+  }
+
+  async function loadPage() {
+    if (moreEl) moreEl.disabled = true;
+    const query = new URLSearchParams({ path: docPath });
+    if (cursor) query.set("cursor", cursor);
+    const result = await fetchAPI(`/api/games/${gameID}/docs/history?${query.toString()}`);
+    if (!result.ok) {
+      if (result.expired) {
+        goToLogin();
+        return;
+      }
+      // The rows already on the page stay: a failed *next* page is not a
+      // reason to throw away the history a reader is looking at.
+      if (moreEl) moreEl.hidden = true;
+      if (errorEl) {
+        errorEl.textContent = result.message;
+        errorEl.hidden = false;
+      }
+      return;
+    }
+    if (errorEl) {
+      errorEl.textContent = "";
+      errorEl.hidden = true;
+    }
+    const body = result.body ?? {};
+    const items = Array.isArray(body.items) ? body.items : [];
+    for (const item of items) {
+      listEl.append(historyRow(gameID, docPath, currentVersion, item, membersByID, role));
+      addOption(fromEl, item.version);
+      addOption(toEl, item.version);
+    }
+    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    if (moreEl) {
+      moreEl.hidden = cursor === null;
+      moreEl.disabled = false;
+    }
+  }
+
+  if (moreEl) {
+    // The handler returns loadPage's promise rather than discarding it:
+    // a browser ignores the return value, and the Node harness in
+    // internal/web/jstest awaits it, which is what lets a test press this
+    // button and then assert what the next page rendered.
+    moreEl.addEventListener("click", () => loadPage());
+  }
+  await loadPage();
+
+  // The two pickers default to "the last change": the previous version
+  // on the left and the current one on the right, which is the
+  // comparison a designer opening this page almost always wants.
+  if (fromEl && toEl && fromEl.options.length > 1) {
+    fromEl.selectedIndex = 1;
+    toEl.selectedIndex = 0;
+  }
+  wireCompareForm(gameID, docPath);
+}
+
+// historyRow is one version: its number, its message, when it landed and
+// who wrote it, plus a revert button on every version but the current
+// one.
+function historyRow(gameID, docPath, currentVersion, version, membersByID, role) {
+  const item = document.createElement("li");
+
+  const number = document.createElement("span");
+  number.className = "history-version";
+  number.textContent = `Version ${version.version}`;
+  item.append(number);
+
+  const message = document.createElement("span");
+  message.className = "history-message";
+  // A save may carry no message, and an empty cell says that better
+  // than inventing words for a designer who chose not to write any.
+  message.textContent = version.message ?? "";
+  item.append(message);
+
+  const who = document.createElement("span");
+  who.className = "history-author";
+  who.textContent = `${describeTime(version.created_at)} · ${describeAuthor(version, membersByID)}`;
+  item.append(who);
+
+  // A tombstone is a version like any other and shows in the history;
+  // saying so is what stops a reader wondering why a version has no
+  // message and no body behind it.
+  if (version.deleted) {
+    const tombstone = document.createElement("span");
+    tombstone.className = "history-note";
+    tombstone.textContent = "deleted here";
+    item.append(tombstone);
+  }
+
+  if (Number(version.version) !== Number(currentVersion) && role !== "viewer") {
+    const revert = document.createElement("button");
+    revert.type = "button";
+    revert.className = "link-button history-revert";
+    revert.textContent = `Restore version ${version.version}`;
+    revert.addEventListener("click", async () => {
+      revert.disabled = true;
+      const result = await postJSON(`/api/games/${gameID}/docs/revert`, {
+        path: docPath,
+        to_version: Number(version.version),
+        // The version this page was drawn from, not the one being
+        // restored: this is the compare-and-set, and it is what makes a
+        // save somebody else landed in the meantime a conflict instead
+        // of a silent overwrite.
+        expected_version: Number(currentVersion),
+        message: `Restore version ${version.version}`,
+      });
+      if (result.ok) {
+        // Reloaded rather than patched in place: a revert adds a
+        // version, moves the current one and changes the body, the
+        // history and both pickers, and re-reading the page is how this
+        // view shows the result of a write rather than guessing at it.
+        window.location.reload();
+        return;
+      }
+      revert.disabled = false;
+      const note = document.getElementById("doc-history-error");
+      if (note) {
+        // The server's own words: a version_conflict says which version
+        // the document is on now, which is the sentence the reader needs
+        // and not one this page could write.
+        note.textContent = result.message || fallbackMessage;
+        note.hidden = false;
+      }
+    });
+    item.append(revert);
+  }
+
+  return item;
+}
+
+// wireCompareForm turns the two pickers into a request to
+// /docs/comparison, whose html is the second and last thing on this page
+// that goes in as markup.
+function wireCompareForm(gameID, docPath) {
+  const form = document.getElementById("compare-form");
+  const fromEl = document.getElementById("compare-from");
+  const toEl = document.getElementById("compare-to");
+  const errorEl = document.getElementById("compare-error");
+  const outEl = document.getElementById("comparison");
+  if (!form || !fromEl || !toEl || !outEl) {
+    return;
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (errorEl) errorEl.textContent = "";
+    const query = new URLSearchParams({
+      path: docPath,
+      from_version: fromEl.value,
+      to_version: toEl.value,
+    });
+    const result = await fetchAPI(`/api/games/${gameID}/docs/comparison?${query.toString()}`);
+    if (!result.ok) {
+      if (result.expired) {
+        goToLogin();
+        return;
+      }
+      outEl.hidden = true;
+      if (errorEl) errorEl.textContent = result.message;
+      return;
+    }
+    setRenderedHTML(outEl, result.body?.html);
+    outEl.hidden = false;
+    if (errorEl && result.body?.coarse) {
+      // Not an error, but the one thing a reader would otherwise
+      // misread: a coarse diff is the whole document replaced, because
+      // the two versions were too large to compare line by line.
+      errorEl.textContent =
+        "These two versions were too large to compare line by line, " +
+        "so this shows the whole document replaced.";
+    }
+  });
+}

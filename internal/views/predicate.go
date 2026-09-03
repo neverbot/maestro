@@ -688,6 +688,8 @@ func checkLimits(l *Limits) error {
 	if len(problems) == 0 {
 		return nil
 	}
-	sort.SliceStable(problems, func(i, j int) bool { return problems[i].Path < problems[j].Path })
+	sort.SliceStable(problems, func(i, j int) bool {
+		return pointerLess(problems[i].Path, problems[j].Path)
+	})
 	return &QueryError{Code: CodeLimitExceeded, Fields: problems}
 }

@@ -38,8 +38,20 @@ const (
 // Keys are folded to lower case in the maps because the database folds
 // them: entity_types_key_key is UNIQUE (project_id, lower(key)). The
 // *stored* spelling is kept on the row, which is what a rename diagnostic
-// compares against.
+// compares against. TestACatalogueFoldsCaseOnBothSides pins both sides of
+// that folding.
+//
+// **It carries the id of the game it was read for**, and every entry
+// point that takes a catalogue takes that id too and refuses a mismatch.
+// A catalogue with no identity makes this package's whole isolation story
+// rest on callers pairing two arguments correctly, which is the one thing
+// reading through one scoped path was supposed to remove: a query
+// resolved against another game's catalogue would come back with that
+// game's type ids, and Task 12 would compare a saved view against the
+// wrong game's vocabulary and answer "not stale".
+// TestACatalogueFromAnotherGameIsRefused pins it.
 type Catalogue struct {
+	ProjectID     uuid.UUID
 	EntityTypes   map[string]dbq.EntityType
 	RelationTypes map[string]dbq.RelationType
 	schemas       map[uuid.UUID]metamodel.Schema
@@ -56,6 +68,7 @@ func (s *Service) LoadCatalogue(ctx context.Context, projectID uuid.UUID) (*Cata
 		return nil, err
 	}
 	cat := &Catalogue{
+		ProjectID:     projectID,
 		EntityTypes:   make(map[string]dbq.EntityType, len(types)),
 		RelationTypes: make(map[string]dbq.RelationType, len(relTypes)),
 		schemas:       make(map[uuid.UUID]metamodel.Schema, len(types)+len(relTypes)),
@@ -132,6 +145,12 @@ type ResolvedPredicate struct {
 // ResolvedLeaf is one comparison, ready to compile. Value is a Go value
 // the compiler binds as a parameter and never spells into SQL; a Value of
 // type ParamRef stands in for one the caller supplies at run time.
+//
+// What Value holds, for Task 6 to bind without guessing: a value coerced
+// to Type for the scalar operators, a bool for exists and empty, and a
+// float64 for the length operators — the last two compare against the
+// operand's own type rather than the field's, and each is guarded here.
+// Values, not Value, carries the operands of the list and pair operators.
 type ResolvedLeaf struct {
 	Field   FieldRef
 	Type    metamodel.FieldType
@@ -143,6 +162,12 @@ type ResolvedLeaf struct {
 
 // Resolved is a query with every name turned into something the compiler
 // can bind.
+//
+// Params holds **declared defaults only**, each coerced to its
+// parameter's declared type. A parameter declared without a default has
+// no entry here at all, and a value the caller supplies at run time never
+// passes through this pass: Task 7 coerces it with coerceParam and
+// overlays it on this map.
 type Resolved struct {
 	Query  *Query
 	Cat    *Catalogue
@@ -183,24 +208,52 @@ type ResolvedLimits struct {
 // It collects every problem in one pass. An agent writing a five-step
 // traversal against an unfamiliar game gets all five mistakes at once;
 // TestEveryProblemInOneQueryIsReportedInOnePass pins it.
+//
+// The problems come back in **document order**, because the pass walks
+// the document in that order and nothing sorts them afterwards. Sorting
+// by pointer string is what an earlier version did, and it reads
+// /from/10 before /from/2 — a list that jumps about in a query long
+// enough for the order to matter.
+// TestProblemsAreReportedInDocumentOrderNotPointerOrder pins it.
 func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, q *Query) (*Resolved, error) {
 	cat, err := s.LoadCatalogue(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	return ResolveAgainst(cat, q)
+	return ResolveAgainst(projectID, cat, q)
 }
+
+// ErrWrongGame is returned when a catalogue is paired with a game it was
+// not read for. It is a programming error rather than a query problem —
+// no document a designer or an agent can write reaches it — so it carries
+// no field pointer and is not a *QueryError.
+var ErrWrongGame = errors.New("this catalogue belongs to another game")
 
 // ResolveAgainst is Resolve with the catalogue already in hand, for a
 // caller that has just read it — Task 12's staleness report, and Task 7's
 // execution, which resolves and compiles in one pass over one read.
-func ResolveAgainst(cat *Catalogue, q *Query) (*Resolved, error) {
+//
+// It takes the game the query is being resolved for as well as the
+// catalogue, and refuses the pair when they disagree: see Catalogue.
+func ResolveAgainst(projectID uuid.UUID, cat *Catalogue, q *Query) (*Resolved, error) {
+	if err := cat.belongsTo(projectID); err != nil {
+		return nil, err
+	}
 	r, problems := resolveInto(cat, q)
 	if len(problems) > 0 {
-		sort.SliceStable(problems, func(i, j int) bool { return problems[i].Path < problems[j].Path })
 		return nil, invalidQueryProblems(problems)
 	}
 	return r, nil
+}
+
+// belongsTo is the check every entry point taking a catalogue makes
+// first.
+func (c *Catalogue) belongsTo(projectID uuid.UUID) error {
+	if c.ProjectID != projectID {
+		return fmt.Errorf("%w: it was read for %s and this call is for %s",
+			ErrWrongGame, c.ProjectID, projectID)
+	}
+	return nil
 }
 
 // ReferencesOf is the dependency list alone, for a query that may not
@@ -209,9 +262,12 @@ func ResolveAgainst(cat *Catalogue, q *Query) (*Resolved, error) {
 // answers such a query with a refusal rather than with a Resolved to read
 // the list off. It is the same pass, so the list cannot drift from the
 // one a successful resolve produces.
-func ReferencesOf(cat *Catalogue, q *Query) []TypeRef {
+func ReferencesOf(projectID uuid.UUID, cat *Catalogue, q *Query) ([]TypeRef, error) {
+	if err := cat.belongsTo(projectID); err != nil {
+		return nil, err
+	}
 	r, _ := resolveInto(cat, q)
-	return r.Refs
+	return r.Refs, nil
 }
 
 // resolveInto is the pass itself, always returning what it built alongside
@@ -280,6 +336,24 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		r.Sets = append(r.Sets, set)
 	}
 
+	// The limits are settled before the steps are walked, because a step's
+	// own depth is judged against them and the problems this pass reports
+	// are in document order — see the sort ResolveAgainst does not do.
+	r.Limits = ResolvedLimits{
+		MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxEdges: DefaultMaxEdges,
+	}
+	if l := q.Limits; l != nil {
+		if l.MaxDepth != nil {
+			r.Limits.MaxDepth = *l.MaxDepth
+		}
+		if l.MaxNodes != nil {
+			r.Limits.MaxNodes = *l.MaxNodes
+		}
+		if l.MaxEdges != nil {
+			r.Limits.MaxEdges = *l.MaxEdges
+		}
+	}
+
 	for i := range q.Traverse {
 		step := &q.Traverse[i]
 		ptr := pointer("traverse", i)
@@ -307,6 +381,15 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 				nodeScope.names = append(nodeScope.names, row.Key)
 				nodeScope.schemas = append(nodeScope.schemas, cat.schemas[row.ID])
 			}
+		}
+		// A step's own depth is only judgeable here: ParseQuery sees the
+		// number but not the max_depth it has to fit under, which the
+		// document may itself have overridden.
+		if step.Depth != nil && step.Depth.Max > r.Limits.MaxDepth {
+			add(ptr+"/depth",
+				fmt.Sprintf("asks for depth %d and this query's max_depth is %d: "+
+					"raise limits.max_depth (up to %d) or lower this step",
+					step.Depth.Max, r.Limits.MaxDepth, HardMaxDepth))
 		}
 		rs.Where = resolvePredicate(nodeScope, paramTypes, step.Where, ptr+"/where", &problems)
 		rs.EdgeWhere = resolvePredicate(edgeScope, paramTypes, step.EdgeWhere,
@@ -337,32 +420,6 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		}
 	}
 
-	r.Limits = ResolvedLimits{
-		MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxEdges: DefaultMaxEdges,
-	}
-	if l := q.Limits; l != nil {
-		if l.MaxDepth != nil {
-			r.Limits.MaxDepth = *l.MaxDepth
-		}
-		if l.MaxNodes != nil {
-			r.Limits.MaxNodes = *l.MaxNodes
-		}
-		if l.MaxEdges != nil {
-			r.Limits.MaxEdges = *l.MaxEdges
-		}
-	}
-	// A step's own depth is only judgeable here: ParseQuery sees the
-	// number but not the max_depth it has to fit under, which the document
-	// may itself have overridden.
-	for i, step := range q.Traverse {
-		if step.Depth != nil && step.Depth.Max > r.Limits.MaxDepth {
-			add(pointer("traverse", i, "depth"),
-				fmt.Sprintf("asks for depth %d and this query's max_depth is %d: "+
-					"raise limits.max_depth (up to %d) or lower this step",
-					step.Depth.Max, r.Limits.MaxDepth, HardMaxDepth))
-		}
-	}
-
 	return r, problems
 }
 
@@ -376,7 +433,11 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 // types compiles to a comparison that silently matches nothing on the
 // other, and a key declared number on one type and enum on another is
 // coerced against whichever happened to be listed first.
-// TestAFieldMustBeDeclaredTheSameWayOnEveryTypeAStepReaches pins both.
+// TestAFieldMustBeDeclaredTheSameWayOnEveryTypeAStepReaches pins the
+// not-declared-everywhere direction;
+// TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration pins the
+// other one, and pins that each type is named beside its own declaration
+// in both the type and the enum-options message.
 type fieldScope struct {
 	// subject names what the schemas belong to, for the refusal message.
 	subject string
@@ -403,6 +464,12 @@ func (sc fieldScope) field(key string) (metamodel.Field, error) {
 			"no field %q can be compared here: %s resolved to nothing", key, sc.subject)
 	}
 	var found metamodel.Field
+	// foundOn is the type that declared it first, and the message names
+	// *that* type beside its declaration rather than pairing one type's
+	// name with the other type's declaration — which is a message that
+	// sends a designer to edit the type that is not the one being
+	// described.
+	var foundOn string
 	var have bool
 	var missing []string
 	for i, schema := range sc.schemas {
@@ -418,20 +485,20 @@ func (sc fieldScope) field(key string) (metamodel.Field, error) {
 			continue
 		}
 		if !have {
-			found, have = *declared, true
+			found, foundOn, have = *declared, sc.names[i], true
 			continue
 		}
 		if declared.Type != found.Type {
 			return metamodel.Field{}, fmt.Errorf(
-				"the field %q is declared %s on %q and %s elsewhere: a comparison here would "+
+				"the field %q is declared %s on %q and %s on %q: a comparison here would "+
 					"have to mean two different things at once",
-				key, found.Type, sc.names[i], declared.Type)
+				key, found.Type, foundOn, declared.Type, sc.names[i])
 		}
 		if found.Type == metamodel.FieldEnum && !sameOptions(found.Options, declared.Options) {
 			return metamodel.Field{}, fmt.Errorf(
-				"the field %q is declared enum with different options on %q (%v against %v): a "+
-					"value legal for one is not legal for the other",
-				key, sc.names[i], found.Options, declared.Options)
+				"the field %q is declared enum with different options on %q (%v) and on %q "+
+					"(%v): a value legal for one is not legal for the other",
+				key, foundOn, found.Options, sc.names[i], declared.Options)
 		}
 	}
 	switch {
@@ -448,12 +515,26 @@ func (sc fieldScope) field(key string) (metamodel.Field, error) {
 	return found, nil
 }
 
+// sameOptions compares two enum declarations' options as **sets**, not as
+// sequences. Two types declaring the same three options in a different
+// order admit exactly the same values, so refusing the comparison would
+// refuse a query with no ambiguity in it — and would do so with a
+// justification that is false in precisely that case, since every value
+// legal for one is legal for the other. The identical-Type requirement
+// stays, and min, max and required are still allowed to diverge: what a
+// comparison needs is that the same value means the same thing on every
+// type in scope, which identical type plus identical option set gives.
+// TestEnumOptionsAreComparedAsASetNotASequence pins it.
 func sameOptions(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	x := append([]string(nil), a...)
+	y := append([]string(nil), b...)
+	sort.Strings(x)
+	sort.Strings(y)
+	for i := range x {
+		if x[i] != y[i] {
 			return false
 		}
 	}
@@ -536,6 +617,20 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		case !declaredParam:
 			add(ptr+"/value", fmt.Sprintf("no parameter named %q is declared: add it to "+
 				"params, or write the value out", ref.Key))
+		case leaf.Type == metamodel.FieldEnum || leaf.Type == metamodel.FieldListText:
+			// A parameter is text, number or bool, so no parameter can ever
+			// feed a field of these two types. The refusal says that the
+			// language cannot express it rather than naming two types that
+			// disagree, which reads like a mistake the author could fix by
+			// redeclaring one of them. Widening a text parameter to feed an
+			// enum is deliberately not done: the option check lives in
+			// coerceOperand and a value bound at run time never passes
+			// through it, so the enum misspelling this language refuses at
+			// save time would come back as an empty picture.
+			add(ptr+"/value", fmt.Sprintf("the field %q is declared %s, and a parameter cannot "+
+				"stand in for one: a parameter is %s, %s or %s, so write the value out",
+				p.FieldRef.Key, leaf.Type,
+				metamodel.FieldText, metamodel.FieldNumber, metamodel.FieldBool))
 		case paramType != leaf.Type:
 			add(ptr+"/value", fmt.Sprintf("the parameter %q is declared %s and the field %q "+
 				"is declared %s", ref.Key, paramType, p.FieldRef.Key, leaf.Type))
@@ -564,11 +659,30 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 			}
 			leaf.Values = append(leaf.Values, value)
 		}
-	case shapeBool, shapeNumber:
-		// exists, empty and the length operators compare against the
-		// operand's own type, not the field's: `tags length_gte 2` is a
-		// number beside a list. checkValueShape has already judged it.
-		leaf.Value = p.Value
+	case shapeBool:
+		// exists and empty compare against the operand's own type, not the
+		// field's. The guard is the same one its two neighbours carry and
+		// for the same reason: ParseQuery's checkValueShape has judged the
+		// shape of a parsed document, and ResolveAgainst is exported, so a
+		// Query a Go caller built by hand has been through no such pass.
+		value, ok := p.Value.(bool)
+		if !ok {
+			add(ptr+"/value", fmt.Sprintf("must be true or false, because the operator is %q",
+				leaf.Op))
+			return nil
+		}
+		leaf.Value = value
+	case shapeNumber:
+		// The length operators count elements, so their operand is a
+		// number beside a list: `tags length_gte 2`. Guarded like the bool
+		// arm above, and for the same reason.
+		value, ok := p.Value.(float64)
+		if !ok {
+			add(ptr+"/value", fmt.Sprintf("must be a number, because the operator is %q",
+				leaf.Op))
+			return nil
+		}
+		leaf.Value = value
 	default:
 		value, err := coerceOperand(leaf.Type, declared, p.Value)
 		if err != nil {

@@ -3,6 +3,7 @@ package views
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -224,9 +225,13 @@ func TestResolutionListsEveryTypeReferenceWithItsPointer(t *testing.T) {
 // something did.
 func TestAReferenceThatDoesNotResolveIsStillListedWithItsKey(t *testing.T) {
 	g, _ := newGame(t)
+	// The query kills one reference of *each* kind: the two miss branches
+	// are separate lines of code, and a test naming only a relation type
+	// leaves the entity-type one held by nothing — while "which entity
+	// type died" is exactly what Task 12 reports.
 	q := mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
-		"traverse":[{"from":"q","via":"gone_missing","as":"m"}]}`)
-	r, err := ResolveAgainst(mustCatalogue(t, g), q)
+		"traverse":[{"from":"q","via":"gone_missing","to_type":"also_gone","as":"m"}]}`)
+	r, err := ResolveAgainst(g.projectID, mustCatalogue(t, g), q)
 	if r != nil {
 		t.Fatalf("an unresolvable key must refuse the query, got %#v", r)
 	}
@@ -237,7 +242,10 @@ func TestAReferenceThatDoesNotResolveIsStillListedWithItsKey(t *testing.T) {
 	// The refusal is what a caller sees; the listing is what Task 11
 	// stores. Resolve refuses, so the listing is read from a second pass
 	// over the same catalogue, which is exactly what stale.go will do.
-	refs := ReferencesOf(mustCatalogue(t, g), q)
+	refs, err := ReferencesOf(g.projectID, mustCatalogue(t, g), q)
+	if err != nil {
+		t.Fatalf("the listing pass must not refuse its own game: %v", err)
+	}
 	var found *TypeRef
 	for i := range refs {
 		if refs[i].Pointer == "/traverse/0/via/0" {
@@ -248,6 +256,18 @@ func TestAReferenceThatDoesNotResolveIsStillListedWithItsKey(t *testing.T) {
 		t.Fatalf("the unresolvable reference must still be listed: %#v", refs)
 	}
 	if found.Key != "gone_missing" || found.ID != nil || found.Kind != KindRelationType {
+		t.Fatalf("want the key kept and the id nil, got %#v", *found)
+	}
+	found = nil
+	for i := range refs {
+		if refs[i].Pointer == "/traverse/0/to_type/0" {
+			found = &refs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("the unresolvable entity type must be listed too: %#v", refs)
+	}
+	if found.Key != "also_gone" || found.ID != nil || found.Kind != KindEntityType {
 		t.Fatalf("want the key kept and the id nil, got %#v", *found)
 	}
 	// Positive control in the same test: a reference that does resolve is
@@ -421,4 +441,283 @@ func mustCatalogue(t *testing.T, g *game) *Catalogue {
 		t.Fatalf("load catalogue: %v", err)
 	}
 	return cat
+}
+
+// TestACatalogueFromAnotherGameIsRefused is the isolation assertion the
+// two above cannot make: they pair a catalogue with the game it was read
+// for, and every message they check comes from a *lookup* missing a key.
+// A catalogue with no identity resolves a query meant for another game
+// happily, handing back type ids belonging to the game it was read for —
+// and Task 12 would then compare a saved view against the wrong game's
+// vocabulary and answer "not stale".
+func TestACatalogueFromAnotherGameIsRefused(t *testing.T) {
+	g, other := newGame(t)
+	// Both games declare "quest", so the query resolves against either
+	// catalogue and only their identities differ.
+	q := mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}]}`)
+	cat := mustCatalogue(t, g)
+
+	// Positive control in the same test: paired with its own game it
+	// resolves, so an unconditional refusal cannot pass this.
+	if _, err := ResolveAgainst(g.projectID, cat, q); err != nil {
+		t.Fatalf("a catalogue must resolve against the game it was read for: %v", err)
+	}
+	r, err := ResolveAgainst(other.projectID, cat, q)
+	if !errors.Is(err, ErrWrongGame) {
+		t.Fatalf("a catalogue from another game must be refused, got %#v and %v", r, err)
+	}
+	if r != nil {
+		t.Fatalf("a refused pair must resolve to nothing, got %#v", r)
+	}
+	if !strings.Contains(err.Error(), g.projectID.String()) ||
+		!strings.Contains(err.Error(), other.projectID.String()) {
+		t.Fatalf("must name both games, got %v", err)
+	}
+	// The dependency list is the other door into the same catalogue, and
+	// it is the one Task 12 reads.
+	if _, err := ReferencesOf(other.projectID, cat, q); !errors.Is(err, ErrWrongGame) {
+		t.Fatalf("the listing pass must refuse the same pair, got %v", err)
+	}
+	if refs, err := ReferencesOf(g.projectID, cat, q); err != nil || len(refs) != 1 {
+		t.Fatalf("its own game must still be listed, got %v and %#v", err, refs)
+	}
+	if cat.ProjectID != g.projectID {
+		t.Fatalf("a catalogue must carry the game it was read for, got %v", cat.ProjectID)
+	}
+}
+
+// TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration pins the
+// half of the multi-type rule the not-declared-everywhere test cannot
+// see: which type is named beside which declaration. Pairing the first
+// declaring type's name with the second type's declaration is a message
+// that sends a designer to edit the type that is not the one being
+// described, and reversing the destination list reverses the lie
+// symmetrically — so both orders are asserted here.
+func TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	doc := func(first, second string) string {
+		return `{"v":1,"from":[{"type":"quest","as":"q"}],
+			"traverse":[{"from":"q","via":"takes_place_in","to_type":["` + first + `","` + second +
+			`"],"as":"p","where":{"field":"min_level","op":"exists","value":true}}]}`
+	}
+	// quest declares min_level number, region declares it enum.
+	_, err := g.views.Resolve(ctx, g.projectID, mustParse(t, doc("quest", "region")))
+	if !errors.Is(err, ErrQueryInvalid) {
+		t.Fatalf("a field declared two ways must be refused, got %v", err)
+	}
+	if !strings.Contains(err.Error(),
+		`the field "min_level" is declared number on "quest" and enum on "region"`) {
+		t.Fatalf("each type must be named beside its own declaration, got %v", err)
+	}
+	_, err = g.views.Resolve(ctx, g.projectID, mustParse(t, doc("region", "quest")))
+	if !strings.Contains(err.Error(),
+		`the field "min_level" is declared enum on "region" and number on "quest"`) {
+		t.Fatalf("reversing the list must reverse the message, got %v", err)
+	}
+
+	// The enum-options branch says the same thing about its own two
+	// operands: quest's options belong to quest and faction's to faction.
+	rank := func(first, second string) string {
+		return `{"v":1,"from":[{"type":"quest","as":"q"}],
+			"traverse":[{"from":"q","via":"takes_place_in","to_type":["` + first + `","` + second +
+			`"],"as":"p","where":{"field":"rank","op":"eq","value":"rare"}}]}`
+	}
+	_, err = g.views.Resolve(ctx, g.projectID, mustParse(t, rank("quest", "faction")))
+	if !errors.Is(err, ErrQueryInvalid) {
+		t.Fatalf("two different option sets must be refused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `on "quest" ([common rare epic]) and on "faction" `+
+		`([common rare])`) {
+		t.Fatalf("each type must carry its own options, got %v", err)
+	}
+	_, err = g.views.Resolve(ctx, g.projectID, mustParse(t, rank("faction", "quest")))
+	if !strings.Contains(err.Error(), `on "faction" ([common rare]) and on "quest" `+
+		`([common rare epic])`) {
+		t.Fatalf("reversing the list must reverse the message, got %v", err)
+	}
+}
+
+// TestEnumOptionsAreComparedAsASetNotASequence is the same defect class
+// as the declared range: a rule that refuses a query with no ambiguity in
+// it. Two types declaring the same options in a different order admit
+// exactly the same values, and the refusal's own justification — a value
+// legal for one is not legal for the other — is false in precisely that
+// case.
+func TestEnumOptionsAreComparedAsASetNotASequence(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	// quest declares rank [common rare epic]; region declares the same
+	// three in another order.
+	if _, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
+		`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "traverse":[{"from":"q","via":"takes_place_in","to_type":["quest","region"],"as":"p",
+		               "where":{"field":"rank","op":"eq","value":"rare"}}]}`)); err != nil {
+		t.Fatalf("the same options in another order admit the same values: %v", err)
+	}
+	// Positive control in the same test: a genuinely different set is
+	// still refused, so this is not a check that stopped checking.
+	_, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
+		`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "traverse":[{"from":"q","via":"takes_place_in","to_type":["quest","faction"],"as":"p",
+		               "where":{"field":"rank","op":"eq","value":"rare"}}]}`))
+	if !errors.Is(err, ErrQueryInvalid) {
+		t.Fatalf("a different option set must still be refused, got %v", err)
+	}
+}
+
+// TestAParameterCannotFeedAnEnumOrAListField records a limit of the
+// language rather than a mistake in a document: a parameter is one of
+// three scalars, the check is strict equality on the declared type, and
+// so no parameter can ever feed a field declared enum or list<text>. The
+// refusal has to say that, because "the parameter is declared text and
+// the field is declared enum" reads like something the author could fix
+// by redeclaring one of them, and neither redeclaration exists.
+func TestAParameterCannotFeedAnEnumOrAListField(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	// Each field is asked with an operator its own type answers, so the
+	// refusal under test is the parameter's and not the operator table's.
+	for field, op := range map[string]string{"rank": "eq", "tags": "contains"} {
+		_, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
+			`{"v":1,"params":[{"key":"which","type":"text"}],
+			  "from":[{"type":"quest","where":{"field":"`+field+`","op":"`+op+
+				`","value":{"param":"which"}}}]}`))
+		if !errors.Is(err, ErrQueryInvalid) {
+			t.Fatalf("%s: a parameter must not feed this field, got %v", field, err)
+		}
+		if !strings.Contains(err.Error(), "a parameter cannot stand in for one") {
+			t.Fatalf("%s: must say the language cannot express it, got %v", field, err)
+		}
+	}
+	// Positive control in the same test: a text parameter still feeds a
+	// text-typed built-in, so this is not a blanket refusal.
+	if _, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
+		`{"v":1,"params":[{"key":"which","type":"text"}],
+		  "from":[{"type":"quest","where":{"field":"@name","op":"eq","value":{"param":"which"}}}]}`,
+	)); err != nil {
+		t.Fatalf("a text parameter must still feed a text field: %v", err)
+	}
+}
+
+// TestAHandBuiltOperandOfTheWrongShapeIsRefused covers the third arm of
+// the value switch. Its two neighbours guard, and for a reason that
+// applies to it word for word: ResolveAgainst is exported and a Query a
+// Go caller built by hand has been through no parse pass, so the shape
+// checkValueShape would have made was never made.
+func TestAHandBuiltOperandOfTheWrongShapeIsRefused(t *testing.T) {
+	g, _ := newGame(t)
+	cat := mustCatalogue(t, g)
+	hand := func(field, op string, value any) *Query {
+		return &Query{V: 1, From: []Selector{{Type: "quest", As: "q", Where: &Predicate{
+			Field: field, Op: op, Value: value,
+			FieldRef: FieldRef{Key: field},
+		}}}}
+	}
+	// Positive control first: the well-shaped operands resolve and land
+	// where Task 6 binds them, typed.
+	r, err := ResolveAgainst(g.projectID, cat, hand("min_level", "exists", true))
+	if err != nil {
+		t.Fatalf("a bool beside exists must resolve: %v", err)
+	}
+	if v, ok := r.Sets[0].Where.Leaf.Value.(bool); !ok || !v {
+		t.Fatalf("exists must carry a bool, got %#v", r.Sets[0].Where.Leaf.Value)
+	}
+	r, err = ResolveAgainst(g.projectID, cat, hand("tags", "length_gte", float64(2)))
+	if err != nil {
+		t.Fatalf("a number beside length_gte must resolve: %v", err)
+	}
+	if v, ok := r.Sets[0].Where.Leaf.Value.(float64); !ok || v != 2 {
+		t.Fatalf("length_gte must carry a float64, got %#v", r.Sets[0].Where.Leaf.Value)
+	}
+
+	if _, err := ResolveAgainst(g.projectID, cat,
+		hand("min_level", "exists", "yes")); !errors.Is(err, ErrQueryInvalid) {
+		t.Fatalf("a string beside exists must be refused, got %v", err)
+	}
+	_, err = ResolveAgainst(g.projectID, cat,
+		hand("tags", "length_gte", map[string]any{"deep": true}))
+	if !errors.Is(err, ErrQueryInvalid) {
+		t.Fatalf("a map beside length_gte must be refused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `must be a number, because the operator is "length_gte"`) {
+		t.Fatalf("must say what the operator takes, got %v", err)
+	}
+}
+
+// TestACatalogueFoldsCaseOnBothSides pins the claim Catalogue's comment
+// makes: the database folds these keys, so the catalogue folds them on
+// the way in and the lookup folds them on the way out. Folding one side
+// and not the other refuses a spelling the write path accepted.
+func TestACatalogueFoldsCaseOnBothSides(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	r, err := g.views.Resolve(ctx, g.projectID, mustParse(t,
+		`{"v":1,"from":[{"type":"QUEST","as":"q"}],
+		  "traverse":[{"from":"q","via":"Available_To","to_type":"Class","as":"c"}]}`))
+	if err != nil {
+		t.Fatalf("a key spelled in another case must resolve: %v", err)
+	}
+	if r.Sets[0].EntityTypeID == nil || len(r.Steps[0].RelationTypeIDs) != 1 ||
+		len(r.Steps[0].ToTypeIDs) != 1 {
+		t.Fatalf("every key must have resolved, got %#v", r)
+	}
+	// The reference keeps the query's own spelling, which is what a rename
+	// diagnostic compares against the stored one.
+	if r.Refs[0].Key != "QUEST" {
+		t.Fatalf("a reference must keep the spelling the query used, got %q", r.Refs[0].Key)
+	}
+	// The load side needs a type whose *stored* spelling is not already
+	// folded, or a catalogue that folds neither side passes: "Boss" is
+	// seeded with its capital and asked for without one.
+	r, err = g.views.Resolve(ctx, g.projectID, mustParse(t,
+		`{"v":1,"from":[{"type":"boss","as":"b"}],
+		  "traverse":[{"from":"b","via":"guards","as":"g"}]}`))
+	if err != nil {
+		t.Fatalf("a type stored with a capital must resolve in lower case: %v", err)
+	}
+	if r.Sets[0].EntityTypeID == nil || len(r.Steps[0].RelationTypeIDs) != 1 {
+		t.Fatalf("boss and guards must both have resolved, got %#v", r)
+	}
+	cat := mustCatalogue(t, g)
+	if _, ok := cat.EntityTypes["boss"]; !ok {
+		t.Fatalf("the catalogue must be keyed by the folded entity-type key")
+	}
+	if _, ok := cat.RelationTypes["guards"]; !ok {
+		t.Fatalf("the catalogue must be keyed by the folded relation-type key")
+	}
+}
+
+// TestProblemsAreReportedInDocumentOrderNotPointerOrder pins the order
+// this pass reports in. Sorting by pointer string reads /from/10 before
+// /from/2, and a designer reading a list that jumps about cannot tell
+// where in their document to start.
+func TestProblemsAreReportedInDocumentOrderNotPointerOrder(t *testing.T) {
+	g, _ := newGame(t)
+	var b strings.Builder
+	b.WriteString(`{"v":1,"from":[`)
+	for i := 0; i < 12; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		// Every selector but the second and the eleventh is fine, so the
+		// two problems are at /from/2 and /from/10 and nothing else.
+		switch i {
+		case 2, 10:
+			fmt.Fprintf(&b, `{"type":"missing_%d","as":"s%d"}`, i, i)
+		default:
+			fmt.Fprintf(&b, `{"type":"quest","as":"s%d"}`, i)
+		}
+	}
+	b.WriteString(`]}`)
+	_, err := g.views.Resolve(context.Background(), g.projectID, mustParse(t, b.String()))
+	var qe *QueryError
+	if !errors.As(err, &qe) {
+		t.Fatalf("want a *QueryError, got %v", err)
+	}
+	got := []string{qe.Fields[0].Path, qe.Fields[1].Path}
+	want := []string{"/from/2/type", "/from/10/type"}
+	if len(qe.Fields) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("want %v in document order, got %v", want, qe.Fields)
+	}
 }

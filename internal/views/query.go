@@ -309,7 +309,9 @@ func ParseQuery(raw []byte) (*Query, error) {
 	}
 	problems := checkQuery(&q)
 	if len(problems) > 0 {
-		sort.SliceStable(problems, func(i, j int) bool { return problems[i].Path < problems[j].Path })
+		sort.SliceStable(problems, func(i, j int) bool {
+			return pointerLess(problems[i].Path, problems[j].Path)
+		})
 		return nil, invalidQueryProblems(problems)
 	}
 	// The limits are judged in their own pass because they answer with
@@ -443,9 +445,25 @@ func checkQuery(q *Query) []metamodel.FieldError {
 		seen[name] = ptr
 	}
 
+	// A parameter key addresses one parameter, exactly as a set name
+	// addresses one set. Two declarations of the same key are last-wins
+	// everywhere that reads them — the type a predicate is checked
+	// against, the default that is bound — so the document would mean one
+	// thing and read as another. It is refused here for the same reason
+	// and in the same shape as a duplicate set name.
+	declaredParams := map[string]string{} // key -> the pointer that declared it
 	for i, p := range q.Params {
 		ptr := pointer("params", i)
 		problems = append(problems, prefixed(ptr+"/key", metamodel.RowKeyProblems("key", p.Key))...)
+		if p.Key != "" {
+			if was, dup := declaredParams[p.Key]; dup {
+				add(ptr+"/key", fmt.Sprintf("the parameter %q is already declared, at %s: a key "+
+					"addresses one parameter, and a second declaration would silently replace "+
+					"its type and its default", p.Key, was))
+			} else {
+				declaredParams[p.Key] = ptr + "/key"
+			}
+		}
 		switch metamodel.FieldType(p.Type) {
 		case metamodel.FieldText, metamodel.FieldNumber, metamodel.FieldBool:
 		default:

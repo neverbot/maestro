@@ -14,6 +14,7 @@ package views
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -158,4 +159,31 @@ func pointer(parts ...any) string {
 		}
 	}
 	return b.String()
+}
+
+// pointerLess orders two JSON pointers the way a reader walks the
+// document rather than the way strings sort: segment by segment, and a
+// segment that is an array index against another index numerically. Plain
+// string order puts /from/10 before /from/2, which is a problem list that
+// jumps about in any query long enough for the order to matter.
+//
+// A pass that already walks in document order does not need this and does
+// not sort — resolveInto is one. It is for the passes that cannot:
+// checkQuery reports the whole-document text bounds before the per-member
+// checks, so its problems do not arrive in document order to begin with.
+// TestProblemsAreOrderedByIndexNotByPointerString pins it.
+func pointerLess(a, b string) bool {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		if as[i] == bs[i] {
+			continue
+		}
+		ai, aNum := strconv.Atoi(as[i])
+		bi, bNum := strconv.Atoi(bs[i])
+		if aNum == nil && bNum == nil {
+			return ai < bi
+		}
+		return as[i] < bs[i]
+	}
+	return len(as) < len(bs)
 }

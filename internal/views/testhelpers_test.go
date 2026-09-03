@@ -68,6 +68,27 @@ func (g *game) seed(t *testing.T) {
 	low, high := 1.0, 10.0
 	difficulty := metamodel.Field{Key: "difficulty", Type: metamodel.FieldNumber,
 		Min: &low, Max: &high}
+	// region and faction exist so a step can reach two types that declare
+	// the *same* field key two different ways, which is the case
+	// TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration and
+	// TestEnumOptionsAreComparedAsASetNotASequence need and no other
+	// fixture type provides:
+	//
+	//   - region declares min_level as an enum where quest declares it a
+	//     number, and rank with quest's three options in another order —
+	//     the same set, so a comparison over it is unambiguous.
+	//   - faction declares rank with a genuinely different option set, so
+	//     a value legal on one really is illegal on the other.
+	//
+	// Neither declares min_level absent-but-comparable on a type already
+	// used by TestAFieldMustBeDeclaredTheSameWayOnEveryTypeAStepReaches,
+	// which still leans on zone declaring nothing.
+	regionLevel := metamodel.Field{Key: "min_level", Type: metamodel.FieldEnum,
+		Options: []string{"low", "high"}}
+	shuffledRank := metamodel.Field{Key: "rank", Type: metamodel.FieldEnum,
+		Options: []string{"epic", "common", "rare"}}
+	narrowRank := metamodel.Field{Key: "rank", Type: metamodel.FieldEnum,
+		Options: []string{"common", "rare"}}
 
 	for _, spec := range []struct {
 		key, label, plural string
@@ -76,6 +97,15 @@ func (g *game) seed(t *testing.T) {
 		{"class", "Class", "Classes", nil},
 		{"zone", "Zone", "Zones", nil},
 		{"quest", "Quest", "Quests", metamodel.Schema{minLevel, tags, rank, difficulty}},
+		{"region", "Region", "Regions", metamodel.Schema{regionLevel, shuffledRank}},
+		{"faction", "Faction", "Factions", metamodel.Schema{narrowRank}},
+		// Boss is seeded with a capital, which row keys allow and the
+		// database folds. It is the only type here whose *stored* spelling
+		// is not already folded, so it is the only one that can tell
+		// whether the catalogue folds on the way in as well as on the way
+		// out: TestACatalogueFoldsCaseOnBothSides asks for it in lower
+		// case.
+		{"Boss", "Boss", "Bosses", nil},
 	} {
 		if _, err := g.meta.UpsertEntityType(ctx, g.projectID, metamodel.EntityTypeInput{
 			Key: spec.key, Label: spec.label, LabelPlural: spec.plural, Schema: spec.schema,
@@ -86,6 +116,9 @@ func (g *game) seed(t *testing.T) {
 	for _, spec := range []struct{ key, label string }{
 		{"available_to", "Available to"}, {"requires", "Requires"},
 		{"takes_place_in", "Takes place in"},
+		// Guards is the relation-type half of the same point Boss makes
+		// for entity types: a stored spelling that is not already folded.
+		{"Guards", "Guards"},
 	} {
 		if _, err := g.meta.UpsertRelationType(ctx, g.projectID, metamodel.RelationTypeInput{
 			Key: spec.key, Label: spec.label,

@@ -401,3 +401,53 @@ func TestALabelDefaultsToTheEntityName(t *testing.T) {
 		t.Fatalf("an explicit label must survive the default, got %+v", q.Project.Label)
 	}
 }
+
+// TestASetOfProblemsIsOrderedByIndexNotByPointerString pins the order
+// this pass reports in. Unlike resolution, checkQuery cannot simply walk
+// and not sort — its whole-document text bounds run before the per-member
+// checks — so it sorts, and sorting pointers as plain strings puts
+// /from/10 before /from/2.
+func TestASetOfProblemsIsOrderedByIndexNotByPointerString(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"v":1,"from":[`)
+	for i := 0; i < 12; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		switch i {
+		case 2, 10:
+			// An empty type is refused by the key grammar, at /from/N/type.
+			b.WriteString(`{"type":"","as":"s` + string(rune('a'+i)) + `"}`)
+		default:
+			b.WriteString(`{"type":"quest","as":"s` + string(rune('a'+i)) + `"}`)
+		}
+	}
+	b.WriteString(`]}`)
+	_, err := ParseQuery([]byte(b.String()))
+	var qe *QueryError
+	if !errors.As(err, &qe) {
+		t.Fatalf("want a *QueryError, got %v", err)
+	}
+	if len(qe.Fields) != 2 {
+		t.Fatalf("want two problems, got %v", qe.Fields)
+	}
+	if qe.Fields[0].Path != "/from/2/type" || qe.Fields[1].Path != "/from/10/type" {
+		t.Fatalf("want /from/2/type before /from/10/type, got %v", qe.Fields)
+	}
+}
+
+// TestAParameterKeyIsDeclaredOnce pins the rule a duplicate set name
+// already has, one member along: two declarations of the same parameter
+// key are last-wins in every pass that reads them — the type a predicate
+// is checked against, the default that is bound — so the document means
+// one thing and reads as another.
+func TestAParameterKeyIsDeclaredOnce(t *testing.T) {
+	parseFails(t, `{"v":1,"params":[{"key":"floor","type":"number","default":1},
+		{"key":"floor","type":"text","default":"x"}],"from":[{"type":"quest"}]}`,
+		"/params/1/key", `the parameter "floor" is already declared, at /params/0/key`)
+	// Positive control: two different keys are ordinary.
+	if _, err := ParseQuery([]byte(`{"v":1,"params":[{"key":"floor","type":"number"},
+		{"key":"ceiling","type":"number"}],"from":[{"type":"quest"}]}`)); err != nil {
+		t.Fatalf("two distinct parameters must parse: %v", err)
+	}
+}

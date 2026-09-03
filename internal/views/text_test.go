@@ -15,19 +15,24 @@ import (
 // test.** encoding/json replaces every byte that does not decode with
 // U+FFFD rather than refusing it, so a `"\xff"` written into a document
 // arrives at the far side of the decode as a valid string and no
-// per-position check could ever see it — a test built on one would assert
-// nothing while looking like it asserted everything, which is this
-// project's second standing defect exactly. The encoding is therefore
+// per-position check could ever see it — a test built on one would look
+// like it asserted everything while asserting nothing about the bound it
+// names, which is this project's second standing defect exactly. (It
+// would not pass, either: it would count zero and then report every
+// position it wanted, failing for a reason unrelated to what it claims to
+// check.) The encoding is therefore
 // bounded on the raw bytes, once, by
 // TestAnInvalidUTF8ByteIsRefusedBeforeItBecomesAReplacementCharacter, and
 // this test uses the fault that does survive a decode to prove that the
 // *walk* reaches every position.
 //
 // It is spelled as the six-character JSON escape rather than as a raw
-// byte, because a raw control character inside a JSON string is a syntax
-// error: the document would be refused by the decoder and the walk would
-// never run, which is a test that passes while asserting nothing.
-// controlChar below is the same character after the decode.
+// byte, because a raw control character inside a JSON string *is* a
+// syntax error — the JSON scanner refuses every byte below 0x20, and only
+// those — so the document would be refused before the walk ran and this
+// test would be exercising the decoder rather than the bound. A raw 0xff
+// is not a syntax error, which is why the encoding needs its own check on
+// the raw bytes. controlChar below is the same character after the decode.
 const badChar = `\u0001`
 
 // controlChar is what badChar decodes to, for the tests that build a Go

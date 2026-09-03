@@ -34,9 +34,8 @@ function fail(message) {
 // innerHTML rather than textContent shows up here as a failure and not
 // as a rendered tag.
 function fakeElement(tag = "div") {
-  return {
+  const el = {
     tagName: tag,
-    hidden: false,
     className: "",
     textContent: "",
     innerHTML: "",
@@ -73,6 +72,50 @@ function fakeElement(tag = "div") {
       return null;
     },
   };
+  // `hidden` counts its writes. An assertion about visibility that the
+  // code under test never wrote is an assertion about this stub's own
+  // initialisation, and assertHidden/assertVisible below turn that into
+  // a loud failure rather than a green tick — see their comment.
+  el._hidden = false;
+  el.hiddenWrites = 0;
+  Object.defineProperty(el, "hidden", {
+    enumerable: true,
+    get() {
+      return this._hidden;
+    },
+    set(value) {
+      this._hidden = value;
+      this.hiddenWrites++;
+    },
+  });
+  return el;
+}
+
+// assertHidden and assertVisible are the only way this file asks about
+// visibility, and they refuse to pass on the stub's initial state.
+//
+// This exists because three assertions in this repository passed for
+// that reason: the stub set a flag to the value the case wanted, the
+// code under test never touched it, and deleting the line that should
+// have set it left the suite green. Counting the writes makes the
+// difference observable — "nobody set this" is a distinct outcome from
+// "somebody set it to the right thing", and only the second is a pass.
+function assertHidden(el, id, why) {
+  if (el.hiddenWrites === 0) {
+    fail(`#${id}: nothing under test ever wrote .hidden, so "${why}" would be an assertion on the stub's own initialisation`);
+  }
+  if (!el.hidden) {
+    fail(why);
+  }
+}
+
+function assertVisible(el, id, why) {
+  if (el.hiddenWrites === 0) {
+    fail(`#${id}: nothing under test ever wrote .hidden, so "${why}" would be an assertion on the stub's own initialisation`);
+  }
+  if (el.hidden) {
+    fail(why);
+  }
 }
 
 function text(node) {
@@ -113,6 +156,7 @@ const IDS = [
   "compare-from",
   "compare-to",
   "compare-error",
+  "compare-note",
   "comparison",
 ];
 
@@ -144,8 +188,14 @@ async function runCase({
   // static_docjs_test.go) pins the real shell's initial state, which
   // this stub is deliberately free to contradict.
   for (const id of ["doc-body", "doc-content", "doc-error", "doc-entities-empty",
-                    "doc-history-error", "doc-history-more", "doc-revert-note", "comparison"]) {
+                    "doc-history-error", "doc-history-more", "doc-revert-note",
+                    "compare-note", "comparison"]) {
     elements[id].hidden = !startVisible;
+  }
+  // The setup above is the shell, not the page: its writes are zeroed so
+  // that every write assertHidden/assertVisible can see is doc.js's.
+  for (const id of IDS) {
+    elements[id].hiddenWrites = 0;
   }
 
   const body = fakeElement("body");
@@ -181,6 +231,7 @@ async function runCase({
 
   const requested = [];
   const posted = [];
+  let comparisonsServed = 0;
   globalThis.fetch = async (url, init) => {
     requested.push(url);
     if (init && init.method === "POST") {
@@ -202,7 +253,14 @@ async function runCase({
       return { ok: true, status: 200, json: async () => history };
     }
     if (url.startsWith(`${base}/docs/comparison`)) {
-      return { ok: comparison !== null, status: comparison === null ? 400 : 200, json: async () => comparison ?? { error: "invalid_input", message: "from_version is required" } };
+      // An array answers successive submits with successive bodies, so
+      // a case can press Compare twice and assert what the *second*
+      // answer left behind — which is the only way to see a note the
+      // page wrote once and never cleared.
+      const body = Array.isArray(comparison)
+        ? (comparison[comparisonsServed++] ?? comparison[comparison.length - 1])
+        : comparison;
+      return { ok: body != null, status: body == null ? 400 : 200, json: async () => body ?? { error: "invalid_input", message: "from_version is required" } };
     }
     if (url === `${base}/members`) {
       return { ok: true, status: 200, json: async () => members };
@@ -243,9 +301,7 @@ async function runCase({
   if (elements["doc-body"].innerHTML !== "<h1>Duskwood</h1>\n<p>Dark.</p>\n") {
     fail(`the rendered body did not reach the page as markup: ${JSON.stringify(elements["doc-body"].innerHTML)}`);
   }
-  if (elements["doc-body"].hidden) {
-    fail("the rendered body is still hidden after a successful read");
-  }
+  assertVisible(elements["doc-body"], "doc-body", "the rendered body is still hidden after a successful read");
   // The title went through textContent, so the crafted string survives
   // verbatim — and it is nowhere in the one field that would have
   // interpreted it.
@@ -262,9 +318,11 @@ async function runCase({
   if (text(elements["doc-entities"]) === "" || !text(elements["doc-entities"]).includes("<b>Duskwood</b>")) {
     fail(`an attached entity's name did not reach the page as text: ${JSON.stringify(text(elements["doc-entities"]))}`);
   }
-  if (!elements["doc-entities-empty"].hidden) {
-    fail("the 'attached to no entity' state is showing on a document that is attached to one");
-  }
+  assertHidden(
+    elements["doc-entities-empty"],
+    "doc-entities-empty",
+    "the 'attached to no entity' state is showing on a document that is attached to one",
+  );
 
   // The history names people, never uuids: a user is resolved against
   // the member list, a token is "an agent", and a user id that is no
@@ -282,9 +340,7 @@ async function runCase({
   if (history.includes(ANA) || history.includes("9999")) {
     fail(`a raw id reached the screen: ${JSON.stringify(history)}`);
   }
-  if (elements["doc-content"].hidden) {
-    fail("the page body is still hidden after a successful read");
-  }
+  assertVisible(elements["doc-content"], "doc-content", "the page body is still hidden after a successful read");
 }
 
 // Case 2: revert. The button appears on a past version and not on the
@@ -359,9 +415,7 @@ async function runCase({
 
   const button = find(elements["doc-history"], (node) => node.tagName === "button");
   await button.click();
-  if (elements["doc-history-error"].hidden) {
-    fail("a refused revert said nothing");
-  }
+  assertVisible(elements["doc-history-error"], "doc-history-error", "a refused revert said nothing");
   if (!elements["doc-history-error"].textContent.includes("version 5")) {
     fail(`the conflict reads ${JSON.stringify(elements["doc-history-error"].textContent)}`);
   }
@@ -392,9 +446,7 @@ async function runCase({
   if (find(elements["doc-history"], (node) => node.tagName === "button")) {
     fail("a viewer is offered a restore button the server will refuse");
   }
-  if (elements["doc-revert-note"].hidden) {
-    fail("a viewer is shown no buttons and told nothing about why");
-  }
+  assertVisible(elements["doc-revert-note"], "doc-revert-note", "a viewer is shown no buttons and told nothing about why");
   if (!elements["doc-revert-note"].textContent.includes("viewer")) {
     fail(`the viewer's note reads ${JSON.stringify(elements["doc-revert-note"].textContent)}`);
   }
@@ -410,15 +462,12 @@ async function runCase({
     rendered: { error: "not_found", message: 'this game has no document at "lore/duskwood"' },
   });
 
-  if (elements["doc-error"].hidden) {
-    fail("a failed read said nothing");
-  }
+  assertVisible(elements["doc-error"], "doc-error", "a failed read said nothing");
   if (!elements["doc-error"].textContent.includes("no document at")) {
     fail(`the failure reads ${JSON.stringify(elements["doc-error"].textContent)}`);
   }
-  if (!elements["doc-body"].hidden || !elements["doc-content"].hidden) {
-    fail("a failed read left an empty article and an empty history on screen");
-  }
+  assertHidden(elements["doc-body"], "doc-body", "a failed read left an empty article on screen");
+  assertHidden(elements["doc-content"], "doc-content", "a failed read left an empty history on screen");
   if (elements["doc-body"].innerHTML !== "") {
     fail("a failed read wrote markup anyway");
   }
@@ -430,15 +479,18 @@ async function runCase({
 {
   const { elements, requested } = await runCase({ path: null, startVisible: true });
 
-  if (elements["doc-error"].hidden) {
-    fail("an address with no path rendered as if it named a document");
+  assertVisible(elements["doc-error"], "doc-error", "an address with no path rendered as if it named a document");
+  // Visible is not enough: an empty error element is visibly nothing.
+  // Case 5 asserts the server's own words; this one asserts the page's,
+  // because here there is no server to quote.
+  if (!elements["doc-error"].textContent.includes("names no document")) {
+    fail(`an address with no path reads ${JSON.stringify(elements["doc-error"].textContent)}`);
   }
   if (requested.some((url) => url.includes("/docs/"))) {
     fail(`the page asked for a document anyway: ${JSON.stringify(requested)}`);
   }
-  if (!elements["doc-body"].hidden || !elements["doc-content"].hidden) {
-    fail("an address with no path left an empty article and an empty history on screen");
-  }
+  assertHidden(elements["doc-body"], "doc-body", "an address with no path left an empty article on screen");
+  assertHidden(elements["doc-content"], "doc-content", "an address with no path left an empty history on screen");
 }
 
 // Case 7: the comparison. Its html is the second and last thing that
@@ -474,18 +526,128 @@ async function runCase({
   }
 
   await elements["compare-form"].fire("submit");
-  if (elements.comparison.hidden) {
-    fail("the comparison stayed hidden after a successful compare");
-  }
+  assertVisible(elements.comparison, "comparison", "the comparison stayed hidden after a successful compare");
   if (!elements.comparison.innerHTML.includes("diff-removed")) {
     fail(`the comparison did not reach the page as markup: ${JSON.stringify(elements.comparison.innerHTML)}`);
   }
-  if (!elements["compare-error"].textContent.includes("too large to compare")) {
-    fail(`a coarse diff was not explained: ${JSON.stringify(elements["compare-error"].textContent)}`);
+  // The sentence is a correct answer, so it goes in the note and not in
+  // the red error line: a complete comparison must not be presented as a
+  // failure.
+  if (!elements["compare-note"].textContent.includes("too large to compare")) {
+    fail(`a coarse diff was not explained: ${JSON.stringify(elements["compare-note"].textContent)}`);
+  }
+  assertVisible(elements["compare-note"], "compare-note", "the coarse-diff sentence was written but never revealed");
+  if (elements["compare-error"].textContent !== "") {
+    fail(`a successful comparison wrote to the error line: ${JSON.stringify(elements["compare-error"].textContent)}`);
+  }
+}
+
+// Case 8: comparing a version with itself. The server answers with a
+// unified diff of nothing but its own file headers, which renders as two
+// grey lines — indistinguishable, to a reader, from a page that failed
+// to load. The page says the answer out loud instead.
+{
+  const { elements } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>x</p>", links: [] },
+    history: {
+      items: [
+        { version: 2, message: "b", author_kind: "user", author_id: ANA, created_at: "2026-09-02T10:00:00Z" },
+        { version: 1, message: "a", author_kind: "user", author_id: ANA, created_at: "2026-08-31T10:00:00Z" },
+      ],
+    },
+    comparison: {
+      path: "lore/duskwood",
+      from_version: 2,
+      to_version: 2,
+      unified: "--- lore/duskwood@2\n+++ lore/duskwood@2\n",
+      coarse: false,
+      html: '<div class="diff"><div class="diff-file">--- lore/duskwood@2</div><div class="diff-file">+++ lore/duskwood@2</div></div>',
+    },
+  });
+
+  await elements["compare-form"].fire("submit");
+  if (!elements["compare-note"].textContent.includes("identical")) {
+    fail(`two identical versions render as ${JSON.stringify(elements["compare-note"].textContent)}, which reads as a blank page`);
+  }
+  assertVisible(elements["compare-note"], "compare-note", "the 'identical' sentence was written but never revealed");
+  if (elements["compare-error"].textContent !== "") {
+    fail(`an identical comparison wrote to the error line: ${JSON.stringify(elements["compare-error"].textContent)}`);
+  }
+}
+
+// Case 10: two comparisons in a row. The first is coarse and says so;
+// the second is an ordinary line-by-line diff and must say nothing —
+// a sentence the page wrote once and never cleared would tell a reader
+// that *this* comparison is the whole document replaced, which is a
+// false statement about the diff they are looking at.
+{
+  const { elements } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>x</p>", links: [] },
+    history: {
+      items: [
+        { version: 2, message: "b", author_kind: "user", author_id: ANA, created_at: "2026-09-02T10:00:00Z" },
+        { version: 1, message: "a", author_kind: "user", author_id: ANA, created_at: "2026-08-31T10:00:00Z" },
+      ],
+    },
+    comparison: [
+      {
+        path: "lore/duskwood",
+        from_version: 1,
+        to_version: 2,
+        unified: "@@ -1 +1 @@\n-# old\n+# new\n",
+        coarse: true,
+        html: '<div class="diff"><div class="diff-removed">-# old</div></div>',
+      },
+      {
+        path: "lore/duskwood",
+        from_version: 1,
+        to_version: 2,
+        unified: "@@ -1 +1 @@\n-# old\n+# new\n",
+        coarse: false,
+        html: '<div class="diff"><div class="diff-added">+# new</div></div>',
+      },
+    ],
+  });
+
+  await elements["compare-form"].fire("submit");
+  if (!elements["compare-note"].textContent.includes("too large to compare")) {
+    fail("the first, coarse comparison was not explained");
+  }
+  await elements["compare-form"].fire("submit");
+  if (elements["compare-note"].textContent !== "") {
+    fail(`the coarse sentence outlived the coarse diff: ${JSON.stringify(elements["compare-note"].textContent)}`);
+  }
+  if (!elements["compare-note"].hidden) {
+    fail("an ordinary diff still shows the previous comparison's note");
+  }
+}
+
+// Case 9: a member the game still has, with no display name set. That is
+// not a departed author, and calling them one is a false statement about
+// somebody who is on the members list right now.
+{
+  const { elements } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 1, html: "<p>x</p>", links: [] },
+    history: {
+      items: [{ version: 1, message: "a", author_kind: "user", author_id: ANA, created_at: "2026-08-31T10:00:00Z" }],
+    },
+    members: { members: [{ id: ANA, display_name: "", role: "editor" }] },
+  });
+
+  const history = text(elements["doc-history"]);
+  if (history.includes("a former member")) {
+    fail(`a current member with no display name is called a former member: ${JSON.stringify(history)}`);
+  }
+  if (!history.includes("no display name")) {
+    fail(`a nameless member is described as ${JSON.stringify(history)}`);
+  }
+  if (history.includes(ANA)) {
+    fail(`a raw id reached the screen: ${JSON.stringify(history)}`);
   }
 }
 
 console.log(
   "ok: the reading view renders markup only from a rendered view, names authors, " +
-    "compare-and-sets its reverts, refuses to guess on a failure and offers a viewer nothing it cannot do",
+    "compare-and-sets its reverts, states a comparison's bounds in its own voice rather than the error line, " +
+    "refuses to guess on a failure and offers a viewer nothing it cannot do",
 );

@@ -80,8 +80,18 @@ function describeAuthor(version, membersByID) {
     return "an agent";
   }
   if (version.author_kind === "user") {
-    const name = version.author_id ? membersByID.get(version.author_id) : null;
-    return name || "a former member";
+    if (!version.author_id) {
+      return "a former member";
+    }
+    // Present-but-nameless is a different fact from absent, and saying
+    // "a former member" about someone still on the members list is
+    // simply false. GET /members can answer with an empty display_name,
+    // so the two cases are told apart by whether the id is *in* the map
+    // rather than by whether the name is truthy.
+    if (!membersByID.has(version.author_id)) {
+      return "a former member";
+    }
+    return membersByID.get(version.author_id) || "a member with no display name";
   }
   return "an unknown author";
 }
@@ -436,6 +446,34 @@ function historyRow(gameID, docPath, currentVersion, version, membersByID, role)
   return item;
 }
 
+// describeComparison names the two things a rendered diff cannot say
+// for itself, and says nothing at all otherwise.
+//
+// A `coarse` comparison is the whole document replaced because the two
+// versions were too large to compare line by line; without the sentence
+// it reads as a change nobody made. And two identical versions produce a
+// unified diff of nothing but its own file headers, which renders as two
+// grey lines and looks like a page that failed to load rather than like
+// an answer.
+function describeComparison(comparison) {
+  if (comparison.coarse) {
+    return (
+      "These two versions were too large to compare line by line, " +
+      "so this shows the whole document replaced."
+    );
+  }
+  const unified = typeof comparison.unified === "string" ? comparison.unified : "";
+  const changed = unified.split("\n").some(
+    (line) =>
+      (line.startsWith("+") && !line.startsWith("+++")) ||
+      (line.startsWith("-") && !line.startsWith("---")),
+  );
+  if (!changed) {
+    return "These two versions are identical.";
+  }
+  return "";
+}
+
 // wireCompareForm turns the two pickers into a request to
 // /docs/comparison, whose html is the second and last thing on this page
 // that goes in as markup.
@@ -444,6 +482,7 @@ function wireCompareForm(gameID, docPath) {
   const fromEl = document.getElementById("compare-from");
   const toEl = document.getElementById("compare-to");
   const errorEl = document.getElementById("compare-error");
+  const noteEl = document.getElementById("compare-note");
   const outEl = document.getElementById("comparison");
   if (!form || !fromEl || !toEl || !outEl) {
     return;
@@ -451,6 +490,10 @@ function wireCompareForm(gameID, docPath) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (errorEl) errorEl.textContent = "";
+    if (noteEl) {
+      noteEl.textContent = "";
+      noteEl.hidden = true;
+    }
     const query = new URLSearchParams({
       path: docPath,
       from_version: fromEl.value,
@@ -468,13 +511,14 @@ function wireCompareForm(gameID, docPath) {
     }
     setRenderedHTML(outEl, result.body?.html);
     outEl.hidden = false;
-    if (errorEl && result.body?.coarse) {
-      // Not an error, but the one thing a reader would otherwise
-      // misread: a coarse diff is the whole document replaced, because
-      // the two versions were too large to compare line by line.
-      errorEl.textContent =
-        "These two versions were too large to compare line by line, " +
-        "so this shows the whole document replaced.";
+    // Both of these are *correct* answers, which is why they go in
+    // #compare-note and not in #compare-error: the error line is red,
+    // and a reader who is told the truth in the colour reserved for
+    // failure reads it as one.
+    const note = describeComparison(result.body ?? {});
+    if (noteEl && note) {
+      noteEl.textContent = note;
+      noteEl.hidden = false;
     }
   });
 }

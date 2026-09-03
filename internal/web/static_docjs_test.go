@@ -194,7 +194,10 @@ func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
 // forever if the request never answered.
 func TestTheDocumentPageShipsItsSectionsHidden(t *testing.T) {
 	shell := documentPageSource(t)
-	for _, id := range []string{"doc-error", "doc-body", "doc-content", "doc-entities-empty", "comparison"} {
+	for _, id := range []string{
+		"doc-error", "doc-body", "doc-content", "doc-entities-empty",
+		"compare-note", "comparison",
+	} {
 		element := regexp.MustCompile(`<[a-z]+[^>]*\bid="` + regexp.QuoteMeta(id) + `"[^>]*>`).FindString(shell)
 		if element == "" {
 			t.Errorf("document.html declares no element with id %q", id)

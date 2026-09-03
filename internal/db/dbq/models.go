@@ -173,3 +173,57 @@ type User struct {
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 }
+
+type View struct {
+	ID                uuid.UUID
+	ProjectID         uuid.UUID
+	Key               string
+	Name              string
+	Description       string
+	Query             []byte
+	Renderer          string
+	RendererParams    []byte
+	LayoutMode        string
+	LayoutSeed        int32
+	BackgroundAssetID *uuid.UUID
+	BackgroundScale   float64
+	BackgroundOffset  []byte
+	Version           int32
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	UpdatedByUserID   *uuid.UUID
+	UpdatedByTokenID  *uuid.UUID
+}
+
+type ViewAsset struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Filename         string
+	Mime             string
+	Width            int32
+	Height           int32
+	Bytes            []byte
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
+type ViewPosition struct {
+	ViewID    uuid.UUID
+	EntityID  uuid.UUID
+	ProjectID uuid.UUID
+	X         float64
+	Y         float64
+	Pinned    bool
+	UpdatedAt pgtype.Timestamptz
+}
+
+type ViewRef struct {
+	ViewID         uuid.UUID
+	ProjectID      uuid.UUID
+	Kind           string
+	RefKey         string
+	EntityTypeID   *uuid.UUID
+	RelationTypeID *uuid.UUID
+	Pointer        string
+}

@@ -814,3 +814,59 @@ func TestTheViewPositionsUpdatedAtTriggerFires(t *testing.T) {
 		t.Fatalf("updated_at did not move on view_positions: %s -> %s", before, after)
 	}
 }
+
+// TestRelationsTypeTargetIndexExists pins relations_type_target_idx
+// itself, not just the query shape it serves. Every other index this
+// migration adds is exercised indirectly by a CASCADE or SET NULL test
+// above; this one backs no constraint and nothing in this file's own
+// suite would turn red if `DROP INDEX relations_type_target_idx` were
+// added to a later migration. Repo convention leaves migration indexes
+// unpinned elsewhere too (0004_metamodel.sql, 0005_entity_listing_index,
+// 0007_documents.sql), but this is the most-argued line in 0008 -- a
+// measured, deliberately-added index rather than one that falls out of
+// a constraint -- so it gets the explicit pin the convention otherwise
+// skips.
+func TestRelationsTypeTargetIndexExists(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+
+	var exists bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public'
+		 AND tablename = 'relations' AND indexname = 'relations_type_target_idx')`).
+		Scan(&exists); err != nil {
+		t.Fatalf("query pg_indexes: %v", err)
+	}
+	if !exists {
+		t.Fatal("relations_type_target_idx was not created")
+	}
+}
+
+// TestAViewPositionDefaultsToPinned pins view_positions.pinned's default
+// of true. Task 13's layout contract (mixed mode: pinned nodes are
+// fixed, the rest are laid out around them) reads this column, and
+// before this test the only place its default was stated was prose in
+// this file's own header comment.
+func TestAViewPositionDefaultsToPinned(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	a := seedViewGame(t, ctx, pool, "game-a")
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO view_positions (view_id, entity_id, project_id, x, y)
+		 VALUES ($1, $2, $3, 1, 1)`, a.viewID, a.entityID, a.projectID); err != nil {
+		t.Fatalf("insert position without specifying pinned: %v", err)
+	}
+
+	var pinned bool
+	if err := pool.QueryRow(ctx,
+		`SELECT pinned FROM view_positions WHERE view_id = $1 AND entity_id = $2`,
+		a.viewID, a.entityID).Scan(&pinned); err != nil {
+		t.Fatalf("read pinned: %v", err)
+	}
+	if !pinned {
+		t.Fatal("view_positions.pinned did not default to true")
+	}
+}

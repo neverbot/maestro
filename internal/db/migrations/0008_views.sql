@@ -41,6 +41,8 @@
 --   TestAnUnknownLayoutModeIsRefused                     23514
 --   TestTheViewsUpdatedAtTriggerFires                    views_set_updated_at
 --   TestTheViewPositionsUpdatedAtTriggerFires            view_positions_set_updated_at
+--   TestRelationsTypeTargetIndexExists                   relations_type_target_idx
+--   TestAViewPositionDefaultsToPinned                    pinned DEFAULT true
 --
 -- Comments below that describe Go behaviour -- which renderer names are
 -- legal, what layout_mode means to a client, the 8 MB asset bound -- say
@@ -142,11 +144,18 @@ CREATE TABLE views (
     -- table (view_id, asset_id, z, scale, offset) and this column would
     -- then be dropped in that migration, not widened.
     --
-    -- No index leads with background_asset_id, so the SET NULL that runs
-    -- when an asset is deleted scans views. That is deliberate rather
-    -- than an oversight and it is not measured: a game holds tens of
-    -- views, not millions, and an index nothing else reads is write cost
-    -- on every view write to serve a rare delete. Whoever finds an asset
+    -- No audit or background key here has a leading index: this SET
+    -- NULL, and the four more on views and view_assets below it
+    -- (updated_by_token_id, updated_by_user_id on views;
+    -- created_by_token_id, created_by_user_id on view_assets) all scan
+    -- their table on the rare delete they serve, rather than each
+    -- carrying an index that is otherwise pure write cost. That matches
+    -- 0004 and 0007, which index no audit column either, so it is repo
+    -- convention rather than a new defect. Every CASCADE path in this
+    -- migration does have a usable index, by contrast. That is
+    -- deliberate rather than an oversight: a game holds tens of views,
+    -- not millions, and an index nothing else reads is write cost on
+    -- every view write to serve a rare delete. Whoever finds an asset
     -- deletion slow adds (project_id, background_asset_id) and measures
     -- it, the way 0005 and 0007 did.
     FOREIGN KEY (background_asset_id, project_id)
@@ -199,6 +208,11 @@ CREATE TABLE view_positions (
       CHECK (x > '-Infinity'::double precision AND x < 'Infinity'::double precision),
     y double precision NOT NULL
       CHECK (y > '-Infinity'::double precision AND y < 'Infinity'::double precision),
+    -- Defaults to true: a position written without saying otherwise is
+    -- an explicit placement, not a spot the layout algorithm may move.
+    -- Task 13's mixed layout_mode reads this column (pinned nodes are
+    -- fixed, the rest are laid out around them); the default is pinned
+    -- by TestAViewPositionDefaultsToPinned in views_schema_test.go.
     pinned     boolean NOT NULL DEFAULT true,
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (view_id, entity_id),
@@ -311,15 +325,21 @@ CREATE INDEX view_refs_relation_type_idx ON view_refs (project_id, relation_type
 -- and one more b-tree entry on every edge inserted. Relation endpoints
 -- and types are never updated in place (an edge is addressable only as
 -- the triple, 0004_metamodel.sql), so this is an insert cost and not a
--- rename cost the way entities_listing_idx's is. Measured over
--- 20,000-row bulk inserts it did not rise clearly above the noise of the
--- workload: 634 ms median with the index against 617 ms without.
+-- rename cost the way entities_listing_idx's is. Measured on this
+-- project's own test Postgres 16, a single COPY of 20,000 relations
+-- into a freshly seeded 20,000-entity project, five runs each way:
+-- 432.9 ms median with the index (422.3-456.3 ms) against 412.2 ms
+-- median without (405.4-415.5 ms). The ranges do not overlap and the
+-- medians differ by about 5%, so the index has a small but real insert
+-- cost here; the read win above is the one worth paying it for.
 --
 -- 2026-09-02-analysis-engine-design.md §11 asks for a *different* index,
 -- relations (project_id, relation_type_id), for a different access shape;
--- neither replaces the other. Whoever adds that one checks first: with
--- both, relations carries six indexes on the table expected to hold the
--- most rows, and every index is write cost on every seeded edge.
+-- neither replaces the other. Whoever adds that one checks first: this
+-- migration already brings relations to six indexes (0004_metamodel.sql's
+-- four plus relations_type_target_idx above); adding theirs makes seven
+-- on the table expected to hold the most rows, and every index is write
+-- cost on every seeded edge.
 CREATE INDEX relations_type_target_idx ON relations (relation_type_id, target_id);
 
 -- +goose Down

@@ -205,6 +205,13 @@ func TestAFieldKeyIsAFieldKeyOrASigil(t *testing.T) {
 	parseFails(t, `{"v":1,"from":[{"type":"quest","where":{"field":"`+strings.Repeat("a", maxFieldKeyLen+1)+
 		`","op":"eq","value":1}}]}`,
 		"/from/0/where/field", "must be at most 64 characters")
+	// The control the refusal above needs: a key of exactly the cap
+	// parses. Without it, `>` narrowed to `>=` refuses a legal key by one
+	// character and every test still passes.
+	if _, err := ParseQuery([]byte(`{"v":1,"from":[{"type":"quest","where":{"field":"` +
+		strings.Repeat("a", maxFieldKeyLen) + `","op":"eq","value":1}}]}`)); err != nil {
+		t.Fatalf("a field key of exactly %d characters must parse: %v", maxFieldKeyLen, err)
+	}
 }
 
 // TestTheBuiltinVocabularyIsListedInTheOrderItIsDeclared pins the two
@@ -289,6 +296,22 @@ func TestTheValueListCapIsRefusedAtParseTime(t *testing.T) {
 	}
 	b.WriteString(`]}}]}`)
 	parseFails(t, b.String(), "/from/0/where/value", "the most an operator takes is 500")
+
+	// The control: a list of exactly MaxValueList parses. Without it, `>`
+	// narrowed to `>=` would silently take one value off the language and
+	// nothing would notice.
+	var ok strings.Builder
+	ok.WriteString(`{"v":1,"from":[{"type":"quest","where":{"field":"rank","op":"in","value":[`)
+	for i := 0; i < MaxValueList; i++ {
+		if i > 0 {
+			ok.WriteString(",")
+		}
+		ok.WriteString("1")
+	}
+	ok.WriteString(`]}}]}`)
+	if _, err := ParseQuery([]byte(ok.String())); err != nil {
+		t.Fatalf("a list of exactly %d values must parse: %v", MaxValueList, err)
+	}
 }
 
 // TestAParameterStandsInForOneScalarAndSaysSoWhereItCannot pins the one
@@ -375,6 +398,23 @@ func TestAPredicateTreeIsBoundedByItsNodeCount(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("the node cap must be reported once, got %d copies", count)
+	}
+
+	// The control: a tree of exactly MaxPredicateNodes parses. The `all`
+	// counts as a node itself, so the cap is reached with one fewer
+	// child. Without this, `>` narrowed to `>=` would take one condition
+	// off the language in silence.
+	var ok strings.Builder
+	ok.WriteString(`{"v":1,"from":[{"type":"quest","where":{"all":[`)
+	for i := 0; i < MaxPredicateNodes-1; i++ {
+		if i > 0 {
+			ok.WriteString(",")
+		}
+		ok.WriteString(`{"field":"rank","op":"eq","value":1}`)
+	}
+	ok.WriteString(`]}}]}`)
+	if _, err := ParseQuery([]byte(ok.String())); err != nil {
+		t.Fatalf("a tree of exactly %d nodes must parse: %v", MaxPredicateNodes, err)
 	}
 }
 
@@ -601,14 +641,26 @@ func TestNoDocumentTypeCarriesCallerTextInAByteSlice(t *testing.T) {
 	walk(reflect.TypeOf(Query{}), "Query")
 
 	// The sanity half: a walk that reached nothing would pass every
-	// assertion above. The three types this task owns must be in the
-	// graph, along with the document's own root shapes.
-	for _, name := range []string{"Query", "Selector", "Step", "Projection", "Limits",
+	// assertion above, and so would a walk that stopped short. **Every**
+	// struct reachable from Query is named, not a representative subset:
+	// naming nine of thirteen left `Params`, `Nodes` and `Edges` outside
+	// the list, so a member that stopped being reachable — the one way
+	// this guard silently stops guarding — would still pass.
+	for _, name := range []string{"Query", "ParamDecl", "Selector", "Step", "Depth",
+		"NodeSet", "EdgeSpec", "Projection", "Limits",
 		"Predicate", "FieldRef", "AttrRef", "RelHop"} {
 		if !structs[name] {
 			t.Errorf("the type graph reachable from Query does not include %s: this test is "+
 				"passing over a graph it never walked", name)
 		}
+	}
+	// And the count, so a type *added* to the document without a line
+	// above is caught too: an unnamed new struct is one this list does
+	// not vouch for.
+	if len(structs) != 13 {
+		t.Errorf("the type graph reachable from Query holds %d structs and this list names 13: "+
+			"%v — name the new one, so the sanity half keeps vouching for the whole graph",
+			len(structs), structs)
 	}
 }
 
@@ -739,5 +791,155 @@ func TestEveryPredicateInAStepIsChecked(t *testing.T) {
 	if found != 2 {
 		t.Errorf("Step declares %d predicate members and this test expected 2: if one was added, "+
 			"give it a checkPredicate call in checkQuery and update this count", found)
+	}
+}
+
+// TestEveryFieldKeyLengthIsBoundedWhereverOneIsWritten pins the three
+// length checks that live outside a predicate's own `field`. A declared
+// field key is 64 characters wherever it appears, and MaxStringLen is
+// 4096, so removing any one of these three lines leaves a 4000-character
+// key legal in that position alone — a narrowing of one rule in one
+// place, which is exactly the kind of drift no other test sees.
+//
+// The `field` inside a predicate is pinned by
+// TestAFieldKeyIsAFieldKeyOrASigil above; these are the other three.
+func TestEveryFieldKeyLengthIsBoundedWhereverOneIsWritten(t *testing.T) {
+	over := strings.Repeat("a", maxFieldKeyLen+1)
+	at := strings.Repeat("a", maxFieldKeyLen)
+	for _, tc := range []struct{ name, over, at, ptr string }{
+		{
+			"the scalar spelling of an attribute reference",
+			`"project":{"color_by":"` + over + `"}`,
+			`"project":{"color_by":"` + at + `"}`,
+			"/project/color_by",
+		},
+		{
+			"the attr of a one-hop related reference",
+			`"project":{"color_by":{"related":{"via":"rewards","attr":"` + over + `"}}}`,
+			`"project":{"color_by":{"related":{"via":"rewards","attr":"` + at + `"}}}`,
+			"/project/color_by/related/attr",
+		},
+		{
+			"a key in the projection's field list",
+			`"project":{"fields":["` + over + `"]}`,
+			`"project":{"fields":["` + at + `"]}`,
+			"/project/fields/0",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parseFails(t, `{"v":1,"from":[{"type":"quest"}],`+tc.over+`}`,
+				tc.ptr, "must be at most 64 characters")
+			// The control every length bound needs: exactly the cap is
+			// legal, so narrowing `>` to `>=` is red rather than silent.
+			if _, err := ParseQuery([]byte(
+				`{"v":1,"from":[{"type":"quest"}],` + tc.at + `}`)); err != nil {
+				t.Fatalf("a key of exactly %d characters must parse: %v", maxFieldKeyLen, err)
+			}
+		})
+	}
+}
+
+// TestAValueIsBoundedThroughObjectsAsWellAsLists is the half of the value
+// depth bound its own test never asked for. valueDepth recurses through a
+// map and through a slice, and the two arms are separate code:
+// TestAPredicateValueHasItsOwnDepthBound drives lists inside lists only,
+// so deleting the map arm — which makes every object one deep, including
+// the `{"param": …}` reference the comment advertises — leaves that test
+// green.
+func TestAValueIsBoundedThroughObjectsAsWellAsLists(t *testing.T) {
+	// An object inside an object: three deep, and refused. This is the
+	// shape the corrections block names and nothing exercised.
+	parseFails(t, `{"v":1,"from":[{"type":"quest","where":`+
+		`{"field":"rank","op":"eq","value":{"a":{"b":1}}}}]}`,
+		"/from/0/where/value", "and a value in this language is at most 2 deep")
+	// An object inside a list, and a list inside an object: the two mixed
+	// arms, each three deep.
+	parseFails(t, `{"v":1,"from":[{"type":"quest","where":`+
+		`{"field":"tags","op":"in","value":[{"a":1}]}}]}`,
+		"/from/0/where/value", "and a value in this language is at most 2 deep")
+	parseFails(t, `{"v":1,"from":[{"type":"quest","where":`+
+		`{"field":"rank","op":"eq","value":{"a":[1]}}}]}`,
+		"/from/0/where/value", "and a value in this language is at most 2 deep")
+	// And the unit the parse-level tests cannot reach: an empty
+	// collection is one deeper than a scalar, which is what makes the
+	// arithmetic the same on both arms.
+	for _, tc := range []struct {
+		name string
+		in   any
+		want int
+	}{
+		{"a scalar", "x", 1},
+		{"an empty object", map[string]any{}, 1},
+		{"an empty list", []any{}, 1},
+		{"a flat object", map[string]any{"a": 1}, 2},
+		{"a flat list", []any{1}, 2},
+		{"an object in an object", map[string]any{"a": map[string]any{"b": 1}}, 3},
+		{"a list in an object", map[string]any{"a": []any{1}}, 3},
+		{"an object in a list", []any{map[string]any{"a": 1}}, 3},
+	} {
+		if got := valueDepth(tc.in); got != tc.want {
+			t.Errorf("%s is %d deep, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestEveryBuiltinCarriesItsSigil pins the invariant the built-in table
+// relies on and states nowhere. Every entry is looked up by the string
+// the caller wrote, and the sigil is the whole of what separates the
+// two namespaces: a table entry spelled `name` rather than `@name` would
+// be found by a lookup for a *declared* field called `name` and would
+// shadow it, silently reading a game's own field as a built-in.
+// TestAFieldKeyIsAFieldKeyOrASigil pins that a game may declare `name`;
+// this pins that no table entry can take it away.
+func TestEveryBuiltinCarriesItsSigil(t *testing.T) {
+	for _, b := range builtins {
+		if !strings.HasPrefix(b.Name, "@") {
+			t.Errorf("the built-in %q has no @ sigil: it would be found by a lookup for a "+
+				"declared field of that name and would shadow it", b.Name)
+		}
+		if b.Type == "" {
+			t.Errorf("the built-in %q has no declared type, so it would admit no operator at all",
+				b.Name)
+		}
+		typ, ok := BuiltinType(b.Name)
+		if !ok || typ != b.Type {
+			t.Errorf("BuiltinType(%q) = %q, %v; the exported answer must be the table's own",
+				b.Name, typ, ok)
+		}
+	}
+	// The other direction, for the exported surface Task 4 calls: a
+	// sigil-less spelling is not a built-in, whatever the table holds.
+	if _, ok := BuiltinType("name"); ok {
+		t.Error(`BuiltinType("name") must not answer: a declared field called name is a ` +
+			`declared field, and @name is the built-in`)
+	}
+}
+
+// TestAParameterDefaultIsBoundedLikeAValue pins the bound `params[]`
+// carries for the same reason a predicate's `value` does: a default is an
+// `any`, and ParseQuery is what stands between a document and the row
+// that stores it. Task 4's coercion refuses a default that is not a
+// scalar of the declared type; the structural depth of the blob is Task
+// 3's, and without this one a 401-deep default parses.
+func TestAParameterDefaultIsBoundedLikeAValue(t *testing.T) {
+	deep := strings.Repeat("[", 200) + "1" + strings.Repeat("]", 200)
+	parseFails(t, `{"v":1,"params":[{"key":"lvl","type":"number","default":`+deep+`}],`+
+		`"from":[{"type":"quest"}]}`,
+		"/params/0/default", "and a value in this language is at most 2 deep")
+	parseFails(t, `{"v":1,"params":[{"key":"lvl","type":"number","default":{"a":{"b":1}}}],`+
+		`"from":[{"type":"quest"}]}`,
+		"/params/0/default", "and a value in this language is at most 2 deep")
+	// Nothing legal is refused: a default is one scalar of one of the
+	// three scalar types, and an omitted default is not a value at all.
+	for _, decl := range []string{
+		`{"key":"lvl","type":"number","default":3}`,
+		`{"key":"who","type":"text","default":"hunter"}`,
+		`{"key":"on","type":"bool","default":true}`,
+		`{"key":"lvl","type":"number"}`,
+	} {
+		if _, err := ParseQuery([]byte(
+			`{"v":1,"params":[` + decl + `],"from":[{"type":"quest"}]}`)); err != nil {
+			t.Fatalf("%s must parse: %v", decl, err)
+		}
 	}
 }

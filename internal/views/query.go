@@ -259,6 +259,19 @@ func (s *Strings) UnmarshalJSON(raw []byte) error {
 // three refusals that precede the decode — the size cap, the encoding
 // check and a syntax error — are necessarily alone, because there is no
 // document to walk yet.
+//
+// **What comes back is structurally bounded and semantically unjudged**,
+// and the caller that stores one should know the difference. Every
+// string is length-bounded, every collection is count-bounded, every
+// tree and every `any` is depth-bounded — including a parameter's
+// `default`, which is an `any` like a predicate's `value` and is bounded
+// for the same reason: a query document is stored, and an unbounded blob
+// in it becomes a saved view every later stage re-walks. What is *not*
+// judged is meaning: a default is not yet known to be a scalar of its
+// declared type, an operator is not yet known to suit the field, and no
+// key names anything. That is Task 4's resolve pass. A parsed query is
+// therefore safe to hold and to size; whether it is worth storing is a
+// question only resolution answers.
 func ParseQuery(raw []byte) (*Query, error) {
 	if len(raw) > MaxQueryBytes {
 		return nil, invalidQuery("", fmt.Sprintf(
@@ -440,6 +453,22 @@ func checkQuery(q *Query) []metamodel.FieldError {
 				"must be %q, %q or %q: a parameter substitutes for one literal value, and the "+
 					"three scalar types are the ones an operator takes (got %q)",
 				metamodel.FieldText, metamodel.FieldNumber, metamodel.FieldBool, p.Type))
+		}
+		// A default is an `any`, exactly like a predicate's value, and the
+		// storage argument for MaxValueDepth applies to it word for word:
+		// nothing overflows, but an arbitrarily deep blob here becomes a
+		// *stored* saved view that every later stage re-walks, and the
+		// only refusal without this is encoding/json's, at ten thousand,
+		// reported at pointer "" in the decoder's own wording. A declared
+		// parameter is one of three scalars, so the bound refuses nothing
+		// legal — it refuses a shape this language has no meaning for,
+		// here rather than in the row that stores it. Task 4's coercion
+		// is what then refuses a default that is not a scalar at all, and
+		// what checks it against the declared type.
+		if got := valueDepth(p.Default); got > MaxValueDepth {
+			add(ptr+"/default", fmt.Sprintf(
+				"is nested %d deep, and a value in this language is at most %d deep: a "+
+					"parameter's default is one scalar of its declared type", got, MaxValueDepth))
 		}
 	}
 

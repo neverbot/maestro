@@ -86,6 +86,18 @@ var renamedAwayTestNames = map[string]string{
 // carry far more of that citation traffic than search.go alone does.
 // Widening the scan now, rather than after Task 10 lands, is cheaper
 // than finding a dangler by hand a second time.
+//
+// **internal/web/static was added here in Task 12**, which is the last
+// place this domain's commentary lives and the last one this check could
+// not see. doc.js's own header cites TestAppScriptNeverWritesRawHTML and
+// TestTheDocumentScriptHasExactlyOneHTMLSink as the tests holding the
+// page's one-sink rule; both resolve today, and adding the directory
+// while they do is exactly when this costs nothing. `.js` and `.mjs`
+// are read with the `//` prefix, `.html` with `<!--` (the trailing
+// `-->` is left on the comment text, which the name pattern simply does
+// not match). The scan stays one directory deep, as it is for every
+// other entry above, so a nested asset directory added later needs a
+// line here.
 func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 	root := moduleRoot(t)
 	defined := definedTestNames(t, root)
@@ -96,6 +108,7 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 		filepath.Join(root, "internal", "metamodel"),
 		filepath.Join(root, "internal", "web"),
 		filepath.Join(root, "internal", "db", "queries"),
+		filepath.Join(root, "internal", "web", "static"),
 	} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -112,6 +125,10 @@ func TestNoCommentNamesATestThatDoesNotExist(t *testing.T) {
 				prefix = "//"
 			case strings.HasSuffix(name, ".sql"):
 				prefix = "--"
+			case strings.HasSuffix(name, ".js"), strings.HasSuffix(name, ".mjs"):
+				prefix = "//"
+			case strings.HasSuffix(name, ".html"):
+				prefix = "<!--"
 			default:
 				continue
 			}

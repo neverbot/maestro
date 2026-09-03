@@ -837,6 +837,16 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 // records the decision; this test records what a subscriber actually
 // receives, which is a DocumentEvent naming the document and nothing
 // about the entity.
+//
+// **It subscribes as a token**, for the reason
+// TestADocumentEventReachesAnSSESubscriber gives at length and which
+// applied to this fourth kind just as much: subscribing with a cookie
+// leaves the stream's HumanOnly filter unobserved for document.linked,
+// so flipping documentEventHumanOnly to true would keep this test green
+// while every agent silently stopped being told a document it holds had
+// been attached to something. The link itself is still made by the
+// session caller, so the event crosses from a human's write to an
+// agent's stream — the direction the filter breaks.
 func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	srv, ids, projSvc := newProseEventServer(t)
 	ctx := context.Background()
@@ -850,6 +860,12 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create game: %v", err)
+	}
+	secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: game.ID, UserID: owner.ID, Label: "lore agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
 	}
 	cookie := loginAs(t, srv, "owner@studio.com")
 
@@ -885,7 +901,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
-	req.AddCookie(cookie)
+	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("Do: %v", err)

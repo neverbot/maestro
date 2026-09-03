@@ -50,25 +50,60 @@ func newTestServerWithHub(t *testing.T, maxLifetime, heartbeatInterval time.Dura
 // comment lines, which carry none of the three) or a read fails. id is ""
 // for a frame that carried no id: line (the synthetic "resync" event
 // never has one — see handleEvents's own doc comment).
+//
+// **The read has a deadline of its own**, and that is the whole reason
+// this is not the plain loop it used to be. A frame that never arrives —
+// because the event was not published, or because it was filtered out of
+// this subscriber's stream, which is what a HumanOnly mutation does —
+// used to block until the server closed the stream at its own
+// SSEMaxLifetime and the read failed with an EOF. On the prose event
+// tests that is a minute of waiting for a failure, which is slow enough
+// that nobody runs the mutation, and an unrun mutation is the only thing
+// that makes these tests worth having. The deadline is generous against
+// a loaded CI box and still two orders of magnitude under the lifetime.
+const sseFrameTimeout = 10 * time.Second
+
 func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, id, data string) {
 	t.Helper()
-	var gotKind, gotID, gotData string
-	for {
-		line, err := r.ReadString('\n')
-		if err != nil {
-			t.Fatalf("read SSE stream: %v", err)
+	type frame struct {
+		kind, id, data string
+		err            error
+	}
+	// Buffered, so the reader goroutine can finish and exit even after
+	// the deadline has already failed the test.
+	done := make(chan frame, 1)
+	go func() {
+		var gotKind, gotID, gotData string
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				done <- frame{err: err}
+				return
+			}
+			line = strings.TrimRight(line, "\n")
+			switch {
+			case strings.HasPrefix(line, "id: "):
+				gotID = strings.TrimPrefix(line, "id: ")
+			case strings.HasPrefix(line, "event: "):
+				gotKind = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				gotData = strings.TrimPrefix(line, "data: ")
+			case line == "" && gotKind != "":
+				done <- frame{kind: gotKind, id: gotID, data: gotData}
+				return
+			}
 		}
-		line = strings.TrimRight(line, "\n")
-		switch {
-		case strings.HasPrefix(line, "id: "):
-			gotID = strings.TrimPrefix(line, "id: ")
-		case strings.HasPrefix(line, "event: "):
-			gotKind = strings.TrimPrefix(line, "event: ")
-		case strings.HasPrefix(line, "data: "):
-			gotData = strings.TrimPrefix(line, "data: ")
-		case line == "" && gotKind != "":
-			return gotKind, gotID, gotData
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("read SSE stream: %v", got.err)
 		}
+		return got.kind, got.id, got.data
+	case <-time.After(sseFrameTimeout):
+		t.Fatalf("no SSE frame within %s: the event this read is waiting for was never published, "+
+			"or was filtered out of this subscriber's stream", sseFrameTimeout)
+		return "", "", ""
 	}
 }
 

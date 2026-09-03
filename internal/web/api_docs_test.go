@@ -4,15 +4,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
@@ -725,8 +722,6 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	// Published first, so a leak arrives before the frame the reader is
 	// waiting for and fails the very next assertion rather than going
 	// unnoticed.
-	otherSrv := srv
-	_ = otherSrv
 	otherReq, err := http.NewRequest(http.MethodPost,
 		ts.URL+"/api/games/"+other.ID.String()+"/docs",
 		strings.NewReader(`{"path":"noise","content":"# noise\n","expected_version":0}`))
@@ -1009,8 +1004,3 @@ func TestAProseRouteOnAnInstanceWithoutTheServiceIsRefused(t *testing.T) {
 		t.Fatalf("body = %s, want it to say what this instance does not serve", rec.Body.String())
 	}
 }
-
-// unusedGuard keeps the uuid and fmt imports honest if a future edit
-// drops their last use; both are used by the table above today.
-var _ = fmt.Sprintf
-var _ = uuid.Nil

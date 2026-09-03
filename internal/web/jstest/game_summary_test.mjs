@@ -26,9 +26,8 @@ function fail(message) {
 // string as markup, which is exactly the point — a harness with an
 // innerHTML setter would let a regression through by emulating one.
 function fakeElement(tag = "div") {
-  return {
+  const el = {
     tagName: tag,
-    hidden: false,
     className: "",
     textContent: "",
     children: [],
@@ -58,6 +57,49 @@ function fakeElement(tag = "div") {
       return null;
     },
   };
+  // `hidden` counts its writes, so assertHidden/assertVisible below can
+  // tell "app.js set this" apart from "the stub started it here".
+  el._hidden = false;
+  el.hiddenWrites = 0;
+  Object.defineProperty(el, "hidden", {
+    enumerable: true,
+    get() {
+      return this._hidden;
+    },
+    set(value) {
+      this._hidden = value;
+      this.hiddenWrites++;
+    },
+  });
+  return el;
+}
+
+// assertHidden and assertVisible are the only way this file asks about
+// visibility, and they refuse to pass on the stub's initial state.
+//
+// A visibility assertion the code under test never wrote is an assertion
+// about this stub — it goes green whether or not the page does anything,
+// and deleting the line that should have set the flag changes nothing.
+// One of those was live in this file: "the page revealed an empty
+// catalogue after a failed summary" held only because the stub had
+// hidden #game-content itself. Counting writes makes that a loud
+// failure instead of a tick.
+function assertHidden(el, id, why) {
+  if (el.hiddenWrites === 0) {
+    fail(`#${id}: nothing under test ever wrote .hidden, so "${why}" would be an assertion on the stub's own initialisation`);
+  }
+  if (!el.hidden) {
+    fail(why);
+  }
+}
+
+function assertVisible(el, id, why) {
+  if (el.hiddenWrites === 0) {
+    fail(`#${id}: nothing under test ever wrote .hidden, so "${why}" would be an assertion on the stub's own initialisation`);
+  }
+  if (el.hidden) {
+    fail(why);
+  }
 }
 
 // text flattens a rendered subtree the way a reader sees it.
@@ -90,7 +132,12 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     login: null,
     invite: null,
   };
+  // game.html ships the body hidden; the stub copies that and then
+  // zeroes the write, so every write the assertions can see is app.js's.
   elements["game-content"].hidden = true;
+  for (const el of Object.values(elements)) {
+    if (el) el.hiddenWrites = 0;
+  }
 
   const body = fakeElement("body");
   globalThis.document = {
@@ -198,12 +245,9 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   if (!totals.includes("401 entities") || !totals.includes("12 relations") || !totals.includes("3 no longer fit")) {
     fail(`the totals line reads ${JSON.stringify(totals)}`);
   }
-  if (elements["game-content"].hidden) {
-    fail("the page body is still hidden after a successful summary");
-  }
-  if (!elements["types-empty"].hidden || !elements["relation-types-empty"].hidden) {
-    fail("an empty state is showing on a game that has content");
-  }
+  assertVisible(elements["game-content"], "game-content", "the page body is still hidden after a successful summary");
+  assertHidden(elements["types-empty"], "types-empty", "an empty state is showing on a game that has content");
+  assertHidden(elements["relation-types-empty"], "relation-types-empty", "an empty state is showing on a game that has content");
   // The whole page is three requests — the game list, the summary and
   // the first page of documents — and none of them is an entity or
   // relation listing: that is the property that keeps a game with four
@@ -236,15 +280,9 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   if (first.href !== "/g/azeroth/doc?path=lore%2Fduskwood") {
     fail(`the first document links to ${JSON.stringify(first.href)}`);
   }
-  if (!elements["docs-empty"].hidden) {
-    fail("the documents empty state is showing on a game that has documents");
-  }
-  if (!elements["docs-error"].hidden) {
-    fail("the documents error line is showing after a successful listing");
-  }
-  if (!elements["docs-more"].hidden) {
-    fail("the paging button is offered when the server issued no cursor");
-  }
+  assertHidden(elements["docs-empty"], "docs-empty", "the documents empty state is showing on a game that has documents");
+  assertHidden(elements["docs-error"], "docs-error", "the documents error line is showing after a successful listing");
+  assertHidden(elements["docs-more"], "docs-more", "the paging button is offered when the server issued no cursor");
 }
 
 // Case 1b: paging. The listing issues a cursor whenever a page came back
@@ -266,9 +304,7 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     },
   });
 
-  if (elements["docs-more"].hidden) {
-    fail("the server issued a cursor and the page offered no way to ask for the next page");
-  }
+  assertVisible(elements["docs-more"], "docs-more", "the server issued a cursor and the page offered no way to ask for the next page");
   await elements["docs-more"].click();
   if (!text(elements.docs).includes("B")) {
     fail(`the second page was not appended: ${JSON.stringify(text(elements.docs))}`);
@@ -277,9 +313,7 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     fail("the second page replaced the first instead of appending to it");
   }
   await elements["docs-more"].click();
-  if (!elements["docs-more"].hidden) {
-    fail("the empty page after the last row did not retire the paging button");
-  }
+  assertHidden(elements["docs-more"], "docs-more", "the empty page after the last row did not retire the paging button");
   if (!requested.some((url) => url.includes("cursor=2"))) {
     fail(`the page never followed the second cursor: ${JSON.stringify(requested)}`);
   }
@@ -300,18 +334,16 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     },
   });
 
-  if (elements["docs-error"].hidden) {
-    fail("a failed documents listing said nothing");
-  }
+  assertVisible(elements["docs-error"], "docs-error", "a failed documents listing said nothing");
   if (elements["docs-error"].textContent !== "the documents could not be listed") {
     fail(`the failure message reads ${JSON.stringify(elements["docs-error"].textContent)}`);
   }
-  if (!elements["docs-empty"].hidden) {
-    fail("a failed documents listing rendered the empty state, which claims the game has no documents");
-  }
-  if (!elements["docs-more"].hidden) {
-    fail("a failed documents listing still offers to fetch more");
-  }
+  assertHidden(
+    elements["docs-empty"],
+    "docs-empty",
+    "a failed documents listing rendered the empty state, which claims the game has no documents",
+  );
+  assertHidden(elements["docs-more"], "docs-more", "a failed documents listing still offers to fetch more");
 }
 
 // Case 2: a brand new game. Both empty states show, the lists are
@@ -327,18 +359,18 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     },
   });
 
-  if (elements["types-empty"].hidden || elements["relation-types-empty"].hidden) {
-    fail("a game with no types is missing its empty state");
-  }
-  if (!elements.types.hidden || !elements["relation-types"].hidden) {
-    fail("an empty catalogue list is still showing");
-  }
+  assertVisible(elements["types-empty"], "types-empty", "a game with no types is missing its empty state");
+  assertVisible(elements["relation-types-empty"], "relation-types-empty", "a game with no types is missing its empty state");
+  assertHidden(elements.types, "types", "an empty catalogue list is still showing");
+  assertHidden(elements["relation-types"], "relation-types", "an empty catalogue list is still showing");
   if (elements["game-summary"].textContent !== "No content yet.") {
     fail(`the totals line for an empty game reads ${JSON.stringify(elements["game-summary"].textContent)}`);
   }
-  if (elements["game-content"].hidden) {
-    fail("the page body is hidden on an empty game, so its empty states are invisible");
-  }
+  assertVisible(
+    elements["game-content"],
+    "game-content",
+    "the page body is hidden on an empty game, so its empty states are invisible",
+  );
 }
 
 // Case 3: the summary fails. The game's name stays, and the server's own
@@ -356,9 +388,7 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   if (elements["game-summary"].textContent !== "the server could not complete the request") {
     fail(`the failure message reads ${JSON.stringify(elements["game-summary"].textContent)}`);
   }
-  if (!elements["game-content"].hidden) {
-    fail("the page revealed an empty catalogue after a failed summary");
-  }
+  assertHidden(elements["game-content"], "game-content", "the page revealed an empty catalogue after a failed summary");
 }
 
 // Case 4: the empty state tells its reader what that reader can do.
@@ -392,9 +422,7 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   // own assertion rather than being assumed from the one above.
   const editorDocs = editor.elements["docs-empty-action"].textContent;
   const viewerDocs = viewer.elements["docs-empty-action"].textContent;
-  if (editor.elements["docs-empty"].hidden) {
-    fail("a game with no documents is missing its empty state");
-  }
+  assertVisible(editor.elements["docs-empty"], "docs-empty", "a game with no documents is missing its empty state");
   if (!editorDocs.includes("MCP")) {
     fail(`an editor is not told how a document gets written: ${JSON.stringify(editorDocs)}`);
   }

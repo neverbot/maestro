@@ -729,6 +729,17 @@ async function renderGameSummary(gameID, slug) {
     if (summaryEl) {
       summaryEl.textContent = result.message;
     }
+    // Hidden here rather than left alone. game.html ships #game-content
+    // hidden and this arm never reveals it, so the two are the same
+    // pixels — but "the failure path hides the catalogue" is then a
+    // property of the shell and not of this function, which is exactly
+    // how the harness's assertion about it came to hold whether or not
+    // this code did anything. Saying it here makes the assertion an
+    // assertion about the page.
+    const failedContent = document.getElementById("game-content");
+    if (failedContent) {
+      failedContent.hidden = true;
+    }
     return;
   }
 

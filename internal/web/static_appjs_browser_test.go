@@ -88,8 +88,10 @@ func TestSafeReturnPathRejectsOffOriginBypasses(t *testing.T) {
 // catalogue that reads exactly like a game with no content.
 //
 // It also pins the property that makes this page a summary at all: it
-// issues exactly two requests, neither of them a listing, so a game
-// holding four hundred entities renders like one holding four. See
+// issues exactly three requests — the game list, the summary and one
+// bounded keyset page of documents — and none of them enumerates
+// entities or relations, so a game holding four hundred entities
+// renders like one holding four. See
 // internal/web/jstest/game_summary_test.mjs for the harness.
 func TestGameHomePageRendersItsSummary(t *testing.T) {
 	nodeOrSkip(t)

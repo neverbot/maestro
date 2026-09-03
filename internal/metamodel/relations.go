@@ -17,9 +17,26 @@ import (
 )
 
 // Ref addresses an entity the way an agent thinks of it: type key plus
-// key. Neither is validated as a key here — both address a row this
-// package only reads, so a malformed one has one honest answer, "there
-// is no such thing", and it gets it from the lookup.
+// key.
+//
+// On the *write* path neither half is validated as a key: both address a
+// row UpsertRelation only reads, so a malformed one has one honest
+// answer, "there is no such thing", and it gets it from the lookup.
+// RelationByEdge bounds them, because a by-key lookup matches on
+// `lower(key)` and `lower()` on a string carrying a NUL byte is SQLSTATE
+// 22021 — a caller's bad argument leaving the domain as a server fault.
+// It is the same guard ListRelations already runs on its own type key
+// filter, and rowKeyProblems is what every upsert checks a key against
+// before it can become a row, so nothing storable is refused by it.
+//
+// **The write path still has that hole**, and this comment says so
+// rather than implying otherwise: `UpsertRelation` with a NUL byte in
+// the type key or in either endpoint key answers `lookup relation type:
+// ERROR: invalid byte sequence for encoding "UTF8" (SQLSTATE 22021)`,
+// measured, not reasoned about. Closing it is a change to the write path
+// and its per-item bulk failure codes, which Metamodel 12 — a read
+// defect — is not the place for; it is recorded in that task's
+// corrections block.
 type Ref struct {
 	TypeKey string
 	Key     string
@@ -618,6 +635,80 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 		})
 	}
 	return page, nil
+}
+
+// RelationByEdge reads one edge by the address it was written under:
+// its relation type's key and both endpoints as (type key, key) refs.
+//
+// **This is the read that did not exist**, and its absence made an
+// edge's own field values write-only: they were validated against the
+// relation type's schema, stored, and returned by nothing. ListRelations
+// could reach an edge but only through a filter on endpoint *ids*, which
+// a caller that wrote the edge does not hold, and no listing carried the
+// fields at all. Entities have EntityByKey for exactly this and edges
+// now have its counterpart, addressed the way relations.upsert addresses
+// an edge, so that writing one and reading it back are the same three
+// strings.
+//
+// Every key is bounded before any lookup runs, the same rule and the
+// same reason as ListRelations' type key filter: rowKeyProblems is what
+// every upsert checks a key against before it can become a row, so a key
+// that fails it cannot name anything stored, and running it here answers
+// a malformed key as the caller's own invalid_input instead of letting a
+// NUL byte reach Postgres as SQLSTATE 22021 and escape as a server
+// fault.
+//
+// The three not_founds are distinct on purpose. An unknown relation
+// type, an unknown endpoint and a real address with no edge on it are
+// three different mistakes, and a caller told only "not found" has to
+// guess which of the three strings it got wrong;
+// TestEachMissingPieceOfAnEdgeRead pins all three plus the fourth case,
+// where every piece exists and the edge does not.
+func (s *Service) RelationByEdge(ctx context.Context, projectID uuid.UUID, typeKey string, source, target Ref) (dbq.Relation, error) {
+	var problems []FieldError
+	for _, part := range []struct{ path, key string }{
+		{"type_key", typeKey},
+		{"source.type_key", source.TypeKey}, {"source.key", source.Key},
+		{"target.type_key", target.TypeKey}, {"target.key", target.Key},
+	} {
+		problems = append(problems, rowKeyProblems(part.path, part.key)...)
+	}
+	if len(problems) > 0 {
+		return dbq.Relation{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
+	}
+
+	relType, err := s.RelationTypeByKey(ctx, projectID, typeKey)
+	if err != nil {
+		return dbq.Relation{}, err
+	}
+	sourceRow, err := s.EntityByKey(ctx, projectID, source.TypeKey, source.Key)
+	if err != nil {
+		return dbq.Relation{}, err
+	}
+	targetRow, err := s.EntityByKey(ctx, projectID, target.TypeKey, target.Key)
+	if err != nil {
+		return dbq.Relation{}, err
+	}
+	row, err := s.q.GetRelationByEdge(ctx, dbq.GetRelationByEdgeParams{
+		ProjectID:      projectID,
+		RelationTypeID: relType.ID,
+		SourceID:       sourceRow.ID,
+		TargetID:       targetRow.ID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The stored spellings, not the caller's: keys are matched
+		// without regard to case, so echoing the request back would tell
+		// a designer who typed "Elwynn" that there is no edge from
+		// "Elwynn" when the game holds "elwynn".
+		return dbq.Relation{}, fmt.Errorf(
+			"%w: no %q edge from %s %q to %s %q in this game",
+			ErrNotFound, relType.Key,
+			source.TypeKey, sourceRow.Key, target.TypeKey, targetRow.Key)
+	}
+	if err != nil {
+		return dbq.Relation{}, fmt.Errorf("lookup relation: %w", err)
+	}
+	return row, nil
 }
 
 // endpointFilterPart spells an optional endpoint filter for a

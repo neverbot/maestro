@@ -2191,3 +2191,205 @@ func TestARemovalSaysWhatItCouldNotFindAndWhatStillHoldsIt(t *testing.T) {
 		}
 	}
 }
+
+// TestAnEdgeIsReadableByTheTripleItWasWrittenUnder is the read half of
+// TestRelationCarriesItsOwnFields, which until Metamodel 12 had none:
+// the values an edge carries were validated on write, stored, and
+// reachable by nothing but SQL. The two endpoints and the type key here
+// are the same three strings UpsertRelation took, because addressing an
+// edge by the address it was written under is the whole point — a
+// caller holding the ids already has ListRelations.
+func TestAnEdgeIsReadableByTheTripleItWasWrittenUnder(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "connects_to", Label: "connects to", SemanticRole: "spatial",
+		Schema: metamodel.Schema{
+			{Key: "requires_ability", Type: metamodel.FieldText},
+			{Key: "one_way", Type: metamodel.FieldBool},
+		},
+	}); err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+	written, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "connects_to",
+		Source:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"requires_ability": "mothwing_cloak", "one_way": true},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	row, err := svc.RelationByEdge(ctx, project, "connects_to",
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"})
+	if err != nil {
+		t.Fatalf("RelationByEdge: %v", err)
+	}
+	if row.ID != written.ID {
+		t.Fatalf("read edge %s, want the one just written, %s", row.ID, written.ID)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(row.Fields, &stored); err != nil {
+		t.Fatalf("decode stored fields %s: %v", row.Fields, err)
+	}
+	if stored["requires_ability"] != "mothwing_cloak" || stored["one_way"] != true {
+		t.Fatalf("read back %v, want requires_ability mothwing_cloak and one_way true", stored)
+	}
+
+	// The direction is part of the address: the same pair the other way
+	// round is a different edge, and there is no such edge here.
+	if _, err := svc.RelationByEdge(ctx, project, "connects_to",
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"}); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the reversed pair answered %v, want ErrNotFound", err)
+	}
+}
+
+// TestEachMissingPieceOfAnEdgeRead names what a reader got wrong, the
+// same way TestEachMissingPieceOfAnEdge does for a write: three
+// addresses in one call means three ways to be wrong, and "not found"
+// alone leaves a caller guessing which.
+func TestEachMissingPieceOfAnEdgeRead(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+
+	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires",
+	}); err != nil {
+		t.Fatalf("UpsertRelationType: %v", err)
+	}
+	if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+	}); err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name           string
+		typeKey        string
+		source, target metamodel.Ref
+		want           string
+	}{
+		{
+			name:    "unknown relation type",
+			typeKey: "unlocks",
+			source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+			target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			want:    `no relation type "unlocks"`,
+		},
+		{
+			name:    "unknown source entity",
+			typeKey: "requires",
+			source:  metamodel.Ref{TypeKey: "quest", Key: "nowhere"},
+			target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			want:    `no entity "nowhere"`,
+		},
+		{
+			name:    "unknown target entity type",
+			typeKey: "requires",
+			source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+			target:  metamodel.Ref{TypeKey: "talent", Key: "hogger"},
+			want:    `no entity type "talent"`,
+		},
+		{
+			name:    "every piece exists and the edge does not",
+			typeKey: "requires",
+			source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+			want:    `no "requires" edge`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.RelationByEdge(ctx, project, tc.typeKey, tc.source, tc.target)
+			if !errors.Is(err, metamodel.ErrNotFound) {
+				t.Fatalf("err = %v, want ErrNotFound", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %q, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestAnEdgeReadIsScopedToItsGameAndBoundsItsKeys covers the two things
+// a by-key read owes that a by-id read does not: another game's edge is
+// not readable by the same triple, and a key too malformed ever to have
+// been stored is a caller's own invalid_input rather than a Postgres
+// error escaping as a server fault — the rule ListRelations' own type
+// key filter already follows.
+func TestAnEdgeReadIsScopedToItsGameAndBoundsItsKeys(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine, theirs := newProject(t, pool), newProject(t, pool)
+	seedWorld(t, svc, mine)
+	seedWorld(t, svc, theirs)
+
+	for _, project := range []uuid.UUID{mine, theirs} {
+		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+			Key: "requires", Label: "requires",
+		}); err != nil {
+			t.Fatalf("UpsertRelationType: %v", err)
+		}
+	}
+	if _, err := svc.UpsertRelation(ctx, mine, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+	}); err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	// The neighbouring game declares the same vocabulary and the same
+	// entities, so every lookup on the way to the edge succeeds there;
+	// only the edge itself is missing, which is what makes this a real
+	// scoping assertion and not a lookup failing early.
+	//
+	// What it does *not* prove is that GetRelationByEdge's own
+	// `project_id` filter is load-bearing. It is not: deleting that
+	// clause from the statement leaves this case green, measured. The
+	// isolation comes one step earlier — the relation type and both
+	// endpoints are resolved inside the calling game, so the triple
+	// handed to the statement is already this game's, and the two games'
+	// identically-keyed "requires" types have different ids. The filter
+	// stays as the backstop GetRelationByID has for the same reason, and
+	// this comment is here so that nobody later reads a passing test as
+	// evidence for it.
+	if _, err := svc.RelationByEdge(ctx, theirs, "requires",
+		metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"}); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("another game read this edge: err = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.RelationByEdge(ctx, mine, "requires",
+		metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"}); err != nil {
+		t.Fatalf("the owning game cannot read its own edge: %v", err)
+	}
+
+	for _, tc := range []struct{ name, path, typeKey, sourceKey string }{
+		{"relation type key", "type_key", "requires\x00", "kobold-camp"},
+		{"endpoint key", "source.key", "requires", "kobold\x00camp"},
+	} {
+		t.Run(tc.name+" is bounded before Postgres sees it", func(t *testing.T) {
+			_, err := svc.RelationByEdge(ctx, mine, tc.typeKey,
+				metamodel.Ref{TypeKey: "quest", Key: tc.sourceKey},
+				metamodel.Ref{TypeKey: "quest", Key: "hogger"})
+			if !errors.Is(err, metamodel.ErrInvalidInput) {
+				t.Fatalf("err = %v, want ErrInvalidInput", err)
+			}
+			requireFieldError(t, err, tc.path,
+				"must be letters, digits, underscores or hyphens, starting with a letter or a digit")
+		})
+	}
+}

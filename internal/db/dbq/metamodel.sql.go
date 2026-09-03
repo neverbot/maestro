@@ -437,6 +437,54 @@ func (q *Queries) GetEntityTypeByKeyForUpdate(ctx context.Context, arg GetEntity
 	return i, err
 }
 
+const getRelationByEdge = `-- name: GetRelationByEdge :one
+SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relations
+WHERE project_id = $1::uuid
+  AND relation_type_id = $2::uuid
+  AND source_id = $3::uuid
+  AND target_id = $4::uuid
+`
+
+type GetRelationByEdgeParams struct {
+	ProjectID      uuid.UUID
+	RelationTypeID uuid.UUID
+	SourceID       uuid.UUID
+	TargetID       uuid.UUID
+}
+
+// One edge by the triple that identifies it: its relation type and its
+// two endpoints, which is exactly the address relations.upsert writes an
+// edge under and the target of the relations_edge_key index, so this
+// statement seeks that unique index and can return at most one row.
+//
+// The project filter is redundant against that index -- an edge's type
+// and both endpoints are already inside one game, by composite foreign
+// key -- and is here anyway, for the reason GetRelationByID has it: a
+// leaked id must not read across games even if a future index change
+// makes the triple ambiguous.
+func (q *Queries) GetRelationByEdge(ctx context.Context, arg GetRelationByEdgeParams) (Relation, error) {
+	row := q.db.QueryRow(ctx, getRelationByEdge,
+		arg.ProjectID,
+		arg.RelationTypeID,
+		arg.SourceID,
+		arg.TargetID,
+	)
+	var i Relation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RelationTypeID,
+		&i.SourceID,
+		&i.TargetID,
+		&i.Fields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
 const getRelationByID = `-- name: GetRelationByID :one
 SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relations
 WHERE project_id = $1::uuid AND id = $2::uuid

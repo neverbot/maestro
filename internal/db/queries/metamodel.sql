@@ -456,6 +456,23 @@ LIMIT sqlc.arg('limit')::int;
 SELECT * FROM relations
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
+-- name: GetRelationByEdge :one
+-- One edge by the triple that identifies it: its relation type and its
+-- two endpoints, which is exactly the address relations.upsert writes an
+-- edge under and the target of the relations_edge_key index, so this
+-- statement seeks that unique index and can return at most one row.
+--
+-- The project filter is redundant against that index -- an edge's type
+-- and both endpoints are already inside one game, by composite foreign
+-- key -- and is here anyway, for the reason GetRelationByID has it: a
+-- leaked id must not read across games even if a future index change
+-- makes the triple ambiguous.
+SELECT * FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid
+  AND source_id = sqlc.arg('source_id')::uuid
+  AND target_id = sqlc.arg('target_id')::uuid;
+
 -- name: DeleteRelation :execrows
 DELETE FROM relations
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;

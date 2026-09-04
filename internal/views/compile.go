@@ -896,17 +896,12 @@ func lengthComparison(op Operator) Operator {
 	return op
 }
 
-// likeOperand escapes the two LIKE metacharacters in a caller's value, so
-// `starts_with: "50%"` matches a name starting "50%" rather than a name
-// starting "50". The escape character is backslash and the pattern says
-// so with ESCAPE '\'.
-func likeOperand(s string) string {
-	return escapeLike(s, false)
-}
-
-// escapeLike walks the operand once, escaping the three characters LIKE
-// reads — backslash, per-cent and underscore — and, when glob is set,
-// mapping `*` and `?` onto their LIKE equivalents *as it goes*.
+// escapeLike walks a caller's operand once, escaping the three characters
+// LIKE reads — backslash, per-cent and underscore, so that `starts_with:
+// "50%"` matches a name starting "50%" rather than a name starting "50",
+// with ESCAPE '\\' in the emitted pattern saying which character escapes
+// — and, when glob is set, mapping `*` and `?` onto their LIKE
+// equivalents *as it goes*.
 //
 // One pass rather than chained replacers, because the chained version was
 // wrong: it escaped the caller's characters and then ran a second

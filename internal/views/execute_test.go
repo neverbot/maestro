@@ -232,7 +232,7 @@ func TestIncludeFieldsIsWhatPutsFieldsInTheEnvelope(t *testing.T) {
 	}
 }
 
-// TestALikePatternsMetacharactersAreEscaped is why likeOperand exists: a
+// TestALikePatternsMetacharactersAreEscaped is why escapeLike exists: a
 // designer's quest name may hold a per-cent sign, and `starts_with:
 // "50%"` must mean a name starting "50%" rather than a name starting
 // "50". The control is in the same assertion, so an empty answer cannot

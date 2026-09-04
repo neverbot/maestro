@@ -992,3 +992,52 @@ func TestARenamedTypeDoesNotSwitchOffTheProjectionsTypoCheck(t *testing.T) {
 		t.Fatalf("codes = %v, want the rename alone", got)
 	}
 }
+
+// TestBestEffortDropsWhatDependedOnWhatItDropped is the other half of
+// the pruning rule, and the half nothing else in this file reaches: a
+// step reads from a set by name and an edges[] entry draws between sets
+// by name, so dropping a set that either of them names leaves a document
+// referring to something that is no longer there. What comes back then
+// is not a smaller picture — it is `no set named "f" is declared`, a
+// query_invalid about a set the designer never removed, from a run they
+// explicitly asked to do its best.
+//
+// Both dependants are in one document on purpose: they fail the same way
+// and a fixture holding one of them would leave the other unwatched. The
+// second step reads from the first, which is what makes the propagation
+// a fixed point rather than one pass: a step reading from a step reading
+// from a dropped set survives a single sweep.
+func TestBestEffortDropsWhatDependedOnWhatItDropped(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "web", `{"v":1,"from":[
+		  {"type":"faction","as":"f"},
+		  {"type":"quest","as":"q"}],
+		"traverse":[{"from":"f","via":"available_to","to_type":"quest","as":"reach"},
+		  {"from":"reach","via":"requires","to_type":"quest","as":"more"}],
+		"edges":[{"via":"available_to","between":["q","f"]}],
+		"nodes":[{"set":"f"},{"set":"q"},{"set":"reach"},{"set":"more"}]}`)
+	id := g.typeIDOf(t, KindEntityType, "faction")
+	if err := g.meta.RemoveEntityType(t.Context(), g.projectID, id, true); err != nil {
+		t.Fatalf("remove the seed type: %v", err)
+	}
+
+	res, err := g.views.RunView(t.Context(), g.projectID, "web",
+		RunRequest{OnStale: OnStaleBestEffort})
+	if err != nil {
+		t.Fatalf("best effort must draw the set that still resolves: %v", err)
+	}
+	if len(res.Nodes) != 3 {
+		t.Fatalf("the quests are what is left: %+v", res.Nodes)
+	}
+	for _, node := range res.Nodes {
+		if node.Set != "q" {
+			t.Fatalf("only the surviving set may draw: %+v", res.Nodes)
+		}
+	}
+	if len(res.Edges) != 0 {
+		t.Fatalf("the entry drew between a set that is gone: %+v", res.Edges)
+	}
+	wants(t, res.Stale, Diagnostic{
+		Code: DiagEntityTypeMissing, Pointer: "/from/0/type", Was: "faction",
+	})
+}

@@ -2,6 +2,7 @@ package views
 
 import (
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -61,10 +62,35 @@ func TestNoCallerValueEverReachesTheStatementText(t *testing.T) {
 var projectScopedTables = []string{"entity_types", "relation_types", "entities", "relations"}
 
 // tableReference matches a FROM or a JOIN of one of those four and
-// captures the alias it was given. The longer names come first in the
-// alternation because Go's regexp is leftmost-first, not leftmost-longest.
+// captures the alias it was given, **or no alias at all**. The longer
+// names come first in the alternation because Go's regexp is
+// leftmost-first, not leftmost-longest.
+//
+// The alias group is optional and the table name may be quoted, because
+// three shapes of reference used to match nothing at all and were
+// therefore asserted by nothing: `FROM relations)` with no alias,
+// `FROM entities, relations r` — a comma-joined list, which hid every
+// table after the comma — and `FROM "relations" q`. A reference this
+// regexp cannot see is a filter this test cannot miss, which is the
+// worst thing a guard can be, so a reference that yields no alias is now
+// an error rather than a non-match, and projectFilterProblems refuses a
+// comma-joined list outright. Task 9 adds LEFT JOIN LATERAL, whose inner
+// FROM is an ordinary reference and is matched here like any other.
 var tableReference = regexp.MustCompile(
-	`(?i)\b(?:FROM|JOIN)\s+(entity_types|relation_types|entities|relations)\b\s*(?:AS\s+)?([a-z_][a-z0-9_]*)`)
+	`(?i)\b(?:FROM|JOIN)\s+"?(entity_types|relation_types|entities|relations)"?` +
+		`(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?`)
+
+// aliasKeywords are the words a reference with no alias puts where the
+// alias would be. They are treated as "no alias", not as an alias, so
+// `FROM relations WHERE …` is an error rather than a search for
+// `where.project_id`.
+var aliasKeywords = map[string]bool{
+	"AS": true, "ON": true, "WHERE": true, "JOIN": true, "UNION": true,
+	"LEFT": true, "RIGHT": true, "INNER": true, "CROSS": true, "FULL": true,
+	"LATERAL": true, "USING": true, "GROUP": true, "ORDER": true, "LIMIT": true,
+	"OFFSET": true, "HAVING": true, "EXCEPT": true, "INTERSECT": true,
+	"AND": true, "OR": true, "SELECT": true, "FROM": true, "WITH": true,
+}
 
 // filteredOn matches this alias's own project filter, and it is a regexp
 // rather than a substring search because an alias can be the *suffix* of
@@ -75,8 +101,124 @@ var tableReference = regexp.MustCompile(
 // filter — the first project filter in this package that is not
 // redundant, and the one that lets a walk leave the game through another
 // game's edge — left this test green.
+//
+// **The placeholder is closed on the right for the same reason the alias
+// is closed on the left**: `\$1` is a prefix of `$18`, so a statement
+// carrying ten binds before its walk satisfied this regexp with
+// `r.project_id = $18` — an arbitrary argument, which is a silent wrong
+// game the moment the value at that position happens to be a uuid. That
+// was the third time this one guard was broken by review, and the two
+// ends are now closed the same way, by a character class rather than by
+// a lookahead Go's regexp does not have.
+//
+// **What it still cannot see** is that the text it matched is live SQL:
+// `-- r.project_id = $1` in a comment, or the same inside a string
+// literal, satisfies it. Nothing this compiler emits contains either —
+// it emits no comments and no string literals holding SQL — so this is
+// recorded as the next step along rather than fixed with a tokeniser
+// this package has no other use for.
 func filteredOn(alias string) *regexp.Regexp {
-	return regexp.MustCompile(`(?:^|[^a-z0-9_])` + regexp.QuoteMeta(alias) + `\.project_id = \$1`)
+	return regexp.MustCompile(`(?:^|[^a-z0-9_])` + regexp.QuoteMeta(alias) +
+		`\.project_id = \$1(?:[^0-9]|$)`)
+}
+
+// projectFilterProblems is the guard itself, factored out of the test
+// that runs it over the compiler's real output so that
+// TestTheProjectFilterGuardSeesTheShapesItMustSee can run it over the
+// shapes that used to slip past. It returns one message per reference it
+// cannot see as filtered, and how many times each table was referenced —
+// the second is what makes the assertion non-vacuous.
+func projectFilterProblems(sql string) ([]string, map[string]int) {
+	var problems []string
+	seen := map[string]int{}
+	for _, block := range strings.Split(sql, "SELECT") {
+		for _, loc := range tableReference.FindAllStringSubmatchIndex(block, -1) {
+			ref := block[loc[0]:loc[1]]
+			table := strings.ToLower(block[loc[2]:loc[3]])
+			seen[table]++
+			alias := ""
+			if loc[4] >= 0 {
+				alias = block[loc[4]:loc[5]]
+			}
+			if alias == "" || aliasKeywords[strings.ToUpper(alias)] {
+				problems = append(problems, fmt.Sprintf(
+					"the reference %q has no alias, so no filter can be named for it:\n%s",
+					ref, block))
+				continue
+			}
+			// A comma-joined FROM list hides every table after the comma
+			// from a regexp anchored on FROM and JOIN, so it is refused
+			// rather than half-checked.
+			if rest := strings.TrimLeft(block[loc[1]:], " \t\n"); strings.HasPrefix(rest, ",") {
+				problems = append(problems, fmt.Sprintf(
+					"the reference %q heads a comma-joined FROM list, which hides the tables "+
+						"after the comma from this guard; write it as a JOIN:\n%s", ref, block))
+				continue
+			}
+			if !filteredOn(alias).MatchString(block) {
+				problems = append(problems, fmt.Sprintf(
+					"%s is read as %q without %s.project_id = $1 in the same block:\n%s",
+					table, ref, alias, block))
+			}
+		}
+	}
+	return problems, seen
+}
+
+// TestTheProjectFilterGuardSeesTheShapesItMustSee tests the guard rather
+// than the compiler, because a guard is only worth what it can see and
+// this one has been broken by review three times — twice by a shape it
+// did not match, once by a placeholder prefix. Every case below is a
+// statement the guard used to pass in silence.
+func TestTheProjectFilterGuardSeesTheShapesItMustSee(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, sql string
+		want      bool
+	}{
+		{"no alias", "SELECT 1 FROM relations\n)", true},
+		{"comma-joined list, first table unaliased",
+			"SELECT 1 FROM entities, relations r WHERE r.project_id = $1", true},
+		{"comma-joined list, both aliased",
+			"SELECT 1 FROM entities e, relations r WHERE e.project_id = $1 AND r.project_id = $1",
+			true},
+		{"quoted table name", `SELECT 1 FROM "relations" q WHERE true`, true},
+		// The prefix: $1 is the head of $18, so an arbitrary argument read
+		// as the project id.
+		{"a placeholder $1 is only the prefix of",
+			"SELECT 1 FROM relations r WHERE r.project_id = $18", true},
+		{"an alias $1 is the suffix of another's filter",
+			"SELECT 1 FROM relations r JOIN entities far ON far.project_id = $1", true},
+		// And the controls, which have to pass or the cases above prove
+		// nothing but that the guard rejects everything.
+		{"filtered", "SELECT 1 FROM relations r WHERE r.project_id = $1", false},
+		{"quoted and filtered", `SELECT 1 FROM "relations" q WHERE q.project_id = $1`, false},
+		{"a lateral join, which is Task 9's shape",
+			"SELECT 1 FROM entities e\n" +
+				"JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1 " +
+				"AND e.project_id = $1\n" +
+				"LEFT JOIN LATERAL (SELECT 1 FROM relations r WHERE r.project_id = $1) x ON true",
+			false},
+		// **Known over-strictness, pinned rather than left to be
+		// discovered.** The scan splits on the word SELECT, so a filter
+		// written *after* a nested SELECT in the same block lands in the
+		// next block and is not seen. Nothing this compiler emits is
+		// shaped that way — every project filter it writes sits in the
+		// JOIN or the WHERE that introduces the table, ahead of any
+		// subquery — and the failure is loud, which is the side of the
+		// trade a guard belongs on. Task 9's lateral joins have to keep
+		// the filter ahead of the nested SELECT, as the case above does.
+		{"a filter written after a nested SELECT is not seen",
+			"SELECT 1 FROM entities e\nWHERE EXISTS (SELECT 1) AND e.project_id = $1", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			problems, _ := projectFilterProblems(c.sql)
+			if got := len(problems) > 0; got != c.want {
+				t.Errorf("the guard reports %d problem(s) on %q, want a problem: %v\n%v",
+					len(problems), c.sql, c.want, problems)
+			}
+		})
+	}
 }
 
 // TestEveryTableReferenceIsProjectFiltered walks the emitted SQL rather
@@ -116,22 +258,9 @@ func TestEveryTableReferenceIsProjectFiltered(t *testing.T) {
 		             "depth":{"min":1,"max":3},"as":"chain"}],
 		"edges":[{"from_step":"c"},{"from_step":"chain"},
 		         {"via":"requires","between":["q","q"]}]}`)
-	seen := map[string]int{}
-	for _, block := range strings.Split(sql, "SELECT") {
-		for _, ref := range tableReference.FindAllStringSubmatch(block, -1) {
-			table, alias := strings.ToLower(ref[1]), ref[2]
-			seen[table]++
-			switch strings.ToUpper(alias) {
-			case "AS", "ON", "WHERE", "JOIN", "UNION":
-				t.Errorf("the reference %q has no alias, so this test cannot name its filter:\n%s",
-					ref[0], block)
-				continue
-			}
-			if !filteredOn(alias).MatchString(block) {
-				t.Errorf("%s is read as %q without %s.project_id = $1 in the same block:\n%s",
-					table, ref[0], alias, block)
-			}
-		}
+	problems, seen := projectFilterProblems(sql)
+	for _, problem := range problems {
+		t.Error(problem)
 	}
 	for _, table := range projectScopedTables {
 		if seen[table] == 0 {

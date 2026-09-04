@@ -317,6 +317,17 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			return conflictOnViewKey(ctx, q, projectID, in.Key)
 		}
 		if err != nil {
+			// 0008_views.sql gives views the same composite
+			// FOREIGN KEY (updated_by_token_id, project_id) as every table
+			// in 0004_metamodel.sql, so a token scoped to another game
+			// cannot be recorded as the editor of this one's view. Without
+			// this arm that refusal reaches a log as the raw SQLSTATE
+			// 23503 over a constraint name, which says nothing about a
+			// token being scoped to the wrong game; the judgement is
+			// metamodel's, shared rather than copied.
+			if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
 			return fmt.Errorf("upsert view: %w", err)
 		}
 		// The locked read cannot be the only place the spelling is

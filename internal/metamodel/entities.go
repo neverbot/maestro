@@ -296,7 +296,7 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 		return upsertedEntity{}, conflictOnEntityKey(ctx, q, projectID, typ.ID, in.Key)
 	}
 	if err != nil {
-		if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+		if mapped := ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 			return upsertedEntity{}, mapped
 		}
 		// searchTextLimit already keeps the search vector under

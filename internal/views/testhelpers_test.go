@@ -177,3 +177,41 @@ func mustParse(t *testing.T, doc string) *Query {
 	}
 	return q
 }
+
+// newUser and newToken build the two actors a write can record.
+//
+// They exist because internal/views has its own copies of the two audit
+// columns and its own composite foreign keys over them, and a test that
+// wants to see either filled needs a users row and an api_tokens row
+// that really exist — the columns are foreign keys, so a made-up uuid is
+// refused rather than stored. The inserts are the minimum each table
+// admits; nothing in this package reads any other column of either.
+func newUser(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	err := pool.QueryRow(context.Background(),
+		`INSERT INTO users (email, display_name, password_hash)
+		 VALUES ($1, 'Designer', 'x') RETURNING id`,
+		uuid.NewString()[:8]+"@example.test").Scan(&id)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	return id
+}
+
+// newToken inserts an api_tokens row scoped to one game, which is what
+// makes "this token belongs to another game" a question the database can
+// answer.
+func newToken(t *testing.T, pool *pgxpool.Pool, project uuid.UUID) uuid.UUID {
+	t.Helper()
+	user := newUser(t, pool)
+	var id uuid.UUID
+	err := pool.QueryRow(context.Background(),
+		`INSERT INTO api_tokens (project_id, user_id, label, token_hint, token_hash)
+		 VALUES ($1, $2, 'seeder', 'abcd', $3) RETURNING id`,
+		project, user, []byte(uuid.NewString())).Scan(&id)
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+	return id
+}

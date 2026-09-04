@@ -74,6 +74,13 @@ var (
 	ErrVersionConflict = metamodel.ErrVersionConflict
 	ErrInvalidInput    = metamodel.ErrInvalidInput
 	ErrInUse           = metamodel.ErrInUse
+	// ErrActorNotInGame is not in Sentinels() and that is deliberate: it
+	// is not a wire code. The actor on a write is resolved by the
+	// transport from the credential the call arrived with and is never
+	// caller-supplied, so an agent can do nothing about it — the argument
+	// metamodel/errors.go makes and metamodel/bulk.go's failureFor
+	// repeats. internal_error is the correct report for it.
+	ErrActorNotInGame = metamodel.ErrActorNotInGame
 )
 
 // QueryError is a refusal of a query document, carrying one or more

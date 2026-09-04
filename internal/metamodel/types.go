@@ -137,7 +137,7 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 			return conflictOnEntityTypeKey(ctx, q, projectID, in.Key)
 		}
 		if err != nil {
-			if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+			if mapped := ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 				return mapped
 			}
 			return fmt.Errorf("upsert entity type: %w", err)

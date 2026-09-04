@@ -118,9 +118,17 @@ func decodeFields(raw []byte) (map[string]any, error) {
 	return out, nil
 }
 
-// actorConstraintViolation recognises a write refused because its Actor
+// ActorConstraintViolation recognises a write refused because its Actor
 // does not belong to the project being written to, and returns
 // ErrActorNotInGame; every other error passes through unchanged.
+//
+// **Exported because internal/views needs the same judgement.**
+// 0008_views.sql gives views the same two audit columns under the same
+// two composite foreign keys as every table in 0004_metamodel.sql, so a
+// saved view written with a foreign token is refused by the database in
+// exactly the same way, and a second copy of this scan in that package
+// would be a second place for the constraint-name list to fall out of
+// step. The sentinel it returns is aliased there too.
 //
 // It matches on the constraint's column rather than its full generated
 // name (entity_types_updated_by_token_id_project_id_fkey today) so that
@@ -131,7 +139,7 @@ func decodeFields(raw []byte) (map[string]any, error) {
 // in with it — a user id that resolves to no row is the same class of
 // fault, an actor this instance cannot vouch for, arriving from the same
 // place.
-func actorConstraintViolation(err error) error {
+func ActorConstraintViolation(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
 		return err

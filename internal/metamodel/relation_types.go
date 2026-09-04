@@ -194,7 +194,7 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 			return conflictOnRelationTypeKey(ctx, q, projectID, in.Key)
 		}
 		if err != nil {
-			if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+			if mapped := ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 				return mapped
 			}
 			return fmt.Errorf("upsert relation type: %w", err)

@@ -51,16 +51,28 @@ func saveable(key, doc string) ViewInput {
 // together, off a second read rather than off the returned row: the
 // returned row is what the INSERT said, and only a read says what was
 // stored.
+//
+// **Review finding: it enumerated four fields and then omitted the very
+// column it was written to catch.** Actor was the one field of ViewInput
+// no test in this package set, so updated_by_user_id and
+// updated_by_token_id were write-only in exactly the sense this comment
+// describes — measured, replacing both with nil in UpsertView left the
+// whole module green. They are set and read back here, both of them at
+// once, because a view is edited by a designer or by that designer's
+// agent and nothing else in this package distinguishes the two.
 func TestAViewIsReadBackWithEveryFieldItWasSavedWith(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()
 
+	user := newUser(t, g.pool)
+	token := newToken(t, g.pool, g.projectID)
 	in := saveable("mage_route", questsToZones)
 	in.Name = "Mage route"
 	in.Description = "Every quest a mage can take,\nby zone."
 	in.RendererParams = map[string]any{"arrows": true, "edge_labels": false}
 	in.LayoutMode = LayoutManual
 	in.LayoutSeed = ptrInt32(7)
+	in.Actor = Actor{UserID: &user, TokenID: &token}
 	written, err := g.views.UpsertView(ctx, g.projectID, in)
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
@@ -95,6 +107,13 @@ func TestAViewIsReadBackWithEveryFieldItWasSavedWith(t *testing.T) {
 	}
 	if got.LayoutSeed != 7 {
 		t.Fatalf("LayoutSeed = %d, want 7", got.LayoutSeed)
+	}
+	// The two audit columns, which no other test in this package fills.
+	if got.UpdatedByUserID == nil || *got.UpdatedByUserID != user {
+		t.Fatalf("UpdatedByUserID = %v, want the user that wrote it (%s)", got.UpdatedByUserID, user)
+	}
+	if got.UpdatedByTokenID == nil || *got.UpdatedByTokenID != token {
+		t.Fatalf("UpdatedByTokenID = %v, want the token that wrote it (%s)", got.UpdatedByTokenID, token)
 	}
 	// The query is stored as authored, which is what makes Task 12's
 	// "a rename does not rewrite the query" checkable at all.
@@ -858,6 +877,51 @@ func TestViewsDependingOnATypeAreFoundByIdWithTheirPointers(t *testing.T) {
 	}
 	if len(crossedVia) != 0 {
 		t.Fatalf("got %+v, want nothing: that relation type belongs to another game", crossedVia)
+	}
+}
+
+// TestAViewWrittenByAnotherGamesTokenIsRefused covers the database's own
+// backstop over the audit columns, the half of them a read-back cannot
+// see.
+//
+// 0008_views.sql gives views the same composite
+// FOREIGN KEY (updated_by_token_id, project_id) REFERENCES
+// api_tokens (id, project_id) that every table in 0004_metamodel.sql
+// carries, so a token scoped to another game cannot be recorded as the
+// editor of this one's view. The constraint worked already; what did not
+// was the reporting, which surfaced "upsert view: ... violates foreign
+// key constraint ... (SQLSTATE 23503)" into whatever log caught it —
+// nothing in that string says a token was scoped to the wrong game.
+// metamodel's TestAnActorFromAnotherGameIsNamed is the same test next
+// door, and this package shares its judgement rather than copying the
+// scan.
+func TestAViewWrittenByAnotherGamesTokenIsRefused(t *testing.T) {
+	azeroth, outland := newGame(t)
+	ctx := context.Background()
+
+	foreign := newToken(t, outland.pool, outland.projectID)
+	in := saveable("route", questsToZones)
+	in.Actor = Actor{TokenID: &foreign}
+	if _, err := azeroth.views.UpsertView(ctx, azeroth.projectID, in); !errors.Is(err, ErrActorNotInGame) {
+		t.Fatalf("err = %v, want ErrActorNotInGame", err)
+	}
+	// The refused write stores nothing: the arm returns inside withTx, so
+	// the transaction rolls back and no half-written view survives.
+	if _, err := azeroth.views.ViewByKey(ctx, azeroth.projectID, "route"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ViewByKey = %v, want not_found: the refused write must store nothing", err)
+	}
+
+	// The same token against its own game is an ordinary write, which is
+	// what keeps the mapping from being "token actors are refused".
+	if _, err := outland.views.UpsertView(ctx, outland.projectID, in); err != nil {
+		t.Fatalf("a token writing to its own game: %v", err)
+	}
+	stored, err := outland.views.ViewByKey(ctx, outland.projectID, "route")
+	if err != nil {
+		t.Fatalf("read back the write that was allowed: %v", err)
+	}
+	if stored.UpdatedByTokenID == nil || *stored.UpdatedByTokenID != foreign {
+		t.Fatalf("UpdatedByTokenID = %v, want %s", stored.UpdatedByTokenID, foreign)
 	}
 }
 

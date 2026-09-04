@@ -329,7 +329,7 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		UpdatedByTokenID: in.Actor.TokenID,
 	})
 	if err != nil {
-		if mapped := actorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+		if mapped := ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 			return upsertedRelation{}, mapped
 		}
 		if mapped := edgeParentViolation(err, in); errors.Is(mapped, ErrNotFound) {

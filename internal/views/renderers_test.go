@@ -413,39 +413,55 @@ func TestEveryBadColumnComesBackWithItsIndex(t *testing.T) {
 	}
 }
 
-// TestMapRefusesBackgroundKnobsWithNoBackground is the "read by nothing"
-// rule one parameter along from x_field, which is where it stopped for a
-// round: a scale and an offset place a background image, and with no image
-// there is nothing to place and nothing to read them.
-func TestMapRefusesBackgroundKnobsWithNoBackground(t *testing.T) {
+// TestSnapIsReadInManualModeAndRefusedInFields is the "read by nothing"
+// rule on the last map parameter that is still a renderer parameter.
+//
+// **The background knobs used to be tested here and are not renderer
+// parameters any more.** background_asset_id, background_scale and
+// background_offset were declared in this catalogue *and* carried as
+// columns on views by 0008_views.sql — two stores for one value. The
+// columns won (only a column can carry the composite foreign key that
+// refuses another game's image, and the ON DELETE SET NULL that detaches
+// a deleted one), the parameters are gone, and the same rule is applied
+// to the columns by assets.go's SetBackground:
+// TestABackgroundKnobWithNoBackgroundIsRefused is where that half of
+// this test went.
+func TestSnapIsReadInManualModeAndRefusedInFields(t *testing.T) {
 	g, _ := newGame(t)
 	quests := resolveFor(t, g, carryingQuery)
-	asset := "6f1a1cbe-6ad1-4a6b-8f6d-2a2a63cb0f2f"
-	// The control: with a background, both knobs are read.
-	checkPasses(t, CheckRenderer(RendererMap, map[string]any{
-		"background_asset_id": asset, "background_scale": 2,
-		"background_offset": []any{1.0, 2.0},
-	}, quests))
-	// And the control for the parameter this rule must not reach: snap
-	// is read in manual mode, background or no background.
+	// The control: snap is the grid a dragged node lands on, and manual
+	// mode — the default — is what drags.
 	checkPasses(t, CheckRenderer(RendererMap, map[string]any{"snap": 10}, quests))
-
-	for _, name := range []string{"background_scale", "background_offset"} {
-		var value any = 2
-		if name == "background_offset" {
-			value = []any{1.0, 2.0}
-		}
-		checkFails(t, CheckRenderer(RendererMap, map[string]any{name: value}, quests),
-			ErrRendererRequirements, pointer("renderer_params", name),
-			"places the background image and this view has none")
-	}
-	// snap, decided rather than left to the next reader: it is the grid a
-	// dragged node lands on, and in fields mode nothing is dragged.
+	// And in fields mode a node's coordinates come off its declared
+	// fields, nothing is dragged, and a grid size changes no picture.
 	checkFails(t, CheckRenderer(RendererMap, map[string]any{
 		"coordinate_source": "fields", "x_field": "min_level",
 		"y_field": "difficulty", "snap": 10,
 	}, quests), ErrRendererRequirements, "/renderer_params/snap",
 		"is the grid a dragged node lands on")
+}
+
+// TestABackgroundIsNotARendererParameter pins the correction above from
+// the other side: the three names are refused as unknown parameters, so
+// an agent that read a stale table and sent one is told, rather than
+// having a background silently stored where nothing reads it.
+func TestABackgroundIsNotARendererParameter(t *testing.T) {
+	g, _ := newGame(t)
+	quests := resolveFor(t, g, carryingQuery)
+	for _, name := range []string{
+		"background_asset_id", "background_scale", "background_offset",
+	} {
+		checkFails(t, CheckRenderer(RendererMap, map[string]any{name: 1}, quests),
+			ErrQueryInvalid, pointer("renderer_params", name),
+			"is not a renderer parameter")
+	}
+	// The description an agent reads must say where it went, or the
+	// refusal above is a dead end.
+	description := RendererDescription()
+	if !strings.Contains(description, "views.set_background") {
+		t.Errorf("the generated description must name views.set_background, since " +
+			"the background is refused as a parameter and set nowhere else")
+	}
 }
 
 func TestMapInFieldsModeRefusesNonNumericCoordinates(t *testing.T) {
@@ -638,9 +654,9 @@ func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 	g, _ := newGame(t)
 	// Five problems in one pass: an agent fixing five parameters should
 	// learn about five.
-	err := CheckRenderer(RendererMap, map[string]any{
-		"snap": "close", "background_scale": "big", "background_offset": "0,0",
-		"background_asset_id": "not-a-uuid", "coordinate_source": 1,
+	err := CheckRenderer(RendererGraph, map[string]any{
+		"size_by": 1, "arrows": "yes", "color_by": 1,
+		"edge_labels": "yes", "cluster_by": 1,
 	}, resolveFor(t, g, questQuery))
 	var qe *QueryError
 	if !errors.As(err, &qe) {
@@ -659,10 +675,11 @@ func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 	// *rotation* of the literal's insertion order, not a permutation.
 	// Measured on this toolchain over 10,000 rebuilds of the literal
 	// below, five keys give five distinct orders and 0 of 10,000 came
-	// back already sorted — because the literal happens to begin with
-	// "snap". The same five keys written alphabetically came back sorted
-	// 4,984 times in 10,000. **The key count is irrelevant, and the guard
-	// was standing on the order somebody happened to type.**
+	// back already sorted — because the literal happens to begin with a
+	// key that is not first alphabetically. The same five keys written
+	// alphabetically came back sorted 4,984 times in 10,000. **The key
+	// count is irrelevant, and the guard was standing on the order
+	// somebody happened to type.**
 	//
 	// So the order is asserted deterministically instead: the same call
 	// twenty times over, every run identical and every run equal to the
@@ -670,17 +687,17 @@ func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 	// cannot silently weaken it, and no database is touched per
 	// iteration.
 	want := []string{
-		"/renderer_params/background_asset_id",
-		"/renderer_params/background_offset",
-		"/renderer_params/background_scale",
-		"/renderer_params/coordinate_source",
-		"/renderer_params/snap",
+		"/renderer_params/arrows",
+		"/renderer_params/cluster_by",
+		"/renderer_params/color_by",
+		"/renderer_params/edge_labels",
+		"/renderer_params/size_by",
 	}
 	r := resolveFor(t, g, questQuery)
 	for run := 0; run < 20; run++ {
-		err := CheckRenderer(RendererMap, map[string]any{
-			"snap": "close", "background_scale": "big", "background_offset": "0,0",
-			"background_asset_id": "not-a-uuid", "coordinate_source": 1,
+		err := CheckRenderer(RendererGraph, map[string]any{
+			"size_by": 1, "arrows": "yes", "color_by": 1,
+			"edge_labels": "yes", "cluster_by": 1,
 		}, r)
 		var qe *QueryError
 		if !errors.As(err, &qe) {
@@ -752,8 +769,6 @@ var wrongValueFor = map[ParamKind]any{
 	kindCount:        "many",
 	kindText:         17,
 	kindEnum:         "nope",
-	kindUUID:         "not-a-uuid",
-	kindPoint:        "0,0",
 	kindSlot:         "nonesuch",
 	kindNumberField:  "no_such_field",
 	kindAxisField:    "no_such_field",

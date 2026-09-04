@@ -74,13 +74,6 @@ const (
 	kindText   ParamKind = "text"
 	// kindEnum is one of the spellings the parameter declares.
 	kindEnum ParamKind = "enum"
-	// kindUUID is an id of a row in another table — a background asset
-	// (Task 14). It is checked for shape here and for existence there:
-	// this package cannot read that table, and a checker that pretended
-	// to would be a second, drifting copy of Task 14's own lookup.
-	kindUUID ParamKind = "uuid"
-	// kindPoint is an [x, y] pair of numbers.
-	kindPoint ParamKind = "point"
 	// kindSlot names a projection slot — a key of Node.Attrs — and
 	// therefore requires the query to declare that slot. A renderer
 	// channel names a slot rather than a field key because the query
@@ -170,7 +163,71 @@ type Renderer struct {
 	// sentence would have been the one refusal in this sub-project with
 	// no address.
 	Requires func(rc *rendererCheck) []metamodel.FieldError
+	// ReadsBackground says whether this renderer draws a background
+	// image, and is the one source for that fact.
+	//
+	// **The background is a column of the view, not a renderer
+	// parameter**, and that is a correction rather than an accident of
+	// naming. The catalogue carried background_asset_id, background_scale
+	// and background_offset as `map` parameters while 0008_views.sql
+	// carried the same three as columns, which is two stores for one
+	// value and therefore a drift waiting to be found. The columns win
+	// and the parameters are gone: only a column can carry
+	// FOREIGN KEY (background_asset_id, project_id) into view_assets,
+	// which is what refuses another game's image, and only a column can
+	// carry ON DELETE SET NULL, which is what detaches every view's
+	// background when the image is deleted. A uuid in a jsonb blob gets
+	// neither, and a deleted asset would leave a dangling id in every map
+	// view in the game.
+	//
+	// So this flag is what assets.go's SetBackground reads to apply this
+	// file's first rule — a stored value no renderer reads is a lie a
+	// designer will believe — to a value stored one table over.
+	// TestOnlyARendererThatDrawsABackgroundAcceptsOne drives every
+	// renderer in this catalogue through that setter, so the flag cannot
+	// disagree with what the product actually does.
+	ReadsBackground bool
 }
+
+// RendererReadsBackground answers whether a renderer draws a background
+// image. An unknown name reads as false: CheckRenderer is what refuses a
+// name this catalogue does not hold, and answering "yes" for a renderer
+// that does not exist would let a background be stored under it.
+func RendererReadsBackground(name string) bool {
+	for _, r := range renderers {
+		if r.Name == name {
+			return r.ReadsBackground
+		}
+	}
+	return false
+}
+
+// movedParams names the parameters this catalogue used to declare and
+// where they went, so that the refusal is a direction rather than a dead
+// end.
+//
+// It changes the *wording* of a refusal and never the decision: a name
+// in here is not a parameter of any renderer, so it is refused by the
+// unknown-parameter arm exactly as any other misspelling is, and adding
+// a name here cannot make one acceptable. That is the same ordering
+// assets.go's svgLooking follows for the same reason.
+//
+// The three below moved from renderer_params to columns of the view (see
+// Renderer.ReadsBackground). An agent working from the spec's own §5.1
+// table, or from a saved document written before the change, will send
+// one; being told "map takes coordinate_source, x_field, y_field, snap"
+// and nothing else leaves it with no idea a background is still
+// possible.
+var movedParams = map[string]string{
+	"background_asset_id": backgroundMoved,
+	"background_scale":    backgroundMoved,
+	"background_offset":   backgroundMoved,
+}
+
+const backgroundMoved = "is not a renderer parameter: a background image, its scale " +
+	"and its offset are columns of the view and are written with views.set_background, " +
+	"because a reference to a stored asset needs a foreign key to stay honest and a " +
+	"value in renderer_params cannot have one"
 
 // renderers is the catalogue, in the order the description prints it and
 // the order the refusal lists it.
@@ -283,11 +340,15 @@ var renderers = []Renderer{
 		},
 	},
 	{
-		Name:     RendererMap,
-		Consumes: "nodes, edges optional, coordinates required",
+		Name:            RendererMap,
+		Consumes:        "nodes, edges optional, coordinates required",
+		ReadsBackground: true,
 		Doc: "Nodes at coordinates, optionally over a background image. The " +
 			"coordinates are either the ones designers dragged (Task 13's " +
-			"positions) or two number fields the game declares.",
+			"positions) or two number fields the game declares. The background " +
+			"image is not a renderer parameter: it is a column of the view, " +
+			"written with views.set_background, because it is a reference to a " +
+			"stored asset and only a foreign key can keep that reference honest.",
 		Params: []RendererParam{
 			{Name: "coordinate_source", Kind: kindEnum, Values: []string{"manual", "fields"},
 				Doc: `"manual" reads the positions designers dragged, "fields" reads ` +
@@ -296,21 +357,16 @@ var renderers = []Renderer{
 				Doc: `the number field holding x, in "fields" mode`},
 			{Name: "y_field", Kind: kindNumberField,
 				Doc: `the number field holding y, in "fields" mode`},
-			{Name: "background_asset_id", Kind: kindUUID,
-				Doc: "the background image, an asset of this game"},
-			{Name: "background_scale", Kind: kindNumber,
-				Doc: "how many coordinate units one pixel of the background is"},
-			{Name: "background_offset", Kind: kindPoint,
-				Doc: "[x, y] the background's top-left corner sits at"},
 			{Name: "snap", Kind: kindNumber,
 				Doc: "grid size a dragged node snaps to; 0 for no grid"},
 		},
 		RequiresDoc: `in "fields" mode, both x_field and y_field, each naming a ` +
 			"number field every entity type in scope declares and project.fields " +
 			`carries; in "manual" mode — which is the default — neither, because ` +
-			"nothing would read them. background_scale and background_offset place " +
-			"a background image and need background_asset_id; snap is the grid a " +
-			"dragged node lands on and is read in manual mode only.",
+			"nothing would read them; snap is the grid a dragged node lands on " +
+			"and is read in manual mode only. A background image, its scale and " +
+			"its offset are not parameters here and are set with " +
+			"views.set_background, which applies the same rules to them.",
 		Requires: func(rc *rendererCheck) []metamodel.FieldError {
 			source, _ := rc.params["coordinate_source"].(string)
 			if source == "" {
@@ -332,21 +388,6 @@ var renderers = []Renderer{
 						`is read by nothing when coordinate_source is "manual", which `+
 							"reads the positions designers dragged: remove it, or set "+
 							`coordinate_source to "fields"`)...)
-				}
-			}
-			// **The same rule, one parameter along.** A scale and an
-			// offset describe where a background image sits and how big
-			// it is; with no image there is nothing for either to place,
-			// and they are stored, returned and read by nothing — the
-			// defect this catalogue exists to refuse, in the two knobs
-			// that were left out of it.
-			if _, given := rc.params["background_asset_id"]; !given {
-				for _, name := range []string{"background_scale", "background_offset"} {
-					if _, set := rc.params[name]; set {
-						problems = append(problems, rc.problem(name,
-							"places the background image and this view has none: set "+
-								"background_asset_id, or remove it")...)
-					}
 				}
 			}
 			// **snap is decided rather than left to the next reader**, the
@@ -535,8 +576,6 @@ var kindPhrases = map[ParamKind]string{
 	kindNumber:       "a number",
 	kindCount:        "a whole number of at least 1",
 	kindText:         "a line of text",
-	kindUUID:         "the id of an asset of this game",
-	kindPoint:        "[x, y], a pair of numbers",
 	kindSlot:         "the name of a projection slot this query declares",
 	kindNumberField:  "a declared number field key this query carries in project.fields",
 	kindAxisField:    "a declared number or enum field key this query carries in project.fields",
@@ -603,10 +642,13 @@ func CheckRenderer(name string, params map[string]any, r *Resolved) error {
 	for given, value := range params {
 		p, ok := renderer.param(given)
 		if !ok {
+			message := fmt.Sprintf("is not a parameter %q takes: it takes %s",
+				renderer.Name, strings.Join(renderer.paramNames(), ", "))
+			if moved, gone := movedParams[given]; gone {
+				message = moved
+			}
 			shape = append(shape, metamodel.FieldError{
-				Path: pointer("renderer_params", given),
-				Message: fmt.Sprintf("is not a parameter %q takes: it takes %s",
-					renderer.Name, strings.Join(renderer.paramNames(), ", ")),
+				Path: pointer("renderer_params", given), Message: message,
 			})
 			continue
 		}
@@ -1108,29 +1150,6 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 			}
 		}
 		return badShape(`%q is not one of "%s"`, s, strings.Join(p.Values, `", "`))
-	},
-	kindUUID: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
-		s, ok := v.(string)
-		if !ok {
-			return badShape("must be a uuid, got %s", jsonTypeOf(v))
-		}
-		if _, err := uuid.Parse(s); err != nil {
-			return badShape("must be a uuid: %v", err)
-		}
-		return nil
-	},
-	kindPoint: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
-		list, ok := v.([]any)
-		if !ok || len(list) != 2 {
-			return badShape("must be a pair of numbers, [x, y], got %s", jsonTypeOf(v))
-		}
-		for _, item := range list {
-			if _, ok := numberOf(item); !ok {
-				return badShape("must be a pair of numbers, [x, y], and %s is %s",
-					describe(item), jsonTypeOf(item))
-			}
-		}
-		return nil
 	},
 	kindSlot: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		name, ok := v.(string)

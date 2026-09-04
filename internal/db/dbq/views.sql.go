@@ -12,6 +12,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearBackgroundKnobsForAsset = `-- name: ClearBackgroundKnobsForAsset :exec
+UPDATE views
+SET background_scale = 1, background_offset = '{"x":0,"y":0}'::jsonb
+WHERE project_id = $1::uuid
+  AND background_asset_id = $2::uuid
+`
+
+type ClearBackgroundKnobsForAssetParams struct {
+	ProjectID         uuid.UUID
+	BackgroundAssetID uuid.UUID
+}
+
+// Reset the scale and the offset of every view backed by one asset, run
+// immediately before that asset is deleted.
+//
+// **background_asset_id is deliberately not in this SET list**: nulling
+// it is 0008_views.sql's ON DELETE SET NULL job, and doing it here as
+// well would make the constraint unobservable through this package --
+// the placement of that action is exactly the kind of thing only a
+// constraint pins, and a Go statement that quietly did the same work
+// would leave a dropped SET NULL green.
+// TestDeletingAnAssetNullsTheBackgroundOfEveryViewUsingIt asserts the
+// null the constraint writes and the two defaults this statement writes,
+// which is why the division of labour is legible from the test.
+//
+// What it is for: a scale and an offset with no image behind them are
+// values nothing reads, which is what SetBackground refuses to store in
+// the first place. A deletion must not be able to create the state the
+// setter refuses.
+//
+// Both filters are load-bearing. project_id scopes the statement -- an
+// asset id is a value a previous answer handed back -- and
+// background_asset_id is what makes this one asset's views rather than
+// the whole game's.
+func (q *Queries) ClearBackgroundKnobsForAsset(ctx context.Context, arg ClearBackgroundKnobsForAssetParams) error {
+	_, err := q.db.Exec(ctx, clearBackgroundKnobsForAsset, arg.ProjectID, arg.BackgroundAssetID)
+	return err
+}
+
 const deleteView = `-- name: DeleteView :execrows
 DELETE FROM views
 WHERE project_id = $1::uuid AND id = $2::uuid
@@ -30,6 +69,34 @@ type DeleteViewParams struct {
 // a success it can publish an event about.
 func (q *Queries) DeleteView(ctx context.Context, arg DeleteViewParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteView, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteViewAsset = `-- name: DeleteViewAsset :execrows
+DELETE FROM view_assets
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type DeleteViewAssetParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+// One asset. Every view pointing at it keeps its row and loses its
+// background: 0008_views.sql's composite FOREIGN KEY carries
+// ON DELETE SET NULL (background_asset_id), so the picture goes and the
+// view does not.
+//
+// execrows because zero rows is the answer to "was it there": a caller
+// that resolved the asset a moment earlier and deleted nothing raced
+// another remover, and hears not_found rather than a success.
+//
+// The project filter is load-bearing exactly as GetViewAsset's is.
+func (q *Queries) DeleteViewAsset(ctx context.Context, arg DeleteViewAssetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteViewAsset, arg.ProjectID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -105,6 +172,86 @@ type DeleteViewRefsParams struct {
 func (q *Queries) DeleteViewRefs(ctx context.Context, arg DeleteViewRefsParams) error {
 	_, err := q.db.Exec(ctx, deleteViewRefs, arg.ProjectID, arg.ViewID)
 	return err
+}
+
+const getViewAsset = `-- name: GetViewAsset :one
+SELECT id, project_id, filename, mime, width, height, bytes, created_at, created_by_user_id, created_by_token_id FROM view_assets
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type GetViewAssetParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+// One asset with its bytes, for the serving route and for nothing else.
+//
+// The project filter is load-bearing for the reason GetViewByID's is: an
+// id is a value a previous answer handed back and names no parent, so a
+// leaked asset id would otherwise serve another game's world map to
+// anyone holding it. TestAnAssetOfAnotherGameIsNotServed pins it.
+func (q *Queries) GetViewAsset(ctx context.Context, arg GetViewAssetParams) (ViewAsset, error) {
+	row := q.db.QueryRow(ctx, getViewAsset, arg.ProjectID, arg.ID)
+	var i ViewAsset
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Filename,
+		&i.Mime,
+		&i.Width,
+		&i.Height,
+		&i.Bytes,
+		&i.CreatedAt,
+		&i.CreatedByUserID,
+		&i.CreatedByTokenID,
+	)
+	return i, err
+}
+
+const getViewAssetMeta = `-- name: GetViewAssetMeta :one
+SELECT id, project_id, filename, mime, width, height, created_at,
+       created_by_user_id, created_by_token_id
+FROM view_assets
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type GetViewAssetMetaParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+type GetViewAssetMetaRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Filename         string
+	Mime             string
+	Width            int32
+	Height           int32
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
+// The same row without its bytes, for the callers that only need to know
+// the asset exists inside this game: SetBackground's own lookup, and the
+// REST layer's after-delete check. Separate from GetViewAsset rather
+// than a column list chosen in Go, because sqlc decides a statement's
+// columns and a caller that "just ignores" a bytea has still read it.
+func (q *Queries) GetViewAssetMeta(ctx context.Context, arg GetViewAssetMetaParams) (GetViewAssetMetaRow, error) {
+	row := q.db.QueryRow(ctx, getViewAssetMeta, arg.ProjectID, arg.ID)
+	var i GetViewAssetMetaRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Filename,
+		&i.Mime,
+		&i.Width,
+		&i.Height,
+		&i.CreatedAt,
+		&i.CreatedByUserID,
+		&i.CreatedByTokenID,
+	)
+	return i, err
 }
 
 const getViewByID = `-- name: GetViewByID :one
@@ -231,6 +378,91 @@ func (q *Queries) GetViewByKeyForUpdate(ctx context.Context, arg GetViewByKeyFor
 	return i, err
 }
 
+const insertViewAsset = `-- name: InsertViewAsset :one
+INSERT INTO view_assets (project_id, filename, mime, width, height, bytes,
+                         created_by_user_id, created_by_token_id)
+VALUES ($1::uuid, $2::text, $3::text,
+        $4::integer, $5::integer, $6::bytea,
+        $7::uuid, $8::uuid)
+RETURNING id, project_id, filename, mime, width, height, created_at,
+          created_by_user_id, created_by_token_id
+`
+
+type InsertViewAssetParams struct {
+	ProjectID        uuid.UUID
+	Filename         string
+	Mime             string
+	Width            int32
+	Height           int32
+	Bytes            []byte
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
+type InsertViewAssetRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Filename         string
+	Mime             string
+	Width            int32
+	Height           int32
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
+// One background image, stored whole.
+//
+// **An insert, with no ON CONFLICT arm and no update path at all.** An
+// asset's bytes never change: a new image is a new asset, which is what
+// lets the serving route hand out a long Cache-Control (assets.go) and
+// what makes "this view's background is asset X" a stable claim. There
+// is nothing to conflict on either -- assets have no key, only an id --
+// so the isolation here is the column value: project_id is written from
+// the caller's resolved project and every read below filters on it.
+//
+// The bytes go in as bytea and are bounded in Go, not here: a length
+// CHECK refuses the row only after Postgres has received and decoded
+// every byte, which is the cost the bound exists to avoid
+// (0008_views.sql says the same where the table is declared).
+//
+// mime, width and height are the *sniffed* mime and the *decoded*
+// dimensions -- never the caller's Content-Type, filename or arguments;
+// assets.go is where that is decided and TestTheMimeIsSniffedNotTrusted
+// is what pins it. The table's CHECK on mime is a closed list that does
+// not include SVG, and is the backstop for a write path that does not
+// come through assets.go.
+//
+// The returned row deliberately does not carry bytes: this statement's
+// caller has just handed those bytes in and every other reader of this
+// table but GetViewAsset avoids them, because a listing that hauled
+// megabytes per row would be a listing nobody could call.
+func (q *Queries) InsertViewAsset(ctx context.Context, arg InsertViewAssetParams) (InsertViewAssetRow, error) {
+	row := q.db.QueryRow(ctx, insertViewAsset,
+		arg.ProjectID,
+		arg.Filename,
+		arg.Mime,
+		arg.Width,
+		arg.Height,
+		arg.Bytes,
+		arg.CreatedByUserID,
+		arg.CreatedByTokenID,
+	)
+	var i InsertViewAssetRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Filename,
+		&i.Mime,
+		&i.Width,
+		&i.Height,
+		&i.CreatedAt,
+		&i.CreatedByUserID,
+		&i.CreatedByTokenID,
+	)
+	return i, err
+}
+
 const insertViewRef = `-- name: InsertViewRef :exec
 INSERT INTO view_refs (view_id, project_id, kind, ref_key, entity_type_id,
                        relation_type_id, pointer)
@@ -273,6 +505,68 @@ func (q *Queries) InsertViewRef(ctx context.Context, arg InsertViewRefParams) er
 		arg.Pointer,
 	)
 	return err
+}
+
+const listViewAssets = `-- name: ListViewAssets :many
+SELECT id, project_id, filename, mime, width, height, created_at,
+       created_by_user_id, created_by_token_id
+FROM view_assets
+WHERE project_id = $1::uuid
+ORDER BY created_at, id
+`
+
+type ListViewAssetsRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	Filename         string
+	Mime             string
+	Width            int32
+	Height           int32
+	CreatedAt        pgtype.Timestamptz
+	CreatedByUserID  *uuid.UUID
+	CreatedByTokenID *uuid.UUID
+}
+
+// Every asset of one game, newest last, in view_assets_project_idx's own
+// order (project_id, created_at, id) so the index serves the sort.
+//
+// **The project filter is the whole mechanism.** An asset has no key and
+// names no parent, so nothing else scopes this read; without it a
+// caller lists every game's images. TestAssetsOfAnotherGameAreNotListed
+// asks for it directly, with a positive control in the same test.
+//
+// **bytes is not selected, deliberately.** The cap is 8 MB an asset, so
+// a game with forty of them would answer this call with 320 MB read out
+// of the database, marshalled and thrown away by every caller but the
+// serving route. width, height and mime are what a picker needs.
+func (q *Queries) ListViewAssets(ctx context.Context, projectID uuid.UUID) ([]ListViewAssetsRow, error) {
+	rows, err := q.db.Query(ctx, listViewAssets, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListViewAssetsRow
+	for rows.Next() {
+		var i ListViewAssetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Filename,
+			&i.Mime,
+			&i.Width,
+			&i.Height,
+			&i.CreatedAt,
+			&i.CreatedByUserID,
+			&i.CreatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listViewPositions = `-- name: ListViewPositions :many
@@ -578,6 +872,63 @@ func (q *Queries) ListViewsPage(ctx context.Context, arg ListViewsPageParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const setViewBackground = `-- name: SetViewBackground :execrows
+UPDATE views
+SET background_asset_id = $1::uuid,
+    background_scale    = $2::double precision,
+    background_offset   = $3::jsonb
+WHERE project_id = $4::uuid AND id = $5::uuid
+`
+
+type SetViewBackgroundParams struct {
+	BackgroundAssetID *uuid.UUID
+	BackgroundScale   float64
+	BackgroundOffset  []byte
+	ProjectID         uuid.UUID
+	ID                uuid.UUID
+}
+
+// The three background columns of one view, and the only statement that
+// writes them.
+//
+// UpsertView deliberately leaves them out of its own SET list, so that
+// an ordinary edit of a query or a renderer parameter cannot silently
+// detach the world map a designer put behind it; this is the other half
+// of that decision. It writes all three together and never one of them,
+// because a scale without an image and an image without a scale are both
+// half a background.
+//
+// **Two mechanisms keep the asset inside the game, and neither is
+// redundant.** The project filter scopes which *view* is written -- a
+// view id is a value a previous answer handed back, so without it a
+// caller repaints another game's picture. 0008_views.sql's composite
+// FOREIGN KEY (background_asset_id, project_id) into view_assets is what
+// refuses another game's *asset*: this statement's own WHERE cannot see
+// that argument at all, so the constraint is the only thing standing
+// between a leaked asset id and a cross-game image.
+// TestAnAssetOfAnotherGameCannotBecomeThisViewsBackground drives both,
+// through the service for the message and through this statement for the
+// 23503, each with its positive control.
+//
+// execrows: a view id that matches nothing is a refusal, not a silent
+// success. version is untouched -- a background is not an edit of the
+// query document the version guards (positions.go makes the same call
+// for a drag), and updated_at moves on its own through
+// views_set_updated_at.
+func (q *Queries) SetViewBackground(ctx context.Context, arg SetViewBackgroundParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setViewBackground,
+		arg.BackgroundAssetID,
+		arg.BackgroundScale,
+		arg.BackgroundOffset,
+		arg.ProjectID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertView = `-- name: UpsertView :one

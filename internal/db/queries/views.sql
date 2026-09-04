@@ -367,3 +367,154 @@ DELETE FROM view_positions
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND view_id = sqlc.arg('view_id')::uuid
   AND entity_id = sqlc.arg('entity_id')::uuid;
+
+-- name: InsertViewAsset :one
+-- One background image, stored whole.
+--
+-- **An insert, with no ON CONFLICT arm and no update path at all.** An
+-- asset's bytes never change: a new image is a new asset, which is what
+-- lets the serving route hand out a long Cache-Control (assets.go) and
+-- what makes "this view's background is asset X" a stable claim. There
+-- is nothing to conflict on either -- assets have no key, only an id --
+-- so the isolation here is the column value: project_id is written from
+-- the caller's resolved project and every read below filters on it.
+--
+-- The bytes go in as bytea and are bounded in Go, not here: a length
+-- CHECK refuses the row only after Postgres has received and decoded
+-- every byte, which is the cost the bound exists to avoid
+-- (0008_views.sql says the same where the table is declared).
+--
+-- mime, width and height are the *sniffed* mime and the *decoded*
+-- dimensions -- never the caller's Content-Type, filename or arguments;
+-- assets.go is where that is decided and TestTheMimeIsSniffedNotTrusted
+-- is what pins it. The table's CHECK on mime is a closed list that does
+-- not include SVG, and is the backstop for a write path that does not
+-- come through assets.go.
+--
+-- The returned row deliberately does not carry bytes: this statement's
+-- caller has just handed those bytes in and every other reader of this
+-- table but GetViewAsset avoids them, because a listing that hauled
+-- megabytes per row would be a listing nobody could call.
+INSERT INTO view_assets (project_id, filename, mime, width, height, bytes,
+                         created_by_user_id, created_by_token_id)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('filename')::text, sqlc.arg('mime')::text,
+        sqlc.arg('width')::integer, sqlc.arg('height')::integer, sqlc.arg('bytes')::bytea,
+        sqlc.narg('created_by_user_id')::uuid, sqlc.narg('created_by_token_id')::uuid)
+RETURNING id, project_id, filename, mime, width, height, created_at,
+          created_by_user_id, created_by_token_id;
+
+-- name: ListViewAssets :many
+-- Every asset of one game, newest last, in view_assets_project_idx's own
+-- order (project_id, created_at, id) so the index serves the sort.
+--
+-- **The project filter is the whole mechanism.** An asset has no key and
+-- names no parent, so nothing else scopes this read; without it a
+-- caller lists every game's images. TestAssetsOfAnotherGameAreNotListed
+-- asks for it directly, with a positive control in the same test.
+--
+-- **bytes is not selected, deliberately.** The cap is 8 MB an asset, so
+-- a game with forty of them would answer this call with 320 MB read out
+-- of the database, marshalled and thrown away by every caller but the
+-- serving route. width, height and mime are what a picker needs.
+SELECT id, project_id, filename, mime, width, height, created_at,
+       created_by_user_id, created_by_token_id
+FROM view_assets
+WHERE project_id = sqlc.arg('project_id')::uuid
+ORDER BY created_at, id;
+
+-- name: GetViewAsset :one
+-- One asset with its bytes, for the serving route and for nothing else.
+--
+-- The project filter is load-bearing for the reason GetViewByID's is: an
+-- id is a value a previous answer handed back and names no parent, so a
+-- leaked asset id would otherwise serve another game's world map to
+-- anyone holding it. TestAnAssetOfAnotherGameIsNotServed pins it.
+SELECT * FROM view_assets
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: GetViewAssetMeta :one
+-- The same row without its bytes, for the callers that only need to know
+-- the asset exists inside this game: SetBackground's own lookup, and the
+-- REST layer's after-delete check. Separate from GetViewAsset rather
+-- than a column list chosen in Go, because sqlc decides a statement's
+-- columns and a caller that "just ignores" a bytea has still read it.
+SELECT id, project_id, filename, mime, width, height, created_at,
+       created_by_user_id, created_by_token_id
+FROM view_assets
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: ClearBackgroundKnobsForAsset :exec
+-- Reset the scale and the offset of every view backed by one asset, run
+-- immediately before that asset is deleted.
+--
+-- **background_asset_id is deliberately not in this SET list**: nulling
+-- it is 0008_views.sql's ON DELETE SET NULL job, and doing it here as
+-- well would make the constraint unobservable through this package --
+-- the placement of that action is exactly the kind of thing only a
+-- constraint pins, and a Go statement that quietly did the same work
+-- would leave a dropped SET NULL green.
+-- TestDeletingAnAssetNullsTheBackgroundOfEveryViewUsingIt asserts the
+-- null the constraint writes and the two defaults this statement writes,
+-- which is why the division of labour is legible from the test.
+--
+-- What it is for: a scale and an offset with no image behind them are
+-- values nothing reads, which is what SetBackground refuses to store in
+-- the first place. A deletion must not be able to create the state the
+-- setter refuses.
+--
+-- Both filters are load-bearing. project_id scopes the statement -- an
+-- asset id is a value a previous answer handed back -- and
+-- background_asset_id is what makes this one asset's views rather than
+-- the whole game's.
+UPDATE views
+SET background_scale = 1, background_offset = '{"x":0,"y":0}'::jsonb
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND background_asset_id = sqlc.arg('background_asset_id')::uuid;
+
+-- name: DeleteViewAsset :execrows
+-- One asset. Every view pointing at it keeps its row and loses its
+-- background: 0008_views.sql's composite FOREIGN KEY carries
+-- ON DELETE SET NULL (background_asset_id), so the picture goes and the
+-- view does not.
+--
+-- execrows because zero rows is the answer to "was it there": a caller
+-- that resolved the asset a moment earlier and deleted nothing raced
+-- another remover, and hears not_found rather than a success.
+--
+-- The project filter is load-bearing exactly as GetViewAsset's is.
+DELETE FROM view_assets
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: SetViewBackground :execrows
+-- The three background columns of one view, and the only statement that
+-- writes them.
+--
+-- UpsertView deliberately leaves them out of its own SET list, so that
+-- an ordinary edit of a query or a renderer parameter cannot silently
+-- detach the world map a designer put behind it; this is the other half
+-- of that decision. It writes all three together and never one of them,
+-- because a scale without an image and an image without a scale are both
+-- half a background.
+--
+-- **Two mechanisms keep the asset inside the game, and neither is
+-- redundant.** The project filter scopes which *view* is written -- a
+-- view id is a value a previous answer handed back, so without it a
+-- caller repaints another game's picture. 0008_views.sql's composite
+-- FOREIGN KEY (background_asset_id, project_id) into view_assets is what
+-- refuses another game's *asset*: this statement's own WHERE cannot see
+-- that argument at all, so the constraint is the only thing standing
+-- between a leaked asset id and a cross-game image.
+-- TestAnAssetOfAnotherGameCannotBecomeThisViewsBackground drives both,
+-- through the service for the message and through this statement for the
+-- 23503, each with its positive control.
+--
+-- execrows: a view id that matches nothing is a refusal, not a silent
+-- success. version is untouched -- a background is not an edit of the
+-- query document the version guards (positions.go makes the same call
+-- for a drag), and updated_at moves on its own through
+-- views_set_updated_at.
+UPDATE views
+SET background_asset_id = sqlc.narg('background_asset_id')::uuid,
+    background_scale    = sqlc.arg('background_scale')::double precision,
+    background_offset   = sqlc.arg('background_offset')::jsonb
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;

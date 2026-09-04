@@ -299,6 +299,34 @@ var renderers = []Renderer{
 							`coordinate_source to "fields"`)...)
 				}
 			}
+			// **The same rule, one parameter along.** A scale and an
+			// offset describe where a background image sits and how big
+			// it is; with no image there is nothing for either to place,
+			// and they are stored, returned and read by nothing — the
+			// defect this catalogue exists to refuse, in the two knobs
+			// that were left out of it.
+			if _, given := rc.params["background_asset_id"]; !given {
+				for _, name := range []string{"background_scale", "background_offset"} {
+					if _, set := rc.params[name]; set {
+						problems = append(problems, rc.problem(name,
+							"places the background image and this view has none: set "+
+								"background_asset_id, or remove it")...)
+					}
+				}
+			}
+			// **snap is decided rather than left to the next reader**, the
+			// way x_field's manual arm was. It is the grid a *dragged*
+			// node lands on, and dragging is what manual mode reads; in
+			// fields mode a node's coordinates come off its declared
+			// fields, nothing is dragged, and a grid size changes no
+			// picture. So it is refused there, and this sentence is why.
+			if _, set := rc.params["snap"]; set && source == "fields" {
+				problems = append(problems, rc.problem("snap",
+					`is the grid a dragged node lands on and coordinate_source is `+
+						`"fields", where a node's coordinates come off its declared `+
+						`fields and nothing is dragged: remove it, or set `+
+						`coordinate_source to "manual"`)...)
+			}
 			return problems
 		},
 	},
@@ -376,6 +404,27 @@ var renderers = []Renderer{
 					"is declared %s and axis_field %q is declared %s: the two ends of "+
 						"a span have to be the same kind of axis",
 					joinTypes(endTypes), start, joinTypes(startTypes)))
+			}
+			// **The same hole one step along, and the answer is the same
+			// answer.** Comparing the two ends' field *types* makes every
+			// pair of enums one axis, so a race declaring
+			// start_stage [heat, semi, final] and end_stage
+			// [bronze, silver, gold] spans from "semi" to "gold", which
+			// means nothing. An enum axis is its option sequence — the
+			// rule requireDeclaredAs already applies across types — so
+			// the two ends of one span are one axis exactly when their
+			// options are the same list in the same order.
+			startField, haveStart := rc.declaredFieldOf(start)
+			endField, haveEnd := rc.declaredFieldOf(end)
+			if haveStart && haveEnd && startField.Type == metamodel.FieldEnum &&
+				!sameSequence(startField.Options, endField.Options) {
+				return rc.problem("axis_end_field", fmt.Sprintf(
+					"is an enum over [%s] and axis_field %q is an enum over [%s]: "+
+						"those are two different axes, and a span from one to the "+
+						"other has no length. Declare the same options in the same "+
+						"order on both ends, or use number fields",
+					strings.Join(endField.Options, ", "), start,
+					strings.Join(startField.Options, ", ")))
 			}
 			return nil
 		},
@@ -496,17 +545,20 @@ func CheckRenderer(name string, params map[string]any, r *Resolved) error {
 			return fmt.Errorf("views: renderer %q declares parameter %q with kind %q "+
 				"and no checker", renderer.Name, p.Name, p.Kind)
 		}
-		fault := check(rc, p, value)
-		if fault == nil {
-			continue
-		}
-		problem := metamodel.FieldError{
-			Path: pointer("renderer_params", given), Message: fault.message,
-		}
-		if fault.requirement {
-			requirements = append(requirements, problem)
-		} else {
-			shape = append(shape, problem)
+		for _, fault := range check(rc, p, value) {
+			// A fault about one element of a list-valued parameter is
+			// addressed at that element. pointerLess orders the indices
+			// numerically, so /columns/10 comes back after /columns/2.
+			path := pointer("renderer_params", given)
+			if fault.index >= 0 {
+				path = pointer("renderer_params", given, fault.index)
+			}
+			problem := metamodel.FieldError{Path: path, Message: fault.message}
+			if fault.requirement {
+				requirements = append(requirements, problem)
+			} else {
+				shape = append(shape, problem)
+			}
 		}
 	}
 	// The map is a map, so the problems above arrive in no order at all.
@@ -660,6 +712,26 @@ func (rc *rendererCheck) declaredTypesOf(key string) []metamodel.FieldType {
 	return out
 }
 
+// declaredFieldOf is declaredTypesOf's companion for the checks that need
+// more of a declaration than its type — an enum's option sequence. It
+// returns the first declaration in scope order, which is the whole
+// declaration when requireDeclaredAs has already agreed the scope declares
+// the key one way, and it draws the same open/unresolved line for the same
+// reason.
+func (rc *rendererCheck) declaredFieldOf(key string) (metamodel.Field, bool) {
+	if rc.scope.open || rc.scope.unresolved {
+		return metamodel.Field{}, false
+	}
+	for _, schema := range rc.scope.schemas {
+		for i := range schema {
+			if schema[i].Key == key {
+				return schema[i], true
+			}
+		}
+	}
+	return metamodel.Field{}, false
+}
+
 // sameSequence compares two option lists in order, which is what an
 // ordered axis needs and what sameOptions deliberately does not do.
 func sameSequence(a, b []string) bool {
@@ -707,17 +779,44 @@ func joinTypes(list []metamodel.FieldType) string {
 // belongs to: a value that is wrong in itself is query_invalid, and a
 // well-formed value this query cannot feed is renderer_requirements.
 type paramFault struct {
+	// index addresses one element of a list-valued parameter — one
+	// column of `columns` — and is -1 for a fault about the parameter as
+	// a whole. **A list is exactly where the index is the address**: an
+	// agent told "/renderer_params/columns" over a table of twelve
+	// columns has to re-read all twelve, and the pointer this package
+	// addresses every other refusal with was the one thing that would
+	// have saved it that.
+	index       int
 	message     string
 	requirement bool
 }
 
-func badShape(format string, args ...any) *paramFault {
-	return &paramFault{message: fmt.Sprintf(format, args...)}
+// paramFaults is what a checker returns: **every** fault it found, and
+// not the first. A checker over a list would otherwise stop at the first
+// bad element, against this package's standing rule that every problem of
+// one call comes back at once — and, worse, the *class* of the answer
+// would depend on which bad element happened to be written first.
+type paramFaults []*paramFault
+
+func badShape(format string, args ...any) paramFaults {
+	return paramFaults{{index: -1, message: fmt.Sprintf(format, args...)}}
 }
 
-func unmet(format string, args ...any) *paramFault {
-	return &paramFault{message: fmt.Sprintf(format, args...), requirement: true}
+func unmet(format string, args ...any) paramFaults {
+	return paramFaults{{index: -1, message: fmt.Sprintf(format, args...), requirement: true}}
 }
+
+// at readdresses these faults to element i of a list-valued parameter.
+func (f paramFaults) at(i int) paramFaults {
+	for _, fault := range f {
+		fault.index = i
+	}
+	return f
+}
+
+// message is the first fault's prose, for the one caller that quotes
+// another checker's refusal inside its own.
+func (f paramFaults) message() string { return f[0].message }
 
 // paramCheckers is the kind table: one checker per kind, and the reason
 // the kinds are data rather than a switch.
@@ -725,20 +824,20 @@ func unmet(format string, args ...any) *paramFault {
 // used by a parameter and missing here would panic on the first value
 // sent, and a checker no parameter uses is a kind somebody meant to
 // declare.
-var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any) *paramFault{
-	kindBool: func(_ *rendererCheck, _ RendererParam, v any) *paramFault {
+var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any) paramFaults{
+	kindBool: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		if _, ok := v.(bool); !ok {
 			return badShape("must be true or false, got %s", jsonTypeOf(v))
 		}
 		return nil
 	},
-	kindNumber: func(_ *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindNumber: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		if _, ok := numberOf(v); !ok {
 			return badShape("must be a number, got %s", jsonTypeOf(v))
 		}
 		return nil
 	},
-	kindCount: func(_ *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindCount: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		n, ok := numberOf(v)
 		if !ok {
 			return badShape("must be a whole number of at least 1, got %s", jsonTypeOf(v))
@@ -748,7 +847,7 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return nil
 	},
-	kindText: func(_ *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindText: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		s, ok := v.(string)
 		if !ok {
 			return badShape("must be a string, got %s", jsonTypeOf(v))
@@ -758,7 +857,7 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return nil
 	},
-	kindEnum: func(_ *rendererCheck, p RendererParam, v any) *paramFault {
+	kindEnum: func(_ *rendererCheck, p RendererParam, v any) paramFaults {
 		s, ok := v.(string)
 		if !ok {
 			return badShape(`must be one of "%s", got %s`,
@@ -771,7 +870,7 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return badShape(`%q is not one of "%s"`, s, strings.Join(p.Values, `", "`))
 	},
-	kindUUID: func(_ *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindUUID: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		s, ok := v.(string)
 		if !ok {
 			return badShape("must be a uuid, got %s", jsonTypeOf(v))
@@ -781,7 +880,7 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return nil
 	},
-	kindPoint: func(_ *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindPoint: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		list, ok := v.([]any)
 		if !ok || len(list) != 2 {
 			return badShape("must be a pair of numbers, [x, y], got %s", jsonTypeOf(v))
@@ -794,7 +893,7 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return nil
 	},
-	kindSlot: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindSlot: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		name, ok := v.(string)
 		if !ok {
 			return badShape("must name a projection slot, got %s", jsonTypeOf(v))
@@ -810,21 +909,21 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return nil
 	},
-	kindNumberField: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindNumberField: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		key, fault := fieldKeyValue(v)
 		if fault != nil {
 			return fault
 		}
-		return rc.requireDeclaredAs(key, metamodel.FieldNumber)
+		return rc.requireFieldKey(key, metamodel.FieldNumber)
 	},
-	kindAxisField: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindAxisField: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		key, fault := fieldKeyValue(v)
 		if fault != nil {
 			return fault
 		}
-		return rc.requireDeclaredAs(key, metamodel.FieldNumber, metamodel.FieldEnum)
+		return rc.requireFieldKey(key, metamodel.FieldNumber, metamodel.FieldEnum)
 	},
-	kindRankBy: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindRankBy: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		s, ok := v.(string)
 		if !ok {
 			return badShape(`must be "edges" or a number field key, got %s`, jsonTypeOf(v))
@@ -834,11 +933,11 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		key, fault := fieldKeyValue(v)
 		if fault != nil {
-			return badShape(`must be "edges" or a number field key: %s`, fault.message)
+			return badShape(`must be "edges" or a number field key: %s`, fault.message())
 		}
-		return rc.requireDeclaredAs(key, metamodel.FieldNumber)
+		return rc.requireFieldKey(key, metamodel.FieldNumber)
 	},
-	kindRelationType: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindRelationType: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		key, ok := v.(string)
 		if !ok {
 			return badShape("must name a relation type, got %s", jsonTypeOf(v))
@@ -850,10 +949,10 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return nil
 	},
-	kindColumn: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindColumn: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		return rc.column(v)
 	},
-	kindColumns: func(rc *rendererCheck, _ RendererParam, v any) *paramFault {
+	kindColumns: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
 		list, ok := v.([]any)
 		if !ok {
 			return badShape("must be a list of column references, got %s", jsonTypeOf(v))
@@ -865,12 +964,22 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		if len(list) > MaxColumns {
 			return badShape("must name at most %d columns", MaxColumns)
 		}
-		for _, item := range list {
-			if fault := rc.column(item); fault != nil {
-				return fault
-			}
+		// **Every column's fault, each addressed by its own index.**
+		// Stopping at the first was three defects in one line: an agent
+		// with two wrong columns learned about one, the pointer named the
+		// list rather than the element that was wrong, and — worst — the
+		// *code* of the whole call depended on which of the two happened
+		// to be written first, because a shape fault and a requirement
+		// fault cannot both travel and the loop returned whichever it
+		// reached. The class of an answer must not depend on the order an
+		// agent typed its columns in; CheckRenderer's own shape-wins rule
+		// is what arbitrates, and it can only do that if it is handed
+		// both.
+		var faults paramFaults
+		for i, item := range list {
+			faults = append(faults, rc.column(item).at(i)...)
 		}
-		return nil
+		return faults
 	},
 }
 
@@ -894,7 +1003,7 @@ const MaxColumns = 64
 // @key and @type. @invalid and @created_at are legal in a *predicate*,
 // where they compare against columns of the row, and they are not in the
 // envelope, so a table cannot draw them.
-func (rc *rendererCheck) column(v any) *paramFault {
+func (rc *rendererCheck) column(v any) paramFaults {
 	name, ok := v.(string)
 	if !ok {
 		return badShape("every column must be a string naming a built-in, a projection "+
@@ -922,14 +1031,38 @@ func (rc *rendererCheck) column(v any) *paramFault {
 	if _, fault := fieldKeyValue(v); fault != nil {
 		return fault
 	}
-	for _, key := range rc.r.Projection.Fields {
-		if key == name {
+	return rc.requireCarried(name)
+}
+
+// requireCarried is the *saved query* half of every parameter that names
+// a declared field key, and it is one function because the rule is one
+// rule.
+//
+// **A node comes back with its identity and the projection's attrs, and
+// with declared fields only when a run asks for include_fields.**
+// include_fields is a per-run option (RunRequest) and a saved view cannot
+// turn it on, so a parameter naming a declared field key is legal exactly
+// when project.fields asked for that key. Anything else is read from a
+// member the envelope does not carry.
+//
+// It lives here rather than inside column() because column() was where
+// the rule was first written and the *only* place it was enforced:
+// axis_field, axis_end_field, x_field, y_field and rank_by all checked
+// the schema and never the projection, so a timeline saved with an axis
+// the run would not carry drew every node at the origin and a map in
+// fields mode had no coordinates at all — the exact failure this file
+// exists to refuse, reached through five parameters that had each been
+// written as if the rule were column()'s alone. Duplication is why it
+// drifted, so there is now one copy and six callers.
+func (rc *rendererCheck) requireCarried(key string) paramFaults {
+	for _, carried := range rc.r.Projection.Fields {
+		if carried == key {
 			return nil
 		}
 	}
 	return unmet("names the field %q and this query does not carry it: add it to "+
 		"project.fields. A run's include_fields cannot answer for a saved view, "+
-		"because it is a per-run option and this view is saved without one", name)
+		"because it is a per-run option and this view is saved without one", key)
 }
 
 // envelopeBuiltins are the @-built-ins a node actually comes back with.
@@ -958,7 +1091,7 @@ func isSlotName(name string) bool {
 // fieldKeyValue judges a value as a declared field key's *spelling*,
 // which is a shape question and is judged by the query document's own
 // rule rather than by a second one.
-func fieldKeyValue(v any) (string, *paramFault) {
+func fieldKeyValue(v any) (string, paramFaults) {
 	key, ok := v.(string)
 	if !ok {
 		return "", badShape("must name a declared field, got %s", jsonTypeOf(v))
@@ -974,26 +1107,54 @@ func fieldKeyValue(v any) (string, *paramFault) {
 	return key, nil
 }
 
-// requireDeclaredAs is the requirement half of a field-key parameter: the
-// key has to be declared somewhere this query draws, and **every** type
-// that declares it has to declare it usably.
+// requireFieldKey is the whole requirement half of a parameter that names
+// a declared field key, and every such parameter goes through it: the key
+// has to be usably declared where this query draws, **and** the saved
+// query has to carry it.
 //
-// The two halves are two different failures and both are the silent-empty
-// one this language refuses everywhere else. A key nothing declares is a
-// typo, answered with an axis every node sits at the origin of. A key
-// declared `number` on quests and `text` on regions is worse: the quests
-// are placed and the regions vanish, and the picture looks right.
+// The second half was the one that went missing. column() had it and no
+// other field-key parameter did, so a timeline could be saved with an
+// axis_field the run would never carry — every node at the origin — and a
+// map in fields mode with neither coordinate. Two halves of one rule in
+// one function is what stops that happening a third time.
+func (rc *rendererCheck) requireFieldKey(key string, admitted ...metamodel.FieldType) paramFaults {
+	if faults := rc.requireDeclaredAs(key, admitted...); faults != nil {
+		return faults
+	}
+	return rc.requireCarried(key)
+}
+
+// requireDeclaredAs is the schema half of a field-key parameter: the key
+// has to be declared on **every** type this query draws, and every one of
+// them has to declare it the same, usable way.
+//
+// The failures it refuses are all one failure — the silent-empty picture
+// this language refuses everywhere else — reached by four routes:
+//
+//   - A key nothing in scope declares is a typo, answered with an axis
+//     every node sits at the origin of.
+//   - A key some types declare and others do not is the same picture for
+//     the types that do not: the quests are placed and the regions
+//     vanish, and what is left looks right. **Declaring the key nowhere
+//     is the rarer mistake**; drawing two types and remembering only one
+//     of them is the common one, and this arm is the one that catches it.
+//   - A key declared `number` on quests and `enum` on regions passes "is
+//     it number or enum" while having no single axis to draw at all.
+//   - An enum declared with the same options in another order is a second
+//     axis wearing the first one's name, because an enum axis *is* its
+//     option sequence.
 //
 // This is deliberately stricter than projectionScope.declares, which
 // admits a key declared on at least one type in scope: a projection slot
 // that finds nothing on some nodes leaves those nodes without an
 // attribute, which a renderer can draw honestly, and an axis that finds
-// nothing has nowhere to put them.
-func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.FieldType) *paramFault {
-	if rc.scope.open || rc.scope.unresolved {
-		// A traverse step with no to_type reaches entities of any type,
-		// so no schema applies and nothing here can judge. The permission
-		// costs what projectionScope.open records it costing.
+// nothing has nowhere to put them. That sentence is the whole reason the
+// "declared on every type" arm exists, and for one round it was a
+// sentence the code did not keep.
+func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.FieldType) paramFaults {
+	if rc.scope.unresolved {
+		// The missing type is already a reported problem, and adding "and
+		// its fields are not declared" to it is one refusal twice.
 		return nil
 	}
 	var declared []string
@@ -1016,6 +1177,22 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 					"a node whose value for it is not one of those cannot be placed, "+
 					"and would be drawn at the origin or not at all",
 					schema[j].Type, on, joinTypes(admitted))
+			}
+			// An enum with no options is an axis with no order and no
+			// admitted value, so every node on it is unplaceable.
+			// metamodel.Schema.Validate refuses one at upsert, which is
+			// what made this rule *unreachable* through the API rather
+			// than true: nothing revalidates a schema on the way back out
+			// of the database, so a row written straight into the schema
+			// column loads and is accepted. One arm here makes the rule
+			// hold on the read side as well.
+			// TestAnOptionlessEnumIsNoAxisEvenIfTheSchemaColumnHoldsOne
+			// pins it.
+			if schema[j].Type == metamodel.FieldEnum && len(schema[j].Options) == 0 {
+				return unmet("is an enum declared on %s with no options: an enum axis "+
+					"is ordered by its options, so one with none is an axis with no "+
+					"order and no place to put a node. Declare its options with "+
+					"types.upsert", on)
 			}
 			// Two types declaring the key differently are two different
 			// axes, and a picture drawn over both would place a node by
@@ -1044,11 +1221,51 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 			declared = append(declared, on)
 		}
 	}
-	if len(declared) == 0 {
+	if rc.scope.open {
+		// A traverse step with no to_type reaches entities of any type,
+		// so no schema covers what this query draws and the two arms
+		// below — "declared nowhere" and "declared on some" — would
+		// refuse a key the untyped step was written to reach. The
+		// permission costs what projectionScope.open records it costing.
+		//
+		// **It stops here and not one line earlier.** The loop above has
+		// already run, so a key a *named* type declares unusably is still
+		// refused: `tags` is list<text> on `quest`, `quest` is written
+		// right there in `from`, and "nothing can judge it" was never
+		// true of that. The projection's justification for the wider
+		// permission — a node carrying no attribute is still drawable —
+		// does not transfer to an axis, which has nowhere to put it.
+		return nil
+	}
+	switch {
+	case len(declared) == 0:
 		return unmet("no field %q is declared on %s (%s): use types.get to see a "+
 			"type's field_schema", key, rc.scope.subject, strings.Join(rc.scope.names, ", "))
+	case len(declared) < len(rc.scope.names):
+		return unmet("is declared on %s and not on %s, and this query draws all of "+
+			"them: a node of a type that does not declare %q has no place on this "+
+			"axis and would be drawn at the origin or not at all. Narrow the query "+
+			"to the types that declare it, or name a field all of them do",
+			strings.Join(declared, ", "), strings.Join(missing(rc.scope.names, declared), ", "),
+			key)
 	}
 	return nil
+}
+
+// missing lists the names of all that are not in declared, in scope order,
+// so a refusal names the types to fix rather than the types that are fine.
+func missing(all, declared []string) []string {
+	var out []string
+	for _, name := range all {
+		found := false
+		for _, on := range declared {
+			found = found || on == name
+		}
+		if !found {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // numberOf reads a JSON number in every spelling this package can be

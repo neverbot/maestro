@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/neverbot/maestro/internal/metamodel"
 )
 
 // resolveFor resolves a document the test asserts is well-formed, so that
@@ -57,6 +59,14 @@ func checkPasses(t *testing.T, err error) {
 // and one that draws `requires` edges between quests.
 const (
 	questQuery = `{"v":1,"from":[{"type":"quest","as":"q"}]}`
+	// carryingQuery is questQuery with the declared fields in
+	// project.fields, and it is what every test of a field-key parameter
+	// is built on: a saved view may only name a field its own query
+	// carries, because include_fields is a per-run option no saved view
+	// can turn on. A test built on questQuery would be asserting against
+	// a view whose axis the run would not carry.
+	carryingQuery = `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"project":{"fields":["min_level","difficulty","rank","tags"]}}`
 	chainQuery = `{"v":1,"from":[{"type":"quest","as":"q"}],
 		"edges":[{"via":"requires","between":["q","q"]}]}`
 )
@@ -78,8 +88,11 @@ func TestTheCatalogueIsClosedAndNamesItselfBack(t *testing.T) {
 			params["axis_field"] = "min_level"
 		}
 		query := questQuery
-		if name == RendererLayered || name == RendererNested {
+		switch name {
+		case RendererLayered, RendererNested:
 			query = chainQuery
+		case RendererTimeline:
+			query = carryingQuery
 		}
 		if err := CheckRenderer(name, params, resolveFor(t, g, query)); err != nil {
 			t.Errorf("%q is in the catalogue and must be accepted: %v", name, err)
@@ -160,7 +173,7 @@ func TestNestedRefusesAQueryWithNoContainmentEdges(t *testing.T) {
 
 func TestTimelineRefusesAnAxisFieldThatIsNotNumberOrOrderedEnum(t *testing.T) {
 	g, _ := newGame(t)
-	quests := resolveFor(t, g, questQuery)
+	quests := resolveFor(t, g, carryingQuery)
 
 	// Both controls: a number axis and an enum axis are what this
 	// renderer is for. An enum's options are its order, and the metamodel
@@ -191,11 +204,12 @@ func TestTimelineRefusesAnAxisFieldThatIsNotNumberOrOrderedEnum(t *testing.T) {
 func TestAnAxisDeclaredTwoWaysIsTwoAxes(t *testing.T) {
 	g, _ := newGame(t)
 	both := resolveFor(t, g,
-		`{"v":1,"from":[{"type":"quest","as":"q"},{"type":"region","as":"g"}]}`)
+		`{"v":1,"from":[{"type":"quest","as":"q"},{"type":"region","as":"g"}],
+		  "project":{"fields":["min_level","rank"]}}`)
 	// The control: rank is declared on both, and difficulty on neither
 	// twice — a scope of two types is not itself a refusal.
 	checkPasses(t, CheckRenderer(RendererTimeline,
-		map[string]any{"axis_field": "min_level"}, resolveFor(t, g, questQuery)))
+		map[string]any{"axis_field": "min_level"}, resolveFor(t, g, carryingQuery)))
 
 	checkFails(t, CheckRenderer(RendererTimeline, map[string]any{"axis_field": "min_level"}, both),
 		ErrRendererRequirements, "/renderer_params/axis_field",
@@ -210,7 +224,7 @@ func TestAnAxisDeclaredTwoWaysIsTwoAxes(t *testing.T) {
 // axes, and one of them would be placed arbitrarily.
 func TestATimelineSpanHasBothEndsOnOneAxis(t *testing.T) {
 	g, _ := newGame(t)
-	quests := resolveFor(t, g, questQuery)
+	quests := resolveFor(t, g, carryingQuery)
 	// The control: two number fields are a span.
 	checkPasses(t, CheckRenderer(RendererTimeline,
 		map[string]any{"axis_field": "min_level", "axis_end_field": "difficulty"}, quests))
@@ -219,11 +233,224 @@ func TestATimelineSpanHasBothEndsOnOneAxis(t *testing.T) {
 		map[string]any{"axis_field": "min_level", "axis_end_field": "rank"}, quests),
 		ErrRendererRequirements, "/renderer_params/axis_end_field",
 		`is declared enum and axis_field "min_level" is declared number`)
+
+	// The same hole one step along: comparing the two ends' *types*
+	// makes every pair of enums one axis, so a span runs from an option
+	// of one enum to an option of an unrelated one and has no length.
+	// region declares two enums with different options, which is the only
+	// place in this fixture that shape exists.
+	regions := resolveFor(t, g,
+		`{"v":1,"from":[{"type":"region","as":"g"}],
+		  "project":{"fields":["min_level","rank"]}}`)
+	// The control: one enum is a span with itself's options — the same
+	// key at both ends is degenerate, so the control is the number pair
+	// above and this one asserts only the refusal it is about.
+	checkFails(t, CheckRenderer(RendererTimeline,
+		map[string]any{"axis_field": "min_level", "axis_end_field": "rank"}, regions),
+		ErrRendererRequirements, "/renderer_params/axis_end_field",
+		"is an enum over [epic, common, rare] and axis_field \"min_level\" is an "+
+			"enum over [low, high]")
+}
+
+// TestAFieldKeyParameterNamesAFieldTheSavedQueryCarries is this file's
+// third rule — a requirement is judged against the *saved* query — applied
+// to every parameter that names a declared field key, and not only to the
+// one it was first written on.
+//
+// A node comes back with its identity and the projection's attrs;
+// declared fields only when a run asks for include_fields, which is a
+// per-run option no saved view can turn on. A timeline saved with an
+// axis_field the query does not carry has no axis at all: every node at
+// the origin. A map in fields mode has no coordinates. Both were accepted
+// while `columns` alone enforced the rule.
+func TestAFieldKeyParameterNamesAFieldTheSavedQueryCarries(t *testing.T) {
+	g, _ := newGame(t)
+	carrying, bare := resolveFor(t, g, carryingQuery), resolveFor(t, g, questQuery)
+	chain := `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"edges":[{"via":"requires","between":["q","q"]}],
+		"project":{"fields":["min_level"]}}`
+	// The controls: the same parameters over a query that carries the
+	// keys they name.
+	checkPasses(t, CheckRenderer(RendererTimeline,
+		map[string]any{"axis_field": "min_level", "axis_end_field": "difficulty"}, carrying))
+	checkPasses(t, CheckRenderer(RendererMap, map[string]any{"coordinate_source": "fields",
+		"x_field": "min_level", "y_field": "difficulty"}, carrying))
+	checkPasses(t, CheckRenderer(RendererLayered,
+		map[string]any{"rank_by": "min_level"}, resolveFor(t, g, chain)))
+	// And "edges" is not a field key at all, so it needs nothing carried.
+	checkPasses(t, CheckRenderer(RendererLayered,
+		map[string]any{"rank_by": "edges"}, resolveFor(t, g, chainQuery)))
+
+	for _, c := range []struct {
+		renderer string
+		params   map[string]any
+		r        *Resolved
+		ptr      string
+	}{
+		{RendererTimeline, map[string]any{"axis_field": "min_level"}, bare,
+			"/renderer_params/axis_field"},
+		{RendererTimeline,
+			map[string]any{"axis_field": "min_level", "axis_end_field": "difficulty"},
+			resolveFor(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
+				"project":{"fields":["min_level"]}}`),
+			"/renderer_params/axis_end_field"},
+		{RendererMap, map[string]any{"coordinate_source": "fields",
+			"x_field": "min_level", "y_field": "difficulty"}, bare,
+			"/renderer_params/x_field"},
+		{RendererMap, map[string]any{"coordinate_source": "fields",
+			"x_field": "min_level", "y_field": "difficulty"}, bare,
+			"/renderer_params/y_field"},
+		{RendererLayered, map[string]any{"rank_by": "min_level"},
+			resolveFor(t, g, chainQuery), "/renderer_params/rank_by"},
+	} {
+		checkFails(t, CheckRenderer(c.renderer, c.params, c.r),
+			ErrRendererRequirements, c.ptr, "this query does not carry it")
+		checkFails(t, CheckRenderer(c.renderer, c.params, c.r),
+			ErrRendererRequirements, c.ptr, "include_fields cannot answer for a saved view")
+	}
+}
+
+// TestAnAxisSomeTypeInScopeDoesNotDeclareIsRefused is requireDeclaredAs's
+// own doc comment, which for one round said the code refused this and did
+// not. Declaring the key as a different type on a second type is the rare
+// mistake; drawing two types and remembering the fields of one of them is
+// the common one, and it makes exactly the picture the comment describes —
+// the quests placed, the zones vanished, and what is left looking right.
+func TestAnAxisSomeTypeInScopeDoesNotDeclareIsRefused(t *testing.T) {
+	g, _ := newGame(t)
+	// The control: one type, which declares it.
+	checkPasses(t, CheckRenderer(RendererTimeline,
+		map[string]any{"axis_field": "min_level"}, resolveFor(t, g, carryingQuery)))
+	// And the control for the *other* rule this one must not swallow: a
+	// projection slot over the same two types is legal, because a node
+	// with no attribute is still drawable and an axis has nowhere to put
+	// it. The two rules disagree deliberately.
+	checkPasses(t, CheckRenderer(RendererGraph, map[string]any{"color_by": "color_by"},
+		resolveFor(t, g, `{"v":1,"from":[{"type":"quest","as":"q"},{"type":"zone","as":"z"}],
+			"project":{"color_by":"min_level"}}`)))
+
+	mixed := resolveFor(t, g,
+		`{"v":1,"from":[{"type":"quest","as":"q"},{"type":"zone","as":"z"}],
+		  "project":{"fields":["min_level","difficulty"]}}`)
+	for _, c := range []struct {
+		renderer string
+		params   map[string]any
+		ptr      string
+	}{
+		{RendererTimeline, map[string]any{"axis_field": "min_level"},
+			"/renderer_params/axis_field"},
+		{RendererMap, map[string]any{"coordinate_source": "fields",
+			"x_field": "min_level", "y_field": "difficulty"}, "/renderer_params/x_field"},
+		{RendererMap, map[string]any{"coordinate_source": "fields",
+			"x_field": "min_level", "y_field": "difficulty"}, "/renderer_params/y_field"},
+	} {
+		checkFails(t, CheckRenderer(c.renderer, c.params, mixed),
+			ErrRendererRequirements, c.ptr, "is declared on quest and not on zone")
+	}
+}
+
+// TestEveryBadColumnComesBackWithItsIndex is three assertions the list
+// shape needs and no scalar parameter does: every bad column is reported,
+// each at its own index, and the *code* of the answer does not depend on
+// the order the columns were written in. The last is the one that matters
+// most — two wrong columns returning query_invalid or renderer_requirements
+// depending on which was typed first is this package's shape-wins rule
+// breaking at the one place a list could break it.
+func TestEveryBadColumnComesBackWithItsIndex(t *testing.T) {
+	g, _ := newGame(t)
+	carrying := resolveFor(t, g,
+		`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "project":{"color_by":"rank","fields":["min_level"]}}`)
+	// The control: three good columns in any order.
+	checkPasses(t, CheckRenderer(RendererTable,
+		map[string]any{"columns": []any{"@name", "color_by", "min_level"}}, carrying))
+
+	// Two columns of one class: both come back, each at its own index.
+	err := CheckRenderer(RendererTable,
+		map[string]any{"columns": []any{"difficulty", "tags"}}, carrying)
+	checkFails(t, err, ErrRendererRequirements, "/renderer_params/columns/0",
+		`names the field "difficulty"`)
+	checkFails(t, err, ErrRendererRequirements, "/renderer_params/columns/1",
+		`names the field "tags"`)
+
+	// The same two wrong columns in either order answer with the same
+	// code and the same class of message: shape wins, and it wins from
+	// whichever position the shape problem was written in.
+	for _, columns := range [][]any{
+		{"@invalid", "difficulty"},
+		{"difficulty", "@invalid"},
+	} {
+		err := CheckRenderer(RendererTable, map[string]any{"columns": columns}, carrying)
+		var qe *QueryError
+		if !errors.As(err, &qe) {
+			t.Fatalf("%v: expected a *QueryError, got %v", columns, err)
+		}
+		if qe.Code != CodeQueryInvalid {
+			t.Errorf("%v answered %s: the code of a refusal must not depend on the "+
+				"order the columns were written in", columns, qe.Code)
+		}
+	}
+
+	// Ten indices, so the pointer order is the numeric one rather than
+	// the string one: /columns/10 after /columns/2, not before it.
+	var many []any
+	for i := 0; i < 11; i++ {
+		many = append(many, "difficulty")
+	}
+	err = CheckRenderer(RendererTable, map[string]any{"columns": many}, carrying)
+	var qe *QueryError
+	if !errors.As(err, &qe) {
+		t.Fatalf("expected a *QueryError, got %v", err)
+	}
+	if len(qe.Fields) != 11 {
+		t.Fatalf("expected all eleven columns to be reported, got %d: %v",
+			len(qe.Fields), qe.Fields)
+	}
+	for i, f := range qe.Fields {
+		if want := pointer("renderer_params", "columns", i); f.Path != want {
+			t.Errorf("problem %d is at %s, want %s", i, f.Path, want)
+		}
+	}
+}
+
+// TestMapRefusesBackgroundKnobsWithNoBackground is the "read by nothing"
+// rule one parameter along from x_field, which is where it stopped for a
+// round: a scale and an offset place a background image, and with no image
+// there is nothing to place and nothing to read them.
+func TestMapRefusesBackgroundKnobsWithNoBackground(t *testing.T) {
+	g, _ := newGame(t)
+	quests := resolveFor(t, g, carryingQuery)
+	asset := "6f1a1cbe-6ad1-4a6b-8f6d-2a2a63cb0f2f"
+	// The control: with a background, both knobs are read.
+	checkPasses(t, CheckRenderer(RendererMap, map[string]any{
+		"background_asset_id": asset, "background_scale": 2,
+		"background_offset": []any{1.0, 2.0},
+	}, quests))
+	// And the control for the parameter this rule must not reach: snap
+	// is read in manual mode, background or no background.
+	checkPasses(t, CheckRenderer(RendererMap, map[string]any{"snap": 10}, quests))
+
+	for _, name := range []string{"background_scale", "background_offset"} {
+		var value any = 2
+		if name == "background_offset" {
+			value = []any{1.0, 2.0}
+		}
+		checkFails(t, CheckRenderer(RendererMap, map[string]any{name: value}, quests),
+			ErrRendererRequirements, pointer("renderer_params", name),
+			"places the background image and this view has none")
+	}
+	// snap, decided rather than left to the next reader: it is the grid a
+	// dragged node lands on, and in fields mode nothing is dragged.
+	checkFails(t, CheckRenderer(RendererMap, map[string]any{
+		"coordinate_source": "fields", "x_field": "min_level",
+		"y_field": "difficulty", "snap": 10,
+	}, quests), ErrRendererRequirements, "/renderer_params/snap",
+		"is the grid a dragged node lands on")
 }
 
 func TestMapInFieldsModeRefusesNonNumericCoordinates(t *testing.T) {
 	g, _ := newGame(t)
-	quests := resolveFor(t, g, questQuery)
+	quests := resolveFor(t, g, carryingQuery)
 	fields := func(x, y string) map[string]any {
 		return map[string]any{"coordinate_source": "fields", "x_field": x, "y_field": y}
 	}
@@ -248,7 +475,7 @@ func TestMapInFieldsModeRefusesNonNumericCoordinates(t *testing.T) {
 // sub-project's most-repeated defect.
 func TestMapAsksForTheCoordinatesItsModeReads(t *testing.T) {
 	g, _ := newGame(t)
-	quests := resolveFor(t, g, questQuery)
+	quests := resolveFor(t, g, carryingQuery)
 	// Both controls: manual mode with no coordinate fields, and the
 	// default mode, which is manual.
 	checkPasses(t, CheckRenderer(RendererMap, map[string]any{"coordinate_source": "manual"}, quests))
@@ -353,26 +580,26 @@ func TestATableColumnIsSomethingTheEnvelopeCarries(t *testing.T) {
 	// envelope.
 	checkFails(t, CheckRenderer(RendererTable, map[string]any{"columns": []any{"@invalid"}},
 		carrying),
-		ErrQueryInvalid, "/renderer_params/columns",
+		ErrQueryInvalid, "/renderer_params/columns/0",
 		`"@invalid" is not a built-in a table can draw`)
 	// A declared field the query does not carry: legal to ask for, and
 	// the recovery is in the query.
 	checkFails(t, CheckRenderer(RendererTable, map[string]any{"columns": []any{"difficulty"}},
 		carrying),
-		ErrRendererRequirements, "/renderer_params/columns",
+		ErrRendererRequirements, "/renderer_params/columns/0",
 		`names the field "difficulty" and this query does not carry it`)
 	// A run's include_fields cannot answer for a saved view, and the
 	// refusal says so rather than leaving an agent to try it.
 	checkFails(t, CheckRenderer(RendererTable, map[string]any{"columns": []any{"difficulty"}},
 		carrying),
-		ErrRendererRequirements, "/renderer_params/columns",
+		ErrRendererRequirements, "/renderer_params/columns/0",
 		"include_fields cannot answer for a saved view")
 	// The spec's "columns may be attribute references, including one-hop
 	// related" is not a shape a renderer can consume: the hop is the
 	// query's to take. The refusal says where it belongs.
 	checkFails(t, CheckRenderer(RendererTable,
 		map[string]any{"columns": []any{map[string]any{"related": map[string]any{}}}}, carrying),
-		ErrQueryInvalid, "/renderer_params/columns",
+		ErrQueryInvalid, "/renderer_params/columns/0",
 		"drawn by projecting it into a slot and naming the slot")
 	// sort is one column reference and obeys the same rule, which is the
 	// "same hole one step along" this file's second parameter would
@@ -732,16 +959,54 @@ func TestEveryRendererDeclaresItsParametersAndTheDescriptionIsGeneratedFromThem(
 // refused.
 func TestAnUntypedStepSwitchesOffTheFieldChecks(t *testing.T) {
 	g, _ := newGame(t)
+	// project.fields carries the key in both, because an open scope
+	// switches off the check on project.fields too — which is the whole
+	// permission this test records, seen from the other side.
 	open := resolveFor(t, g,
 		`{"v":1,"from":[{"type":"quest","as":"q"}],
-		  "traverse":[{"from":"q","via":"takes_place_in","as":"z"}]}`)
+		  "traverse":[{"from":"q","via":"takes_place_in","as":"z"}],
+		  "project":{"fields":["no_such_field","tags"]}}`)
 	typed := resolveFor(t, g,
 		`{"v":1,"from":[{"type":"quest","as":"q"}],
-		  "traverse":[{"from":"q","via":"takes_place_in","to_type":"zone","as":"z"}]}`)
+		  "traverse":[{"from":"q","via":"takes_place_in","to_type":"zone","as":"z"}],
+		  "project":{"fields":["tags"]}}`)
 
 	checkPasses(t, CheckRenderer(RendererTimeline,
 		map[string]any{"axis_field": "no_such_field"}, open))
 	checkFails(t, CheckRenderer(RendererTimeline,
 		map[string]any{"axis_field": "no_such_field"}, typed),
 		ErrRendererRequirements, "/renderer_params/axis_field", `no field "no_such_field"`)
+
+	// **The permission stops where its justification stops.** "Nothing
+	// can judge this key" is true of a key no named type declares; it is
+	// not true of `tags`, which quest declares list<text> and which is
+	// written right there in `from`. The projection's own reason for the
+	// wider permission — a node carrying no attribute is still drawable —
+	// does not transfer to an axis, which has nowhere to put that node.
+	checkFails(t, CheckRenderer(RendererTimeline,
+		map[string]any{"axis_field": "tags"}, open),
+		ErrRendererRequirements, "/renderer_params/axis_field",
+		"is declared list<text> on quest and this parameter needs number and enum")
+}
+
+// TestAnOptionlessEnumIsNoAxisEvenIfTheSchemaColumnHoldsOne closes the
+// gap between "refused at upsert" and "true". metamodel.Schema.Validate
+// refuses an enum with no options, which made "an enum axis is ordered by
+// its options" unreachable through the API rather than a rule the axis
+// held — nothing revalidates a schema on the way *out* of the database,
+// so a row written straight into the schema column loads and is believed.
+// The catalogue mutated here is exactly what such a load produces.
+func TestAnOptionlessEnumIsNoAxisEvenIfTheSchemaColumnHoldsOne(t *testing.T) {
+	g, _ := newGame(t)
+	r := resolveFor(t, g, carryingQuery)
+	// The control: with its options, the same key is an axis.
+	checkPasses(t, CheckRenderer(RendererTimeline, map[string]any{"axis_field": "rank"}, r))
+
+	quest := r.Cat.EntityTypes["quest"]
+	r.Cat.schemas[quest.ID] = metamodel.Schema{
+		{Key: "rank", Type: metamodel.FieldEnum},
+	}
+	checkFails(t, CheckRenderer(RendererTimeline, map[string]any{"axis_field": "rank"}, r),
+		ErrRendererRequirements, "/renderer_params/axis_field",
+		"is an enum declared on quest with no options")
 }

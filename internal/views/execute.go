@@ -66,6 +66,16 @@ type Node struct {
 // relation: a field it declares, or its relation type's key for @type.
 // Empty when the entry asked for none, which is the default — an
 // unasked-for label on every edge is text a renderer has to hide again.
+//
+// **An edge drawn by two entries takes the first entry's label**, where
+// "first" is entry order: capOf's DISTINCT ON keeps the lowest rank per
+// id, and the Go-side dedupe applies the same rule, so the choice is
+// deterministic rather than arbitrary. It is still a choice, and it is
+// one the document controls without saying so: two documents that differ
+// only in the order of their edges[] entries label the same edge
+// differently. Recorded rather than changed — the alternative is either
+// a list of labels, which no renderer wants, or refusing the overlap,
+// which refuses a legitimate document.
 type Edge struct {
 	ID     uuid.UUID      `json:"id"`
 	Type   string         `json:"type"`

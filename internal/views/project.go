@@ -105,6 +105,23 @@ type projectionScope struct {
 	// query reaches entities of a type it does not name — a traverse step
 	// with no to_type. Refusing a key there would refuse a projection
 	// over a type the document never had a chance to declare.
+	//
+	// **What the permission costs, said out loud because an agent will
+	// hit it.** It is not scoped to the untyped part: nodeScopeOf sets
+	// open if *any* step lacks to_type, and declares then returns before
+	// looking at a single schema. So one untyped step disables typo
+	// detection for the **whole** projection — a misspelt key is accepted
+	// for the types the document *did* name, and for project.fields too,
+	// not just for whatever the untyped step reaches. Reproduced with
+	// `color_by: "min_levle"` and `fields: ["no_such_key"]`: both are
+	// taken, and both answer with the flat one-colour picture this file's
+	// header calls the most expensive failure mode.
+	//
+	// It is left permissive rather than narrowed, because the alternative
+	// — judging a key against the named types only — refuses a projection
+	// over exactly the types the untyped step was written to reach. But a
+	// document that opens its scope has given up the typo check, and that
+	// is a trade worth knowing about before making it.
 	open bool
 	// unresolved marks a scope built from types that resolved to nothing.
 	// The missing type is already a reported problem, and adding "and its
@@ -378,6 +395,20 @@ func (c *compiler) payload(alias frag) frag {
 	// Stripped of its nulls like attrs, and for the same reason: a node
 	// that does not carry one of the named keys carries nothing under it,
 	// rather than a null a renderer has to tell from a stored one.
+	//
+	// **jsonb_strip_nulls recurses, which the include_fields branch above
+	// does not.** So a projected value that is itself an object would be
+	// rewritten — its own null members dropped — and `project.fields`
+	// and `include_fields` would answer the same question with different
+	// values. Unreachable today from every direction: the metamodel
+	// declares no object field type (0004_metamodel.sql), array elements
+	// are left alone by strip_nulls anyway, and a null written through
+	// UpsertEntity is dropped on the way in, so no stored payload can
+	// contain one. It takes raw SQL to build a row that shows the
+	// difference. Recorded rather than fixed, because the fix — strip
+	// only the top level — is a rewrite for a shape the metamodel cannot
+	// currently express; whoever adds an object field type reads this
+	// first.
 	return sprintf("jsonb_strip_nulls(jsonb_build_object(%s))", joinFrags(pairs, ", "))
 }
 

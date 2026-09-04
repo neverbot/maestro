@@ -35,9 +35,17 @@ func TestNoCallerValueEverReachesTheStatementText(t *testing.T) {
 	// are the seeded keys themselves — which is the strongest form of the
 	// test: even a *valid* key must travel as a bind parameter, because
 	// the compiler cannot tell a valid key from a crafted one.
-	sql, args := compileOf(t, g, `{"v":1,"from":[{"type":"quest","keys":["hogger"],
-		"where":{"field":"rank","op":"eq","value":"rare"}}]}`)
-	for _, sentinel := range []string{"hogger", "rare", "quest", "min_level"} {
+	// The document walks as well as selects, because the walk's text is
+	// written by internal/graph rather than by this package's builder:
+	// the seed, the edge predicate and every bound the walk carries reach
+	// that text through builder.adopt, and this is what says none of them
+	// carries a caller's value.
+	sql, args := compileOf(t, g, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q",
+		"where":{"field":"rank","op":"eq","value":"rare"}}],
+		"traverse":[{"from":"q","via":"requires","direction":"out","to_type":"quest",
+		             "depth":{"min":1,"max":3},"as":"chain",
+		             "edge_where":{"field":"@type","op":"eq","value":"requires"}}]}`)
+	for _, sentinel := range []string{"hogger", "rare", "quest", "min_level", "requires", "chain"} {
 		if strings.Contains(sql, sentinel) {
 			t.Errorf("the caller value %q reached the statement text:\n%s", sentinel, sql)
 		}
@@ -83,9 +91,18 @@ var tableReference = regexp.MustCompile(
 // and 9 add, and this test is what defends them.
 func TestEveryTableReferenceIsProjectFiltered(t *testing.T) {
 	g, _ := newGame(t)
+	// The query carries a **multi-hop** step as well as a one-hop one,
+	// because the recursion internal/graph emits is the first shape in
+	// this package whose project filters are not redundant: a one-hop step
+	// finds its rows by an id resolved in this game, and a walk finds them
+	// by walking. Its three filters — the anchor's, the relation's and the
+	// far entity's — are counted here like every other.
 	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
-		"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"}],
-		"edges":[{"from_step":"c"},{"via":"requires","between":["q","q"]}]}`)
+		"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"},
+		            {"from":"q","via":"requires","direction":"out","to_type":"quest",
+		             "depth":{"min":1,"max":3},"as":"chain"}],
+		"edges":[{"from_step":"c"},{"from_step":"chain"},
+		         {"via":"requires","between":["q","q"]}]}`)
 	seen := map[string]int{}
 	for _, block := range strings.Split(sql, "SELECT") {
 		for _, ref := range tableReference.FindAllStringSubmatch(block, -1) {

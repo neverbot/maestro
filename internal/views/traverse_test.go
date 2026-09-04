@@ -444,3 +444,62 @@ func TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows(t *testing.T) {
 		t.Fatalf("control: with no to_type and include_invalid the walk draws all three, got %v", got)
 	}
 }
+
+// TestMaxDepthReachedIsWhatTheWalkReachedNotWhatItAskedFor is the
+// arithmetic Task 6 shipped, replaced.
+//
+// A set's depth used to be its source set's depth plus the step's
+// *declared* max, which is exact only while every step is one hop: a
+// walk that asked for four and found two would have reported four, and a
+// designer reading "max_depth_reached: 4" would conclude the bound was
+// binding when it was not — the same over-report the node cap was fixed
+// for. The depth now travels on the row.
+func TestMaxDepthReachedIsWhatTheWalkReachedNotWhatItAskedFor(t *testing.T) {
+	g, _ := newGame(t)
+	g.entity(t, "quest", "m1", "Middle 1", nil)
+	g.entity(t, "quest", "m2", "Middle 2", nil)
+	g.relate(t, "requires", "quest", "m1", "quest", "m2")
+
+	res := runQuery(t, g, `{"v":1,
+		"from":[{"type":"quest","keys":["m1"],"as":"start"}],
+		"traverse":[{"from":"start","via":"requires","direction":"out",
+		             "depth":{"min":1,"max":4},"as":"chain"}],
+		"nodes":[{"set":"chain"}]}`)
+	if got := sortedKeysOf(res); !equalStrings(got, []string{"m2"}) {
+		t.Fatalf("the chain is one hop long, got %v", got)
+	}
+	if res.Stats.MaxDepthReached != 1 {
+		t.Errorf("the walk asked for four hops and found one; stats say %d",
+			res.Stats.MaxDepthReached)
+	}
+}
+
+// TestAWalkFromAWalkCountsItsDepthFromTheSeed is the case the depth
+// column exists for. A step reading from another step starts at whatever
+// depth its own seed row sits at, and internal/graph counts from its own
+// anchor — so the seed row's depth is added back, per row, through the
+// path the walk carries. A picture of a chain would otherwise report
+// every node past the second step as one or two hops away.
+func TestAWalkFromAWalkCountsItsDepthFromTheSeed(t *testing.T) {
+	g, _ := newGame(t)
+	chainOfQuests(t, g)
+	res := runQuery(t, g, `{"v":1,
+		"from":[{"type":"quest","keys":["c1"],"as":"start"}],
+		"traverse":[{"from":"start","via":"requires","direction":"out",
+		             "depth":{"min":1,"max":2},"as":"first"},
+		            {"from":"first","via":"requires","direction":"out",
+		             "depth":{"min":1,"max":2},"as":"second"}],
+		"nodes":[{"set":"second"}],
+		"limits":{"max_depth":4}}`)
+	// The second walk starts from c2 and c3 and reaches c3, c4 and c5.
+	if got := sortedKeysOf(res); !equalStrings(got, []string{"c3", "c4", "c5"}) {
+		t.Fatalf("a walk from a walk reaches the rest of the chain, got %v", got)
+	}
+	// c5 is four hops from the seed: two through the first walk, two more
+	// through the second. Counted from the second walk's own anchor it
+	// would be two.
+	if res.Stats.MaxDepthReached != 4 {
+		t.Errorf("the deepest node is four hops from the seed selector, stats say %d",
+			res.Stats.MaxDepthReached)
+	}
+}

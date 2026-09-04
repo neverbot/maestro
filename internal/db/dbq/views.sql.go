@@ -660,16 +660,19 @@ type UpsertViewParams struct {
 //     type id. Its two project filters mask each other and only their
 //     joint removal is observable; the statement's own comment says so
 //     and names the test that asks the question across the games.
-//   - On view_positions, load-bearing on all three statements that carry
-//     a WHERE, for the same reason as view_refs and with the same
-//     caveat: a view id is a value a previous answer handed back, and the
-//     composite foreign key says what a row may hold rather than which
-//     rows a read or a DELETE may match. UpsertViewPosition has no WHERE
-//     at all -- it is an INSERT, and its isolation is the two composite
-//     keys refusing a parent from another game, which is the one place in
-//     this file where "the database refuses it" is the whole mechanism.
-//     Each statement's own comment says which of its filters is doing
-//     work and which is redundant with the one above it.
+//   - On view_positions, load-bearing on the read and on both deletes,
+//     for the same reason as view_refs and with the same caveat: a view
+//     id is a value a previous answer handed back, and the composite
+//     foreign key says what a row may hold rather than which rows a read
+//     or a DELETE may match. UpsertViewPosition is the interesting one
+//     and it needs *two* mechanisms: the composite keys refuse a parent
+//     from another game on the insert path, and they check nothing at
+//     all on the ON CONFLICT path, where the stored row keeps its own
+//     project id -- so the DO UPDATE carries a project guard of its own.
+//     That is written up on the statement, because it was a real
+//     cross-game overwrite before it was a comment. Each statement here
+//     says which of its filters is doing work and which is redundant
+//     with the one above it.
 //
 // No write here sets updated_at. 0008_views.sql puts a set_updated_at
 // trigger on views, so the column has one mechanism behind it rather

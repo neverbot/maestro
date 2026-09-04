@@ -139,6 +139,13 @@ func TestAnAmbiguousHopIsMarkedRatherThanSilentlyPicked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	// Three quests, not four: a hop that came back as two rows would put
+	// hogger in the picture twice, count twice against max_nodes, and let
+	// capOf's dedupe pick an arbitrary one of its two zones.
+	if len(res.Nodes) != 3 {
+		t.Fatalf("a quest in two zones is still one node, got %d: %v",
+			len(res.Nodes), keysOf(res.Nodes))
+	}
 	byKey := nodesByKey(res.Nodes)
 	hogger := byKey["hogger"]
 	if got := hogger.Attrs["color_by"]; got != "Elwynn Forest" {

@@ -144,8 +144,9 @@ const (
 )
 
 // compileOptions are the parts of one *run* the compiler needs, as
-// opposed to the parts of the query, which live on Resolved. There is one
-// today; Task 9's projection adds to it.
+// opposed to the parts of the query, which live on Resolved. The
+// projection is not here for exactly that reason: it is written in the
+// document, so it is resolved with the rest of it and read off Resolved.
 type compileOptions struct {
 	// IncludeFields selects the entity's and the relation's jsonb fields
 	// into the result. It is off by default because a thousand-node

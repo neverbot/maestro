@@ -319,9 +319,17 @@ func (c *compiler) projection(alias, typeAlias frag) (attrs, ambiguous, joins fr
 		lateral = append(lateral, join)
 		pairs = append(pairs, sprintf("%s::text, %s.value", name, hop))
 		// A hop that found nothing has no row at all, so matches is null
-		// and the node is not ambiguous. COALESCE says that rather than
-		// leaving the whole expression null, which would make a node with
-		// one unmatched slot report an unknown ambiguity.
+		// and the node is not ambiguous. COALESCE says so in the column
+		// rather than leaving it null.
+		//
+		// **Only the golden file observes it**, and that is recorded
+		// rather than dressed up: a null boolean scans into a *bool of
+		// nil, which Run already reads as false, and `null OR true` is
+		// true — so removing the COALESCE changes no answer this package
+		// gives today. It stays because the column then means "not
+		// ambiguous" instead of "unknown" to anything that reads the
+		// statement rather than Run: a later arm that ANDs this term, or
+		// a WHERE over it, would drop the unmatched rows.
 		terms = append(terms, sprintf("COALESCE(%s.matches, 0) > 1", hop))
 	}
 	attrs = "NULL::jsonb"
@@ -429,15 +437,19 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // **LIMIT 1 with the count taken over the whole match set**, which is not
 // what this task's plan prescribed. The plan asked for LIMIT 2, on the
 // cap + 1 argument the truncation flags use — but a lateral that returns
-// two rows *duplicates the node row*: the arm emits one row per zone, the
-// two rows differ in attrs so UNION does not collapse them, capOf's
-// DISTINCT ON then keeps an arbitrary one of the two, and both rows count
-// against max_nodes. The window count is computed before ORDER BY and
-// LIMIT, so `count(*) OVER ()` with LIMIT 1 returns exactly one row whose
-// matches is the *true* number of candidates. It is not a weaker
-// detection than cap + 1, it is a stronger one, and it costs nothing:
-// finding the first far entity by name requires sorting the matches
-// anyway, so nothing is saved by stopping at two.
+// two rows *duplicates the node row*. Measured rather than reasoned
+// about: two far entities for one node produce two rows, each carrying
+// the same true count. The duplicate then reaches capOf, whose
+// `DISTINCT ON (id) … ORDER BY id, rank, depth` names no attribute, so
+// **which of the two zones survives is unspecified** — it happened to be
+// the first on this Postgres, which is the same "green three runs out of
+// three" the result ordering was pinned as text for.
+//
+// A window count is computed before ORDER BY and LIMIT, so
+// `count(*) OVER ()` with LIMIT 1 gives exactly one row whose matches is
+// the *true* number of candidates — not a weaker detection than cap + 1
+// but a stronger one, and free: finding the first far entity by name
+// requires sorting the matches anyway, so stopping at two saves nothing.
 //
 // **The ordering is the reason the same query paints the same picture
 // twice.** far.name first because that is the rule the flag documents —

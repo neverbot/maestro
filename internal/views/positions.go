@@ -225,8 +225,8 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 			// measured. It stays because the alternative is discarding a
 			// row count that can only be zero if an invariant of this
 			// package has been broken, and a silent no-op is how the
-			// cross-game overwrite this guard exists for reached a commit
-			// in the first place (views.sql says what it was). The guard
+			// cross-game overwrite this guard exists for got as far as a
+			// green test run (views.sql says what it was). The guard
 			// itself is load-bearing and is asserted by driving the
 			// statement directly, in
 			// TestPositionsOfAnotherGameAreNotReachable.

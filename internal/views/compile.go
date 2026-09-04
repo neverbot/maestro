@@ -320,7 +320,7 @@ func (c *compiler) step(i int) (frag, error) {
 	if err != nil {
 		return "", err
 	}
-	toType := frag("")
+	var toType frag
 	if len(step.ToTypeIDs) > 0 {
 		toType = sprintf("\n     AND far.entity_type_id = ANY(%s::uuid[])",
 			c.b.bind(step.ToTypeIDs))
@@ -677,7 +677,7 @@ func builtinColumn(sc leafScope, name string) (frag, error) {
 // whether a value is a structural dependency is view_refs' question, and
 // Task 11 owns it.
 func (c *compiler) typeLeaf(sc leafScope, leaf *ResolvedLeaf) (frag, error) {
-	column, table := frag("entity_type_id"), frag("entity_types")
+	var column, table frag = "entity_type_id", "entity_types"
 	lookup := func(key string) (uuid.UUID, bool) {
 		row, ok := c.r.Cat.EntityTypes[strings.ToLower(key)]
 		return row.ID, ok
@@ -712,7 +712,7 @@ func (c *compiler) typeLeaf(sc leafScope, leaf *ResolvedLeaf) (frag, error) {
 		if err != nil {
 			return "", err
 		}
-		comparison := frag("=")
+		var comparison frag = "="
 		if leaf.Op == OpNeq {
 			comparison = "<>"
 		}
@@ -797,7 +797,7 @@ func (c *compiler) compare(op operandOf, leaf *ResolvedLeaf) (frag, error) {
 			value, c.b.bind(likePattern(leaf.Op, leaf.Value)))), nil
 
 	case OpContainsAny, OpContainsAll:
-		operator := frag("?|")
+		var operator frag = "?|"
 		if leaf.Op == OpContainsAll {
 			operator = "?&"
 		}

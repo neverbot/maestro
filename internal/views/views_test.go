@@ -808,6 +808,57 @@ func TestViewsDependingOnATypeAreFoundByIdWithTheirPointers(t *testing.T) {
 		"entity", zone.ID); err == nil {
 		t.Fatal("a kind outside the two must be refused, not answered with nothing")
 	}
+
+	// The isolation, which none of the assertions above reaches. Every
+	// one of them separates the two games by the *type id* — azeroth's
+	// zone and outland's zone are different rows — so a statement that
+	// ignored its project_id entirely would answer all of them
+	// correctly. Measured: with both project filters deleted from
+	// ListViewsBrokenByType the whole package stayed green, and outland
+	// asking about azeroth's quest type got back azeroth's view.
+	//
+	// This is the question that separates them: the *other* game asking
+	// about *this* game's type id, which is exactly what a caller holding
+	// an id from somewhere else does. The composite foreign key does not
+	// defend it — the ref row legitimately holds azeroth's type id under
+	// azeroth's project id, and the caller supplies the type id directly
+	// — so the filter is the only thing standing here, and
+	// ViewsDependingOn takes a bare id, which makes it load-bearing for
+	// this package's own caller rather than defence in depth.
+	crossed, err := outland.views.ViewsDependingOn(ctx, outland.projectID, KindEntityType, zone.ID)
+	if err != nil {
+		t.Fatalf("outland asking about azeroth's zone: %v", err)
+	}
+	if len(crossed) != 0 {
+		t.Fatalf("got %+v, want nothing: that type id belongs to another game", crossed)
+	}
+	// The positive control for that question, in the same test: outland's
+	// own zone is named by outland's own view, so the empty answer above
+	// is isolation and not an outland fixture that references nothing.
+	outlandCat, err := outland.views.LoadCatalogue(ctx, outland.projectID)
+	if err != nil {
+		t.Fatalf("outland catalogue: %v", err)
+	}
+	own, err := outland.views.ViewsDependingOn(ctx, outland.projectID,
+		KindEntityType, outlandCat.EntityTypes["zone"].ID)
+	if err != nil {
+		t.Fatalf("outland asking about its own zone: %v", err)
+	}
+	if len(own) != 1 || own[0].ViewKey != "route" {
+		t.Fatalf("got %+v, want outland's own view: the empty answer above must be isolation", own)
+	}
+	// And the relation type arm, whose filter the entity-type arm does
+	// not stand in for: each arm is its own column and the two filters
+	// mask each other, so deleting either one alone leaves this package
+	// green unless both arms are asked across the games.
+	crossedVia, err := outland.views.ViewsDependingOn(ctx, outland.projectID,
+		KindRelationType, via.ID)
+	if err != nil {
+		t.Fatalf("outland asking about azeroth's takes_place_in: %v", err)
+	}
+	if len(crossedVia) != 0 {
+		t.Fatalf("got %+v, want nothing: that relation type belongs to another game", crossedVia)
+	}
 }
 
 // TestViewEventsReachEveryMemberOfTheGameIncludingAgents pins the gating

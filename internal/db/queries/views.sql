@@ -34,6 +34,11 @@
 --     defence-in-depth claim is worth what the test behind it is worth.
 --     InsertViewRef writes project_id as a column value, which is what
 --     makes the composite key check anything at all.
+--   * On ListViewsBrokenByType, load-bearing again, and for its own
+--     caller rather than for a hypothetical one: it is handed a bare
+--     type id. Its two project filters mask each other and only their
+--     joint removal is observable; the statement's own comment says so
+--     and names the test that asks the question across the games.
 --
 -- No write here sets updated_at. 0008_views.sql puts a set_updated_at
 -- trigger on views, so the column has one mechanism behind it rather
@@ -225,6 +230,28 @@ ORDER BY pointer;
 -- (project_id, relation_type_id), so each arm is an index lookup rather
 -- than a scan over every stored query document, which is the whole point
 -- of the table.
+--
+-- **Two project filters, and they mask each other.** The join equates
+-- v.project_id with r.project_id, so each filter implies the other and
+-- deleting either one alone changes no answer and leaves the whole
+-- package green. Removing both does not: the caller supplies the type id
+-- directly and 0008_views.sql's composite foreign keys do not defend
+-- this one — a ref row legitimately holds another game's type id under
+-- that game's project id — so with neither filter the statement does not
+-- care who is asking, and one game asking about another's type is handed
+-- that game's views. Either filter alone is therefore sufficient and
+-- neither is individually necessary; what is load-bearing is that at
+-- least one survives, which is why both are written and this note exists
+-- rather than a claim that each is doing its own work.
+--
+-- **This is not defence in depth**, unlike the view_refs filters above:
+-- views.ViewsDependingOn takes a bare type id and resolves nothing
+-- inside the game first, so the isolation this statement enforces is the
+-- only isolation its own caller has.
+-- TestViewsDependingOnATypeAreFoundByIdWithTheirPointers asks the other
+-- game about this game's type id, on both arms, with the positive
+-- control in the same test — the discrimination in the rest of that test
+-- comes from the two games' type ids differing, which passes either way.
 SELECT v.id, v.key, v.name, r.kind, r.ref_key, r.pointer
 FROM view_refs r
 JOIN views v ON v.id = r.view_id AND v.project_id = r.project_id

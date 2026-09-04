@@ -446,7 +446,7 @@ func TestDeletingATypeListsTheViewsItBroke(t *testing.T) {
 
 	// The ordering rule, asserted rather than trusted: asked after the
 	// deletion the same question answers nothing.
-	after, err := g.views.ViewsBrokenBy(t.Context(), g.projectID, KindEntityType, id)
+	after, err := g.views.ViewsDependingOn(t.Context(), g.projectID, KindEntityType, id)
 	if err != nil {
 		t.Fatalf("list after: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestAnAtTypeOperandIsADependencyLikeEveryOtherTypeReference(t *testing.T) {
 	// The deletion of that type now reports this view, which is what the
 	// index is for.
 	id := g.typeIDOf(t, KindEntityType, "class")
-	broke, err := g.views.ViewsBrokenBy(t.Context(), g.projectID, KindEntityType, id)
+	broke, err := g.views.ViewsDependingOn(t.Context(), g.projectID, KindEntityType, id)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

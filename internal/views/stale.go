@@ -170,13 +170,15 @@ func diagnosticCodes() []string {
 	}
 }
 
-// fatal says whether this diagnostic stops the view running as written.
-// The two renames do not: they resolved by id, the picture is right, and
-// only the spelling is behind. Everything else names something the run
-// cannot do.
-func (d Diagnostic) fatal() bool {
-	return d.Code != DiagEntityTypeRenamed && d.Code != DiagRelationTypeRenamed
-}
+// **What makes a diagnostic fatal is not written here**, and that is
+// deliberate. The obvious version is a predicate over the code — the two
+// renames are survivable, the other six are not — and it would be a
+// second statement of something resolution already says: a reference
+// that resolved reports no problem, and a reference that did not reports
+// one at its own pointer. runStored prunes and refuses on *those*
+// pointers, so the two can never disagree; a code-based predicate could,
+// the first time a code is produced beside a reference that still
+// resolved.
 
 // staleness is the stored dependency index of one saved view, plus the
 // report the resolution pass builds as it walks that view's query.
@@ -715,20 +717,6 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 	return &out, true
 }
 
-// ViewsBrokenBy is the list a type's deletion answers with: every saved
-// view that references this type, and where in each query.
-//
-// **It must be asked before the type is deleted**, which is why it is a
-// separate call rather than something the removal could do afterwards:
-// ON DELETE SET NULL is what makes a ref row survive its type, and the
-// same SET NULL empties the column this lookup matches on.
-// ViewsDependingOn (Task 11) says the same thing where the statement is.
-func (s *Service) ViewsBrokenBy(ctx context.Context, projectID uuid.UUID,
-	kind string, typeID uuid.UUID,
-) ([]ViewDependency, error) {
-	return s.ViewsDependingOn(ctx, projectID, kind, typeID)
-}
-
 // RemoveTypeReportingViews removes an entity type or a relation type and
 // answers with the saved views it broke.
 //
@@ -755,7 +743,7 @@ func (s *Service) ViewsBrokenBy(ctx context.Context, projectID uuid.UUID,
 func (s *Service) RemoveTypeReportingViews(ctx context.Context, projectID uuid.UUID,
 	kind string, typeID uuid.UUID, cascade bool,
 ) ([]ViewDependency, error) {
-	broke, err := s.ViewsBrokenBy(ctx, projectID, kind, typeID)
+	broke, err := s.ViewsDependingOn(ctx, projectID, kind, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -765,7 +753,7 @@ func (s *Service) RemoveTypeReportingViews(ctx context.Context, projectID uuid.U
 	case KindRelationType:
 		err = s.meta.RemoveRelationType(ctx, projectID, typeID, cascade)
 	default:
-		// Unreachable: ViewsBrokenBy has already refused any third kind.
+		// Unreachable: ViewsDependingOn has already refused any third kind.
 		return nil, fmt.Errorf("views: %q is not a kind of type a view can reference", kind)
 	}
 	if err != nil {

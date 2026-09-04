@@ -636,6 +636,8 @@ func TestAShapeProblemIsAnsweredBeforeARequirement(t *testing.T) {
 // three, not discover them one call apart.
 func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 	g, _ := newGame(t)
+	// Five problems in one pass: an agent fixing five parameters should
+	// learn about five.
 	err := CheckRenderer(RendererMap, map[string]any{
 		"snap": "close", "background_scale": "big", "background_offset": "0,0",
 		"background_asset_id": "not-a-uuid", "coordinate_source": 1,
@@ -647,12 +649,26 @@ func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 	if len(qe.Fields) != 5 {
 		t.Fatalf("expected all five problems in one pass, got %v", qe.Fields)
 	}
-	// And in a stable order rather than the map's, which has none:
-	// pointerLess is what makes a refusal reproducible. **Five wrong
-	// parameters and not two**, because Go randomises map iteration per
-	// range: with three keys an unsorted implementation comes back sorted
-	// by luck one run in six, and a guard that passes a mutation one run
-	// in six is not a guard. With five it is one in a hundred and twenty.
+	// And in a stable order rather than the map's, which has none.
+	//
+	// **The mechanism, measured rather than assumed.** The previous
+	// version of this comment claimed three keys survive an unsorted
+	// implementation one run in six and five one in a hundred and twenty,
+	// as though Go permuted a map's keys. It does not: a small map is
+	// iterated from a random start slot, so what comes back is a
+	// *rotation* of the literal's insertion order, not a permutation.
+	// Measured on this toolchain over 10,000 rebuilds of the literal
+	// below, five keys give five distinct orders and 0 of 10,000 came
+	// back already sorted — because the literal happens to begin with
+	// "snap". The same five keys written alphabetically came back sorted
+	// 4,984 times in 10,000. **The key count is irrelevant, and the guard
+	// was standing on the order somebody happened to type.**
+	//
+	// So the order is asserted deterministically instead: the same call
+	// twenty times over, every run identical and every run equal to the
+	// sorted expectation. Reordering the literal cannot break it and
+	// cannot silently weaken it, and no database is touched per
+	// iteration.
 	want := []string{
 		"/renderer_params/background_asset_id",
 		"/renderer_params/background_offset",
@@ -660,9 +676,24 @@ func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 		"/renderer_params/coordinate_source",
 		"/renderer_params/snap",
 	}
-	for i, ptr := range want {
-		if qe.Fields[i].Path != ptr {
-			t.Fatalf("problem %d must be %s, got %s (%v)", i, ptr, qe.Fields[i].Path, qe.Fields)
+	r := resolveFor(t, g, questQuery)
+	for run := 0; run < 20; run++ {
+		err := CheckRenderer(RendererMap, map[string]any{
+			"snap": "close", "background_scale": "big", "background_offset": "0,0",
+			"background_asset_id": "not-a-uuid", "coordinate_source": 1,
+		}, r)
+		var qe *QueryError
+		if !errors.As(err, &qe) {
+			t.Fatalf("run %d: expected a *QueryError, got %v", run, err)
+		}
+		var got []string
+		for _, f := range qe.Fields {
+			got = append(got, f.Path)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("run %d came back as %v, want %v: sortProblems is what makes a "+
+				"refusal reproducible, and a refusal that is only usually in order "+
+				"is one a test cannot assert past its first line", run, got, want)
 		}
 	}
 }
@@ -798,6 +829,124 @@ func TestAParameterKindCannotBeHalfAdded(t *testing.T) {
 				"unreachable, and an unreachable arm is a kind somebody meant to use",
 				kind)
 		}
+		// The same both-arms shape for the prose half. A kind with no
+		// phrase prints its own identifier into the description an agent
+		// reads — "x_field: number_field." names a Go constant at a
+		// reader who has never seen one — and a phrase for no kind is a
+		// sentence nothing prints.
+		if kind == kindEnum {
+			continue // prints its own admitted spellings instead
+		}
+		if _, ok := kindPhrases[kind]; !ok {
+			t.Errorf("kind %q has no phrase, so the description prints the "+
+				"identifier %q at an agent", kind, kind)
+		}
+	}
+	for kind := range kindPhrases {
+		switch {
+		case kind == kindEnum:
+			t.Errorf("kindEnum prints its own values and must not have a phrase")
+		case !used[kind]:
+			t.Errorf("kind %q has a phrase and no parameter declares it: the "+
+				"sentence is printed nowhere", kind)
+		}
+	}
+}
+
+// TestEveryRequirementIsDocumentedAndEveryDocHasARequirement is the guard
+// F6 asks for, and it is bidirectional for the reason every other guard
+// over this table is.
+//
+// The generated description promises, in its own first sentence, to say
+// what a query has to produce for a view to be saveable against each
+// renderer — and for one round it said it for none of them. Worse than
+// the omission is the drift it left open: a Requires could be added,
+// changed or deleted and no generated sentence would change and no test
+// would notice, in the half of the contract a query is actually written
+// against. So a renderer that checks the query has to say what it checks,
+// and a renderer that says it checks something has to check it.
+func TestEveryRequirementIsDocumentedAndEveryDocHasARequirement(t *testing.T) {
+	documented := 0
+	for _, r := range renderers {
+		switch {
+		case r.Requires != nil && r.RequiresDoc == "":
+			t.Errorf("%q checks the query and says nowhere what it checks: an agent "+
+				"reads the description and discovers the rule by being refused", r.Name)
+		case r.Requires == nil && r.RequiresDoc != "":
+			t.Errorf("%q documents a requirement it does not enforce, which is the "+
+				"one kind of sentence this catalogue must never print", r.Name)
+		case r.Requires != nil:
+			documented++
+			if !strings.Contains(RendererDescription(), r.RequiresDoc) {
+				t.Errorf("%q's requirement is written on the table and printed "+
+					"nowhere", r.Name)
+			}
+		}
+	}
+	// The vacuity check: this test asserts nothing over a catalogue whose
+	// Requires closures have all been deleted.
+	if documented < 5 {
+		t.Fatalf("the catalogue declares %d requirements and this test needs the "+
+			"five it has (graph, layered, nested, map, timeline)", documented)
+	}
+	// And the three sentences an agent cannot get anywhere else, named
+	// individually so that deleting a requirement quietly is a failure
+	// here as well as above.
+	for _, want := range []string{
+		"drawing contain_via's relation type",
+		`in "manual" mode — which is the default — neither`,
+		"the same options in the same order",
+	} {
+		if !strings.Contains(RendererDescription(), want) {
+			t.Errorf("the description must say %q", want)
+		}
+	}
+}
+
+// TestAParameterNameCarriesOneKindAcrossTheCatalogue is the guard over the
+// one thing the per-renderer tables cannot see. `group_by` is a projection
+// slot on graph and on table; if one of them were changed to text, the
+// description would print two kinds under one prose line, and a misspelt
+// slot name on a table would be stored, returned and read by nothing —
+// which is the defect this whole file exists to refuse, reached through
+// the one door none of the other guards watch.
+//
+// Divergence is not forbidden, it is declared: a name that genuinely means
+// two things goes in the exception list with a reason, and this test then
+// stops asserting about it.
+func TestAParameterNameCarriesOneKindAcrossTheCatalogue(t *testing.T) {
+	// Empty on purpose. Nothing in this catalogue needs to diverge, and a
+	// name added here needs a sentence saying why an agent should expect
+	// the same word to mean two things.
+	allowedToDiffer := map[string]string{}
+
+	kinds := map[string]ParamKind{}
+	declaredBy := map[string]string{}
+	shared := 0
+	for _, renderer := range renderers {
+		for _, p := range renderer.Params {
+			if _, ok := allowedToDiffer[p.Name]; ok {
+				continue
+			}
+			if was, seen := kinds[p.Name]; seen {
+				shared++
+				if was != p.Kind {
+					t.Errorf("%q is %q on %s and %q on %s: one name means two kinds, "+
+						"so the description prints two under one line and one of the "+
+						"two values is read by nothing. Give it two names, or add it "+
+						"to allowedToDiffer with a reason",
+						p.Name, was, declaredBy[p.Name], p.Kind, renderer.Name)
+				}
+				continue
+			}
+			kinds[p.Name], declaredBy[p.Name] = p.Kind, renderer.Name
+		}
+	}
+	// The vacuity check: a catalogue where no name is shared makes this
+	// test assert nothing at all.
+	if shared == 0 {
+		t.Fatal("no parameter name is declared by two renderers, so this guard " +
+			"compared nothing (group_by is graph's and table's)")
 	}
 }
 

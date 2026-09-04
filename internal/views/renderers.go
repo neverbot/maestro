@@ -140,6 +140,24 @@ type Renderer struct {
 	// Params are this renderer's knobs, in the order the description
 	// prints them.
 	Params []RendererParam
+	// RequiresDoc is what Requires enforces, in prose, printed under this
+	// renderer in the generated description.
+	//
+	// **The header of that description promises "what a query has to
+	// produce for a view to be saveable", and for one round the body said
+	// it for no renderer.** An agent read the parameters and nothing
+	// told it that nested needs edges of contain_via, that map's x_field
+	// is refused in manual mode, or that a timeline axis has to be
+	// declared identically across the whole scope — the half of the
+	// contract a query is actually written against.
+	//
+	// It is a second place the same rule is written, which is the risk
+	// this file refuses everywhere else, so it is guarded the way the
+	// parameter table is: TestEveryRequirementIsDocumentedAndEveryDoc
+	// HasARequirement asserts both directions, and a Requires added,
+	// changed or deleted with this line left alone is a failing test
+	// rather than a sentence that has quietly started to lie.
+	RequiresDoc string
 	// Requires is checked against a *resolved* query at upsert time. It
 	// returns the problems that make this query unfeedable to this
 	// renderer, each addressed by its own pointer, or nothing.
@@ -178,6 +196,9 @@ var renderers = []Renderer{
 			{Name: "arrows", Kind: kindBool,
 				Doc: "draw an edge's direction"},
 		},
+		RequiresDoc: "nothing of the query on its own — a scatter of unconnected " +
+			"nodes is a picture this renderer draws. edge_labels, when it is on, " +
+			"needs at least one edges[] entry declaring label_from.",
 		Requires: func(rc *rendererCheck) []metamodel.FieldError {
 			// edge_labels asks for text that only the query can produce.
 			// Turning it on over a query that labels nothing is a knob
@@ -209,6 +230,10 @@ var renderers = []Renderer{
 			{Name: "align", Kind: kindEnum, Values: []string{"start", "center", "end"},
 				Doc: "where a node sits within its layer"},
 		},
+		RequiresDoc: "at least one edges[] entry: the layers are the edges, and a " +
+			"query that draws none is one layer. rank_by naming a field rather " +
+			`than "edges" needs a number field every entity type in scope declares ` +
+			"and project.fields carries.",
 		Requires: func(rc *rendererCheck) []metamodel.FieldError {
 			// Layers are the edges: a layered view of a query that draws
 			// none is one layer, which is a list drawn expensively.
@@ -235,6 +260,10 @@ var renderers = []Renderer{
 			{Name: "leaf_label", Kind: kindSlot,
 				Doc: "the projection slot that labels a box with no children"},
 		},
+		RequiresDoc: "at least one edges[] entry drawing contain_via's relation " +
+			`type, named either by "via" or by a from_step whose step walks it: ` +
+			"the nesting is that relation, and without it the picture is one flat " +
+			"row of boxes.",
 		Requires: func(rc *rendererCheck) []metamodel.FieldError {
 			via, _ := rc.params["contain_via"].(string)
 			row, ok := rc.r.Cat.RelationTypes[strings.ToLower(via)]
@@ -276,6 +305,12 @@ var renderers = []Renderer{
 			{Name: "snap", Kind: kindNumber,
 				Doc: "grid size a dragged node snaps to; 0 for no grid"},
 		},
+		RequiresDoc: `in "fields" mode, both x_field and y_field, each naming a ` +
+			"number field every entity type in scope declares and project.fields " +
+			`carries; in "manual" mode — which is the default — neither, because ` +
+			"nothing would read them. background_scale and background_offset place " +
+			"a background image and need background_asset_id; snap is the grid a " +
+			"dragged node lands on and is read in manual mode only.",
 		Requires: func(rc *rendererCheck) []metamodel.FieldError {
 			source, _ := rc.params["coordinate_source"].(string)
 			if source == "" {
@@ -384,6 +419,10 @@ var renderers = []Renderer{
 			{Name: "axis_label", Kind: kindText,
 				Doc: "what to call the axis"},
 		},
+		RequiresDoc: "axis_field naming a number or enum field that every entity " +
+			"type in scope declares the same way — the same type, and for an enum " +
+			"the same options in the same order — and that project.fields carries. " +
+			"axis_end_field, when given, has to land on that same axis.",
 		Requires: func(rc *rendererCheck) []metamodel.FieldError {
 			// A span's two ends have to be the same kind of thing. A
 			// number start with an enum end is two axes, and the picture
@@ -468,6 +507,9 @@ func RendererDescription() string {
 		"combination otherwise with renderer_requirements.\n")
 	for _, r := range renderers {
 		fmt.Fprintf(&b, "\n- %s (consumes %s): %s\n", r.Name, r.Consumes, r.Doc)
+		if r.RequiresDoc != "" {
+			fmt.Fprintf(&b, "  requires: %s\n", r.RequiresDoc)
+		}
 		for _, p := range r.Params {
 			fmt.Fprintf(&b, "  - %s: %s. %s", p.Name, p.kindPhrase(), p.Doc)
 			if p.Required {
@@ -479,6 +521,31 @@ func RendererDescription() string {
 	return b.String()
 }
 
+// kindPhrases is how each kind reads in the description an agent is
+// handed. The identifiers themselves are this package's own vocabulary and
+// were being printed straight into agent-facing prose — "rank_by:
+// rank_by.", "sort: column.", "x_field: number_field." — which names a Go
+// constant at a reader who has never seen one and says nothing about what
+// to send. kindEnum is the exception and prints its own admitted
+// spellings instead.
+// TestAParameterKindCannotBeHalfAdded requires a phrase for every kind and
+// a kind for every phrase, the same both-arms guard the checkers get.
+var kindPhrases = map[ParamKind]string{
+	kindBool:         "true or false",
+	kindNumber:       "a number",
+	kindCount:        "a whole number of at least 1",
+	kindText:         "a line of text",
+	kindUUID:         "the id of an asset of this game",
+	kindPoint:        "[x, y], a pair of numbers",
+	kindSlot:         "the name of a projection slot this query declares",
+	kindNumberField:  "a declared number field key this query carries in project.fields",
+	kindAxisField:    "a declared number or enum field key this query carries in project.fields",
+	kindRankBy:       `either "edges" or a declared number field key this query carries`,
+	kindRelationType: "the key of a relation type this game declares",
+	kindColumn:       "one column reference: a built-in, a projection slot, or a carried field key",
+	kindColumns:      "a list of column references, in the order they are drawn",
+}
+
 // kindPhrase is how a parameter's kind reads in the description. An enum
 // prints its own values, so the admitted spellings are in the prose an
 // agent reads rather than only in the refusal it gets afterwards.
@@ -486,6 +553,11 @@ func (p RendererParam) kindPhrase() string {
 	if p.Kind == kindEnum {
 		return fmt.Sprintf(`one of "%s"`, strings.Join(p.Values, `", "`))
 	}
+	if phrase, ok := kindPhrases[p.Kind]; ok {
+		return phrase
+	}
+	// Unreachable while the guard holds, and this is what it would print
+	// if it ever did not: the identifier, which is at least true.
 	return string(p.Kind)
 }
 

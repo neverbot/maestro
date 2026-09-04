@@ -142,6 +142,17 @@ const (
 // but has no type would admit no operator at all, and one that has a type
 // but is not printed is invisible to the agent that mistyped it.
 // TestTheBuiltinVocabularyIsListedInTheOrderItIsDeclared pins both halves.
+//
+// **This list is complete for the row a predicate compares against, and
+// it is not everything an envelope node carries.** Node.Set and Node.Role
+// (execute.go) say which selector or step a node came back through, and
+// they have no sigil here. Nothing depends on that today — a predicate
+// filters entities and a set is not a column of one — but a table drawn
+// over a multi-set query therefore cannot show which set a row came from,
+// because Task 10's `columns` admits exactly the sigils in this table.
+// Recorded here rather than there because this is where a reader comes to
+// learn what the vocabulary holds, and "@set" is the first thing they
+// will look for and not find.
 var builtins = []struct {
 	Name string
 	Type metamodel.FieldType

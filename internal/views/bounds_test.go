@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -268,27 +269,62 @@ func TestTheStatementBudgetIsClampedToItsHardCap(t *testing.T) {
 	}
 }
 
-// TestTheBoundsDoNotLeakOntoTheNextCaller is the pooled-connection half.
-// Both settings are made with is_local, so the connection this run
-// borrowed goes back to the pool with neither of them — and if it did
-// not, every later write in the process would fail with 25006 and every
-// later query would inherit a millisecond.
+// TestTheBoundsDoNotLeakOntoTheNextCaller is the pooled-connection half:
+// the connection a run borrowed goes back to the pool carrying neither
+// setting, and if it did not, every later write in this process would be
+// refused with 25006 and every later query would inherit a millisecond.
+//
+// **Two things make that true and the test holds the pair, not either
+// half.** The settings are made with is_local, and runInTx always rolls
+// back — and a plain SET is transactional too, so a rollback undoes a
+// session-level one as well. Measured: flipping is_local to false alone
+// leaves this test green. Only losing both (is_local off *and* the
+// rollback turned into a commit) leaks, and that is the mutation this
+// test was proved red against.
+//
+// It checks **every connection in the pool**, not one, and that is the
+// difference between an assertion and a coincidence: the pool holds four,
+// the run borrowed whichever was free, and a single SHOW would three
+// times out of four ask a connection the run never touched and pass
+// whatever the answer was.
 func TestTheBoundsDoNotLeakOntoTheNextCaller(t *testing.T) {
 	g, _ := newGame(t)
 	g.views.statementTimeout = time.Millisecond
-	// Ignored: the point is what the connection carries afterwards.
+	// The result is ignored: the point is what the connection carries
+	// afterwards, and whether the run itself timed out does not change it.
 	_, _ = g.views.Run(t.Context(), g.projectID, RunRequest{
 		Query: mustParse(t, `{"v":1,"from":[{"type":"quest"}]}`)})
 
-	var timeout string
-	if err := g.pool.QueryRow(t.Context(), "SHOW statement_timeout").Scan(&timeout); err != nil {
-		t.Fatalf("read the setting back: %v", err)
+	// Held all at once, so that every connection the pool can hand out —
+	// including the one the run used — is inspected rather than sampled.
+	var held []*pgxpool.Conn
+	for i := int32(0); i < g.pool.Config().MaxConns; i++ {
+		conn, err := g.pool.Acquire(t.Context())
+		if err != nil {
+			t.Fatalf("acquire connection %d of %d: %v", i, g.pool.Config().MaxConns, err)
+		}
+		held = append(held, conn)
 	}
-	if timeout != "0" {
-		t.Errorf("the statement timeout must end with the transaction, got %q", timeout)
+	for i, conn := range held {
+		var timeout, readOnly string
+		if err := conn.QueryRow(t.Context(),
+			"SELECT current_setting('statement_timeout'), current_setting('transaction_read_only')").
+			Scan(&timeout, &readOnly); err != nil {
+			t.Fatalf("read the settings back from connection %d: %v", i, err)
+		}
+		if timeout != "0" {
+			t.Errorf("connection %d kept a statement timeout of %q past the transaction "+
+				"that set it", i, timeout)
+		}
+		if readOnly != "off" {
+			t.Errorf("connection %d is still read-only (%q): every later write in this "+
+				"process would be refused", i, readOnly)
+		}
+		conn.Release()
 	}
-	// A write on the same pool still works, which is the read-only half of
-	// the same question.
+
+	// And the same question behaviourally: a write on the same pool still
+	// works.
 	g.entity(t, "quest", "after-the-bounds", "After the bounds", nil)
 }
 

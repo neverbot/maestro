@@ -148,9 +148,9 @@ func TestAMultiHopStepEmitsARecursionRatherThanASecondJoin(t *testing.T) {
 		"traverse":[{"from":"q","via":"requires","depth":3,"as":"chain"}]}`)
 	for _, want := range []string{
 		"w0 (id, depth, path, via_relation, from_id, closed) AS (", // graph's own recursion
-		"UNION ALL",     // the recursive term
-		"NOT w.closed",  // its path guard
-		"w0_out AS (", // the wrapper that bounds it
+		"UNION ALL",    // the recursive term
+		"NOT w.closed", // its path guard
+		"w0_out AS (",  // the wrapper that bounds it
 		// And this compiler reading from it — through the row cap, which
 		// is the half that is not decoration: the wrapper returns one row
 		// past MaxRows so that a truncated walk is detectable, and a

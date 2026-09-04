@@ -133,6 +133,23 @@ type ResolvedStep struct {
 	EdgeWhere       *ResolvedPredicate
 }
 
+// ResolvedEdge is one edges[] entry with its relation type keys turned
+// into ids.
+//
+// Only the `via`/`between` spelling has anything to resolve — the
+// `from_step` spelling names a set, which is resolved by being compiled.
+// It is resolved here rather than in the compiler for the reason
+// LoadCatalogue exists at all: a second place that turns a key into an id
+// is a second place that can forget the project filter, and a reference
+// the compiler resolved privately would be missing from Refs, so
+// deleting a relation type a view draws edges with would report the view
+// as fine. TestAnEdgeEntrysRelationTypeIsResolvedAndListed pins both
+// halves.
+type ResolvedEdge struct {
+	Spec            *EdgeSpec
+	RelationTypeIDs []uuid.UUID
+}
+
 // ResolvedPredicate is a predicate whose every leaf carries the declared
 // type of the field it names and a value already coerced to that type.
 type ResolvedPredicate struct {
@@ -173,6 +190,7 @@ type Resolved struct {
 	Cat    *Catalogue
 	Sets   []ResolvedSet
 	Steps  []ResolvedStep
+	Edges  []ResolvedEdge
 	Refs   []TypeRef
 	Params map[string]any
 	Limits ResolvedLimits
@@ -358,7 +376,7 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		step := &q.Traverse[i]
 		ptr := pointer("traverse", i)
 		rs := ResolvedStep{Step: step, Name: step.As, FromSet: step.From}
-		edgeScope := fieldScope{subject: "the relation types this step follows"}
+		edgeScope := fieldScope{subject: "the relation types this step follows", edge: true}
 		for j, key := range step.Via {
 			if row := relationType(pointer("traverse", i, "via", j), key); row != nil {
 				rs.RelationTypeIDs = append(rs.RelationTypeIDs, row.ID)
@@ -395,6 +413,17 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		rs.EdgeWhere = resolvePredicate(edgeScope, paramTypes, step.EdgeWhere,
 			ptr+"/edge_where", &problems)
 		r.Steps = append(r.Steps, rs)
+	}
+
+	for i := range q.Edges {
+		spec := &q.Edges[i]
+		edge := ResolvedEdge{Spec: spec}
+		for j, key := range spec.Via {
+			if row := relationType(pointer("edges", i, "via", j), key); row != nil {
+				edge.RelationTypeIDs = append(edge.RelationTypeIDs, row.ID)
+			}
+		}
+		r.Edges = append(r.Edges, edge)
 	}
 
 	// The projection's one-hop related attributes are type references too,
@@ -448,6 +477,28 @@ type fieldScope struct {
 	// open marks a position that reaches entities of any type, where no
 	// declared field is comparable at all because no schema applies.
 	open bool
+	// edge marks a position whose rows are relations rather than
+	// entities. A relation has an id, a type, two endpoints, its declared
+	// fields and its timestamps and nothing else (0004_metamodel.sql), so
+	// @name, @key and @invalid name no column there and would compile to
+	// SQL Postgres refuses. TestAnEdgePredicateAdmitsOnlyTheBuiltinsA
+	// RelationHas pins the refusal, with @type and @created_at as its
+	// controls.
+	edge bool
+}
+
+// builtin says whether an @-sigil name can be compared in this position.
+func (sc fieldScope) builtin(name string) error {
+	if !sc.edge {
+		return nil
+	}
+	if name == AttrType || name == AttrCreatedAt {
+		return nil
+	}
+	return fmt.Errorf("%s cannot be compared on a relation: an edge carries its type, its "+
+		"creation time and its declared fields, and has no key, name or invalid flag of its "+
+		"own — compare %s or %s here, or a field this relation type declares",
+		name, AttrType, AttrCreatedAt)
 }
 
 // field finds the declaration a key has across every schema in scope,
@@ -585,6 +636,10 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 			// caller built by hand has been through no such pass.
 			add(ptr+"/field", fmt.Sprintf("%q is not a built-in: the built-ins are %s",
 				p.FieldRef.Key, strings.Join(builtinNames, ", ")))
+			return nil
+		}
+		if err := scope.builtin(p.FieldRef.Key); err != nil {
+			add(ptr+"/field", err.Error())
 			return nil
 		}
 		leaf.Type = typ

@@ -257,21 +257,52 @@ func TestAnOversizeAssetIsRefusedBeforeItIsRead(t *testing.T) {
 			"is %d: a bound applied after io.ReadAll is a bound that already lost",
 			body.read, MaxAssetBytes+1)
 	}
-	// The control, so the assertion above cannot pass by reading nothing:
-	// exactly the cap is accepted, and one byte more is not. Both are
-	// built from a real PNG so the size is the only thing under test.
+}
+
+// TestABodyOneBytePastTheCapIsNotStoredTruncated is the other half of
+// the bound, and the half that says why readBounded reads one byte past
+// it.
+//
+// It is a separate test from the byte count above because the two
+// mutations differ: that one is about how much is read, this one is
+// about what "too big" is measured against. A reader stopped at exactly
+// the cap sees the first eight megabytes of a larger file and cannot
+// tell them from a file of exactly eight megabytes.
+func TestABodyOneBytePastTheCapIsNotStoredTruncated(t *testing.T) {
+	g, _ := newGame(t)
+	// The control, so the refusal below cannot pass by refusing everything:
+	// exactly the cap is accepted, and one byte more is not.
 	//
-	// A PNG of random noise is close to incompressible, so it is padded
-	// to the cap with a trailing comment the decoder ignores; what
-	// matters here is the length.
-	atCap := padded(pngBytes(t, 8, 8), MaxAssetBytes)
+	// **Both are built from a JPEG, and that is the point of the
+	// fixture.** jpeg.DecodeConfig returns as soon as it has read the
+	// frame header, so it never looks at the padding — which means a
+	// truncated body is *not* caught by the decoder, and a bound that
+	// read only MaxAssetBytes would store the first eight megabytes of a
+	// larger file and report success. With a PNG the same mutation goes
+	// red for the wrong reason: png.DecodeConfig walks chunks past the
+	// header and trips over the padding. That is the difference between
+	// a mutation this test kills and one the standard library kills for
+	// it.
+	atCap := padded(jpegBytes(t, 8, 8), MaxAssetBytes)
 	if _, err := g.views.CreateAsset(context.Background(), g.projectID, Actor{},
 		"exactly-at-the-cap.png", bytes.NewReader(atCap)); err != nil {
 		t.Fatalf("an asset of exactly %d bytes must be accepted: %v", MaxAssetBytes, err)
 	}
-	overCap := padded(pngBytes(t, 8, 8), MaxAssetBytes+1)
-	err = createAsset(t, g, "one-byte-over.png", overCap)
-	assertRefused(t, err, pointer("bytes"), "is larger than")
+	overCap := padded(jpegBytes(t, 8, 8), MaxAssetBytes+1)
+	assertRefused(t, createAsset(t, g, "one-byte-over.png", overCap),
+		pointer("bytes"), "is larger than")
+	// And nothing of it was stored, truncated or otherwise: two assets
+	// exist, the one at the cap and the one this test's control uploaded.
+	stored, err := g.views.ListAssets(context.Background(), g.projectID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, a := range stored {
+		if a.Filename == "one-byte-over.png" {
+			t.Fatalf("an over-cap upload was stored: a bound that reads exactly the " +
+				"cap cannot tell a file of that size from the front of a larger one")
+		}
+	}
 }
 
 // padded lengthens raw to exactly n bytes. The trailing bytes are past

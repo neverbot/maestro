@@ -170,6 +170,9 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 	// "which set does a node that appears in two of them belong to"
 	// answerable in Go without a second query, and the id is what keeps
 	// two runs of the same query in the same order.
+	// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
+	// asserts this line as text, because deleting it leaves the
+	// behavioural half of that test green.
 	b.write(" e\nORDER BY 1, 11, 2")
 	return b.sql.String(), b.args, nil
 }

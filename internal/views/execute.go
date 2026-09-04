@@ -191,6 +191,8 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 			// and the ORDER BY on the entry's rank is what makes "first"
 			// mean the order the document declared rather than whatever
 			// Postgres happened to return.
+			// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
+			// pins both halves, and says which of the two the ordering is.
 			if seenNode[id] {
 				continue
 			}

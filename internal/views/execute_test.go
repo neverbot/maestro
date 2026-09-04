@@ -172,11 +172,23 @@ func TestAParameterWithNoValueIsRefusedRatherThanCompiledAsNothing(t *testing.T)
 }
 
 // TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt pins the
-// deduplication and the order that makes it deterministic: without the
-// rank column and the ORDER BY over it, which of two sets a shared node
-// reports would be whatever Postgres returned first.
+// deduplication, and pins the ordering **as text**.
+//
+// The split matters, and it was found by mutation: deleting the ORDER BY
+// leaves the behavioural half green, because a UNION of two arms happens
+// to come back in arm order on this Postgres. So the behavioural half is
+// only the positive control — it proves the node is deduplicated and that
+// the set it reports is the first one declared — and the text assertion
+// is what makes the order a contract rather than an executor detail. It
+// is the half that is red without the ORDER BY.
 func TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt(t *testing.T) {
 	g, _ := newGame(t)
+	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"first"},
+		{"type":"quest","as":"second"}]}`)
+	if !strings.Contains(sql, "ORDER BY 1, 11, 2") {
+		t.Fatalf("the rows must be ordered by kind, then by the declaration rank of the "+
+			"entry that produced them, then by id:\n%s", sql)
+	}
 	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 		Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"first"},
 			{"type":"quest","as":"second"}]}`)})

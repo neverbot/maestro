@@ -13,11 +13,13 @@
 // of a cursor is a copy of its bugs, and a copy of a walk is a copy of a
 // missing project filter.
 //
-// **As of this commit there is no caller at all.** internal/views reaches
-// it in Task 8 of the views plan and internal/analysis does not exist
-// yet. That is stated rather than implied, because a package comment
-// claiming callers it cannot point at is the "documentation claiming more
-// than the code does" defect this repository has produced nineteen times.
+// **It has one caller as of this commit**, internal/views, whose compiler
+// routes every traversal step deeper than one hop through WalkCTE and
+// splices the result into its own statement (see builder.adopt there).
+// internal/analysis does not exist yet. That is stated rather than
+// implied, because a package comment claiming callers it cannot point at
+// is the "documentation claiming more than the code does" defect this
+// repository has produced nineteen times.
 //
 // What lives here is the SQL primitive. Policy -- which relation types
 // gate what, whether a container propagates reachability, what a step's
@@ -92,6 +94,25 @@ type Walk struct {
 	RelationTypeIDs []uuid.UUID
 
 	Direction Direction
+
+	// EdgePredicate is an extra condition every hop's relation has to
+	// satisfy before the walk will follow it, written as **the caller's
+	// own SQL over the alias `r`, containing no caller text** -- the same
+	// contract SeedSQL carries and for the same reason. It is numbered
+	// from $1 and renumbered here, with EdgeArgs supplying its values, so
+	// a caller can build it with its own numbering.
+	//
+	// It sits **inside** the recursive term, next to the relation-type
+	// filter, because a relation the caller's predicate excludes is a
+	// relation the walk must not traverse: applied outside, the walk would
+	// still reach -- and hand back -- every node behind an excluded edge,
+	// which is a wrong answer with no error rather than a narrower
+	// picture. TestAnEdgePredicateIsAppliedInsideTheRecursion pins that
+	// difference with a node reachable only through the excluded edge.
+	//
+	// An empty EdgePredicate adds no clause at all.
+	EdgePredicate string
+	EdgeArgs      []any
 
 	// MinDepth and MaxDepth bound the hops. Depth 0 is the seed itself,
 	// which the recursion always carries because the guard needs it on
@@ -243,7 +264,11 @@ func ReadFrom(w Walk) string { return w.Name + "_out" }
 //     an outer WHERE, which would materialise the whole walk first.
 //     TestDepthBoundsTheWalk pins what it reaches.
 //
-// A fourth line is load-bearing only under Any:
+// A fourth clause is there only when the caller asked for one:
+// EdgePredicate, ANDed into the same JOIN, so a condition on the relation
+// prunes the recursion instead of filtering its output. See the field.
+//
+// A fifth line is load-bearing only under Any:
 // r.id IS DISTINCT FROM w.via_relation, which stops a walk re-traversing
 // the relation it just arrived by. Under Out and In it can never fire.
 // Under Any it is what keeps every single edge from reading as a
@@ -307,6 +332,16 @@ func WalkCTE(w Walk) (string, []any) {
 	seed := renumber(w.SeedSQL, len(args))
 	args = append(args, w.SeedArgs...)
 
+	// The caller's own edge predicate, renumbered the same way and for the
+	// same reason. It is parenthesised because it is joined to this
+	// package's own conditions with AND, and a caller's `a OR b` would
+	// otherwise swallow the relation-type filter beside it.
+	edge := ""
+	if w.EdgePredicate != "" {
+		edge = "\n     AND (" + renumber(w.EdgePredicate, len(args)) + ")"
+		args = append(args, w.EdgeArgs...)
+	}
+
 	types := bind(w.RelationTypeIDs)
 	maxDepth := bind(w.MaxDepth)
 
@@ -349,13 +384,13 @@ func WalkCTE(w Walk) (string, []any) {
       ON r.project_id = $1
      AND r.relation_type_id = ANY(%[4]s::uuid[])
      AND r.id IS DISTINCT FROM w.via_relation
-     AND %[5]s
+     AND %[5]s%[7]s
     JOIN entities far
       ON far.id = (%[3]s)
      AND far.project_id = $1
     WHERE w.depth < %[6]s
       AND NOT w.closed
-)`, w.Name, seed, far, types, near, maxDepth)
+)`, w.Name, seed, far, types, near, maxDepth, edge)
 
 	// The wrapper is where MinDepth, the ordering and the row cap live,
 	// because none of them may prune the recursion: a walk with min 2 has
@@ -374,12 +409,34 @@ func WalkCTE(w Walk) (string, []any) {
 	return body, args
 }
 
+// Renumber shifts a statement WalkCTE produced up by offset so it can be
+// spliced into a larger one, **leaving $1 exactly where it is**.
+//
+// $1 is the project id in everything this package emits, and it is the
+// project id in internal/views' statements too, so the two agree on that
+// one position and the id is bound once rather than twice. That is not a
+// convenience: `project_id = $1` on every table reference is the shape
+// both packages' isolation guards assert as text, and a splice that
+// renumbered $1 into $9 would leave those guards asserting a filter that
+// no longer exists under the name they look for.
+//
+// It is exported for exactly one caller shape -- a compiler that owns the
+// outer statement and wrote its own $1 as the same project id -- and it
+// checks nothing, because it cannot: the caller is the only side that
+// knows what its $1 holds. internal/views asserts the identity itself,
+// in builder.adopt, rather than trusting this comment.
+func Renumber(sql string, offset int) string { return shift(sql, offset, 2) }
+
 // renumber shifts a seed statement's $1..$n up by offset, so a caller can
 // write its seed with its own numbering. It rewrites only $N tokens and
 // leaves everything else alone; a seed containing a literal "$1" inside a
 // string would be rewritten, which is why SeedSQL is documented as the
 // caller's own SQL with no caller text in it.
-func renumber(sql string, offset int) string {
+func renumber(sql string, offset int) string { return shift(sql, offset, 1) }
+
+// shift is the renumbering both spellings share: every $N with N >= from
+// moves up by offset, and everything else is copied through.
+func shift(sql string, offset, from int) string {
 	var b strings.Builder
 	for i := 0; i < len(sql); i++ {
 		if sql[i] != '$' {
@@ -398,7 +455,10 @@ func renumber(sql string, offset int) string {
 		for _, c := range sql[i+1 : j] {
 			n = n*10 + int(c-'0')
 		}
-		fmt.Fprintf(&b, "$%d", n+offset)
+		if n >= from {
+			n += offset
+		}
+		fmt.Fprintf(&b, "$%d", n)
 		i = j - 1
 	}
 	return b.String()

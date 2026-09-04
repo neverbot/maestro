@@ -853,3 +853,93 @@ func TestANegativeOrInvertedBoundPanics(t *testing.T) {
 		graph.WalkCTE(w)
 	}
 }
+
+// TestAnEdgePredicateIsAppliedInsideTheRecursion is the test that says
+// where the caller's own condition on a relation belongs.
+//
+// The fixture is a chain a -> b -> c and the predicate excludes the first
+// edge. Inside the recursion, that edge is never followed and *neither* b
+// nor c comes back. Applied to the walk's output instead -- which is
+// where a caller could plausibly have put it, beside the to_type and
+// where filters that do live outside -- b would be filtered out and c
+// would still be reached and returned, a node the caller can only have
+// arrived at through an edge it said not to follow. So the control here
+// is not "the predicate narrows the answer" but the specific node c, the
+// one that separates the two placements.
+func TestAnEdgePredicateIsAppliedInsideTheRecursion(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pool := testutil.NewPool(t)
+	edges := [][2]int{{0, 1}, {1, 2}} // a -> b -> c
+	f := seedGraph(t, ctx, pool, "edgepred", 3, edges)
+	rels := relationIDs(t, ctx, pool, f, edges)
+
+	base := graph.Walk{
+		Name: "w", ProjectID: f.projectID,
+		SeedSQL: seedWalk, SeedArgs: []any{f.projectID, f.ids[0]},
+		RelationTypeIDs: []uuid.UUID{f.relTypeID},
+		Direction:       graph.Out, MinDepth: 1, MaxDepth: 5, MaxRows: 100,
+	}
+	// The positive control, in the same test: with no predicate the walk
+	// reaches both. Without it, an empty answer for any other reason --
+	// a broken seed, a lost relation type -- would read as the predicate
+	// working.
+	if got := nodeSet(run(t, ctx, pool, base)); len(got) != 2 || !got[f.ids[1]] || !got[f.ids[2]] {
+		t.Fatalf("positive control: the unfiltered walk must reach b and c, got %d nodes", len(got))
+	}
+
+	filtered := base
+	// The caller's own SQL over the alias r, numbered from $1 the way
+	// SeedSQL is, so this also exercises the renumbering of a second
+	// caller-supplied fragment.
+	filtered.EdgePredicate = "r.id <> $1"
+	filtered.EdgeArgs = []any{rels[0]}
+	got := nodeSet(run(t, ctx, pool, filtered))
+	if got[f.ids[1]] {
+		t.Errorf("b was reached over the relation the predicate excluded")
+	}
+	if got[f.ids[2]] {
+		t.Errorf("c came back, so the predicate filtered the walk's output rather than its " +
+			"recursion: c is reachable only through the excluded edge")
+	}
+	if len(got) != 0 {
+		t.Errorf("the excluded edge is the only way out of the seed, so the walk reaches "+
+			"nothing; got %d nodes", len(got))
+	}
+}
+
+// TestAnEdgePredicateIsParenthesisedSoItCannotSwallowTheTypeFilter: the
+// predicate is ANDed into a join that already carries the relation-type
+// filter, so an unparenthesised `a OR b` would make that filter optional.
+// Asserted as text and as rows: the walk below excludes the first edge or
+// nothing, which under a missing parenthesis would follow every relation
+// type there is.
+func TestAnEdgePredicateIsParenthesisedSoItCannotSwallowTheTypeFilter(t *testing.T) {
+	t.Parallel()
+	sql, _ := graph.WalkCTE(graph.Walk{
+		Name: "w", ProjectID: uuid.New(), SeedSQL: "SELECT id FROM entities WHERE false",
+		RelationTypeIDs: []uuid.UUID{uuid.New()}, Direction: graph.Out, MaxDepth: 2,
+		EdgePredicate: "r.id <> $1 OR true", EdgeArgs: []any{uuid.New()},
+	})
+	if !strings.Contains(sql, "AND (r.id <> $2 OR true)") {
+		t.Errorf("the edge predicate must be parenthesised and renumbered:\n%s", sql)
+	}
+}
+
+// TestRenumberLeavesTheProjectPlaceholderAlone pins the one thing
+// separating Renumber from the seed's own renumbering: $1 is the project
+// id in every statement this package emits and in the statement a caller
+// splices it into, so it is the one placeholder that must not move.
+// Every isolation guard on both sides looks for `project_id = $1` by
+// name.
+func TestRenumberLeavesTheProjectPlaceholderAlone(t *testing.T) {
+	t.Parallel()
+	got := graph.Renumber("a.project_id = $1 AND b = $2 AND c = ANY($10::uuid[]) AND d = '$'", 4)
+	want := "a.project_id = $1 AND b = $6 AND c = ANY($14::uuid[]) AND d = '$'"
+	if got != want {
+		t.Errorf("Renumber:\n got %s\nwant %s", got, want)
+	}
+	if same := graph.Renumber("$1 $2", 0); same != "$1 $2" {
+		t.Errorf("an offset of zero must change nothing, got %q", same)
+	}
+}

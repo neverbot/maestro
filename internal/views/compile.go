@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/graph"
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
@@ -18,8 +19,8 @@ import (
 // — does not. `b.write(set.Name)` therefore does not compile, and turning
 // a caller's value into statement text requires spelling `frag(...)`,
 // which is one grep and one review comment away from being caught.
-// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere reads this
-// file's own syntax tree and refuses a conversion outside the four
+// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere reads every
+// non-test file of this package and refuses a conversion outside the five
 // helpers below, so the guard is a test rather than a habit.
 type frag string
 
@@ -64,6 +65,42 @@ func (b *builder) bind(v any) frag {
 	return frag(fmt.Sprintf("$%d", len(b.args)))
 }
 
+// adopt splices the statement internal/graph wrote for one bounded walk
+// into this one, and returns its CTE bodies as a fragment.
+//
+// **It is the one route by which text this package did not write becomes
+// statement text**, and it is narrow on purpose: it takes a graph.Walk
+// rather than a string, so the only thing it can convert is
+// graph.WalkCTE's own output. What that output contains beyond graph's
+// own literals is the seed and the edge predicate this builder handed it,
+// both already fragments, and its values are bind arguments.
+//
+// **The renumbering.** WalkCTE numbers its arguments from $1 and puts the
+// project id there, which is where this statement already keeps it, so
+// $1 maps onto $1 and everything above it moves to the end of this
+// builder's argument list. The identity of $1 is *checked* rather than
+// trusted: a walk compiled for another project, or a builder whose $1 is
+// not the project id, would otherwise emit `project_id = $1` filters
+// against some unrelated value — the wrong-answer-without-an-error class
+// this project keeps producing, and here it would be a wrong answer about
+// which game a picture came from.
+func (b *builder) adopt(w graph.Walk) (frag, error) {
+	sql, args := graph.WalkCTE(w)
+	if len(b.args) == 0 || b.args[0] != any(w.ProjectID) {
+		return "", fmt.Errorf("views: this statement's $1 is not the project id the walk " +
+			"was compiled for, so its project filters would read the wrong argument")
+	}
+	if len(args) == 0 || args[0] != any(w.ProjectID) {
+		return "", fmt.Errorf("views: internal/graph no longer binds the project id at $1, " +
+			"so a spliced walk cannot share this statement's $1")
+	}
+	// $1 stays; args[1] becomes $(len+1), which is $(2 + offset) with
+	// offset one below the current count.
+	offset := len(b.args) - 1
+	b.args = append(b.args, args[1:]...)
+	return frag(graph.Renumber(sql, offset)), nil
+}
+
 // sprintf is fmt.Sprintf with a fragment format and fragment arguments,
 // so nothing but statement text this package produced can be
 // interpolated. Its format string is an untyped constant at every call
@@ -93,10 +130,15 @@ func cteName(prefix frag, i int) frag {
 	return frag(fmt.Sprintf("%s%d", prefix, i))
 }
 
-// The two CTE prefixes and the two collection points, spelled once.
+// The three CTE prefixes and the two collection points, spelled once.
 const (
 	seedPrefix frag = "s"
 	stepPrefix frag = "t"
+	// walkPrefix names the CTEs internal/graph emits for a multi-hop
+	// step. It is a third prefix rather than the step's own name with a
+	// suffix so that no generated name can ever collide with another:
+	// "t1_w" is a name a step called t1_w would also want.
+	walkPrefix frag = "w"
 	nodeRows   frag = "node_rows"
 	edgeRows   frag = "edge_rows"
 )
@@ -118,12 +160,16 @@ type compileOptions struct {
 // TestEveryTableReferenceIsProjectFiltered asserts it as text.
 //
 // **What it does not do yet**, so this comment does not claim a compiler
-// that is finished: a traversal step deeper than one hop is refused
-// rather than emitted (Task 8 routes it through internal/graph), the
-// projection's label, colour and grouping attributes are resolved but not
-// applied (Task 9), and an edge entry's label_from is not read. Each of
-// those is a refusal or a documented absence, never a silently wrong answer,
-// except the projection, which is an absence a designer can see.
+// that is finished: the projection's label, colour and grouping
+// attributes are resolved but not applied (Task 9), and an edge entry's
+// label_from is not read. Both are documented absences a designer can
+// see, never a silently wrong answer.
+//
+// A traversal step deeper than one hop is emitted through
+// internal/graph's WalkCTE — see walk() — which owns the recursion, its
+// project filter, its path guard and its depth bound. That package's
+// arguments are spliced in by builder.adopt, which is why $1 means the
+// project id in the walk's own text as well as in this compiler's.
 //
 // **What the emitted statement costs.** entities.fields is indexed by
 // `gin (fields jsonb_path_ops)`, which serves containment and nothing
@@ -143,7 +189,7 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 	}
 	b := &builder{}
 	b.bind(projectID) // $1, referenced by every clause
-	c := &compiler{b: b, r: r, opts: opts, cte: map[string]cteRef{}}
+	c := &compiler{b: b, r: r, projectID: projectID, opts: opts, cte: map[string]cteRef{}}
 
 	var ctes []frag
 	for i := range r.Sets {
@@ -187,7 +233,18 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 	// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
 	// asserts this line as text, because deleting it leaves the
 	// behavioural half of that test green.
-	b.write(" e\nORDER BY 1, 11, 2")
+	b.write(" e")
+	// The depth arm: zero rows or one, and the one says that at least one
+	// walk had a hop left to make when its depth bound stopped it. It is a
+	// statement-level fact rather than a property of any node, so it comes
+	// back as its own row rather than as a column repeated on every other
+	// one — and a query with no multi-hop step emits no arm at all, which
+	// is why a flat query cannot report a depth it never measured.
+	if len(c.probes) > 0 {
+		b.write(sprintf("\nUNION ALL\nSELECT '%s' AS kind, %s\nWHERE %s",
+			depthTruncatedKind, nullColumns, joinFrags(c.probes, " OR ")))
+	}
+	b.write("\nORDER BY 1, 11, 2")
 	return b.sql.String(), b.args, nil
 }
 
@@ -202,10 +259,33 @@ type cteRef struct {
 
 // compiler carries the state one Compile call threads through its parts.
 type compiler struct {
-	b    *builder
-	r    *Resolved
-	opts compileOptions
-	cte  map[string]cteRef
+	b         *builder
+	r         *Resolved
+	projectID uuid.UUID
+	opts      compileOptions
+	cte       map[string]cteRef
+	// probes are the "is there a hop past the depth this step asked for"
+	// tests, one per multi-hop step. They are collected here and emitted
+	// as one arm of the final statement, so a query with no walk in it
+	// carries no probe at all rather than an EXISTS over nothing.
+	probes []frag
+}
+
+// subPredicate compiles a predicate against a fresh argument list, so
+// what comes back is numbered from $1 and can be handed to
+// internal/graph, which renumbers it into the outer statement. Compiled
+// against the outer builder instead, its placeholders would be
+// renumbered a second time by adopt and point at the wrong values.
+func (c *compiler) subPredicate(sc leafScope, p *ResolvedPredicate) (frag, []any, error) {
+	outer := c.b
+	sub := &builder{}
+	c.b = sub
+	sql, err := c.predicate(sc, p)
+	c.b = outer
+	if err != nil {
+		return "", nil, err
+	}
+	return sql, sub.args, nil
 }
 
 // fieldsOf is the jsonb payload column, or a typed null when the run did
@@ -270,8 +350,8 @@ func (c *compiler) selector(i int) (frag, error) {
 		return "", err
 	}
 	where = append(where, predicate)
-	return sprintf(`%s (id, set_name) AS (
-    SELECT e.id, %s::text
+	return sprintf(`%s (id, set_name, depth) AS (
+    SELECT e.id, %s::text, 0
     FROM entities e
     WHERE %s
 )`, name, c.b.bind(set.Name), joinFrags(where, "\n      AND ")), nil
@@ -287,21 +367,16 @@ func (c *compiler) selector(i int) (frag, error) {
 //	    WHERE (node predicate)
 //	)
 //
-// A step deeper than one hop is **refused**, with the pointer that names
-// it, rather than emitted as a one-hop walk that would answer the wrong
-// question in silence. Task 8 replaces the refusal with a
-// graph.WalkCTE call.
+// A step deeper than one hop is **not** emitted here: it goes through
+// walk() and internal/graph, which owns the recursion, its project
+// filter, its path guard and its depth bound. Emitting it here as a
+// second, hand-written recursion is the drift internal/graph was
+// extracted to prevent.
 func (c *compiler) step(i int) (frag, error) {
 	step := c.r.Steps[i]
 	name := cteName(stepPrefix, i)
 	if step.Name != "" {
 		c.cte[step.Name] = cteRef{name: name, step: true}
-	}
-	if step.Step.Depth != nil && step.Step.Depth.Max > 1 {
-		return "", invalidQuery(pointer("traverse", i, "depth"),
-			fmt.Sprintf("asks for %d hops and this build walks one: multi-hop traversal is "+
-				"not implemented yet — use depth 1, or several steps chained by \"from\"",
-				step.Step.Depth.Max))
 	}
 	from, ok := c.cte[step.FromSet]
 	if !ok {
@@ -310,6 +385,16 @@ func (c *compiler) step(i int) (frag, error) {
 		return "", invalidQuery(pointer("traverse", i, "from"),
 			fmt.Sprintf("no set named %q was compiled before this step", step.FromSet))
 	}
+	if step.Step.Depth != nil && step.Step.Depth.Max > 1 {
+		return c.walk(i, name, from)
+	}
+	return c.hop(i, name, from)
+}
+
+// hop emits a step of exactly one hop as a plain join. It is the shape
+// above; walk() is the shape for anything deeper.
+func (c *compiler) hop(i int, name frag, from cteRef) (frag, error) {
+	step := c.r.Steps[i]
 
 	var near, far frag
 	switch step.Step.Direction {
@@ -342,8 +427,8 @@ func (c *compiler) step(i int) (frag, error) {
 		toType = sprintf("\n     AND far.entity_type_id = ANY(%s::uuid[])",
 			c.b.bind(step.ToTypeIDs))
 	}
-	return sprintf(`%s (id, set_name, from_id, via_relation) AS (
-    SELECT %s, %s::text, near.id, r.id
+	return sprintf(`%s (id, set_name, from_id, via_relation, depth) AS (
+    SELECT %s, %s::text, near.id, r.id, near.depth + 1
     FROM %s near
     JOIN relations r
       ON r.project_id = $1
@@ -358,17 +443,178 @@ func (c *compiler) step(i int) (frag, error) {
 		near, edgeWhere, far, c.invalidFilter("far"), toType, nodeWhere), nil
 }
 
+// walkDirection maps this language's direction onto internal/graph's.
+//
+// It is a translation rather than a cast even though the three strings
+// are equal, because graph.WalkCTE **panics** on a direction it does not
+// know — rightly, since a direction it defaulted would answer a walk
+// backwards — and a panic is not how this package refuses a document.
+// The refusal is the one hop() gives, with the same pointer.
+func walkDirection(i int, d string) (graph.Direction, error) {
+	switch d {
+	case DirectionOut:
+		return graph.Out, nil
+	case DirectionIn:
+		return graph.In, nil
+	case DirectionAny:
+		return graph.Any, nil
+	}
+	return "", invalidQuery(pointer("traverse", i, "direction"),
+		fmt.Sprintf("must be %q, %q or %q (got %q)",
+			DirectionOut, DirectionIn, DirectionAny, d))
+}
+
+// walk emits a step of more than one hop, as the two CTEs
+// graph.WalkCTE produces plus one of this compiler's own reading them:
+//
+//	t0_w      the recursion
+//	t0_w_out  the depth bound, the ordering and the row cap
+//	t0        this step's own row shape, its output filters and its depth
+//
+// **Which filter goes inside the recursion and which outside is the whole
+// design of this function**, and the two are not interchangeable:
+//
+//   - edge_where is a condition on the relation each hop walks, so it is
+//     handed to graph.Walk as EdgePredicate and prunes the recursion. A
+//     relation the document excluded is a relation the walk must not
+//     follow; filtering it out of the *output* instead would still return
+//     every node reachable behind it.
+//   - to_type, where and the invalid-row exclusion are conditions on the
+//     entity a hop reached, and they are applied here, outside. A walk
+//     that pruned on them could not pass *through* a node of another type
+//     to reach one of the right type, which is a picture the language
+//     promises: "quests three steps up the prerequisite chain" does not
+//     stop at the zone in the middle.
+//
+// TestAnEdgeWhereFiltersTheHopsAWalkFollows and
+// TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows are the two sides.
+//
+// **The depth is absolute**, counted from the seed selector rather than
+// from this step's own start, which is what makes Stats.MaxDepthReached
+// answerable for a step that reads from another step. The walk counts
+// from its own seed, so the seed row's own depth is added back: path[1]
+// is the id the walk started from (Postgres arrays are 1-based), and the
+// from-set is grouped by id first so a node its own step reached twice
+// cannot multiply this step's rows.
+func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
+	step := c.r.Steps[i]
+	direction, err := walkDirection(i, step.Step.Direction)
+	if err != nil {
+		return "", err
+	}
+	// The edge predicate is compiled against its own argument list, so it
+	// arrives at graph.WalkCTE numbered from $1 like the seed and is
+	// renumbered there. Compiled into this builder instead, its
+	// placeholders would be renumbered a second time by adopt below.
+	var edgeWhere frag
+	var edgeArgs []any
+	if step.EdgeWhere != nil {
+		edgeWhere, edgeArgs, err = c.subPredicate(leafScope{alias: "r", edge: true}, step.EdgeWhere)
+		if err != nil {
+			return "", err
+		}
+	}
+	// The two CTE names are built here as fragments, from a constant
+	// prefix and an int, because this statement has to *reference* them
+	// and a name is the one thing in a statement that cannot be a bind
+	// parameter. graph.ReadFrom is asked for the second one rather than
+	// assumed, so a change to that package's naming convention is a
+	// refusal here instead of a statement referring to a CTE that no
+	// longer exists.
+	walkName := cteName(walkPrefix, i)
+	outName := walkName + "_out"
+	walk := graph.Walk{
+		Name:            string(walkName),
+		ProjectID:       c.projectID,
+		SeedSQL:         string(sprintf("SELECT id FROM %s", from.name)),
+		RelationTypeIDs: step.RelationTypeIDs,
+		Direction:       direction,
+		EdgePredicate:   string(edgeWhere),
+		EdgeArgs:        edgeArgs,
+		MinDepth:        step.Step.Depth.Min,
+		// One hop *past* what the step asked for, which is how
+		// Truncated.Depth is measured rather than inferred — the same
+		// cap + 1 mechanism capOf uses for the node and edge caps. The
+		// extra hop is dropped below and never reaches the picture; what
+		// it buys is the difference between "the chain ends here" and "the
+		// bound stopped here", which a designer cannot see any other way.
+		MaxDepth: step.Step.Depth.Max + 1,
+		// Four times the node cap, so a pathological branching factor
+		// cannot build a giant intermediate before the outer limit
+		// applies. Four rather than one because a walk legitimately
+		// visits a node at several depths before the outer DISTINCT
+		// collapses them.
+		MaxRows: c.r.Limits.MaxNodes * 4,
+	}
+	if graph.ReadFrom(walk) != string(outName) {
+		return "", fmt.Errorf("views: internal/graph reads its walk from %q and this "+
+			"statement refers to %q", graph.ReadFrom(walk), outName)
+	}
+	body, err := c.b.adopt(walk)
+	if err != nil {
+		return "", err
+	}
+	maxDepth := c.b.bind(step.Step.Depth.Max)
+	// The probe: a row the recursion produced past the depth the step
+	// asked for. It reads the *recursion* rather than the wrapper because
+	// the wrapper's row cap is ORDER BY depth, so the deepest rows are the
+	// first it drops — a walk that hit MaxRows would otherwise report a
+	// depth truncation it can no longer see. A walk that hit the row cap
+	// reports a node truncation instead.
+	c.probes = append(c.probes, sprintf("EXISTS (SELECT 1 FROM %s WHERE depth > %s)",
+		walkName, maxDepth))
+
+	nodeWhere, err := c.predicate(leafScope{alias: "far"}, step.Where)
+	if err != nil {
+		return "", err
+	}
+	var toType frag
+	if len(step.ToTypeIDs) > 0 {
+		toType = sprintf("\n     AND far.entity_type_id = ANY(%s::uuid[])",
+			c.b.bind(step.ToTypeIDs))
+	}
+	return sprintf(`%s,
+%s (id, set_name, from_id, via_relation, depth) AS (
+    SELECT w.id, %s::text, w.from_id, w.via_relation, src.depth + w.depth
+    FROM %s w
+    JOIN (SELECT id, MIN(depth) AS depth FROM %s GROUP BY id) src ON src.id = w.path[1]
+    JOIN entities far
+      ON far.id = w.id
+     AND far.project_id = $1%s%s
+    WHERE w.depth <= %s
+      AND %s
+)`, body, name, c.b.bind(step.Name), outName, from.name,
+		c.invalidFilter("far"), toType, maxDepth, nodeWhere), nil
+}
+
 // The column list both collection points produce, so the two arms of the
 // final UNION ALL line up. A node fills the identity columns and leaves
 // the endpoints null; an edge does the opposite.
+// depth is last so that rank stays the eleventh column and the final
+// ORDER BY does not move. It is the hops from a seed selector to the row,
+// and it is what Stats.MaxDepthReached is read off: a walk that asked for
+// four hops and found two must report two, which the declared depth of
+// the step cannot say. Only node rows fill it — an edge's depth is the
+// step's, and nothing reads it, so a from_step arm carries its step's
+// depth and a between arm carries null.
 const rowColumns frag = "(id, key, name, type_key, set_name, role, " +
-	"source_id, target_id, fields, rank)"
+	"source_id, target_id, fields, rank, depth)"
+
+// nullColumns is one row of typed nothings, spelled once because two
+// arms need it: the empty collection point below, and the depth arm of
+// the final statement, which carries no graph element at all. The types
+// have to be spelled, because a UNION of two untyped nulls has no type.
+const nullColumns frag = "NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, " +
+	"NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer"
 
 // emptyRow is the typed nothing a collection point emits when the
-// document asked for no nodes or no edges at all. Its column types have
-// to be spelled, because a UNION of two untyped nulls has no type.
-const emptyRow frag = "SELECT NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, " +
-	"NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer WHERE false"
+// document asked for no nodes or no edges at all.
+const emptyRow frag = "SELECT " + nullColumns + " WHERE false"
+
+// depthTruncatedKind is the first column of the row that says a walk was
+// cut short by its depth bound. It is not a graph element, so it is
+// neither "node" nor "edge"; execute.go reads it and sets the flag.
+const depthTruncatedKind frag = "depth_truncated"
 
 // capOf is the body both collection points carry: the arms, deduplicated
 // by id, ordered the way the result is, and cut at one row more than the
@@ -410,7 +656,7 @@ func (c *compiler) capOf(arms frag, limit int) frag {
         FROM (
     %s
         ) AS all_rows %s
-        ORDER BY all_rows.id, all_rows.rank
+        ORDER BY all_rows.id, all_rows.rank, all_rows.depth
     ) AS capped
     ORDER BY capped.rank, capped.id
     LIMIT %s`, arms, rowColumns, c.b.bind(limit+1))
@@ -429,12 +675,12 @@ func (c *compiler) nodeUnion() (frag, error) {
 				fmt.Sprintf("no set named %q is declared", entry.Set))
 		}
 		arms = append(arms, sprintf(`SELECT e.id, e.key, e.name, et.key, %s.set_name, %s::text,
-           NULL::uuid, NULL::uuid, %s, %s::integer
+           NULL::uuid, NULL::uuid, %s, %s::integer, %s.depth
     FROM %s
     JOIN entities e ON e.id = %s.id AND e.project_id = $1
     JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1`,
 			ref.name, c.b.bind(entry.Role), c.fieldsOf("e"), c.b.bind(i),
-			ref.name, ref.name))
+			ref.name, ref.name, ref.name))
 	}
 	if len(arms) == 0 {
 		arms = append(arms, emptyRow)
@@ -483,11 +729,11 @@ func (c *compiler) edge(i int) (frag, error) {
 					spec.Spec.FromStep))
 		}
 		return sprintf(`SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, %s, %s::integer
+           r.source_id, r.target_id, %s, %s::integer, %s.depth
     FROM %s
     JOIN relations r ON r.id = %s.via_relation AND r.project_id = $1
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1`,
-			fields, rank, ref.name, ref.name), nil
+			fields, rank, ref.name, ref.name, ref.name), nil
 	}
 
 	side := func(j int) (frag, error) {
@@ -531,7 +777,7 @@ func (c *compiler) edge(i int) (frag, error) {
 				DirectionOut, DirectionIn, DirectionAny, spec.Spec.Direction))
 	}
 	return sprintf(`SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, %s, %s::integer
+           r.source_id, r.target_id, %s, %s::integer, NULL::integer
     FROM relations r
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
     WHERE r.project_id = $1

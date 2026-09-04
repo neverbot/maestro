@@ -134,24 +134,38 @@ func TestAMisspelledTypeNameIsRefusedRatherThanDrawnAsNothing(t *testing.T) {
 	}
 }
 
-// TestAMultiHopStepIsRefusedUntilTheWalkArrives keeps this build from
-// answering a depth-3 question with a depth-1 answer, which is the
-// wrong-answer-without-an-error class this repository keeps producing.
-// Task 8 replaces the refusal with graph.WalkCTE and deletes this test.
-func TestAMultiHopStepIsRefusedUntilTheWalkArrives(t *testing.T) {
+// TestAMultiHopStepEmitsARecursionRatherThanASecondJoin replaces the
+// refusal this build carried until the walk arrived. The refusal existed
+// so that a depth-3 question could not be answered with a depth-1 answer
+// and no error; what keeps that from happening now is that the step is
+// compiled by internal/graph, and this asserts it as text — a compiler
+// that quietly emitted its own one-hop join for a depth-3 step would
+// still return rows, and only the shape of the statement says which
+// question was asked.
+func TestAMultiHopStepEmitsARecursionRatherThanASecondJoin(t *testing.T) {
 	g, _ := newGame(t)
-	r, err := g.views.Resolve(t.Context(), g.projectID,
-		mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
-			"traverse":[{"from":"q","via":"requires","depth":3,"as":"chain"}]}`))
-	if err != nil {
-		t.Fatalf("a multi-hop query resolves; it is the compiler that cannot emit it: %v", err)
+	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"requires","depth":3,"as":"chain"}]}`)
+	for _, want := range []string{
+		"w0 (id, depth, path, via_relation, from_id, closed) AS (", // graph's own recursion
+		"UNION ALL",     // the recursive term
+		"NOT w.closed",  // its path guard
+		"w0_out AS (",   // the wrapper that bounds it
+		"FROM w0_out w", // and this compiler reading from it
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("a multi-hop step is walked by internal/graph, and %q is missing:\n%s",
+				want, sql)
+		}
 	}
-	_, _, err = Compile(r, g.projectID)
-	oneProblem(t, err, "/traverse/0/depth", "multi-hop traversal is not implemented yet")
-
-	// The control: one hop compiles.
-	compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
+	// The control: one hop is still a plain join, with no recursion at
+	// all. Routing a neighbour query through a recursive CTE would be a
+	// cost nothing asked for.
+	one, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 		"traverse":[{"from":"q","via":"requires","depth":1,"as":"chain"}]}`)
+	if strings.Contains(one, "w0") {
+		t.Errorf("a one-hop step is a join, not a walk:\n%s", one)
+	}
 }
 
 // TestAnEdgeEntryNamingASelectorIsRefused: a selector walks no relation,

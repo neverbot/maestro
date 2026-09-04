@@ -141,11 +141,12 @@ func TestInvalidRowsAreExcludedUnlessAskedFor(t *testing.T) {
 // §3.1 is verbatim: the fixture is that example's own game. The other two
 // are the *shapes* of §3.2 and §3.3 mapped onto the same vocabulary,
 // because their own types — licence, championship, room, ability — are
-// not declared here and §3.2's `depth: {min:1,max:4}` is Task 8's, not
-// this build's. What each keeps is the structure the golden file exists
-// to freeze: a query with only between-edges and no traversal at all, and
-// a query whose steps branch from one seed into two sets with three edge
-// entries.
+// not declared here. What each keeps is the structure the golden file
+// exists to freeze: a query with only between-edges and no traversal at
+// all, and a query whose steps branch from one seed into three sets with
+// three edge entries, one of them §3.2's own `depth: {min:1,max:4}` —
+// which is the only golden file holding a recursion, its edge predicate
+// and the renumbering that splices both into the statement around them.
 var workedExamples = []struct {
 	name  string
 	query string
@@ -193,12 +194,16 @@ var workedExamples = []struct {
 	  "traverse": [
 	    { "from": "start", "via": "available_to", "direction": "in",
 	      "to_type": "quest", "depth": 1, "as": "quests" },
+	    { "from": "quests", "via": "requires", "direction": "out",
+	      "to_type": "quest", "depth": { "min": 1, "max": 4 }, "as": "chain",
+	      "edge_where": { "field": "@type", "op": "eq", "value": "requires" } },
 	    { "from": "quests", "via": "takes_place_in", "direction": "out",
 	      "to_type": "zone", "depth": 1, "as": "zones" }
 	  ],
-	  "nodes": [ { "set": "start", "role": "seed" }, { "set": "quests" }, { "set": "zones" } ],
-	  "edges": [ { "from_step": "quests" }, { "from_step": "zones" },
-	             { "via": "requires", "between": ["quests", "quests"] } ],
+	  "nodes": [ { "set": "start", "role": "seed" }, { "set": "quests" },
+	             { "set": "chain" }, { "set": "zones" } ],
+	  "edges": [ { "from_step": "quests" }, { "from_step": "chain" },
+	             { "from_step": "zones" } ],
 	  "project": { "label": "@name", "color_by": "@type", "group_by": "@type" },
 	  "limits": { "max_depth": 4, "max_nodes": 800 }
 	}`},
@@ -259,7 +264,8 @@ func TestTheWorkedExamplesCompileToTheseStatements(t *testing.T) {
 // into a statement is an explicit `frag(...)`. This test reads the whole
 // package's syntax tree and refuses that conversion outside the four
 // helpers that build placeholders, names and formats from things a
-// caller cannot reach.
+// caller cannot reach, plus the one that adopts internal/graph's own
+// statement.
 //
 // **It reads every non-test file in the package, not compile.go alone**,
 // and it closes the four routes a one-file walk over function bodies
@@ -285,6 +291,11 @@ func TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere(t *testing.T) {
 		"sprintf":   true, // a fragment format over fragment arguments
 		"joinFrags": true, // fragments joined by a fragment
 		"cteName":   true, // a constant prefix and an int
+		// The one route by which text this package did not write becomes
+		// statement text: internal/graph's own walk, spliced in. It takes
+		// a graph.Walk rather than a string, so what it converts is
+		// WalkCTE's output and nothing else — see builder.adopt.
+		"adopt": true,
 	}
 	// The two methods of sqlText, which are the only code that may touch
 	// the raw strings.Builder underneath a statement.

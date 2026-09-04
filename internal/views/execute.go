@@ -66,11 +66,13 @@ type Edge struct {
 // numbers it cannot be answered. DurationMS is also the measurement this
 // plan's open question O2 (indexed jsonb fields) is to be re-argued with.
 //
-// MaxDepthReached is derived from the *declared* depth of the sets that
-// contributed a node, not from a depth column: every step this build
-// compiles is one hop, so the two are the same number. Task 8's recursive
-// steps have to read it off graph.WalkCTE's own depth column instead, and
-// this comment is the note that says so rather than a silence.
+// MaxDepthReached is **measured, not declared**: every row the statement
+// returns carries the hops from a seed selector to the node it drew, a
+// selector's own rows being zero, and this is the largest of them. A step
+// that asked for four hops and found two reports two — the declared depth
+// cannot say that, which is why the arithmetic this used to be is gone.
+// A set that drew no node contributes no depth, because a depth is only
+// ever read off a row that came back.
 type Stats struct {
 	Nodes           int   `json:"nodes"`
 	Edges           int   `json:"edges"`
@@ -100,11 +102,29 @@ type Stats struct {
 // too, and a renderer has to tolerate it regardless of this flag. A
 // renderer that wants a closed graph filters on Nodes itself.
 //
-// **Depth is still nobody's**, and false here means "not measured". Every
-// step this build compiles is one hop, so no run can exceed max_depth;
-// Task 8's recursive walk is what can, and it is what sets this. It is
-// declared rather than omitted because the envelope's shape is a contract
-// Task 15's tool description is generated against.
+// **Depth is detected the same way**, and by the same cap + 1 idea: each
+// multi-hop step is walked one hop *past* what it asked for, the extra
+// hop is dropped before the picture is built, and the flag is whether
+// there was one. So it is exact about the traversal — a chain that ends
+// exactly at the bound is not flagged, where "the deepest node sits at
+// max_depth" would report a whole picture partial.
+//
+// Two things it deliberately does not say, because a flag that means two
+// things means neither:
+//
+//   - It is about the *walk*, not about the picture. A hop the bound
+//     refused whose far entity the step's to_type or where would have
+//     filtered out still sets it: the traversal was cut short, and
+//     whether the next node would have been drawn is a different
+//     question from whether there was one.
+//   - A **one-hop step is not probed**, and cannot set it. A step that
+//     asks for exactly one hop is a neighbour query, not a bounded
+//     traversal, and probing it would cost a second scan of relations on
+//     the common case to tell a designer something they already know.
+//
+// A walk that hit its row cap can also lose the evidence — the walk's own
+// cap keeps the shallowest rows, so the probe's are the first to go. Such
+// a run reports a node truncation instead, which is the larger fact.
 type Truncated struct {
 	Nodes bool `json:"nodes"`
 	Edges bool `json:"edges"`
@@ -196,20 +216,37 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	// stay as the second half of that rule — the one that decides which
 	// set a node belongs to — and no longer collapse anything.
 	nodeRowsRead, edgeRowsRead := 0, 0
+	// The deepest node that came back, in hops from a seed selector. It is
+	// read off the statement rather than derived from the query's shape:
+	// a walk that asked for four hops and found two reached two, and only
+	// the rows know which.
+	deepest := 0
 	collect := func(rows pgx.Rows) error {
 		for rows.Next() {
 			var (
 				kind                        string
-				id                          uuid.UUID
+				id                          *uuid.UUID
 				key, name, typeKey, setName *string
 				role                        *string
 				source, target              *uuid.UUID
 				fields                      []byte
-				rank                        *int32
+				rank, depth                 *int32
 			)
+			// id is a pointer because the depth row below carries no graph
+			// element at all: it is one row of typed nothings whose only
+			// content is that it exists.
 			if err := rows.Scan(&kind, &id, &key, &name, &typeKey, &setName, &role,
-				&source, &target, &fields, &rank); err != nil {
+				&source, &target, &fields, &rank, &depth); err != nil {
 				return fmt.Errorf("scan a view row: %w", err)
+			}
+			if kind == string(depthTruncatedKind) {
+				// A walk had a hop left to make when its depth bound
+				// stopped it. See Truncated.Depth.
+				result.Truncated.Depth = true
+				continue
+			}
+			if id == nil {
+				return fmt.Errorf("views: a %s row came back without an id", kind)
 			}
 			payload, err := decodeFields(fields)
 			if err != nil {
@@ -229,12 +266,15 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				// Postgres happened to return.
 				// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
 				// pins both halves, and says which of the two the ordering is.
-				if seenNode[id] {
+				if seenNode[*id] {
 					continue
 				}
-				seenNode[id] = true
+				seenNode[*id] = true
+				if depth != nil && int(*depth) > deepest {
+					deepest = int(*depth)
+				}
 				result.Nodes = append(result.Nodes, Node{
-					ID:     id,
+					ID:     *id,
 					Key:    text(key),
 					Type:   text(typeKey),
 					Name:   text(name),
@@ -244,11 +284,11 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				})
 			case "edge":
 				edgeRowsRead++
-				if seenEdge[id] {
+				if seenEdge[*id] {
 					continue
 				}
-				seenEdge[id] = true
-				edge := Edge{ID: id, Type: text(typeKey), Fields: payload}
+				seenEdge[*id] = true
+				edge := Edge{ID: *id, Type: text(typeKey), Fields: payload}
 				if source != nil {
 					edge.Source = *source
 				}
@@ -257,7 +297,8 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				}
 				result.Edges = append(result.Edges, edge)
 			default:
-				return fmt.Errorf("views: a result row is a node or an edge, got %q", kind)
+				return fmt.Errorf("views: a result row is a node, an edge or a depth "+
+					"report, got %q", kind)
 			}
 		}
 		return nil
@@ -286,7 +327,7 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	result.Stats = Stats{
 		Nodes:           len(result.Nodes),
 		Edges:           len(result.Edges),
-		MaxDepthReached: maxDepthReached(&forRun, result.Nodes),
+		MaxDepthReached: deepest,
 		DurationMS:      time.Since(started).Milliseconds(),
 	}
 	return result, nil
@@ -369,35 +410,6 @@ func sortedKeys(m map[string]any) []string {
 		}
 	}
 	return out
-}
-
-// maxDepthReached is how many hops from a seed the furthest node that
-// came back sits at.
-//
-// It is computed from the query's own shape rather than from the rows,
-// which is exact only because every step this build compiles is one hop:
-// a set's depth is its source set's depth plus that step's own, and a set
-// that contributed no node contributes no depth. Task 8's multi-hop steps
-// break that arithmetic and have to read the walk's depth column instead.
-func maxDepthReached(r *Resolved, nodes []Node) int {
-	depth := map[string]int{}
-	for _, set := range r.Sets {
-		depth[set.Name] = 0
-	}
-	for _, step := range r.Steps {
-		hops := 1
-		if step.Step.Depth != nil {
-			hops = step.Step.Depth.Max
-		}
-		depth[step.Name] = depth[step.FromSet] + hops
-	}
-	deepest := 0
-	for _, node := range nodes {
-		if d, ok := depth[node.Set]; ok && d > deepest {
-			deepest = d
-		}
-	}
-	return deepest
 }
 
 // The statement budget, in the two numbers Task 7's table gives. They are

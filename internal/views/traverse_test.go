@@ -250,6 +250,168 @@ func TestTruncatedDepthIsFlagged(t *testing.T) {
 	if flat := runQuery(t, g, `{"v":1,"from":[{"type":"quest"}]}`); flat.Truncated.Depth {
 		t.Errorf("a query with no traversal cannot be depth-truncated")
 	}
+	// **A one-hop step is the other unmeasured case, and it is observed
+	// here rather than left to the prose.** Truncated.Depth documents
+	// that a step asking for exactly one hop is a neighbour query and is
+	// not probed, so its false means "not measured" — indistinguishable
+	// from the measured false above, and the meaning is now per step. A
+	// test that covered only the no-traversal query left the one-hop rule
+	// asserted by nothing, so removing the `depth > 1` condition that
+	// routes a step through the walk would change this flag and no test
+	// would say so.
+	hop := runQuery(t, g, fmt.Sprintf(doc, 1))
+	if got := sortedKeysOf(hop); !equalStrings(got, []string{"c2"}) {
+		t.Fatalf("control: one hop from c1 is c2, got %v", got)
+	}
+	if hop.Truncated.Depth {
+		t.Errorf("a one-hop step is not probed, so it cannot report a depth truncation; "+
+			"c3, c4 and c5 lie past it and the flag stays false: %+v", hop.Truncated)
+	}
+}
+
+// clique seeds n quests with every pair related, keyed by prefix, and
+// returns their keys. A dense graph is the fixture two of this package's
+// truncation flags are wrong on and no chain or three-cycle can show:
+// simple paths through a clique keep existing long past the point where
+// they reach anything new.
+func clique(t *testing.T, g *game, prefix string, n int) []string {
+	t.Helper()
+	var keys []string
+	for i := 1; i <= n; i++ {
+		key := fmt.Sprintf("%s%d", prefix, i)
+		g.entity(t, "quest", key, key, nil)
+		keys = append(keys, key)
+	}
+	for i := range keys {
+		for j := i + 1; j < len(keys); j++ {
+			g.relate(t, "requires", "quest", keys[i], "quest", keys[j])
+		}
+	}
+	return keys
+}
+
+// TestACompletePictureOfADenseGraphIsNotDepthTruncated is the honest
+// half of Truncated.Depth.
+//
+// The probe asks whether there is a node **or an edge** past the bound
+// that the walk does not already hold within it. The weaker question —
+// "did the recursion produce a row past the bound" — is true of every
+// dense or cyclic graph at every bound, because a clique of six has
+// simple paths of every length up to five and they reach nothing new.
+// The whole graph came back, all six quests and all fifteen relations,
+// and the designer was told their picture had been cut short.
+//
+// The negative half is in the same test and is what keeps the fix from
+// being "never flag a dense graph": a chain hung off the clique puts a
+// genuinely unreachable quest one hop past the bound, and that must
+// flag while the deeper paths through the clique still do not.
+func TestACompletePictureOfADenseGraphIsNotDepthTruncated(t *testing.T) {
+	g, _ := newGame(t)
+	keys := clique(t, g, "k", 6)
+	// A tail: k6 -> t1 -> t2 -> t3 -> t4, so t4 is five hops from k1 and
+	// nothing shorter reaches it.
+	prev := keys[len(keys)-1]
+	for i := 1; i <= 4; i++ {
+		key := fmt.Sprintf("t%d", i)
+		g.entity(t, "quest", key, key, nil)
+		g.relate(t, "requires", "quest", prev, "quest", key)
+		prev = key
+	}
+	doc := `{"v":1,
+		"from":[{"type":"quest","keys":["k1"],"as":"start"}],
+		"traverse":[{"from":"start","via":"requires","direction":"any",
+		             "depth":{"min":1,"max":%d},"as":"w"}],
+		"nodes":[{"set":"start"},{"set":"w"}],
+		"edges":[{"from_step":"w"}],
+		"limits":{"max_depth":12}}`
+
+	// Four hops: t4 is one hop further and nothing else is missing.
+	cut := runQuery(t, g, fmt.Sprintf(doc, 4))
+	if !cut.Truncated.Depth {
+		t.Errorf("t4 is five hops from k1 and the bound is four, so the picture is "+
+			"genuinely cut short: %+v", cut.Truncated)
+	}
+	if got := sortedKeysOf(cut); equalStrings(got, []string{}) {
+		t.Fatalf("control: the four-hop picture must not be empty")
+	}
+
+	// Five hops: the whole graph — ten quests, and every one of the
+	// clique's fifteen relations plus the tail's four. Deeper simple
+	// paths still exist in their thousands and reach nothing new.
+	whole := runQuery(t, g, fmt.Sprintf(doc, 5))
+	want := []string{"k1", "k2", "k3", "k4", "k5", "k6", "t1", "t2", "t3", "t4"}
+	if got := sortedKeysOf(whole); !equalStrings(got, want) {
+		t.Fatalf("five hops reaches the whole graph, got %v", got)
+	}
+	if len(whole.Edges) != 19 {
+		t.Fatalf("the whole graph is fifteen clique edges and four tail edges, got %d",
+			len(whole.Edges))
+	}
+	if whole.Truncated.Depth {
+		t.Errorf("every node and every edge is drawn, so nothing is past the bound that "+
+			"the picture does not hold; the deeper paths through the clique reach "+
+			"nothing new: %+v", whole.Truncated)
+	}
+}
+
+// TestAWalkRowCapIsReportedRatherThanLosingContentSilently is the
+// walk's own row cap, read.
+//
+// internal/graph caps a walk at MaxRows rows and emits LIMIT MaxRows + 1
+// so that the caller can tell a full walk from a truncated one. A walk
+// row is one **edge traversal**, so four times max_nodes rows collapse to
+// far fewer than max_nodes nodes on a dense graph, and the node cap and
+// the edge cap both stay unfired while relations disappear from the
+// picture. Before this was read, the fixture below lost two of its
+// twenty-two edges at max_nodes 8, got all of them back at 9, and
+// reported {false false} for the element flags either way — silent
+// content loss, which this plan calls its worst failure mode.
+//
+// The control at a large cap is what makes the flag mean "the walk was
+// cut" rather than "this fixture is dense".
+func TestAWalkRowCapIsReportedRatherThanLosingContentSilently(t *testing.T) {
+	g, _ := newGame(t)
+	// a hangs off a seven-clique, so a walk from a spends its rows inside
+	// the clique: twenty-two relations, and 4 x 8 = 32 traversals is not
+	// enough of them.
+	keys := clique(t, g, "n", 7)
+	g.entity(t, "quest", "a", "A", nil)
+	g.relate(t, "requires", "quest", "a", "quest", keys[0])
+	doc := `{"v":1,
+		"from":[{"type":"quest","keys":["a"],"as":"start"}],
+		"traverse":[{"from":"start","via":"requires","direction":"any",
+		             "depth":{"min":1,"max":4},"as":"w"}],
+		"nodes":[{"set":"w"}],
+		"edges":[{"from_step":"w"}],
+		"limits":{"max_nodes":%d,"max_edges":1000,"max_depth":12}}`
+
+	// The control first, because it is what says the cap is the only
+	// difference: with room for every traversal the picture is whole and
+	// nothing is flagged.
+	whole := runQuery(t, g, fmt.Sprintf(doc, 5000))
+	if len(whole.Edges) != 22 {
+		t.Fatalf("control: the whole graph is twenty-two relations, got %d", len(whole.Edges))
+	}
+	if whole.Truncated.Nodes || whole.Truncated.Edges || whole.Truncated.Depth {
+		t.Fatalf("control: nothing is truncated at max_nodes 5000: %+v", whole.Truncated)
+	}
+
+	// And the cut: fewer edges than the graph holds, with neither cap
+	// reached — twenty-two relations is well under max_edges 1000, and
+	// the eight nodes are under max_nodes 8.
+	cut := runQuery(t, g, fmt.Sprintf(doc, 8))
+	if len(cut.Edges) >= 22 {
+		t.Fatalf("the walk's row cap must cut this picture for the flag to be about "+
+			"anything; got %d edges", len(cut.Edges))
+	}
+	if len(cut.Nodes) > 8 || len(cut.Edges) > 1000 {
+		t.Fatalf("neither element cap may be the thing that fired: %d nodes, %d edges",
+			len(cut.Nodes), len(cut.Edges))
+	}
+	if !cut.Truncated.Nodes || !cut.Truncated.Edges {
+		t.Errorf("a walk that hit its row cap handed back fewer traversals than the graph "+
+			"holds, and both element flags say so: %+v", cut.Truncated)
+	}
 }
 
 // TestAWalkStaysInsideOneGame is the isolation test, and it has to forge

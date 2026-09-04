@@ -150,8 +150,19 @@ func TestAMultiHopStepEmitsARecursionRatherThanASecondJoin(t *testing.T) {
 		"w0 (id, depth, path, via_relation, from_id, closed) AS (", // graph's own recursion
 		"UNION ALL",     // the recursive term
 		"NOT w.closed",  // its path guard
-		"w0_out AS (",   // the wrapper that bounds it
-		"FROM w0_out w", // and this compiler reading from it
+		"w0_out AS (", // the wrapper that bounds it
+		// And this compiler reading from it — through the row cap, which
+		// is the half that is not decoration: the wrapper returns one row
+		// past MaxRows so that a truncated walk is detectable, and a
+		// caller that read all of them would draw the overflow row and
+		// still have to report the truncation.
+		"FROM (SELECT * FROM w0_out LIMIT ",
+		// The overflow the cap leaves behind, read. A cap whose extra row
+		// nothing looks at is silent content loss: walk rows are edge
+		// traversals, so four times the node cap can collapse to far
+		// fewer nodes than the node cap and neither element cap fires.
+		"SELECT 'walk_truncated' AS kind",
+		"WHERE EXISTS (SELECT 1 FROM w0_out OFFSET ",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("a multi-hop step is walked by internal/graph, and %q is missing:\n%s",

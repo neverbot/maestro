@@ -92,6 +92,25 @@ type Stats struct {
 // directions — it is neither set for a graph that fits nor left unset for
 // one that did not.
 //
+// **A multi-hop step sets both of them together**, without either
+// collection point overflowing, when its walk hit the row cap
+// internal/graph applies for it (compiler.walk). A walk row is one edge
+// traversal, so a cap of four times max_nodes rows can collapse to a
+// handful of nodes: the picture is then short of content that neither
+// element cap can see. Which of the two it is short of — a node, an
+// edge, or an edge whose node another traversal also reached — the
+// statement cannot say, so both are set rather than a guess made.
+//
+// This is the one position where Nodes and Edges can over-report, and
+// the over-report cannot be removed: the walk hands back one row past
+// its cap and no more, so "a traversal was cut" is knowable and "the
+// picture is poorer for it" is not — the cut traversals may all have
+// reached nodes and edges the picture already holds. The alternative is
+// the silent loss this replaced, where content vanished with all three
+// flags false.
+// TestAWalkRowCapIsReportedRatherThanLosingContentSilently pins it, with
+// the same fixture under a larger cap as the control.
+//
 // **An edge's endpoints are not guaranteed to be in Nodes.** The two caps
 // are independent and the edge arms are collected from the sets, not from
 // the trimmed node list, so a node truncation leaves the edges that
@@ -105,9 +124,16 @@ type Stats struct {
 // **Depth is detected the same way**, and by the same cap + 1 idea: each
 // multi-hop step is walked one hop *past* what it asked for, the extra
 // hop is dropped before the picture is built, and the flag is whether
-// there was one. So it is exact about the traversal — a chain that ends
-// exactly at the bound is not flagged, where "the deepest node sits at
-// max_depth" would report a whole picture partial.
+// that hop found anything. So it is exact about the traversal — a chain
+// that ends exactly at the bound is not flagged, where "the deepest node
+// sits at max_depth" would report a whole picture partial.
+//
+// **"Found anything" means a node or an edge the walk does not already
+// hold within the bound**, not merely a row past it. On a dense or a
+// cyclic graph the rows past the bound never stop: a clique of six drawn
+// whole, every node and all fifteen edges, produced deeper simple paths
+// that reached nothing new, and the designer was told their complete
+// picture had been cut short. compiler.walk's probe is the predicate.
 //
 // Two things it deliberately does not say, because a flag that means two
 // things means neither:
@@ -121,10 +147,17 @@ type Stats struct {
 //     asks for exactly one hop is a neighbour query, not a bounded
 //     traversal, and probing it would cost a second scan of relations on
 //     the common case to tell a designer something they already know.
+//     So a false Depth on a query whose every step is one hop means "not
+//     measured", exactly as an all-false Truncated did before Task 8, and
+//     nothing but this paragraph says which — which is why
+//     TestTruncatedDepthIsFlagged observes the one-hop case rather than
+//     leaving it to the prose.
 //
-// A walk that hit its row cap can also lose the evidence — the walk's own
-// cap keeps the shallowest rows, so the probe's are the first to go. Such
-// a run reports a node truncation instead, which is the larger fact.
+// The walk's own row cap cannot hide the evidence: the probe reads the
+// recursion, not the wrapper the cap is applied to (compiler.walk says
+// so, and that is its stated reason). A run that hit the row cap reports
+// a node and an edge truncation as well, and the two flags are
+// independent — neither substitutes for the other.
 type Truncated struct {
 	Nodes bool `json:"nodes"`
 	Edges bool `json:"edges"`
@@ -240,9 +273,21 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				return fmt.Errorf("scan a view row: %w", err)
 			}
 			if kind == string(depthTruncatedKind) {
-				// A walk had a hop left to make when its depth bound
-				// stopped it. See Truncated.Depth.
+				// A walk had a node or an edge one hop past its bound
+				// that the picture does not already hold. See
+				// Truncated.Depth.
 				result.Truncated.Depth = true
+				continue
+			}
+			if kind == string(walkTruncatedKind) {
+				// A walk hit the row cap it carries internally, so it
+				// handed the statement a prefix of the traversals the
+				// graph holds. Both element flags, because the row it
+				// dropped carried a node and an edge and nothing can say
+				// which of the two the picture came up short of. See
+				// Truncated.Nodes.
+				result.Truncated.Nodes = true
+				result.Truncated.Edges = true
 				continue
 			}
 			if id == nil {
@@ -297,8 +342,8 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				}
 				result.Edges = append(result.Edges, edge)
 			default:
-				return fmt.Errorf("views: a result row is a node, an edge or a depth "+
-					"report, got %q", kind)
+				return fmt.Errorf("views: a result row is a node, an edge or a "+
+					"truncation report, got %q", kind)
 			}
 		}
 		return nil

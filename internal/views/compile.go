@@ -246,6 +246,15 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 		b.write(sprintf("\nUNION ALL\nSELECT '%s' AS kind, %s\nWHERE %s",
 			depthTruncatedKind, nullColumns, joinFrags(c.probes, " OR ")))
 	}
+	// The row arm, the same shape and for the same reason: a walk that
+	// hit the row cap internal/graph applies handed this statement fewer
+	// traversals than the graph holds, and neither the node cap nor the
+	// edge cap can see that — four times the node cap in *edge
+	// traversals* can collapse to a handful of nodes.
+	if len(c.rowProbes) > 0 {
+		b.write(sprintf("\nUNION ALL\nSELECT '%s' AS kind, %s\nWHERE %s",
+			walkTruncatedKind, nullColumns, joinFrags(c.rowProbes, " OR ")))
+	}
 	b.write("\nORDER BY 1, 11, 2")
 	return b.sql.String(), b.args, nil
 }
@@ -266,11 +275,19 @@ type compiler struct {
 	projectID uuid.UUID
 	opts      compileOptions
 	cte       map[string]cteRef
-	// probes are the "is there a hop past the depth this step asked for"
-	// tests, one per multi-hop step. They are collected here and emitted
-	// as one arm of the final statement, so a query with no walk in it
-	// carries no probe at all rather than an EXISTS over nothing.
+	// probes are the "is there a node or an edge past the depth this step
+	// asked for that the picture does not already hold" tests, one per
+	// multi-hop step. They are collected here and emitted as one arm of
+	// the final statement, so a query with no walk in it carries no probe
+	// at all rather than an EXISTS over nothing.
 	probes []frag
+	// rowProbes are the "did this walk's own row cap drop a traversal"
+	// tests, one per multi-hop step, emitted as their own arm. They are
+	// separate from probes because they answer a different question and
+	// set different flags: a depth truncation is a bound the designer
+	// declared, a row truncation is content the walk's internal cap threw
+	// away.
+	rowProbes []frag
 }
 
 // subPredicate compiles a predicate against a fresh argument list, so
@@ -498,9 +515,10 @@ func walkDirection(i int, d string) (graph.Direction, error) {
 // is the id the walk started from (Postgres arrays are 1-based).
 //
 // The from-set is grouped by id before that join, taking each seed's
-// shortest depth. **Nothing observes it**, and that is recorded rather
-// than dressed up as a correctness guard: removing the grouping leaves
-// the whole suite green, because capOf deduplicates by id with
+// shortest depth. **Only the golden file observes it** — removing the
+// grouping is red on testdata's expected statement and green everywhere
+// else — and that is recorded rather than dressed up as a correctness
+// guard: no behavioural test moves, because capOf deduplicates by id with
 // ORDER BY id, rank, depth and therefore keeps the shallowest row of a
 // node reached at two depths anyway. What it stops is this CTE holding
 // one row per *spelling* of its seed, which is work and not an answer.
@@ -531,6 +549,7 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 	// longer exists.
 	walkName := cteName(walkPrefix, i)
 	outName := walkName + "_out"
+	maxRows := c.r.Limits.MaxNodes * 4
 	walk := graph.Walk{
 		Name:      string(walkName),
 		ProjectID: c.projectID,
@@ -556,7 +575,16 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 		// applies. Four rather than one because a walk legitimately
 		// visits a node at several depths before the outer DISTINCT
 		// collapses them.
-		MaxRows: c.r.Limits.MaxNodes * 4,
+		//
+		// **The overflow row this asks for is read**, below, and it has
+		// to be: internal/graph emits LIMIT MaxRows + 1 precisely so a
+		// caller can tell a full walk from a truncated one, and a walk
+		// row is an edge traversal, so four times the node cap can
+		// collapse to far fewer nodes than the node cap — a picture
+		// short of content with the node and the edge cap both unfired.
+		// A cap whose overflow signal nothing reads is silent content
+		// loss, which is this plan's worst failure mode.
+		MaxRows: maxRows,
 	}
 	if graph.ReadFrom(walk) != string(outName) {
 		return "", fmt.Errorf("views: internal/graph reads its walk from %q and this "+
@@ -567,14 +595,41 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 		return "", err
 	}
 	maxDepth := c.b.bind(step.Step.Depth.Max)
-	// The probe: a row the recursion produced past the depth the step
-	// asked for. It reads the *recursion* rather than the wrapper because
-	// the wrapper's row cap is ORDER BY depth, so the deepest rows are the
-	// first it drops — a walk that hit MaxRows would otherwise report a
-	// depth truncation it can no longer see. A walk that hit the row cap
-	// reports a node truncation instead.
-	c.probes = append(c.probes, sprintf("EXISTS (SELECT 1 FROM %s WHERE depth > %s)",
-		walkName, maxDepth))
+	// **The depth probe: is there anything past the bound that the
+	// picture does not already hold?** Not "did the recursion produce a
+	// row past the bound", which is a different and much weaker question:
+	// on a dense or a cyclic graph deeper simple paths keep existing long
+	// after they stop reaching anything new, so a complete picture — every
+	// node and every edge of a clique, drawn — was reported cut short by
+	// its depth bound. The predicate below asks for a node **or an edge**
+	// past the bound that is not already inside it, which is the thing a
+	// designer reads the flag as meaning.
+	//
+	// It reads the *recursion* rather than the wrapper, on both sides of
+	// the comparison, because the wrapper applies MinDepth and the row
+	// cap: a node the walk passed through below MinDepth is a node it
+	// found, and re-finding it one hop past the bound is not new content.
+	//
+	// A relation is never null at a depth above zero, so the NOT IN over
+	// via_relation is safe; the inner filter spells the exclusion anyway,
+	// because a single null in a NOT IN list makes the whole test
+	// unknowable and that is a flag stuck false.
+	c.probes = append(c.probes, sprintf(`EXISTS (
+        SELECT 1 FROM %[1]s deep
+        WHERE deep.depth > %[2]s
+          AND (deep.id NOT IN (SELECT id FROM %[1]s WHERE depth <= %[2]s)
+            OR deep.via_relation NOT IN (SELECT via_relation FROM %[1]s
+                                         WHERE depth <= %[2]s AND via_relation IS NOT NULL))
+    )`, walkName, maxDepth))
+	// **The row probe: did the walk's own row cap drop a traversal?**
+	// internal/graph emits LIMIT MaxRows + 1 so that exactly this can be
+	// asked, and this is the caller that asks it. The overflow row is
+	// excluded from the picture below, by the same LIMIT, so the answer
+	// is the cap + 1 mechanism used the way that package documents it
+	// rather than an extra row quietly drawn.
+	rowCap := c.b.bind(maxRows)
+	c.rowProbes = append(c.rowProbes,
+		sprintf("EXISTS (SELECT 1 FROM %s OFFSET %s)", outName, rowCap))
 
 	nodeWhere, err := c.predicate(leafScope{alias: "far"}, step.Where)
 	if err != nil {
@@ -588,14 +643,14 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 	return sprintf(`%s,
 %s (id, set_name, from_id, via_relation, depth) AS (
     SELECT w.id, %s::text, w.from_id, w.via_relation, src.depth + w.depth
-    FROM %s w
+    FROM (SELECT * FROM %s LIMIT %s) w
     JOIN (SELECT id, MIN(depth) AS depth FROM %s GROUP BY id) src ON src.id = w.path[1]
     JOIN entities far
       ON far.id = w.id
      AND far.project_id = $1%s%s
     WHERE w.depth <= %s
       AND %s
-)`, body, name, c.b.bind(step.Name), outName, from.name,
+)`, body, name, c.b.bind(step.Name), outName, rowCap, from.name,
 		c.invalidFilter("far"), toType, maxDepth, nodeWhere), nil
 }
 
@@ -627,6 +682,14 @@ const emptyRow frag = "SELECT " + nullColumns + " WHERE false"
 // cut short by its depth bound. It is not a graph element, so it is
 // neither "node" nor "edge"; execute.go reads it and sets the flag.
 const depthTruncatedKind frag = "depth_truncated"
+
+// walkTruncatedKind is the first column of the row that says a walk hit
+// the row cap it carries internally, so the traversals this statement was
+// handed are a prefix of the ones the graph holds. It is neither a node
+// nor an edge either; execute.go reads it and sets both element flags,
+// because a dropped walk row is a (node, edge) pair and nothing here can
+// say which of the two the picture actually came up short of.
+const walkTruncatedKind frag = "walk_truncated"
 
 // capOf is the body both collection points carry: the arms, deduplicated
 // by id, ordered the way the result is, and cut at one row more than the

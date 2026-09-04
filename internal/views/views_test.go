@@ -573,7 +573,12 @@ func TestARendererParameterIsJudgedAgainstTheQueryItIsSavedWith(t *testing.T) {
 func TestAViewsOwnArgumentsAreRefusedBeforePostgresSeesThem(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()
-	for _, tc := range []struct {
+	// Each case saves under its own key. They all expect a refusal, so
+	// sharing one key would work — until a mutation makes one of them
+	// land, and every case after it fails with a version conflict over a
+	// row the previous case created rather than with what it was written
+	// to catch.
+	for i, tc := range []struct {
 		name string
 		in   func(ViewInput) ViewInput
 		path string
@@ -596,7 +601,8 @@ func TestAViewsOwnArgumentsAreRefusedBeforePostgresSeesThem(t *testing.T) {
 			func(in ViewInput) ViewInput { in.LayoutMode = "grid"; return in }, "/layout_mode"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := g.views.UpsertView(ctx, g.projectID, tc.in(saveable("route", questsOnly)))
+			key := fmt.Sprintf("route%d", i)
+			_, err := g.views.UpsertView(ctx, g.projectID, tc.in(saveable(key, questsOnly)))
 			if !errors.Is(err, ErrInvalidInput) {
 				t.Fatalf("err = %v, want invalid_input", err)
 			}
@@ -610,7 +616,7 @@ func TestAViewsOwnArgumentsAreRefusedBeforePostgresSeesThem(t *testing.T) {
 	// asymmetry between the two pieces of prose a view carries; without
 	// this control the rule above would be satisfied by refusing every
 	// control character in both.
-	in := saveable("route", questsOnly)
+	in := saveable("control", questsOnly)
 	in.Description = "two\nparagraphs"
 	if _, err := g.views.UpsertView(ctx, g.projectID, in); err != nil {
 		t.Fatalf("a description is prose and may hold a newline: %v", err)
@@ -794,6 +800,13 @@ func TestViewsDependingOnATypeAreFoundByIdWithTheirPointers(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("got %+v, want nothing: the two kinds are two columns", got)
+	}
+	// A kind that is neither is refused rather than answered with an
+	// empty list, which would read as "nothing depends on it" — the
+	// silent-empty answer this sub-project refuses everywhere else.
+	if _, err := azeroth.views.ViewsDependingOn(ctx, azeroth.projectID,
+		"entity", zone.ID); err == nil {
+		t.Fatal("a kind outside the two must be refused, not answered with nothing")
 	}
 }
 

@@ -1035,3 +1035,46 @@ func TestTheViewQueriesAddressingARowByIdAreScopedToTheProject(t *testing.T) {
 		t.Fatalf("the view must still be there: %v", err)
 	}
 }
+
+// TestAViewAndItsRefsAreOneChange pins the placement of the refs rewrite
+// rather than its result, which is the half every other refs test in
+// this file leaves open.
+//
+// Measured before it was written: moving writeRefs out of the
+// transaction, to run against the pool once the view had committed, left
+// the whole package green — every assertion about refs is about what is
+// stored after a call that succeeded, and both placements store the same
+// rows. What separates them is a failure *between* the two writes, and
+// this test manufactures exactly one. A deferred foreign key from
+// view_refs.view_id to projects.id is satisfied by nothing — a view's id
+// is not a project id — but being DEFERRABLE INITIALLY DEFERRED it is
+// checked at COMMIT, so:
+//
+//   - written inside the transaction, the refs take the view down with
+//     them and nothing is stored, which is what this asserts;
+//   - written after it, the view is already committed and only the refs
+//     fail, leaving a stored view whose dependency index is empty — and
+//     a type deleted afterwards would report that it broke nothing.
+func TestAViewAndItsRefsAreOneChange(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+
+	if _, err := g.pool.Exec(ctx,
+		`ALTER TABLE view_refs ADD CONSTRAINT zz_refs_fail_at_commit
+		   FOREIGN KEY (view_id) REFERENCES projects (id) DEFERRABLE INITIALLY DEFERRED`); err != nil {
+		t.Fatalf("install the deferred constraint: %v", err)
+	}
+
+	_, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsToZones))
+	if err == nil {
+		t.Fatal("the commit must fail under the deferred constraint")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("err = %v, want a deferred foreign-key violation at commit", err)
+	}
+	if _, err := g.views.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ViewByKey = %v, want not_found: a view whose refs could not be written "+
+			"must not be stored, or its dependency index describes a query nobody wrote", err)
+	}
+}

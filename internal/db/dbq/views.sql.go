@@ -377,6 +377,21 @@ type ListViewsPageParams struct {
 // only when it is set, because a row comparison against a NULL half
 // yields NULL, which reads as false and would answer with an empty page
 // rather than a refusal.
+//
+// **`id` in the ORDER BY is not observable by a test here, and that is
+// measured rather than assumed.** internal/metamodel found dropping it
+// from ListEntitiesPage red the moment a fixture shared one name; the
+// same mutation on this statement, against seven views sharing one name
+// paged three at a time, leaves the whole package green — views_project_idx
+// is (project_id, name, id), so the index scan that serves this
+// statement already returns tied rows in id order and the clause asks
+// for what the plan was doing anyway. What that means is that the
+// *index* is the guard today and the clause is what keeps the statement
+// correct without it: a plan that sorts instead of scanning the index
+// (a dropped index, a different planner) orders ties arbitrarily, the
+// comparison below lands nowhere near where the previous page stopped,
+// and a paged walk starts skipping and repeating rows with nothing to
+// signal it. It stays for that, not for a test.
 func (q *Queries) ListViewsPage(ctx context.Context, arg ListViewsPageParams) ([]View, error) {
 	rows, err := q.db.Query(ctx, listViewsPage,
 		arg.ProjectID,
@@ -478,18 +493,23 @@ type UpsertViewParams struct {
 //     That includes GetViewByID: a view id in a caller's hand is not
 //     authority to read it. TestReadingAnotherGamesViewIsNotFound pins
 //     both, by key and by id, with a positive control in the same test.
-//   - On view_refs, the filter is **not** the mechanism and is defence
-//     in depth. 0008_views.sql gives the table a composite
+//   - On view_refs, the filter is defence in depth *for this package's
+//     own callers* and is load-bearing for anyone else's, which is a
+//     narrower claim than the one this comment first made and is the
+//     honest one. 0008_views.sql gives the table a composite
 //     FOREIGN KEY (view_id, project_id) REFERENCES views (id, project_id),
-//     so a ref row's project is already determined by its view's and no
-//     row can match a view id under one project id and not another.
-//     Dropping the filter from DeleteViewRefs, InsertViewRef or
-//     ListViewRefs changes no result and can be caught by no test — the
-//     same position internal/db/queries/metamodel.sql records for the
-//     statements that reach entities through an entity_type_id. It stays
-//     against a future schema that relaxes that key, and so that whoever
-//     adds the next view_refs query copies the safe shape rather than
-//     working out which statements happen to be covered by a constraint.
+//     so no ref row can hold a view id under one project id and a
+//     different project id of its own; and UpsertView, the only caller
+//     that writes here, has just written the view row in the same
+//     transaction. So dropping the filter changes no answer any service
+//     call can produce. It does not follow that nothing can observe it:
+//     the composite key constrains what a row may *hold*, not which rows
+//     a DELETE may *match*, so DeleteViewRefs called with a foreign view
+//     id and this game's project id would clear another game's index.
+//     TestTheViewQueriesAddressingARowByIdAreScopedToTheProject drives
+//     these statements directly, because that is the only way to observe
+//     a filter every service path has already made redundant — a
+//     defence-in-depth claim is worth what the test behind it is worth.
 //     InsertViewRef writes project_id as a column value, which is what
 //     makes the composite key check anything at all.
 //

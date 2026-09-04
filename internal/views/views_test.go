@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
 )
@@ -958,5 +960,78 @@ func TestNoViewEventIsPublishedWhenTheCommitFails(t *testing.T) {
 	}
 	if refs != 0 {
 		t.Fatalf("%d ref rows survived a transaction that never committed, want 0", refs)
+	}
+}
+
+// TestTheViewQueriesAddressingARowByIdAreScopedToTheProject goes at the
+// generated statements directly, because the service cannot reach the
+// hole they would leave.
+//
+// Every one of these is addressed by an id the caller already holds, and
+// every service path resolves that id inside the game first — RemoveView
+// reads the view by key before it deletes, UpsertView writes refs for a
+// row its own transaction just wrote — so each of those reads masks the
+// filter under it and dropping the filter changes no answer any test in
+// this file can see. Measured, not assumed: with the filter deleted from
+// DeleteView the whole package stays green.
+//
+// The claim the SQL file makes about them is therefore that they are
+// defence in depth against a caller that does *not* resolve first, and a
+// claim like that is worth exactly as much as a test that a caller who
+// pairs a foreign id with this game's project id gets nothing. This is
+// that test.
+func TestTheViewQueriesAddressingARowByIdAreScopedToTheProject(t *testing.T) {
+	azeroth, outland := newGame(t)
+	ctx := context.Background()
+	mine, err := azeroth.views.UpsertView(ctx, azeroth.projectID, saveable("route", questsToZones))
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	q := dbq.New(azeroth.pool)
+
+	// Read: the other game's project id with this view's id finds nothing.
+	if _, err := q.GetViewByID(ctx, dbq.GetViewByIDParams{
+		ProjectID: outland.projectID, ID: mine.ID,
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("GetViewByID = %v, want no rows", err)
+	}
+	// Refs: listed under the wrong game, nothing comes back.
+	refs, err := q.ListViewRefs(ctx, dbq.ListViewRefsParams{
+		ProjectID: outland.projectID, ViewID: mine.ID,
+	})
+	if err != nil {
+		t.Fatalf("ListViewRefs: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("ListViewRefs returned %d rows for another game, want 0", len(refs))
+	}
+	// Refs: cleared under the wrong game, nothing is cleared. The
+	// composite FOREIGN KEY (view_id, project_id) does not defend this
+	// one — it constrains what a row may hold, not which rows a DELETE
+	// may match.
+	if err := q.DeleteViewRefs(ctx, dbq.DeleteViewRefsParams{
+		ProjectID: outland.projectID, ViewID: mine.ID,
+	}); err != nil {
+		t.Fatalf("DeleteViewRefs: %v", err)
+	}
+	survived, err := azeroth.views.ViewRefs(ctx, azeroth.projectID, mine.ID)
+	if err != nil {
+		t.Fatalf("list refs: %v", err)
+	}
+	if len(survived) != 3 {
+		t.Fatalf("%d refs survived another game's clear, want all 3", len(survived))
+	}
+	// Delete: the row is not this game's to remove.
+	affected, err := q.DeleteView(ctx, dbq.DeleteViewParams{
+		ProjectID: outland.projectID, ID: mine.ID,
+	})
+	if err != nil {
+		t.Fatalf("DeleteView: %v", err)
+	}
+	if affected != 0 {
+		t.Fatalf("DeleteView removed %d rows of another game, want 0", affected)
+	}
+	if _, err := azeroth.views.ViewByKey(ctx, azeroth.projectID, "route"); err != nil {
+		t.Fatalf("the view must still be there: %v", err)
 	}
 }

@@ -733,7 +733,7 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		// A saved view whose operator no longer suits its field is a
 		// field whose declared type moved under it: the document did not
 		// change, so the declaration did. Same judgement, one code.
-		rc.st.note(DiagFieldTypeChanged, ptr+"/op", p.FieldRef.Key, string(leaf.Type))
+
 		return nil
 	}
 

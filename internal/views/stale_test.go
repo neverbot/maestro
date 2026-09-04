@@ -1041,3 +1041,67 @@ func TestBestEffortDropsWhatDependedOnWhatItDropped(t *testing.T) {
 		Code: DiagEntityTypeMissing, Pointer: "/from/0/type", Was: "faction",
 	})
 }
+
+// TestARunsOwnBadArgumentsAreNotBlamedOnTheView: a parameter name the
+// document does not declare is the caller's mistake, made now, in this
+// call — not something the game moved out from under a saved document.
+// It answers query_invalid at its own pointer, and a run that reported it
+// as staleness would send a designer to repair a view that is fine.
+func TestARunsOwnBadArgumentsAreNotBlamedOnTheView(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "levelled", `{"v":1,"params":[{"key":"floor","type":"number","default":20}],
+		"from":[{"type":"quest","as":"q",
+		  "where":{"field":"min_level","op":"gte","value":{"param":"floor"}}}]}`)
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "levelled",
+		RunRequest{Params: map[string]any{"flor": 5}})
+	oneProblem(t, err, "/params", `no parameter named "flor"`)
+	if errors.Is(err, ErrQueryStale) {
+		t.Fatalf("a run's own argument is not a stale view: %v", err)
+	}
+
+	// The control: the parameter spelled right runs, and the default it
+	// overrides shows the value really was read.
+	res, err := g.views.RunView(t.Context(), g.projectID, "levelled",
+		RunRequest{Params: map[string]any{"floor": 5}})
+	if err != nil || len(res.Nodes) != 3 {
+		t.Fatalf("the control must run every quest over level 5: %v, %+v", err, res.Nodes)
+	}
+}
+
+// TestATypeThatIsGoneIsReportedOnceAndNotAgainByTheFieldsItDeclared is
+// the second position where one broken thing could be reported twice.
+//
+// A step whose to_type has gone reaches entities of no known type, so
+// every field its `where` names is undeclared *there* — and answering
+// that as field_missing beside the type's own diagnostic would tell a
+// designer to repair a field that never moved. fieldScope says which of
+// its refusals is staleness and which is a consequence of one already
+// reported, and this is the case where the distinction shows.
+func TestATypeThatIsGoneIsReportedOnceAndNotAgainByTheFieldsItDeclared(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "narrow", `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"available_to","to_type":"faction","as":"f",
+		  "where":{"field":"rank","op":"eq","value":"rare"}}]}`)
+	id := g.typeIDOf(t, KindEntityType, "faction")
+	if err := g.meta.RemoveEntityType(t.Context(), g.projectID, id, true); err != nil {
+		t.Fatalf("remove the destination type: %v", err)
+	}
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "narrow", RunRequest{})
+	diags := diagnosticsOf(t, err)
+	wants(t, diags, Diagnostic{
+		Code: DiagEntityTypeMissing, Pointer: "/traverse/0/to_type/0", Was: "faction",
+	})
+	if len(diags) != 1 {
+		t.Fatalf("one thing moved and it is reported once: %+v", diags)
+	}
+	// The predicate's own refusal is still carried, because it is still
+	// true and an agent reading the addressed sentences should see every
+	// position that has to change. What it is not is a second thing to
+	// repair.
+	var qe *QueryError
+	if !errors.As(err, &qe) || len(qe.Fields) != 2 {
+		t.Fatalf("both positions are addressed: %+v", qe)
+	}
+}

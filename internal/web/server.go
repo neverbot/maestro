@@ -19,6 +19,7 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/views"
 )
 
 // Options carries everything the server needs from the outside.
@@ -43,6 +44,14 @@ type Options struct {
 	// same hub. Today only the search tool reads it — see
 	// MCPDeps.Markdown.
 	Markdown *markdown.Service
+
+	// Views is the saved-view domain. Optional in the same sense as
+	// Metamodel and Markdown and for the same reason it is a field here:
+	// whoever constructs the service has to hand this package the same
+	// instance, over the same pool and the same hub. Today only the
+	// background-asset routes read it (api_view_assets.go); the views.*
+	// tools and their REST mirror are Task 15.
+	Views *views.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the
 	// SSE endpoint (events.go) reads from. publish.go's own handlers
@@ -335,6 +344,21 @@ func NewServer(opts Options) *Server {
 	// these routes invisible to TestEveryGameScopedRouteGoesThrough
 	// RequireProject and TestEveryContentRouteIsRegisteredAsContent,
 	// both of which build their server from stubOptions.
+	// The background-asset surface (api_view_assets.go). Registered
+	// unconditionally, for the reason api_docs.go's header gives: a
+	// registration gated on the service being present is invisible to
+	// TestEveryContentRouteIsRegisteredAsContent and
+	// TestEveryContentWriteRouteRefusesAViewer, both of which build
+	// their server from stubOptions.
+	//
+	// The GET that serves an image is a content *read*, so a viewer
+	// reaches it: looking at a picture is reading the game. The upload
+	// and the delete are writes and are gated by registerContentRoute
+	// from their own methods.
+	s.registerContentRoute("GET /api/games/{game}/view-assets", s.handleListViewAssets)
+	s.registerContentRoute("POST /api/games/{game}/view-assets", s.handleUploadViewAsset)
+	s.registerContentRoute("GET /api/games/{game}/view-assets/{id}", s.handleServeViewAsset)
+	s.registerContentRoute("DELETE /api/games/{game}/view-assets/{id}", s.handleRemoveViewAsset)
 	s.registerContentRoute("GET /api/games/{game}/docs", s.handleListDocs)
 	s.registerContentRoute("POST /api/games/{game}/docs", s.handleWriteDoc)
 	s.registerContentRoute("GET /api/games/{game}/docs/one", s.handleReadDoc)

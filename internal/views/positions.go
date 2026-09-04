@@ -46,13 +46,18 @@ import (
 // document, and making it one would hand every agent holding a version a
 // conflict for a change to something it never wrote.
 //
-// **No event is published.** internal/views publishes view.upserted and
-// view.removed, and those are the two kinds the transport registers
-// (the views plan, Task 15). A view.positions kind would be a signal
-// nothing subscribes to, which is the mechanism-nobody-reads this
-// package refuses elsewhere; the cost is that a second browser open on
-// one view does not learn that a node moved until it re-reads, and that
-// is recorded here rather than discovered later.
+// **No event is published here, and that is Task 15's decision to make
+// rather than a loss this file records.** internal/views publishes
+// view.upserted and view.removed, and those are the two kinds the
+// transport registers today (the views plan, Task 15), so a kind
+// published from here would reach nothing. But the argument the events
+// design makes for an invalidation — a browser holding a picture has no
+// other way to learn the picture changed — is the argument for a drag
+// exactly as it is for an edit, with the same reader and no error
+// anywhere in between: two designers in one session would see different
+// arrangements indefinitely. Task 15's block carries it as a checklist
+// item, with the kind, its payload and its gating named, so it is
+// decided where the kinds are registered instead of regretted here.
 
 // MaxPositions is the most positions one SetPositions call may carry.
 //
@@ -249,6 +254,25 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 // reachable; it is not something a caller should be able to do by
 // accident.
 //
+// **The same three passes SetPositions makes, in the same order**: the
+// arguments this call carries, then the addresses they name, then the
+// write. The order is stated on both calls and was wrong here — the view
+// was resolved before the arguments were judged, so a call naming a
+// missing view *and* a malformed address heard about the view, while the
+// same pair on SetPositions heard about the address. Now both answer the
+// argument first, and TestAPositionCallRefusesItsArgumentsInTheSameOrder
+// pins that they agree.
+//
+// **The list is capped at MaxPositions, exactly as a write is**, and for
+// the reason a write is: one statement per entity is a lookup plus a
+// delete per address, on one pooled connection, and an uncapped list is
+// an unbounded loop a single call can park that connection on. Measured
+// before the cap existed: fifty thousand addresses took 24.6 s and
+// returned success. The cap is answered here, before a single address is
+// resolved, which is what
+// TestAnEmptyOrOversizeClearIsRefused asserts by naming entities that do
+// not exist.
+//
 // An address that names no entity of this game is refused exactly as it
 // is in SetPositions, and through the same lookup. An entity that exists
 // and was never dragged is not: it has no row, and removing nothing from
@@ -257,15 +281,9 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewKey string,
 	entities []EntityAddress,
 ) (int64, error) {
-	if entities != nil && len(entities) == 0 {
+	if problems := clearProblems(entities); len(problems) > 0 {
 		return 0, &metamodel.ValidationError{
-			Code: metamodel.CodeInvalidInput,
-			Fields: []metamodel.FieldError{{
-				Path: pointer("entities"),
-				Message: "is empty: send no list at all to clear every position of this " +
-					"view, or name the entities to clear — an empty list is neither, " +
-					"and clearing a whole arrangement is not something to do by accident",
-			}},
+			Code: metamodel.CodeInvalidInput, Fields: problems,
 		}
 	}
 	view, err := s.ViewByKey(ctx, projectID, viewKey)
@@ -282,16 +300,6 @@ func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewK
 		return removed, nil
 	}
 
-	problems := make([]metamodel.FieldError, 0)
-	for i, a := range entities {
-		problems = append(problems, addressProblems(pointer("entities", i), a)...)
-	}
-	if len(problems) > 0 {
-		return 0, &metamodel.ValidationError{
-			Code: metamodel.CodeInvalidInput, Fields: problems,
-		}
-	}
-
 	var removed int64
 	for i, a := range entities {
 		row, err := s.meta.EntityByKey(ctx, projectID, a.EntityType, a.EntityKey)
@@ -299,9 +307,11 @@ func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewK
 			return 0, fmt.Errorf("%s: %w", pointer("entities", i), err)
 		}
 		// One statement per entity rather than one over an array of ids:
-		// the list is bounded by the same cap a write is, the delete is a
-		// primary-key lookup, and a caller naming one node is the common
-		// call. Not in a transaction, deliberately — a delete of a row
+		// clearProblems has already bounded the list by the same cap a
+		// write is — asserted, because this comment claimed the bound
+		// before anything applied it — the delete is a primary-key
+		// lookup, and a caller naming one node is the common call. Not
+		// in a transaction, deliberately — a delete of a row
 		// that is already gone is a no-op, so a call that fails halfway
 		// leaves an arrangement with fewer positions and no row it should
 		// not have, which is the same state a caller retrying reaches.
@@ -379,6 +389,44 @@ func positionProblems(positions []PositionInput) []metamodel.FieldError {
 			coordinateProblem(p.X))...)
 		problems = append(problems, oneValue(pointer("positions", i, "y"),
 			coordinateProblem(p.Y))...)
+	}
+	return problems
+}
+
+// clearProblems judges one ClearPositions call's own arguments, whole,
+// the way positionProblems does for a write — one function per call so
+// each says what its own list means, and the same three refusals in the
+// same order so the two calls cannot drift apart.
+//
+// A nil list is every position of the view and is not a problem. An
+// empty one is refused: said nothing is not said none, and here that
+// distinction stands between a caller whose list of dirty nodes came out
+// empty and a wiped arrangement.
+func clearProblems(entities []EntityAddress) []metamodel.FieldError {
+	if entities == nil {
+		return nil
+	}
+	if len(entities) == 0 {
+		return []metamodel.FieldError{{
+			Path: pointer("entities"),
+			Message: "is empty: send no list at all to clear every position of this " +
+				"view, or name the entities to clear — an empty list is neither, " +
+				"and clearing a whole arrangement is not something to do by accident",
+		}}
+	}
+	if len(entities) > MaxPositions {
+		return []metamodel.FieldError{{
+			Path: pointer("entities"),
+			Message: fmt.Sprintf("names %d entities, and the most one call may carry is "+
+				"%d: the same cap a write takes, because this call resolves and deletes "+
+				"one address at a time and a longer list is an unbounded loop on one "+
+				"connection",
+				len(entities), MaxPositions),
+		}}
+	}
+	problems := make([]metamodel.FieldError, 0)
+	for i, a := range entities {
+		problems = append(problems, addressProblems(pointer("entities", i), a)...)
 	}
 	return problems
 }

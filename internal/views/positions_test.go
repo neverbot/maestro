@@ -740,3 +740,149 @@ func TestAPositionIsWrittenIntoTheViewItNames(t *testing.T) {
 		t.Fatalf("azeroth reads %+v, want nothing: outland's write is outland's", got)
 	}
 }
+
+// TestClearingOneViewLeavesAnotherViewsArrangementStanding is the clear
+// path's half of the core spec's per-view requirement, and it was the
+// missing half.
+//
+// TestPositionsArePerViewAndNotPerEntity asserts it for the *write*: two
+// views, one entity, two coordinates, neither disturbing the other.
+// Nothing asserted it for the clear, and the comments on
+// DeleteViewPositions and DeleteViewPosition call the view filter
+// load-bearing — a claim about behaviour, so worth what the test behind
+// it is worth. There was no test behind it: with the view_id filter
+// deleted from either statement the whole package stayed green, while
+// clearing "route" took "map" down with it.
+//
+//	unmutated:  ClearPositions(route, nil) removed=2 ; route now=0 ; map now=2
+//	mutated:    ClearPositions(route, nil) removed=4 ; route now=0 ; map now=0
+//
+// Both clears are covered, because they are two statements: the
+// whole-view clear and the single-entity one.
+func TestClearingOneViewLeavesAnotherViewsArrangementStanding(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	mustSaveView(t, g, "route")
+	mustSaveView(t, g, "map")
+	for _, key := range []string{"route", "map"} {
+		if err := g.views.SetPositions(ctx, g.projectID, key, placed()); err != nil {
+			t.Fatalf("set positions in %q: %v", key, err)
+		}
+	}
+
+	// One named node, cleared out of one view only.
+	removed, err := g.views.ClearPositions(ctx, g.projectID, "route",
+		[]EntityAddress{{EntityType: "quest", EntityKey: "hogger"}})
+	if err != nil {
+		t.Fatalf("clear one: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1: the same node in another view is not this "+
+			"call's to remove", removed)
+	}
+	if got := mustGetPositions(t, g, "map"); len(got) != 2 {
+		t.Fatalf("map holds %+v after route cleared one node, want both its own "+
+			"positions", got)
+	}
+
+	// The whole view, cleared out of one view only.
+	removed, err = g.views.ClearPositions(ctx, g.projectID, "route", nil)
+	if err != nil {
+		t.Fatalf("clear every position of route: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1: route had one position left, and map's two are "+
+			"not route's to clear", removed)
+	}
+	if got := mustGetPositions(t, g, "route"); len(got) != 0 {
+		t.Fatalf("route holds %+v after its own clear, want none", got)
+	}
+	got := mustGetPositions(t, g, "map")
+	if len(got) != 2 {
+		t.Fatalf("map holds %+v after route was cleared whole, want both its own "+
+			"positions: clearing one view must not wipe another's arrangement", got)
+	}
+	// Coordinates, not a count: the numbers are what a designer loses.
+	if got[1].X != 12.5 || got[1].Y != -40.25 {
+		t.Fatalf("map's hogger = %+v, want (12.5, -40.25)", got[1])
+	}
+}
+
+// TestAnEmptyOrOversizeClearIsRefused is the twin of
+// TestAnEmptyOrOversizePositionsCallIsRefused, and the cap half of it
+// was a bound stated in prose and absent from the code.
+//
+// ClearPositions' own comment said the list was "bounded by the same cap
+// a write is". Nothing bounded it — the cap lived in the write's
+// argument check, which the clear never called — and the call is one
+// lookup plus one delete per address on a single pooled connection:
+//
+//	ClearPositions with 50000 addresses: removed=0 err=<nil> elapsed=24.604468167s
+//
+// The oversize list here names entities that **do not exist**, exactly
+// as the write's test does, so a not_found answer would mean the cap is
+// applied after five thousand lookups rather than before the first.
+func TestAnEmptyOrOversizeClearIsRefused(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	mustSaveView(t, g, "route")
+
+	_, err := g.views.ClearPositions(ctx, g.projectID, "route", []EntityAddress{})
+	var ve *metamodel.ValidationError
+	if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Path != "/entities" {
+		t.Fatalf("err = %#v, want one problem at /entities for an empty list", err)
+	}
+
+	oversize := make([]EntityAddress, MaxPositions+1)
+	for i := range oversize {
+		oversize[i] = EntityAddress{
+			EntityType: "quest", EntityKey: fmt.Sprintf("ghost_%d", i),
+		}
+	}
+	_, err = g.views.ClearPositions(ctx, g.projectID, "route", oversize)
+	if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Path != "/entities" {
+		t.Fatalf("err = %#v, want one problem at /entities for %d addresses",
+			err, len(oversize))
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want the cap answered before the addresses are resolved", err)
+	}
+}
+
+// TestAPositionCallRefusesItsArgumentsInTheSameOrder pins the one thing
+// the two calls' doc comments both claim and only one of them did.
+//
+// Both say: the arguments this call carries, then the addresses they
+// name, then the write. ClearPositions resolved the view first, so one
+// call answered a missing view where the other answered a malformed
+// address, from the same pair of bad arguments:
+//
+//	Set   -> invalid_input: /positions/0/entity_key: is required
+//	Clear -> not_found: no view "nosuchview" in this game
+//
+// A rule two calls state and one follows is worth less than no rule, so
+// the assertion is that they agree rather than that either is right.
+func TestAPositionCallRefusesItsArgumentsInTheSameOrder(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+
+	var ve *metamodel.ValidationError
+	err := g.views.SetPositions(ctx, g.projectID, "nosuchview",
+		[]PositionInput{{EntityType: "quest", EntityKey: "", X: 1, Y: 1}})
+	if !errors.As(err, &ve) || len(ve.Fields) != 1 ||
+		ve.Fields[0].Path != "/positions/0/entity_key" {
+		t.Fatalf("set: err = %#v, want invalid_input at /positions/0/entity_key", err)
+	}
+
+	_, err = g.views.ClearPositions(ctx, g.projectID, "nosuchview",
+		[]EntityAddress{{EntityType: "quest", EntityKey: ""}})
+	if !errors.As(err, &ve) || len(ve.Fields) != 1 ||
+		ve.Fields[0].Path != "/entities/0/entity_key" {
+		t.Fatalf("clear: err = %#v, want invalid_input at /entities/0/entity_key: the "+
+			"two calls state the same order and must refuse in it", err)
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Fatalf("clear: err = %v, want the arguments judged before the view is "+
+			"resolved", err)
+	}
+}

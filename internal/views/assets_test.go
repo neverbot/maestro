@@ -160,6 +160,18 @@ func TestAnSVGIsRefusedWhateverItCallsItself(t *testing.T) {
 	err = createAsset(t, g, "map.png", []byte("GIF89a and then some bytes"))
 	assertRefused(t, err, pointer("bytes"), "are not a image/png")
 
+	// A RIFF container that is not a WebP — a WAV file is the one every
+	// designer's machine has — is refused as *no image at all*, not as a
+	// broken WebP. The distinction is what the second half of the WebP
+	// magic number buys: without it the file is sniffed as image/webp
+	// and refused a step later by the chunk parser, with a sentence
+	// telling a designer their WebP is corrupt when they uploaded a
+	// sound.
+	wave := append([]byte("RIFF"), 0, 0, 0, 0)
+	wave = append(wave, "WAVEfmt "...)
+	assertRefused(t, createAsset(t, g, "map.png", append(wave, make([]byte, 16)...)),
+		pointer("bytes"), "are not a image/png")
+
 	// The control: nothing at all is stored by any of the three.
 	assets, err := g.views.ListAssets(ctx, g.projectID)
 	if err != nil {

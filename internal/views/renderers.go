@@ -1581,12 +1581,3 @@ func jsonTypeOf(v any) string {
 		return fmt.Sprintf("a %T", value)
 	}
 }
-
-// describe is jsonTypeOf's companion for an item inside a list, naming
-// the value itself where it is short enough to be worth quoting.
-func describe(v any) string {
-	if s, ok := v.(string); ok && len(s) <= 32 {
-		return fmt.Sprintf("%q", s)
-	}
-	return "an item"
-}

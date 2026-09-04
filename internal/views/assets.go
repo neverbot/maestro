@@ -651,6 +651,10 @@ func assetDimensions(mime string, raw []byte) (int32, int32, error) {
 	if problem := dimensionProblem(width, height); problem != "" {
 		return 0, 0, brokenImage(mime, problem)
 	}
+	//nolint:gosec // G115: dimensionProblem above has just refused every
+	// value outside 1..MaxAssetDimension (20000), on both sides, so
+	// neither conversion can overflow — that bound is the reason the
+	// check runs before the conversion rather than after it.
 	return int32(width), int32(height), nil
 }
 

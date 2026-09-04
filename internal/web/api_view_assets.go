@@ -154,6 +154,7 @@ func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
 //   - Content-Type is the *stored* mime, which is the mime a decoder
 //     agreed with when the bytes were accepted. It is never derived from
 //     the filename and never guessed here.
+//
 //   - X-Content-Type-Options: nosniff. securityHeaders already sets it
 //     on every response this server writes, and it is set again here
 //     rather than relied on, because this is the one route whose safety
@@ -162,11 +163,24 @@ func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
 //     exists to bound. TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType
 //     asserts it on this response, so moving or narrowing the global
 //     middleware cannot silently take it away from here.
+//
 //   - Cache-Control, long and immutable, because an asset's bytes never
 //     change: there is no update path, and a new image is a new asset
 //     with a new id. It is private rather than public — the bytes are a
 //     game's own content behind an authenticated route, and a shared
 //     cache has no business holding them.
+//
+//     **This overrides requireCaller's Cache-Control: no-store**, which
+//     is deliberate and is the same override events.go makes for its own
+//     reason. no-store exists because a response computed for one
+//     identity must not be replayed to another; `private` says exactly
+//     that to every cache that is not this browser, and requireCaller's
+//     `Vary: Cookie, Authorization` — which this handler leaves alone —
+//     is what keys the browser's own copy. What is bought for it is a
+//     map that is not re-downloaded on every pan of a graph. A viewer
+//     who later loses access keeps whatever their own browser cached,
+//     which is true of every image any authenticated site serves and is
+//     what `private` scopes to one machine.
 //
 // **No Content-Disposition.** Nothing echoes the caller-supplied
 // filename into a response header, so there is no header-injection or

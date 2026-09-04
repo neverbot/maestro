@@ -1165,3 +1165,170 @@ func TestARefIdIsTrustedOnlyWhenItsKeyIsTheOneTheDocumentSpells(t *testing.T) {
 		t.Fatalf("nothing in this game moved under this view, got %+v", res.Stale)
 	}
 }
+
+// nestedView draws the prerequisite chain and reads `requires` twice: once
+// in the query, once as the containment relation of the renderer that
+// draws it. The second position is the one no run judged.
+const nestedView = `{"v":1,"from":[{"type":"quest","as":"q"}],
+	"traverse":[{"from":"q","via":"requires","to_type":"quest","as":"pre"}],
+	"edges":[{"from_step":"pre"}]}`
+
+// saveNested saves a view whose renderer names a relation type.
+func (g *game) saveNested(t *testing.T, key, doc, via string, version *int32) {
+	t.Helper()
+	in := ViewInput{Key: key, Name: "Nest", Query: []byte(doc), ExpectedVersion: version,
+		Renderer: RendererNested, RendererParams: map[string]any{"contain_via": via}}
+	if _, err := g.views.UpsertView(context.Background(), g.projectID, in); err != nil {
+		t.Fatalf("save view %s: %v", key, err)
+	}
+}
+
+// TestARenamedRelationTypeIsReportedAtTheRendererParameterThatNamesIt is
+// the rule carried to the fourth position that turns a key into a
+// declared thing — and the one where its absence made the *rename
+// diagnostic itself* prescribe a repair the product then refused.
+//
+// A renderer parameter naming a relation type is a reference exactly as
+// `via` is: deleting the type breaks the view, and a rename has to be
+// carried by the id. It was resolved only by `CheckRenderer`, which is
+// called from the upsert and never from a run, so a rename left the
+// document reported and the parameter silent — and re-saving with the
+// new spelling, which is what the rename diagnostic says to do, came back
+// refused at `/renderer_params/contain_via` with advice that would
+// recreate the type the designer had just renamed away from. The view was
+// uneditable until they guessed.
+//
+// The whole loop is asserted here, because the loop is the finding: the
+// run names both positions, repairing both is accepted, and the repaired
+// view runs with nothing reported.
+func TestARenamedRelationTypeIsReportedAtTheRendererParameterThatNamesIt(t *testing.T) {
+	g, _ := newGame(t)
+	g.saveNested(t, "nest", nestedView, "requires", nil)
+	g.renameRelationType(t, "requires", "depends_on")
+
+	res, err := g.views.RunView(t.Context(), g.projectID, "nest", RunRequest{})
+	if err != nil {
+		t.Fatalf("a rename does not change this picture and must not refuse it: %v", err)
+	}
+	if len(res.Nodes) != 3 {
+		t.Fatalf("the picture the rename did not change, got %d nodes", len(res.Nodes))
+	}
+	wants(t, res.Stale, Diagnostic{
+		Code: DiagRelationTypeRenamed, Pointer: "/traverse/0/via/0",
+		Was: "requires", Now: "depends_on",
+	})
+	wants(t, res.Stale, Diagnostic{
+		Code: DiagRelationTypeRenamed, Pointer: "/renderer_params/contain_via",
+		Was: "requires", Now: "depends_on",
+	})
+
+	// The repair the diagnostics prescribe, at both pointers they name.
+	repaired := `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"depends_on","to_type":"quest","as":"pre"}],
+		"edges":[{"from_step":"pre"}]}`
+	one := int32(1)
+	g.saveNested(t, "nest", repaired, "depends_on", &one)
+
+	res, err = g.views.RunView(t.Context(), g.projectID, "nest", RunRequest{})
+	if err != nil {
+		t.Fatalf("the repaired view must run: %v", err)
+	}
+	if len(res.Stale) != 0 {
+		t.Fatalf("a repaired view reports nothing, got %+v", res.Stale)
+	}
+}
+
+// TestARendererParameterNamingADeletedRelationTypeIsReported is the other
+// half: the parameter's reference dies with the type, and the run says so
+// at the parameter rather than drawing the flat row of boxes that a
+// containment renderer with no containment relation draws.
+func TestARendererParameterNamingADeletedRelationTypeIsReported(t *testing.T) {
+	g, _ := newGame(t)
+	g.saveNested(t, "nest", nestedView, "requires", nil)
+	id := g.typeIDOf(t, KindRelationType, "requires")
+	if err := g.meta.RemoveRelationType(t.Context(), g.projectID, id, true); err != nil {
+		t.Fatalf("remove relation type: %v", err)
+	}
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "nest", RunRequest{})
+	wants(t, diagnosticsOf(t, err), Diagnostic{
+		Code: DiagRelationTypeMissing, Pointer: "/renderer_params/contain_via", Was: "requires",
+	})
+}
+
+// TestARendererParameterIsARecordedReference is what makes the rename
+// above resolve at all: without a `view_refs` row at the parameter's own
+// pointer there is no id to resolve by, so a run would look the renamed
+// type up by key, find nothing, and report a type *missing* that the
+// rename left standing — refusing a view whose picture had not changed.
+//
+// It is asserted on the stored index rather than only through the run,
+// because the run is green either way for one round: a by-key lookup that
+// happens to find the type says nothing is wrong, and the difference
+// shows only once something has moved.
+//
+// **The deletion report gains nothing measurable from this row**, and
+// that is worth saying rather than claiming otherwise: `contain_via` is
+// the only type-naming renderer parameter, and the nested renderer
+// structurally requires the query to draw an edges[] entry of that same
+// relation type — so a view naming it in the parameter already named it
+// in the query, and already appeared in the report. The row is here for
+// the id, not for the list.
+func TestARendererParameterIsARecordedReference(t *testing.T) {
+	g, _ := newGame(t)
+	g.saveNested(t, "nest", nestedView, "requires", nil)
+
+	view, err := g.views.ViewByKey(t.Context(), g.projectID, "nest")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	refs, err := g.views.ViewRefs(t.Context(), g.projectID, view.ID)
+	if err != nil {
+		t.Fatalf("read refs: %v", err)
+	}
+	for _, ref := range refs {
+		if ref.Pointer != "/renderer_params/contain_via" {
+			continue
+		}
+		if ref.Kind != KindRelationType || ref.RefKey != "requires" ||
+			ref.RelationTypeID == nil {
+			t.Fatalf("the parameter's reference must carry its kind, its key and its "+
+				"id: %+v", ref)
+		}
+		return
+	}
+	t.Fatalf("no reference recorded at the renderer parameter, got %+v", refs)
+}
+
+// TestARendererParameterReadingADroppedFieldIsReported is the field half
+// of the same position: a parameter that names a declared field key is a
+// second lookup exactly as one that names a type, and a schema narrowing
+// under a saved view left it unjudged too.
+func TestARendererParameterReadingADroppedFieldIsReported(t *testing.T) {
+	g, _ := newGame(t)
+	in := ViewInput{Key: "levels", Name: "Levels",
+		Query: []byte(`{"v":1,"from":[{"type":"quest","as":"q"}],
+			"project":{"fields":["min_level"]}}`),
+		Renderer:       RendererTimeline,
+		RendererParams: map[string]any{"axis_field": "min_level"},
+	}
+	if _, err := g.views.UpsertView(t.Context(), g.projectID, in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	// The narrowing: quest is redeclared without min_level.
+	if _, err := g.meta.UpsertEntityType(t.Context(), g.projectID, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests", ExpectedVersion: ptrInt32(1),
+		Schema: metamodel.Schema{
+			{Key: "tags", Type: metamodel.FieldListText},
+			{Key: "rank", Type: metamodel.FieldEnum,
+				Options: []string{"common", "rare", "epic"}},
+		},
+	}); err != nil {
+		t.Fatalf("drop min_level: %v", err)
+	}
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "levels", RunRequest{})
+	wants(t, diagnosticsOf(t, err), Diagnostic{
+		Code: DiagFieldMissing, Pointer: "/renderer_params/axis_field", Was: "min_level",
+	})
+}

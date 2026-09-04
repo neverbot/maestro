@@ -1159,3 +1159,37 @@ func TestAnOptionlessEnumIsNoAxisEvenIfTheSchemaColumnHoldsOne(t *testing.T) {
 		ErrRendererRequirements, "/renderer_params/axis_field",
 		"is an enum declared on quest with no options")
 }
+
+// TestEveryTypeNamingParameterKindIsARecordedReference is the both-arms
+// guard for typeNamingKinds, which two things have to agree on: the refs
+// a save writes, and the resolution a run performs. A kind in one and not
+// the other is a parameter whose type deletion reports nothing and whose
+// rename reports the type missing — the defect Task 12's finding 2 fixed
+// once already, for `@type` operands.
+//
+// The second arm is behavioural rather than a second list: a checker that
+// answers "this game has no such type" is a checker that turns a key into
+// a declared type, whatever its kind is called, and every one of those is
+// a reference. It is asked with a string naming nothing, which is the one
+// input every such checker refuses.
+func TestEveryTypeNamingParameterKindIsARecordedReference(t *testing.T) {
+	g, _ := newGame(t)
+	r := resolveFor(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"project":{"fields":["min_level"]}}`)
+	for kind, check := range paramCheckers {
+		rc := &rendererCheck{renderer: &renderers[0], params: map[string]any{}, r: r}
+		rc.scope = nodeScopeOf(r.Cat, r.Query, nil)
+		names := false
+		for _, fault := range check(rc, RendererParam{Name: "p", Kind: kind},
+			"nothing_in_this_game_is_called_this") {
+			names = names || fault.code == DiagRelationTypeMissing ||
+				fault.code == DiagEntityTypeMissing
+		}
+		if names != (typeNamingKinds[kind] != "") {
+			t.Errorf("kind %q resolves a declared type = %v, and typeNamingKinds says "+
+				"%v: a type-naming parameter that is not a recorded reference loses "+
+				"its id, and a reference whose kind names no type is a row about "+
+				"nothing", kind, names, typeNamingKinds[kind] != "")
+		}
+	}
+}

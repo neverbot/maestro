@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -503,13 +504,30 @@ func (s *Service) RunView(ctx context.Context, projectID uuid.UUID, key string,
 	for _, ref := range refs {
 		stored[ref.Pointer] = ref
 	}
-	return s.runStored(ctx, projectID, q, &staleness{stored: stored}, req)
+	// The renderer and its parameters are stored beside the query, and
+	// they name types and fields the game can move under exactly as the
+	// query does. A run that resolved only the document would leave that
+	// half unreported — and, worse, would prescribe a repair the save
+	// path then refuses at a pointer nobody had been shown.
+	var params map[string]any
+	if len(view.RendererParams) > 0 {
+		if err := json.Unmarshal(view.RendererParams, &params); err != nil {
+			// Same judgement as a stored document that no longer parses:
+			// this package wrote the column through CheckRenderer, so
+			// anything it cannot read back is a bug here rather than a
+			// game that moved on.
+			return Result{}, fmt.Errorf("the stored renderer parameters of view %q "+
+				"do not parse: %w", key, err)
+		}
+	}
+	return s.runStored(ctx, projectID, q, &staleness{stored: stored}, req,
+		view.Renderer, params)
 }
 
 // runStored resolves a stored query against the game and decides what the
 // run does about what has moved.
 func (s *Service) runStored(ctx context.Context, projectID uuid.UUID, q *Query,
-	st *staleness, req RunRequest,
+	st *staleness, req RunRequest, renderer string, rendererParams map[string]any,
 ) (Result, error) {
 	cat, err := s.LoadCatalogue(ctx, projectID)
 	if err != nil {
@@ -524,6 +542,11 @@ func (s *Service) runStored(ctx context.Context, projectID uuid.UUID, q *Query,
 		return Result{}, err
 	}
 	unbound := st.noteUnboundParams(r, params)
+	// The renderer's own references, judged against the document as
+	// stored rather than against whatever best_effort is about to prune:
+	// the pointers a diagnostic carries address the view a designer will
+	// open to repair it, and that view is the whole one.
+	staleParams := rendererStaleness(st, r, renderer, rendererParams)
 
 	// Everything the run cannot do, addressed. The diagnostics are the
 	// *report*; these pointers are what best_effort prunes on, and they
@@ -532,11 +555,12 @@ func (s *Service) runStored(ctx context.Context, projectID uuid.UUID, q *Query,
 	// staleness — and running it half-resolved would silently widen it,
 	// since a predicate whose leaf failed to resolve comes back as the
 	// tree without that leaf.
-	broken := make([]string, 0, len(problems)+len(unbound))
+	broken := make([]string, 0, len(problems)+len(unbound)+len(staleParams))
 	for _, p := range problems {
 		broken = append(broken, p.Path)
 	}
 	broken = append(broken, unbound...)
+	broken = append(broken, staleParams...)
 
 	if len(broken) == 0 {
 		// Renames only, or nothing at all. The view runs as written.

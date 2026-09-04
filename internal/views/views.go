@@ -383,7 +383,14 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 		// the query they index, which is the one thing they exist not to
 		// do: a view whose query landed and whose refs did not would
 		// report, on the next type deletion, that nothing broke.
-		return writeRefs(ctx, q, projectID, row.ID, resolved.Refs)
+		// The renderer's own type references travel with the query's.
+		// Without them a run of this view resolves a renamed relation
+		// type at its parameter by key, finds nothing, and reports a type
+		// missing that the rename left standing.
+		refs := make([]TypeRef, 0, len(resolved.Refs))
+		refs = append(refs, resolved.Refs...)
+		refs = append(refs, rendererTypeRefs(in.Renderer, in.RendererParams, resolved.Cat)...)
+		return writeRefs(ctx, q, projectID, row.ID, refs)
 	})
 	if err != nil {
 		return dbq.View{}, err

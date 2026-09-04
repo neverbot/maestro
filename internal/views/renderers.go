@@ -690,6 +690,147 @@ type rendererCheck struct {
 	r        *Resolved
 	scope    projectionScope
 	drawn    map[uuid.UUID]bool
+	// st is the saved view's dependency index when this check is a *run*
+	// of a stored view rather than a save, and nil when it is a save.
+	//
+	// A save has no recorded past — the caller is writing the document
+	// now — so the type-naming parameters resolve by key, exactly as they
+	// did before staleness existed. A run resolves them by id first,
+	// through the same two methods every other reference in this package
+	// goes through, which is what lets a renamed type keep its parameter
+	// working and report the spelling instead of losing the type.
+	st *staleness
+}
+
+// rendererPointer addresses one renderer parameter of a saved view.
+//
+// **It is not a pointer into the query document**, which every other
+// pointer in this package is, and it does not have to be: a view's
+// renderer and its parameters are stored beside the query rather than
+// inside it, and CheckRenderer has always refused a bad parameter at this
+// same address. A staleness diagnostic reported here is therefore
+// addressed exactly where the repair is made.
+func rendererPointer(p RendererParam) string {
+	return pointer("renderer_params", p.Name)
+}
+
+// typeNamingKinds are the parameter kinds whose value *is* a declared
+// type of this game, and therefore a dependency of the view exactly as a
+// type named in the query is: deleting the type breaks the view, and a
+// rename has to be carried by an id rather than by the spelling.
+//
+// It is a map from kind to the ref kind it records, rather than a switch
+// inside the two functions that need it, because those two — the refs a
+// save writes and the resolution a run performs — must agree about which
+// parameters are references. A kind added to one and not the other is a
+// parameter whose type deletion reports nothing, which is the defect
+// Task 12's finding 2 already fixed once for @type operands.
+// TestEveryTypeNamingParameterKindIsARecordedReference asserts the
+// membership against the checkers that consult the catalogue.
+var typeNamingKinds = map[ParamKind]string{
+	kindRelationType: KindRelationType,
+}
+
+// rendererTypeRefs is the dependency index a view's renderer parameters
+// contribute, written beside the query's own by the same transaction.
+//
+// It is read for its ids: without a row here, a run of a saved view whose
+// relation type was renamed resolves the parameter by key, finds nothing,
+// and reports the type *missing* — refusing a view whose picture the
+// rename did not change. With one, the id resolves and the run reports
+// the spelling, which is what the query's own references have always
+// done.
+//
+// It is called after CheckRenderer, so every parameter it looks at has
+// already been judged: a key that resolves to nothing here is a parameter
+// the check refused, and the view is not being written at all.
+func rendererTypeRefs(name string, params map[string]any, cat *Catalogue) []TypeRef {
+	renderer, ok := rendererByName[name]
+	if !ok || cat == nil {
+		return nil
+	}
+	var refs []TypeRef
+	for _, p := range renderer.Params {
+		if typeNamingKinds[p.Kind] != KindRelationType {
+			continue
+		}
+		key, ok := params[p.Name].(string)
+		if !ok {
+			continue
+		}
+		row, ok := cat.RelationTypes[strings.ToLower(key)]
+		if !ok {
+			continue
+		}
+		id := row.ID
+		refs = append(refs, TypeRef{
+			Kind: KindRelationType, Key: key, ID: &id, Pointer: rendererPointer(p),
+		})
+	}
+	return refs
+}
+
+// rendererStaleness resolves a saved view's renderer parameters against
+// the game as it stands now, and answers with the pointers a run cannot
+// act on.
+//
+// **This is the fourth position that turns a key into a declared thing**,
+// after the closures resolveInto hands itself, the projection's own scope
+// and an edges[] entry's inherited relation types — and, until this, the
+// one position none of them covered. CheckRenderer was called only from
+// the upsert, so a run said nothing about a parameter whose type or field
+// had moved, and the rename diagnostic's own repair instruction —
+// re-save with the new spelling — was refused at a pointer the designer
+// had never been told about, with advice that would recreate the type
+// they had just renamed away from.
+//
+// It runs **the same checkers** the save runs, over the run's catalogue
+// and this view's dependency index, and keeps only the faults that carry
+// a diagnostic code. That is what stops it being a second implementation
+// of the rules: a shape fault, a slot this query does not declare and a
+// key `project.fields` does not carry are all real refusals of a save and
+// none of them is something the game did, so a run reports none of them.
+// The rename diagnostics are emitted by the resolution itself, inside
+// kindRelationType, exactly as every other position emits its own.
+func rendererStaleness(st *staleness, r *Resolved, name string,
+	params map[string]any,
+) []string {
+	renderer, ok := rendererByName[name]
+	if !ok || r == nil || r.Cat == nil || r.Query == nil {
+		return nil
+	}
+	rc := &rendererCheck{renderer: renderer, params: params, r: r, st: st}
+	rc.scope = nodeScopeOf(r.Cat, r.Query, st)
+	var broken []string
+	// Over the renderer's declared parameters rather than over the map,
+	// so the order a run reports two stale parameters in is the order the
+	// catalogue declares them and not Go's map iteration.
+	for _, p := range renderer.Params {
+		value, given := params[p.Name]
+		if !given {
+			continue
+		}
+		check, ok := paramCheckers[p.Kind]
+		if !ok {
+			// CheckRenderer refuses this loudly at save time, so a stored
+			// view cannot hold one. A run says nothing rather than
+			// failing over a parameter it cannot judge.
+			continue
+		}
+		at := rendererPointer(p)
+		for _, fault := range check(rc, p, value) {
+			if fault.code == "" {
+				continue
+			}
+			was := p.Name
+			if key, ok := value.(string); ok {
+				was = key
+			}
+			st.note(fault.code, at, was, fault.now)
+			broken = append(broken, at)
+		}
+	}
+	return broken
 }
 
 // problem addresses one parameter of this call.
@@ -864,6 +1005,16 @@ type paramFault struct {
 	index       int
 	message     string
 	requirement bool
+	// code and now are the staleness diagnostic this fault *is*, when it
+	// is one, carried the same way scopeError carries its own: the
+	// judgement is made once, where the rule lives, and the run-time pass
+	// reads the code off it rather than deciding a second time from a
+	// pointer or a message. A code of "" is a fault that is not staleness
+	// — a shape, a slot this query does not declare, a field
+	// `project.fields` does not carry — and a run reports none of those,
+	// because none of them is something the game did.
+	code string
+	now  string
 }
 
 // paramFaults is what a checker returns: **every** fault it found, and
@@ -879,6 +1030,17 @@ func badShape(format string, args ...any) paramFaults {
 
 func unmet(format string, args ...any) paramFaults {
 	return paramFaults{{index: -1, message: fmt.Sprintf(format, args...), requirement: true}}
+}
+
+// unmetStale is unmet for a requirement a *game* can stop meeting: the
+// type or the field this parameter names moved. The refusal is the same
+// one a save answers with; what it also carries is the diagnostic code a
+// run reports it as.
+func unmetStale(code, now, format string, args ...any) paramFaults {
+	return paramFaults{{
+		index: -1, message: fmt.Sprintf(format, args...), requirement: true,
+		code: code, now: now,
+	}}
 }
 
 // at readdresses these faults to element i of a list-valued parameter.
@@ -1014,15 +1176,22 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		}
 		return rc.requireFieldKey(key, metamodel.FieldNumber)
 	},
-	kindRelationType: func(rc *rendererCheck, _ RendererParam, v any) paramFaults {
+	kindRelationType: func(rc *rendererCheck, p RendererParam, v any) paramFaults {
 		key, ok := v.(string)
 		if !ok {
 			return badShape("must name a relation type, got %s", jsonTypeOf(v))
 		}
-		if _, ok := rc.r.Cat.RelationTypes[strings.ToLower(key)]; !ok {
-			return unmet("no relation type %q in this game: declare it with "+
-				"relation_types.upsert, or use relation_types.list to see what this "+
-				"game has", key)
+		// The same id-then-key road every other reference in this package
+		// takes. On a save rc.st is nil and this is the plain catalogue
+		// lookup it has always been; on a run of a saved view the stored
+		// reference resolves a renamed type by its id and reports the
+		// spelling at this parameter's own pointer, so the run keeps
+		// working and the designer is told both positions to repair.
+		if _, ok := rc.st.relationTypeAt(rc.r.Cat, rendererPointer(p), key, true); !ok {
+			return unmetStale(DiagRelationTypeMissing, "",
+				"no relation type %q in this game: declare it with "+
+					"relation_types.upsert, or use relation_types.list to see what this "+
+					"game has", key)
 		}
 		return nil
 	},
@@ -1250,9 +1419,10 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 			}
 			on := rc.scope.names[i]
 			if !containsType(admitted, schema[j].Type) {
-				return unmet("is declared %s on %s and this parameter needs %s: "+
-					"a node whose value for it is not one of those cannot be placed, "+
-					"and would be drawn at the origin or not at all",
+				return unmetStale(DiagFieldTypeChanged, string(schema[j].Type),
+					"is declared %s on %s and this parameter needs %s: "+
+						"a node whose value for it is not one of those cannot be placed, "+
+						"and would be drawn at the origin or not at all",
 					schema[j].Type, on, joinTypes(admitted))
 			}
 			// An enum with no options is an axis with no order and no
@@ -1266,10 +1436,11 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 			// TestAnOptionlessEnumIsNoAxisEvenIfTheSchemaColumnHoldsOne
 			// pins it.
 			if schema[j].Type == metamodel.FieldEnum && len(schema[j].Options) == 0 {
-				return unmet("is an enum declared on %s with no options: an enum axis "+
-					"is ordered by its options, so one with none is an axis with no "+
-					"order and no place to put a node. Declare its options with "+
-					"types.upsert", on)
+				return unmetStale(DiagFieldTypeChanged, string(metamodel.FieldEnum),
+					"is an enum declared on %s with no options: an enum axis "+
+						"is ordered by its options, so one with none is an axis with no "+
+						"order and no place to put a node. Declare its options with "+
+						"types.upsert", on)
 			}
 			// Two types declaring the key differently are two different
 			// axes, and a picture drawn over both would place a node by
@@ -1278,19 +1449,21 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 			// admitted, and a scope holding one of each passes the check
 			// above without agreeing on anything.
 			if firstOn != "" && firstField.Type != schema[j].Type {
-				return unmet("is declared %s on %s and %s on %s: those are two "+
-					"different axes, and a node would be placed by whichever type it "+
-					"happens to have",
+				return unmetStale(DiagFieldTypeChanged, "",
+					"is declared %s on %s and %s on %s: those are two "+
+						"different axes, and a node would be placed by whichever type it "+
+						"happens to have",
 					firstField.Type, firstOn, schema[j].Type, on)
 			}
 			if firstOn != "" && schema[j].Type == metamodel.FieldEnum &&
 				!sameSequence(firstField.Options, schema[j].Options) {
-				return unmet("is an enum declared [%s] on %s and [%s] on %s: an enum "+
-					"axis is ordered by its declared options, so those are two "+
-					"different axes. Declare the same options in the same order, or "+
-					"use a number field. (A predicate over the same field compares "+
-					"the options as a set, where the order changes no answer; an "+
-					"axis is the one place the sequence is the meaning)",
+				return unmetStale(DiagFieldTypeChanged, "",
+					"is an enum declared [%s] on %s and [%s] on %s: an enum "+
+						"axis is ordered by its declared options, so those are two "+
+						"different axes. Declare the same options in the same order, or "+
+						"use a number field. (A predicate over the same field compares "+
+						"the options as a set, where the order changes no answer; an "+
+						"axis is the one place the sequence is the meaning)",
 					strings.Join(firstField.Options, ", "), firstOn,
 					strings.Join(schema[j].Options, ", "), on)
 			}
@@ -1316,13 +1489,15 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 	}
 	switch {
 	case len(declared) == 0:
-		return unmet("no field %q is declared on %s (%s): use types.get to see a "+
-			"type's field_schema", key, rc.scope.subject, strings.Join(rc.scope.names, ", "))
+		return unmetStale(DiagFieldMissing, "",
+			"no field %q is declared on %s (%s): use types.get to see a "+
+				"type's field_schema", key, rc.scope.subject, strings.Join(rc.scope.names, ", "))
 	case len(declared) < len(rc.scope.names):
-		return unmet("is declared on %s and not on %s, and this query draws all of "+
-			"them: a node of a type that does not declare %q has no place on this "+
-			"axis and would be drawn at the origin or not at all. Narrow the query "+
-			"to the types that declare it, or name a field all of them do",
+		return unmetStale(DiagFieldMissing, "",
+			"is declared on %s and not on %s, and this query draws all of "+
+				"them: a node of a type that does not declare %q has no place on this "+
+				"axis and would be drawn at the origin or not at all. Narrow the query "+
+				"to the types that declare it, or name a field all of them do",
 			strings.Join(declared, ", "), strings.Join(missing(rc.scope.names, declared), ", "),
 			key)
 	}

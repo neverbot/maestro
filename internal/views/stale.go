@@ -220,6 +220,14 @@ type staleness struct {
 // moved. A mismatch is never a rename; it is an index describing a
 // document this run is not holding, and falling through to the by-key
 // lookup answers from the document alone.
+//
+// **It is therefore a constraint on the rename operation this package was
+// built before.** Such an operation may move a type's key freely; what it
+// may not do is tidy `view_refs.ref_key` to the new spelling while
+// leaving the stored documents alone, because that is precisely the
+// disagreement this check reads as a torn index — and every renamed view
+// would fall to the by-key lookup and report its type missing. The two
+// spellings move together or neither moves.
 func (st *staleness) storedID(kind, ptr, key string) *uuid.UUID {
 	if st == nil {
 		return nil

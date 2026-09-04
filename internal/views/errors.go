@@ -171,7 +171,7 @@ func pointer(parts ...any) string {
 // not sort — resolveInto is one. It is for the passes that cannot:
 // checkQuery reports the whole-document text bounds before the per-member
 // checks, so its problems do not arrive in document order to begin with.
-// TestProblemsAreOrderedByIndexNotByPointerString pins it.
+// TestASetOfProblemsIsOrderedByIndexNotByPointerString pins it.
 func pointerLess(a, b string) bool {
 	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
 	for i := 0; i < len(as) && i < len(bs); i++ {

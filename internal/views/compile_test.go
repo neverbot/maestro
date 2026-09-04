@@ -183,7 +183,7 @@ func TestTheWorkedExamplesCompileToTheseStatements(t *testing.T) {
 			}
 			want, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("read %s (run go test -run TestTheWorkedExamples -update): %v", path, err)
+				t.Fatalf("read %s (run go test -run TestTheWorkedExamplesCompileToTheseStatements -update): %v", path, err)
 			}
 			if got := sql + "\n"; got != string(want) {
 				t.Errorf("the emitted statement changed.\n--- want ---\n%s\n--- got ---\n%s",

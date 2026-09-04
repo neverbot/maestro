@@ -149,9 +149,16 @@ func ReadFrom(w Walk) string { return w.Name + "_out" }
 //   - NOT (... = ANY(path)) is the cycle guard, and it is a correctness
 //     requirement rather than a defensive one: the core spec deliberately
 //     allows prerequisite cycles as design errors to be surfaced, so a
-//     cycle is legal content and a walk without the guard does not
-//     terminate on exactly the games this engine exists to help.
-//     TestAWalkTerminatesOnACycle pins termination and the node set.
+//     cycle is legal content, and content this engine exists to help with.
+//     It is **not** what makes the walk terminate -- the depth bound
+//     below does that, and removing the guard leaves this package's cycle
+//     test finishing with the same node set. What it stops is the cycle
+//     being re-walked once per level until that bound is reached: three
+//     rows rather than eleven for a three-node cycle at max depth 10 --
+//     and rather than 2047 for the same cycle under direction any, the
+//     branching factor raised to the depth bound.
+//     TestAWalkOverACycleReturnsEachNodeOnce pins the node set and the
+//     row count, and only the row count is red without the guard.
 //   - depth < $n sits in the recursive term, where it prunes, and not in
 //     an outer WHERE, which would materialise the whole walk first.
 //     TestDepthBoundsTheWalk pins what it reaches.

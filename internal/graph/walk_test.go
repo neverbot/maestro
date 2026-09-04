@@ -146,18 +146,30 @@ func TestTheProjectFilterIsInBothTermsOfTheRecursion(t *testing.T) {
 	}
 }
 
-func TestAWalkTerminatesOnACycle(t *testing.T) {
+// TestAWalkOverACycleReturnsEachNodeOnce is the visited-path guard's
+// test, and the row count is the half that pins it. Termination is *not*:
+// the depth bound terminates the walk on its own, so removing the guard
+// leaves this walk finishing in the same time with the same node set,
+// and a test that asserted only "it came back, with three nodes" was
+// green against an emitter with no guard at all. What the guard changes
+// is how many times the cycle is walked -- once, instead of once per
+// depth up to the bound: 3 rows here against 11, and against 2047 for
+// the same three-node cycle walked with direction any at the same bound,
+// both measured on this project's Postgres. The cost is the branching
+// factor raised to the depth bound, not the length of the cycle.
+func TestAWalkOverACycleReturnsEachNodeOnce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pool := testutil.NewPool(t)
 	f := seedGraph(t, ctx, pool, "cycle", 3, [][2]int{{0, 1}, {1, 2}, {2, 0}}) // a -> b -> c -> a
 
-	got := nodeSet(run(t, ctx, pool, graph.Walk{
+	rows := run(t, ctx, pool, graph.Walk{
 		Name: "w", ProjectID: f.projectID,
 		SeedSQL: seedWalk, SeedArgs: []any{f.projectID, f.ids[0]},
 		RelationTypeIDs: []uuid.UUID{f.relTypeID},
 		Direction:       graph.Out, MinDepth: 0, MaxDepth: 10, MaxRows: 1000,
-	}))
+	})
+	got := nodeSet(rows)
 
 	// Termination alone would also be satisfied by an empty answer, which
 	// is why the node set is asserted: a cycle is legal content and the
@@ -173,6 +185,11 @@ func TestAWalkTerminatesOnACycle(t *testing.T) {
 	}
 	if len(got) != 3 {
 		t.Fatalf("the walk visited %d nodes and the graph has 3", len(got))
+	}
+	if len(rows) != 3 {
+		t.Fatalf("the walk returned %d rows for a three-node cycle, want 3: without the "+
+			"visited-path guard a cycle is re-walked once per level until the depth bound "+
+			"stops it, and the node set alone cannot see that", len(rows))
 	}
 }
 

@@ -1,6 +1,8 @@
 package views
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -30,6 +32,15 @@ type Service struct {
 	pool *pgxpool.Pool
 	meta *metamodel.Service
 	hub  *realtime.Hub
+	// statementTimeout is the per-run statement budget, and it is
+	// unexported and settable from nowhere but this package because that
+	// is what lets runInTx say the value reaching Postgres is one this
+	// package computed from its own constants. Zero means
+	// DefaultStatementTimeout; anything above HardStatementTimeout is
+	// clamped to it (statementBudget). The package's own bounds tests are
+	// what write it, so that the timeout path can be exercised without a
+	// slow query — nothing else does.
+	statementTimeout time.Duration
 }
 
 // New builds the service. The hub may be nil, in which case nothing is

@@ -121,9 +121,8 @@ type compileOptions struct {
 // that is finished: a traversal step deeper than one hop is refused
 // rather than emitted (Task 8 routes it through internal/graph), the
 // projection's label, colour and grouping attributes are resolved but not
-// applied (Task 9), an edge entry's label_from is not read, and no bound
-// from Resolved.Limits appears in the statement (Task 7). Each of those
-// is a refusal or a documented absence, never a silently wrong answer,
+// applied (Task 9), and an edge entry's label_from is not read. Each of
+// those is a refusal or a documented absence, never a silently wrong answer,
 // except the projection, which is an absence a designer can see.
 //
 // **What the emitted statement costs.** entities.fields is indexed by
@@ -371,6 +370,28 @@ const rowColumns frag = "(id, key, name, type_key, set_name, role, " +
 const emptyRow frag = "SELECT NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, " +
 	"NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer WHERE false"
 
+// capOf is the tail both collection points carry: the ordering the result
+// is trimmed by, and one row more than the cap.
+//
+// **The extra row is how truncation is detected rather than inferred.**
+// With a plain LIMIT n, a result of exactly n rows and a graph that
+// happens to hold n are the same answer, so the flag could only ever be a
+// guess. With n + 1, the collection point that came back full says so by
+// arriving one row over, and Run trims it — see truncation in execute.go,
+// which counts *rows* rather than the nodes left after the deduplication,
+// because two rows can collapse into one node and the row count is the
+// only thing that knows the limit was reached.
+//
+// The ORDER BY is the same one the outer statement applies (rank, then
+// id; columns 10 and 1 of rowColumns), and it has to be here as well as
+// there: without it the rows the LIMIT keeps are whichever Postgres
+// produced first, so a truncated result would drop a different arbitrary
+// third of the graph on every run and the trim in Go would be trimming a
+// different set than the one the document's declaration order asks for.
+func (c *compiler) capOf(limit int) frag {
+	return sprintf("\n    ORDER BY 10, 1\n    LIMIT %s", c.b.bind(limit+1))
+}
+
 // nodeUnion collects the sets the document asked to draw. Each arm joins
 // its set back to entities and entity_types for the identity a renderer
 // needs, and UNION rather than UNION ALL is what stops a node reached by
@@ -394,8 +415,8 @@ func (c *compiler) nodeUnion() (frag, error) {
 	if len(arms) == 0 {
 		arms = append(arms, emptyRow)
 	}
-	return sprintf("%s %s AS (\n    %s\n)", nodeRows, rowColumns,
-		joinFrags(arms, "\n  UNION\n    ")), nil
+	return sprintf("%s %s AS (\n    %s%s\n)", nodeRows, rowColumns,
+		joinFrags(arms, "\n  UNION\n    "), c.capOf(c.r.Limits.MaxNodes)), nil
 }
 
 // edgeUnion collects the relations the document asked to draw, in the two
@@ -414,8 +435,8 @@ func (c *compiler) edgeUnion() (frag, error) {
 	if len(arms) == 0 {
 		arms = append(arms, emptyRow)
 	}
-	return sprintf("%s %s AS (\n    %s\n)", edgeRows, rowColumns,
-		joinFrags(arms, "\n  UNION\n    ")), nil
+	return sprintf("%s %s AS (\n    %s%s\n)", edgeRows, rowColumns,
+		joinFrags(arms, "\n  UNION\n    "), c.capOf(c.r.Limits.MaxEdges)), nil
 }
 
 func (c *compiler) edge(i int) (frag, error) {

@@ -3,10 +3,14 @@ package views
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -78,10 +82,16 @@ type Stats struct {
 // designer asking about a huge graph should see a thousand nodes and a
 // warning, not a stack trace.
 //
-// **Nothing sets any of these yet.** The statement this task emits
-// carries no LIMIT at all; Task 7 is what adds the `cap + 1` mechanism
-// that makes truncation detected rather than inferred, and until then a
-// Truncated of all-false means "not measured", not "not truncated".
+// Nodes and Edges are **detected, not inferred**: each collection point
+// is emitted with `LIMIT cap + 1` (compiler.capOf), so a result that came
+// back one row over its cap is a result the graph had more of. Run trims
+// the extra rows and sets the flag.
+//
+// **Depth is still nobody's**, and false here means "not measured". Every
+// step this build compiles is one hop, so no run can exceed max_depth;
+// Task 8's recursive walk is what can, and it is what sets this. It is
+// declared rather than omitted because the envelope's shape is a contract
+// Task 15's tool description is generated against.
 type Truncated struct {
 	Nodes bool `json:"nodes"`
 	Edges bool `json:"edges"`
@@ -152,16 +162,7 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	}
 
 	started := time.Now()
-	// Task 7 replaces this with the bounded read-only transaction: a
-	// statement timeout, default_transaction_read_only, and the LIMIT
-	// cap+1 that makes truncation detectable. Until then a run is neither
-	// time-bounded nor row-bounded, which is stated here rather than left
-	// for a reviewer to notice.
-	rows, err := s.pool.Query(ctx, statement, args...)
-	if err != nil {
-		return Result{}, err
-	}
-	defer rows.Close()
+	budget := s.statementBudget()
 
 	// Empty rather than nil, because a nil slice serialises as JSON null
 	// and an empty result is `{"nodes": [], "edges": []}` — a picture
@@ -171,65 +172,100 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	result := Result{Nodes: []Node{}, Edges: []Edge{}}
 	seenNode := map[uuid.UUID]bool{}
 	seenEdge := map[uuid.UUID]bool{}
-	for rows.Next() {
-		var (
-			kind                        string
-			id                          uuid.UUID
-			key, name, typeKey, setName *string
-			role                        *string
-			source, target              *uuid.UUID
-			fields                      []byte
-			rank                        *int32
-		)
-		if err := rows.Scan(&kind, &id, &key, &name, &typeKey, &setName, &role,
-			&source, &target, &fields, &rank); err != nil {
-			return Result{}, fmt.Errorf("scan a view row: %w", err)
+	// How many rows each collection point actually returned, which is what
+	// *detects* truncation: capOf asked each of them for one row more than
+	// its cap, so a count over the cap is a graph that had more. It is
+	// counted per row rather than per surviving node because the
+	// deduplication below can collapse two rows into one node — a node
+	// count is a count after that collapse, and a collapsed result sitting
+	// exactly on the cap is indistinguishable from a graph that holds
+	// exactly that many.
+	nodeRowsRead, edgeRowsRead := 0, 0
+	collect := func(rows pgx.Rows) error {
+		for rows.Next() {
+			var (
+				kind                        string
+				id                          uuid.UUID
+				key, name, typeKey, setName *string
+				role                        *string
+				source, target              *uuid.UUID
+				fields                      []byte
+				rank                        *int32
+			)
+			if err := rows.Scan(&kind, &id, &key, &name, &typeKey, &setName, &role,
+				&source, &target, &fields, &rank); err != nil {
+				return fmt.Errorf("scan a view row: %w", err)
+			}
+			payload, err := decodeFields(fields)
+			if err != nil {
+				return err
+			}
+			switch kind {
+			case "node":
+				// Counted before the deduplication, deliberately: this is
+				// the row the collection point returned, and the row count
+				// is the only thing that knows whether the LIMIT was
+				// reached.
+				nodeRowsRead++
+				// One node per id, keeping the first `nodes` entry that
+				// claimed it: a node in two sets is one thing on the picture,
+				// and the ORDER BY on the entry's rank is what makes "first"
+				// mean the order the document declared rather than whatever
+				// Postgres happened to return.
+				// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
+				// pins both halves, and says which of the two the ordering is.
+				if seenNode[id] {
+					continue
+				}
+				seenNode[id] = true
+				result.Nodes = append(result.Nodes, Node{
+					ID:     id,
+					Key:    text(key),
+					Type:   text(typeKey),
+					Name:   text(name),
+					Set:    text(setName),
+					Role:   text(role),
+					Fields: payload,
+				})
+			case "edge":
+				edgeRowsRead++
+				if seenEdge[id] {
+					continue
+				}
+				seenEdge[id] = true
+				edge := Edge{ID: id, Type: text(typeKey), Fields: payload}
+				if source != nil {
+					edge.Source = *source
+				}
+				if target != nil {
+					edge.Target = *target
+				}
+				result.Edges = append(result.Edges, edge)
+			default:
+				return fmt.Errorf("views: a result row is a node or an edge, got %q", kind)
+			}
 		}
-		payload, err := decodeFields(fields)
-		if err != nil {
-			return Result{}, err
-		}
-		switch kind {
-		case "node":
-			// One node per id, keeping the first `nodes` entry that
-			// claimed it: a node in two sets is one thing on the picture,
-			// and the ORDER BY on the entry's rank is what makes "first"
-			// mean the order the document declared rather than whatever
-			// Postgres happened to return.
-			// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
-			// pins both halves, and says which of the two the ordering is.
-			if seenNode[id] {
-				continue
-			}
-			seenNode[id] = true
-			result.Nodes = append(result.Nodes, Node{
-				ID:     id,
-				Key:    text(key),
-				Type:   text(typeKey),
-				Name:   text(name),
-				Set:    text(setName),
-				Role:   text(role),
-				Fields: payload,
-			})
-		case "edge":
-			if seenEdge[id] {
-				continue
-			}
-			seenEdge[id] = true
-			edge := Edge{ID: id, Type: text(typeKey), Fields: payload}
-			if source != nil {
-				edge.Source = *source
-			}
-			if target != nil {
-				edge.Target = *target
-			}
-			result.Edges = append(result.Edges, edge)
-		default:
-			return Result{}, fmt.Errorf("views: a result row is a node or an edge, got %q", kind)
+		return nil
+	}
+	if err := s.runInTx(ctx, budget, statement, args, collect); err != nil {
+		return Result{}, runFailure(err, budget, forRun.Limits)
+	}
+
+	// Trim what the cap + 1 brought back, and say so. A truncated result
+	// is not an error: a designer asking about a huge graph should get a
+	// thousand nodes and a flag, not a stack trace, and the flag is what
+	// stops them reading a partial picture as the whole one.
+	if nodeRowsRead > forRun.Limits.MaxNodes {
+		result.Truncated.Nodes = true
+		if len(result.Nodes) > forRun.Limits.MaxNodes {
+			result.Nodes = result.Nodes[:forRun.Limits.MaxNodes]
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return Result{}, err
+	if edgeRowsRead > forRun.Limits.MaxEdges {
+		result.Truncated.Edges = true
+		if len(result.Edges) > forRun.Limits.MaxEdges {
+			result.Edges = result.Edges[:forRun.Limits.MaxEdges]
+		}
 	}
 
 	result.Stats = Stats{
@@ -348,3 +384,162 @@ func maxDepthReached(r *Resolved, nodes []Node) int {
 	}
 	return deepest
 }
+
+// The statement budget, in the two numbers Task 7's table gives. They are
+// this package's own constants, and the only value that ever reaches
+// `statement_timeout` is derived from them: see statementBudget.
+const (
+	// DefaultStatementTimeout is what a run gets when nothing overrides it.
+	DefaultStatementTimeout = 5 * time.Second
+	// HardStatementTimeout is the ceiling. Nothing in the query document
+	// sets a timeout — limits are about the size of the answer, and a
+	// designer who could ask for a minute of database time would — so this
+	// is a ceiling over this package's own knob rather than over a caller's
+	// value.
+	HardStatementTimeout = 15 * time.Second
+)
+
+// statementBudget is the timeout one run gets.
+//
+// It is DefaultStatementTimeout unless a test set the package-private
+// knob, and it is clamped to HardStatementTimeout either way, so the
+// duration that reaches the statement is always a value this package
+// computed from its own two constants. That is the property the
+// set_config bind rests on and the reason no caller can influence it: the
+// knob is an unexported field, and nothing outside this package can write
+// one.
+func (s *Service) statementBudget() time.Duration {
+	budget := s.statementTimeout
+	if budget <= 0 {
+		budget = DefaultStatementTimeout
+	}
+	if budget > HardStatementTimeout {
+		budget = HardStatementTimeout
+	}
+	return budget
+}
+
+// runInTx executes one compiled statement under the two settings that
+// make the bounds real rather than intended.
+//
+// **A read-only transaction** is what makes "the compiler only ever emits
+// SELECT" a guarantee instead of a property of the current code. The
+// compiler is careful; a transaction that refuses a write is careful
+// forever. TestEveryQueryRunsInAReadOnlyTransaction asserts the refusal
+// with SQLSTATE 25006.
+//
+// It is said twice, and the second saying is not the one the plan wrote.
+// `BEGIN READ ONLY` (pgx.ReadOnly) refuses on its own, and so does
+// `transaction_read_only`; `default_transaction_read_only`, which the
+// plan's block set, **does not** — it is the default for transactions
+// started *later*, so setting it inside this one is a line that reads as
+// protection and provides none. Measured against Postgres rather than
+// assumed: with only that setting, an INSERT in this transaction
+// succeeds. See Task 7's corrections.
+//
+// **statement_timeout** bounds the work. Past it Postgres raises 57014,
+// which internal/metamodel.IsRetryable already admits and internal/web
+// already maps to the `retryable` wire code — so a timed-out view does
+// not get a ninth code that means the same thing. What it does get is the
+// advice completed, by runFailure: the error names the elapsed budget and
+// the three bounds to lower, because "send the same call again" is right
+// for contention and wrong for a query that is simply too expensive, and
+// the caller cannot tell those apart from the code alone.
+//
+// **Both settings travel as bind arguments through set_config, not as
+// formatted text.** The plan's block spelled the milliseconds into a `SET
+// LOCAL` with fmt.Sprintf and called it the one deliberate exception to
+// this package's no-value-in-the-statement-text rule; set_config takes
+// its value as a parameter, so there is no exception to make. One
+// statement, one round trip, and
+// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere keeps
+// watching a package where nothing formats a value into SQL at all.
+func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement string,
+	args []any, scan func(pgx.Rows) error) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("begin read-only: %w", err)
+	}
+	// Rolled back always: nothing here writes, and a read-only transaction
+	// has nothing to commit.
+	defer func() { _ = tx.Rollback(ctx) }()
+	// is_local = true, which is what SET LOCAL means: both settings are
+	// undone when this transaction ends, so a pooled connection handed to
+	// the next caller carries neither.
+	if _, err := tx.Exec(ctx,
+		`SELECT set_config('transaction_read_only', 'on', true),
+		        set_config('statement_timeout', $1, true)`,
+		strconv.FormatInt(timeout.Milliseconds(), 10)+"ms"); err != nil {
+		return fmt.Errorf("bound the transaction: %w", err)
+	}
+	rows, err := tx.Query(ctx, statement, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if err := scan(rows); err != nil {
+		return err
+	}
+	// Closed here rather than only by the defer, because pgx settles a
+	// failure into rows.Err() when the result is finished with, not when
+	// Query returns: a statement whose first response is an error — the
+	// read-only refusal below, a statement_timeout that fired before any
+	// row — leaves Err() nil until the rows are closed, so a scan that
+	// never iterated would return success on a statement the database
+	// refused. TestEveryQueryRunsInAReadOnlyTransaction is the test that
+	// found this; Close is idempotent, so the defer stays for the paths
+	// that return above.
+	rows.Close()
+	return rows.Err()
+}
+
+// TimeoutError is a run that ran out of its statement budget.
+//
+// It exists to complete the advice, not to add a ninth wire code: it
+// unwraps to the *pgconn.PgError carrying 57014, so metamodel.IsRetryable
+// still admits it and internal/web still maps it to `retryable`. What the
+// code cannot say is which of "the database was busy" and "this query is
+// too expensive as written" happened, and only the second has a recovery
+// the caller can act on — so the message names the budget that elapsed
+// and the three bounds to lower.
+//
+// **Task 15 has to map this type explicitly.** mcpErrorFor's retryable
+// arm deliberately drops the database's own message and substitutes a
+// generic one, which is right for a lock wait and would throw this advice
+// away; the views tools need an arm for *TimeoutError before that one.
+// Recorded in Task 7's corrections and in Task 15's block.
+type TimeoutError struct {
+	Budget time.Duration
+	Limits ResolvedLimits
+	err    error
+}
+
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("this view ran longer than its %s budget and was cancelled: "+
+		"send it again if the database was merely busy, but if it fails again the query is "+
+		"too expensive as written rather than unlucky — lower max_depth (now %d), max_nodes "+
+		"(now %d) or max_edges (now %d), narrow the selector it starts from, or drop a "+
+		"traverse step", e.Budget, e.Limits.MaxDepth, e.Limits.MaxNodes, e.Limits.MaxEdges)
+}
+
+func (e *TimeoutError) Unwrap() error { return e.err }
+
+// runFailure turns the one database failure this package can say
+// something useful about into the sentence that says it, and leaves every
+// other error exactly as it arrived.
+//
+// 57014 is query_canceled, which is what statement_timeout raises. It is
+// also what an operator cancelling a backend raises, and the two are
+// indistinguishable here — which costs nothing, because the advice
+// ("resend; if it fails again, ask for less") is right for both.
+func runFailure(err error, budget time.Duration, limits ResolvedLimits) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgErrQueryCanceled {
+		return err
+	}
+	return &TimeoutError{Budget: budget, Limits: limits, err: err}
+}
+
+// pgErrQueryCanceled is SQLSTATE 57014, one of the four
+// metamodel.IsRetryable admits.
+const pgErrQueryCanceled = "57014"

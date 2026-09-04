@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // TestASeedSelectorComesBackAsNodes is the read-back this whole
@@ -381,5 +383,151 @@ func TestAGlobPatternDoesNotLeakThePerCentItWasGiven(t *testing.T) {
 	}
 	if got := keysOf(single.Nodes); len(got) != 1 || got[0] != "half" {
 		t.Fatalf(`matches "5?%%*" must map ? and keep the per-cent literal, got %v`, got)
+	}
+}
+
+// TestAnInListComparesAsItsOwnType pins the typed-array cast, which
+// nothing reached before: `in` binds its operand list as an array of the
+// field's declared type and says so in the statement, because a list
+// bound as `any` arrives as text and compares a number against its own
+// spelling. Both halves are here — the emitted cast and the rows it
+// returns — because the cast is what the behaviour rests on.
+func TestAnInListComparesAsItsOwnType(t *testing.T) {
+	g, _ := newGame(t)
+	numeric := `{"v":1,"from":[{"type":"quest",
+		"where":{"field":"min_level","op":"in","value":[22,28]}}]}`
+	sql, _ := compileOf(t, g, numeric)
+	if !strings.Contains(sql, "::numeric[]") {
+		t.Fatalf("a number list binds as numeric[]:\n%s", sql)
+	}
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, numeric)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := keysOf(res.Nodes); len(got) != 2 {
+		t.Fatalf("22 and 28 are two of the three quests, got %v", got)
+	}
+	// The text arm is a different branch of typedList, and the fold is
+	// applied to the list rather than to a single value.
+	textual := `{"v":1,"from":[{"type":"quest",
+		"where":{"field":"@key","op":"in","value":["HOGGER","cook"]}}]}`
+	sql, _ = compileOf(t, g, textual)
+	if !strings.Contains(sql, "::text[]") {
+		t.Fatalf("a text list binds as text[]:\n%s", sql)
+	}
+	res, err = g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, textual)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := keysOf(res.Nodes); len(got) != 2 {
+		t.Fatalf("a key list folds each element, got %v", got)
+	}
+}
+
+// TestABetweenEdgeReadsItsDirection: the two sets of a `between` entry
+// are ordered, and `in` draws the relations that run the other way. No
+// test used a non-default direction before this one, so the arm shipped
+// on a reading of the code rather than on an answer from the database.
+func TestABetweenEdgeReadsItsDirection(t *testing.T) {
+	g, _ := newGame(t)
+	// takes_place_in runs quest -> zone, so "out" between quests and
+	// zones draws it and "in" draws nothing.
+	run := func(direction string) []Edge {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+			Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"quests"},
+				{"type":"zone","as":"zones"}],
+				"edges":[{"via":"takes_place_in","between":["quests","zones"],
+				          "direction":"`+direction+`"}]}`)})
+		if err != nil {
+			t.Fatalf("run %s: %v", direction, err)
+		}
+		return res.Edges
+	}
+	if got := len(run("out")); got != 2 {
+		t.Fatalf("two quests take place in a zone, got %d edges out", got)
+	}
+	if got := len(run("in")); got != 0 {
+		t.Fatalf("no zone takes place in a quest, got %d edges in", got)
+	}
+	if got := len(run("any")); got != 2 {
+		t.Fatalf("any draws the same two, got %d", got)
+	}
+}
+
+// TestAnEdgeDrawnTwiceComesBackOnce: the node dedupe was pinned and the
+// edge dedupe was not. Two entries drawing the same relation cannot be
+// deduplicated by the UNION, because each arm carries its own bound rank,
+// so the edge arriving once is Go's doing and this is what says so.
+func TestAnEdgeDrawnTwiceComesBackOnce(t *testing.T) {
+	g, _ := newGame(t)
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"class","as":"cls"}],
+			"traverse":[{"from":"cls","via":"available_to","direction":"in",
+			             "to_type":"quest","as":"quests"}],
+			"edges":[{"from_step":"quests"},
+			         {"via":"available_to","between":["quests","cls"]}]}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(res.Edges) != 3 {
+		t.Fatalf("both entries draw the same three relations, got %d edges", len(res.Edges))
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, e := range res.Edges {
+		if seen[e.ID] {
+			t.Fatalf("the relation %s came back twice", e.ID)
+		}
+		seen[e.ID] = true
+	}
+	if res.Stats.Edges != len(res.Edges) {
+		t.Fatalf("stats count the rows that came back: %d vs %d", res.Stats.Edges, len(res.Edges))
+	}
+}
+
+// TestMaxDepthReachedCountsTheHopsThatContributedANode pins the
+// arithmetic Task 8 is told to replace, which had no test at all: a
+// selector is depth 0, a step is its source's depth plus its own, and a
+// set that drew no node contributes nothing.
+func TestMaxDepthReachedCountsTheHopsThatContributedANode(t *testing.T) {
+	g, _ := newGame(t)
+	depthOf := func(doc string) int {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(res.Nodes) == 0 {
+			t.Fatalf("a depth read off an empty result would say nothing: %s", doc)
+		}
+		return res.Stats.MaxDepthReached
+	}
+	if got := depthOf(`{"v":1,"from":[{"type":"quest"}]}`); got != 0 {
+		t.Errorf("a selector is depth 0, got %d", got)
+	}
+	oneHop := `{"v":1,"from":[{"type":"class","as":"cls"}],
+		"traverse":[{"from":"cls","via":"available_to","direction":"in",
+		             "to_type":"quest","as":"quests"}]}`
+	if got := depthOf(oneHop); got != 1 {
+		t.Errorf("one step is depth 1, got %d", got)
+	}
+	twoHops := `{"v":1,"from":[{"type":"class","as":"cls"}],
+		"traverse":[{"from":"cls","via":"available_to","direction":"in",
+		             "to_type":"quest","as":"quests"},
+		            {"from":"quests","via":"takes_place_in","direction":"out",
+		             "to_type":"zone","as":"zones"}]}`
+	if got := depthOf(twoHops); got != 2 {
+		t.Errorf("a step from a step is depth 2, got %d", got)
+	}
+	// The second step is walked but drawn by nobody, so nothing it
+	// reached contributes a depth.
+	drawnShallow := `{"v":1,"from":[{"type":"class","as":"cls"}],
+		"traverse":[{"from":"cls","via":"available_to","direction":"in",
+		             "to_type":"quest","as":"quests"},
+		            {"from":"quests","via":"takes_place_in","direction":"out",
+		             "to_type":"zone","as":"zones"}],
+		"nodes":[{"set":"cls"},{"set":"quests"}]}`
+	if got := depthOf(drawnShallow); got != 1 {
+		t.Errorf("a set that drew no node contributes no depth, got %d", got)
 	}
 }

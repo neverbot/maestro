@@ -3,6 +3,9 @@ package views
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 	"time"
@@ -242,6 +245,15 @@ func TestATimedOutQueryIsRetryableAndSaysWhichBoundToLower(t *testing.T) {
 // from its own two constants": the knob exists, so the ceiling over it
 // has to be asserted rather than assumed.
 func TestTheStatementBudgetIsClampedToItsHardCap(t *testing.T) {
+	// The two numbers of the bounds table, asserted rather than left to
+	// the constants to agree with themselves. Everything else in this file
+	// is written in terms of these two names, so a default quietly raised
+	// to a minute — a minute of database time for one picture — would
+	// change what every view costs and fail nothing.
+	if DefaultStatementTimeout != 5*time.Second || HardStatementTimeout != 15*time.Second {
+		t.Fatalf("the budget is 5s with a 15s ceiling, got %s and %s",
+			DefaultStatementTimeout, HardStatementTimeout)
+	}
 	s := &Service{}
 	if got := s.statementBudget(); got != DefaultStatementTimeout {
 		t.Errorf("an unset knob must give the default, got %s", got)
@@ -289,5 +301,77 @@ func seedQuests(t *testing.T, g *game, n int) {
 		key := fmt.Sprintf("filler-%03d", i)
 		g.entity(t, "quest", key, fmt.Sprintf("Filler %d", i),
 			map[string]any{"min_level": i})
+	}
+}
+
+// TestNoStatementTextIsAssembledOutsideTheCompiler closes the route the
+// frag guard cannot see.
+//
+// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere watches
+// conversions into the builder's fragment type, which is every statement
+// the compiler emits — but this file executes SQL of its own, written as
+// Go string literals that never become a frag, and a value concatenated
+// or formatted into one of those would reach Postgres with no guard
+// speaking. That is the shape of defect this repository keeps producing:
+// a hole closed at one call site and left open one step along.
+//
+// So: every statement this package hands to pgx is either a literal it
+// wrote or the identifier holding the compiler's output. A `+`, a
+// fmt.Sprintf, a function call — anything a caller's value could be in —
+// fails here, and the failure names the argument.
+//
+// The plan's own block would have failed this test: it formatted the
+// milliseconds into `SET LOCAL statement_timeout` with fmt.Sprintf and
+// called it the one deliberate exception. set_config takes its value as a
+// bind parameter, so the exception is unnecessary and this guard needs no
+// allowance carved into it.
+func TestNoStatementTextIsAssembledOutsideTheCompiler(t *testing.T) {
+	// The methods whose first non-context argument is statement text.
+	executors := map[string]bool{"Exec": true, "Query": true, "QueryRow": true}
+	// The one identifier allowed to carry a statement: the compiler's
+	// output, which the frag guard already covers end to end.
+	compiled := map[string]bool{"statement": true}
+
+	found := 0
+	for _, file := range packageFiles(t) {
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) < 2 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || !executors[sel.Sel.Name] {
+				return true
+			}
+			found++
+			switch arg := unparen(call.Args[1]).(type) {
+			case *ast.BasicLit:
+				return true
+			case *ast.Ident:
+				if compiled[arg.Name] {
+					return true
+				}
+				t.Errorf("%s:%d passes the statement %q to %s; only a literal this package "+
+					"wrote or the compiler's output may be executed", file,
+					fset.Position(call.Pos()).Line, arg.Name, sel.Sel.Name)
+			default:
+				t.Errorf("%s:%d assembles the statement it passes to %s (%T); a caller's "+
+					"value has no route into a statement this package did not build",
+					file, fset.Position(call.Pos()).Line, sel.Sel.Name, arg)
+			}
+			return true
+		})
+	}
+	// Vacuity: this package executes SQL, and a walk that found none is a
+	// walk that stopped matching rather than a package that stopped
+	// running queries.
+	if found < 2 {
+		t.Fatalf("found %d statements executed in this package; the guard above is no "+
+			"longer watching what it names", found)
 	}
 }

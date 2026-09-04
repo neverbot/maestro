@@ -503,3 +503,42 @@ func TestAWalkFromAWalkCountsItsDepthFromTheSeed(t *testing.T) {
 			res.Stats.MaxDepthReached)
 	}
 }
+
+// TestAWalkFromASetThatReachedANodeTwiceCountsTheShorterPath is why the
+// from-set is grouped by id before a walk's depth is added back to it.
+//
+// One row of a step is one edge traversal, so a set can hold the same
+// quest at two depths — here d3, reached from d1 directly and through d2.
+// Joined ungrouped, the walk that reads from it would produce one row per
+// spelling of its seed, and the deeper spelling would be reported as the
+// depth the picture reached. The seed's depth is its *shortest* path, and
+// the grouping is what makes that a single number.
+func TestAWalkFromASetThatReachedANodeTwiceCountsTheShorterPath(t *testing.T) {
+	g, _ := newGame(t)
+	for _, key := range []string{"d1", "d2", "d3", "d4"} {
+		g.entity(t, "quest", key, "Diamond "+key, nil)
+	}
+	g.relate(t, "requires", "quest", "d1", "quest", "d2")
+	g.relate(t, "requires", "quest", "d2", "quest", "d3")
+	g.relate(t, "requires", "quest", "d1", "quest", "d3")
+	g.relate(t, "requires", "quest", "d3", "quest", "d4")
+
+	res := runQuery(t, g, `{"v":1,
+		"from":[{"type":"quest","keys":["d1"],"as":"start"}],
+		"traverse":[{"from":"start","via":"requires","direction":"out",
+		             "depth":{"min":1,"max":2},"as":"first"},
+		            {"from":"first","via":"requires","direction":"out",
+		             "depth":{"min":1,"max":1},"as":"second"}],
+		"nodes":[{"set":"second"}],
+		"limits":{"max_depth":4}}`)
+	if got := sortedKeysOf(res); !equalStrings(got, []string{"d3", "d4"}) {
+		t.Fatalf("the second walk reaches d3 (from d2) and d4 (from d3), got %v", got)
+	}
+	// d4 is two hops from the seed the short way (d1 -> d3 -> d4) and
+	// three the long way. The picture reports the graph's distance, not
+	// the longest spelling of it that happened to be walked.
+	if res.Stats.MaxDepthReached != 2 {
+		t.Errorf("the deepest node is two hops from the seed, stats say %d",
+			res.Stats.MaxDepthReached)
+	}
+}

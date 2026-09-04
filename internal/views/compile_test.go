@@ -66,6 +66,19 @@ var projectScopedTables = []string{"entity_types", "relation_types", "entities",
 var tableReference = regexp.MustCompile(
 	`(?i)\b(?:FROM|JOIN)\s+(entity_types|relation_types|entities|relations)\b\s*(?:AS\s+)?([a-z_][a-z0-9_]*)`)
 
+// filteredOn matches this alias's own project filter, and it is a regexp
+// rather than a substring search because an alias can be the *suffix* of
+// another one: `far.project_id = $1` contains the text
+// "r.project_id = $1", so a substring check reported the relation alias
+// `r` as filtered by the entity join beside it. That is exactly the pair
+// internal/graph's recursive term emits, so deleting the walk's relation
+// filter — the first project filter in this package that is not
+// redundant, and the one that lets a walk leave the game through another
+// game's edge — left this test green.
+func filteredOn(alias string) *regexp.Regexp {
+	return regexp.MustCompile(`(?:^|[^a-z0-9_])` + regexp.QuoteMeta(alias) + `\.project_id = \$1`)
+}
+
 // TestEveryTableReferenceIsProjectFiltered walks the emitted SQL rather
 // than one query's behaviour, so a clause added by a later task cannot
 // quietly drop the filter.
@@ -114,7 +127,7 @@ func TestEveryTableReferenceIsProjectFiltered(t *testing.T) {
 					ref[0], block)
 				continue
 			}
-			if !strings.Contains(block, alias+".project_id = $1") {
+			if !filteredOn(alias).MatchString(block) {
 				t.Errorf("%s is read as %q without %s.project_id = $1 in the same block:\n%s",
 					table, ref[0], alias, block)
 			}

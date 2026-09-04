@@ -481,9 +481,9 @@ type fieldScope struct {
 	// entities. A relation has an id, a type, two endpoints, its declared
 	// fields and its timestamps and nothing else (0004_metamodel.sql), so
 	// @name, @key and @invalid name no column there and would compile to
-	// SQL Postgres refuses. TestAnEdgePredicateAdmitsOnlyTheBuiltinsA
-	// RelationHas pins the refusal, with @type and @created_at as its
-	// controls.
+	// SQL Postgres refuses.
+	// TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas pins the
+	// refusal, with @type and @created_at as its controls.
 	edge bool
 }
 

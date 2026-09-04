@@ -382,6 +382,25 @@ func applyDefaults(q *Query) {
 	if q.Project.Label == nil {
 		q.Project.Label = &AttrRef{Attr: AttrName}
 	}
+	// A one-hop related attribute defaults its direction and what it
+	// reads, in the one place every other default is filled. `out` is the
+	// direction a step and an edge entry default to; @name is what
+	// "coloured by zone" means, and a hop that named a type but no attr
+	// wants the far entity's name rather than an error. Defaulting them
+	// further down instead is what made an empty direction a refusal in
+	// one position and a silent "out" in another.
+	for _, attr := range projectionAttrs {
+		ref := attr.Of(q.Project)
+		if ref == nil || ref.Related == nil {
+			continue
+		}
+		if ref.Related.Direction == "" {
+			ref.Related.Direction = DirectionOut
+		}
+		if ref.Related.Attr == "" {
+			ref.Related.Attr = AttrName
+		}
+	}
 }
 
 // declaredSets lists every set name in declaration order: the selectors
@@ -617,6 +636,7 @@ func checkQuery(q *Query) []metamodel.FieldError {
 				add(ptr+"/direction", fmt.Sprintf("must be %q, %q or %q (got %q)",
 					DirectionOut, DirectionIn, DirectionAny, e.Direction))
 			}
+			problems = append(problems, checkLabelFrom(e.LabelFrom, ptr+"/label_from")...)
 		default:
 			add(ptr, `must name either "from_step" or "via" with "between"`)
 		}

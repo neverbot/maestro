@@ -618,6 +618,36 @@ func checkAttrRef(ref *AttrRef, ptr string) []metamodel.FieldError {
 	return problems
 }
 
+// checkLabelFrom bounds an edge entry's label source. It is the scalar
+// half of checkAttrRef and nothing else: label_from names a field of the
+// relation or a built-in it has, and there is no related spelling — a
+// label read one hop away is a property of a node, and a node is where
+// the projection puts it.
+//
+// Which built-ins a relation actually has is resolution's judgement
+// (fieldScope.builtin), not this one: the shape of the string is a
+// document question and what a relation carries is a metamodel question.
+func checkLabelFrom(label, ptr string) []metamodel.FieldError {
+	var problems []metamodel.FieldError
+	add := func(message string) {
+		problems = append(problems, metamodel.FieldError{Path: ptr, Message: message})
+	}
+	switch {
+	case label == "":
+	case strings.HasPrefix(label, "@"):
+		if _, ok := builtinTypes[label]; !ok {
+			add(fmt.Sprintf("%q is not a built-in: the built-ins are %s",
+				label, strings.Join(builtinNames, ", ")))
+		}
+	case len(label) > maxFieldKeyLen:
+		add(fmt.Sprintf("must be at most %d characters", maxFieldKeyLen))
+	case !fieldKeyPattern.MatchString(label):
+		add("must be lower_snake_case: a field the relation type declares, or a built-in " +
+			"with an @ sigil")
+	}
+	return problems
+}
+
 // The bounds every query is judged against, and the caps no query may
 // raise them past. The spec's §4.3 table, in one place, because the tool
 // description prints it and a second copy would drift.

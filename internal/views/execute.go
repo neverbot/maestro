@@ -21,10 +21,16 @@ import (
 // inlined is a five-figure token bill for a picture the agent is not
 // going to look at.
 //
-// Attrs is **declared and never filled** as of this task. The projection
-// pass that fills it is Task 9's; nothing here reads project.label,
-// color_by, group_by, size_by or sort_by, and Ambiguous is likewise
-// Task 9's to set.
+// Attrs carries the projection: one entry per slot the document asked
+// for, keyed by the member it was written under — attrs["color_by"] is
+// what `project.color_by` resolved to for this node. `label` is always
+// there, because it defaults to the entity's name.
+//
+// **A slot that found nothing is absent, not empty.** The attributes are
+// built as jsonb and stripped of their nulls, so a renderer can tell "this
+// quest has no zone" from "this quest's zone is named the empty string",
+// and a value keeps its JSON type: a projected number is a number, not
+// the text of one.
 type Node struct {
 	ID     uuid.UUID      `json:"id"`
 	Key    string         `json:"key"`
@@ -37,7 +43,13 @@ type Node struct {
 	// Ambiguous is set when a one-hop related attribute found more than
 	// one entity and the first by name was used. Silently picking one and
 	// saying nothing would produce a map that is wrong in a way nobody
-	// can see. Task 9 is what sets it.
+	// can see.
+	//
+	// It is a property of the *node*, not of one slot: a node with two
+	// related slots, one of them ambiguous, is flagged, and which of the
+	// two it was is not said. Saying it would mean an attrs-shaped second
+	// map that every renderer would have to read to draw anything, for a
+	// distinction a designer resolves by looking at the query.
 	Ambiguous bool `json:"ambiguous,omitempty"`
 }
 
@@ -50,8 +62,10 @@ type Node struct {
 // edge. Nothing in this sub-project stores an edge id; a client that does
 // is storing something that will change under it.
 //
-// Label is Task 9's, from an edge entry's label_from; nothing here fills
-// it.
+// Label is what the edge entry's label_from asked to be drawn on this
+// relation: a field it declares, or its relation type's key for @type.
+// Empty when the entry asked for none, which is the default — an
+// unasked-for label on every edge is text a renderer has to hide again.
 type Edge struct {
 	ID     uuid.UUID      `json:"id"`
 	Type   string         `json:"type"`
@@ -264,12 +278,14 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				source, target              *uuid.UUID
 				fields                      []byte
 				rank, depth                 *int32
+				attrs                       []byte
+				ambiguous                   *bool
 			)
 			// id is a pointer because the depth row below carries no graph
 			// element at all: it is one row of typed nothings whose only
 			// content is that it exists.
 			if err := rows.Scan(&kind, &id, &key, &name, &typeKey, &setName, &role,
-				&source, &target, &fields, &rank, &depth); err != nil {
+				&source, &target, &fields, &rank, &depth, &attrs, &ambiguous); err != nil {
 				return fmt.Errorf("scan a view row: %w", err)
 			}
 			if kind == string(depthTruncatedKind) {
@@ -297,6 +313,10 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 			if err != nil {
 				return err
 			}
+			projected, err := decodeFields(attrs)
+			if err != nil {
+				return err
+			}
 			switch kind {
 			case "node":
 				// Counted before the deduplication, deliberately: this is
@@ -319,13 +339,15 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 					deepest = int(*depth)
 				}
 				result.Nodes = append(result.Nodes, Node{
-					ID:     *id,
-					Key:    text(key),
-					Type:   text(typeKey),
-					Name:   text(name),
-					Set:    text(setName),
-					Role:   text(role),
-					Fields: payload,
+					ID:        *id,
+					Key:       text(key),
+					Type:      text(typeKey),
+					Name:      text(name),
+					Set:       text(setName),
+					Role:      text(role),
+					Attrs:     projected,
+					Fields:    payload,
+					Ambiguous: ambiguous != nil && *ambiguous,
 				})
 			case "edge":
 				edgeRowsRead++
@@ -334,6 +356,18 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 				}
 				seenEdge[*id] = true
 				edge := Edge{ID: *id, Type: text(typeKey), Fields: payload}
+				// An edge's label rides in the same attrs column the nodes
+				// use, under one key. It is a string on the wire because a
+				// renderer draws one string on an edge; a value of another
+				// JSON type is rendered the way it was stored rather than
+				// refused, since a number is a perfectly good edge label.
+				if label, ok := projected[edgeLabelKey]; ok {
+					if text, ok := label.(string); ok {
+						edge.Label = text
+					} else {
+						edge.Label = fmt.Sprint(label)
+					}
+				}
 				if source != nil {
 					edge.Source = *source
 				}

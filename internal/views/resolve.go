@@ -148,6 +148,12 @@ type ResolvedStep struct {
 type ResolvedEdge struct {
 	Spec            *EdgeSpec
 	RelationTypeIDs []uuid.UUID
+	// LabelFrom is the field key or built-in this entry draws on each
+	// relation, checked against the relation types the entry actually
+	// draws — the step's, for the from_step spelling. Empty when the
+	// entry asked for no label, which is the default: an unasked-for
+	// label on every edge is text a renderer has to hide again.
+	LabelFrom string
 }
 
 // ResolvedPredicate is a predicate whose every leaf carries the declared
@@ -194,6 +200,10 @@ type Resolved struct {
 	Refs   []TypeRef
 	Params map[string]any
 	Limits ResolvedLimits
+	// Projection is how each node presents itself: the attribute slots
+	// the document asked for, each already known to name something, and
+	// the one hop a slot may take to read its value off a neighbour.
+	Projection ResolvedProjection
 }
 
 // ResolvedLimits are the bounds this run will use: the query's overrides
@@ -418,11 +428,36 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 	for i := range q.Edges {
 		spec := &q.Edges[i]
 		edge := ResolvedEdge{Spec: spec}
+		// The relation types this entry draws, which is what its
+		// label_from is judged against. The via spelling names them; the
+		// from_step spelling inherits the step's, because the relations it
+		// draws are exactly the ones that step walked.
+		var drawn []*dbq.RelationType
 		for j, key := range spec.Via {
 			if row := relationType(pointer("edges", i, "via", j), key); row != nil {
 				edge.RelationTypeIDs = append(edge.RelationTypeIDs, row.ID)
+				drawn = append(drawn, row)
 			}
 		}
+		if spec.FromStep != "" {
+			for j := range q.Traverse {
+				if q.Traverse[j].As != spec.FromStep {
+					continue
+				}
+				for _, key := range q.Traverse[j].Via {
+					// Read from the catalogue rather than through
+					// relationType: the step already listed this key in
+					// Refs at its own pointer, and a second TypeRef for
+					// the same reference would make Task 12 report one
+					// broken dependency twice.
+					if row, ok := cat.RelationTypes[strings.ToLower(key)]; ok {
+						drawn = append(drawn, &row)
+					}
+				}
+			}
+		}
+		edge.LabelFrom = resolveEdgeLabel(cat, drawn, spec.LabelFrom,
+			pointer("edges", i, "label_from"), add)
 		r.Edges = append(r.Edges, edge)
 	}
 
@@ -436,18 +471,7 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 	// pass as well as checkProjection: a sixth *AttrRef added to
 	// Projection fails that test, and the line it then gains is the line
 	// this loop reads.
-	if q.Project != nil {
-		for _, attr := range projectionAttrs {
-			ref := attr.Of(q.Project)
-			if ref == nil || ref.Related == nil {
-				continue
-			}
-			relationType(pointer("project", attr.Name, "related", "via"), ref.Related.Via)
-			if ref.Related.Type != "" {
-				entityType(pointer("project", attr.Name, "related", "type"), ref.Related.Type)
-			}
-		}
-	}
+	r.Projection = resolveProjection(cat, q, add, entityType, relationType)
 
 	return r, problems
 }

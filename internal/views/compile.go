@@ -159,11 +159,13 @@ type compileOptions struct {
 // $1 is always the project id, in every CTE and every arm, and
 // TestEveryTableReferenceIsProjectFiltered asserts it as text.
 //
-// **What it does not do yet**, so this comment does not claim a compiler
-// that is finished: the projection's label, colour and grouping
-// attributes are resolved but not applied (Task 9), and an edge entry's
-// label_from is not read. Both are documented absences a designer can
-// see, never a silently wrong answer.
+// **The projection travels as one jsonb column**, built per node arm by
+// project.go: every slot the document asked for, plus the one hop a slot
+// may take to read its value off a neighbour, plus the flag that says a
+// hop had more than one candidate. An edge entry's label_from rides in
+// the same column under the key "label". Nulls are stripped, so a slot
+// that found nothing is absent rather than empty — "this quest has no
+// zone" and "its zone is named the empty string" are different answers.
 //
 // A traversal step deeper than one hop is emitted through
 // internal/graph's WalkCTE — see walk() — which owns the recursion, its
@@ -680,14 +682,15 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 // step's, and nothing reads it, so a from_step arm carries its step's
 // depth and a between arm carries null.
 const rowColumns frag = "(id, key, name, type_key, set_name, role, " +
-	"source_id, target_id, fields, rank, depth)"
+	"source_id, target_id, fields, rank, depth, attrs, ambiguous)"
 
 // nullColumns is one row of typed nothings, spelled once because two
 // arms need it: the empty collection point below, and the depth arm of
 // the final statement, which carries no graph element at all. The types
 // have to be spelled, because a UNION of two untyped nulls has no type.
 const nullColumns frag = "NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, " +
-	"NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer"
+	"NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer, " +
+	"NULL::jsonb, NULL::boolean"
 
 // emptyRow is the typed nothing a collection point emits when the
 // document asked for no nodes or no edges at all.
@@ -757,6 +760,18 @@ func (c *compiler) capOf(arms frag, limit int) frag {
 // needs, and UNION rather than UNION ALL is what stops a node reached by
 // two edges of one step arriving twice.
 func (c *compiler) nodeUnion() (frag, error) {
+	// The projection is compiled once and spelled into every arm: the
+	// aliases it reads (e, et) are the same in each of them and its
+	// placeholders are the same arguments, so a second compilation would
+	// bind the same values a second time for no answer.
+	attrs, ambiguous, laterals, err := c.projection("e", "et")
+	if err != nil {
+		return "", err
+	}
+	// The same, for the same reason: `project.fields` binds one key per
+	// entry, and binding them again per arm would put the same value in
+	// the argument list as many times as the document draws sets.
+	payload := c.payload("e")
 	var arms []frag
 	for i, entry := range c.r.Query.Nodes {
 		ref, ok := c.cte[entry.Set]
@@ -765,12 +780,12 @@ func (c *compiler) nodeUnion() (frag, error) {
 				fmt.Sprintf("no set named %q is declared", entry.Set))
 		}
 		arms = append(arms, sprintf(`SELECT e.id, e.key, e.name, et.key, %s.set_name, %s::text,
-           NULL::uuid, NULL::uuid, %s, %s::integer, %s.depth
+           NULL::uuid, NULL::uuid, %s, %s::integer, %s.depth, %s, %s
     FROM %s
     JOIN entities e ON e.id = %s.id AND e.project_id = $1
-    JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1`,
-			ref.name, c.b.bind(entry.Role), c.fieldsOf("e"), c.b.bind(i),
-			ref.name, ref.name, ref.name))
+    JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1%s`,
+			ref.name, c.b.bind(entry.Role), payload, c.b.bind(i),
+			ref.name, attrs, ambiguous, ref.name, ref.name, laterals))
 	}
 	if len(arms) == 0 {
 		arms = append(arms, emptyRow)
@@ -803,6 +818,10 @@ func (c *compiler) edge(i int) (frag, error) {
 	spec := c.r.Edges[i]
 	rank := c.b.bind(i)
 	fields := c.fieldsOf("r")
+	label, err := c.edgeLabel(&spec, "r", "rt")
+	if err != nil {
+		return "", err
+	}
 	if spec.Spec.FromStep != "" {
 		ref, ok := c.cte[spec.Spec.FromStep]
 		if !ok {
@@ -819,11 +838,11 @@ func (c *compiler) edge(i int) (frag, error) {
 					spec.Spec.FromStep))
 		}
 		return sprintf(`SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, %s, %s::integer, %s.depth
+           r.source_id, r.target_id, %s, %s::integer, %s.depth, %s, NULL::boolean
     FROM %s
     JOIN relations r ON r.id = %s.via_relation AND r.project_id = $1
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1`,
-			fields, rank, ref.name, ref.name, ref.name), nil
+			fields, rank, ref.name, label, ref.name, ref.name), nil
 	}
 
 	side := func(j int) (frag, error) {
@@ -867,12 +886,12 @@ func (c *compiler) edge(i int) (frag, error) {
 				DirectionOut, DirectionIn, DirectionAny, spec.Spec.Direction))
 	}
 	return sprintf(`SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, %s, %s::integer, NULL::integer
+           r.source_id, r.target_id, %s, %s::integer, NULL::integer, %s, NULL::boolean
     FROM relations r
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
     WHERE r.project_id = $1
       AND r.relation_type_id = ANY(%s::uuid[])
-      AND %s`, fields, rank, c.b.bind(spec.RelationTypeIDs), endpoints), nil
+      AND %s`, fields, rank, label, c.b.bind(spec.RelationTypeIDs), endpoints), nil
 }
 
 // leafScope is what a predicate is being compiled against: the alias its

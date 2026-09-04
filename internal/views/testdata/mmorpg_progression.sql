@@ -68,73 +68,73 @@ t2 (id, set_name, from_id, via_relation, depth) AS (
      AND far.entity_type_id = ANY($17::uuid[])
     WHERE true
 ),
-node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth) AS (
+node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous) AS (
     SELECT capped.*
     FROM (
         SELECT DISTINCT ON (all_rows.id) all_rows.*
         FROM (
-    SELECT e.id, e.key, e.name, et.key, s0.set_name, $20::text,
-           NULL::uuid, NULL::uuid, NULL::jsonb, $21::integer, s0.depth
+    SELECT e.id, e.key, e.name, et.key, s0.set_name, $23::text,
+           NULL::uuid, NULL::uuid, NULL::jsonb, $24::integer, s0.depth, jsonb_strip_nulls(jsonb_build_object($20::text, to_jsonb(e.name), $21::text, to_jsonb(et.key), $22::text, to_jsonb(et.key))), false
     FROM s0
     JOIN entities e ON e.id = s0.id AND e.project_id = $1
     JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1
   UNION
-    SELECT e.id, e.key, e.name, et.key, t0.set_name, $22::text,
-           NULL::uuid, NULL::uuid, NULL::jsonb, $23::integer, t0.depth
+    SELECT e.id, e.key, e.name, et.key, t0.set_name, $25::text,
+           NULL::uuid, NULL::uuid, NULL::jsonb, $26::integer, t0.depth, jsonb_strip_nulls(jsonb_build_object($20::text, to_jsonb(e.name), $21::text, to_jsonb(et.key), $22::text, to_jsonb(et.key))), false
     FROM t0
     JOIN entities e ON e.id = t0.id AND e.project_id = $1
     JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1
   UNION
-    SELECT e.id, e.key, e.name, et.key, t1.set_name, $24::text,
-           NULL::uuid, NULL::uuid, NULL::jsonb, $25::integer, t1.depth
+    SELECT e.id, e.key, e.name, et.key, t1.set_name, $27::text,
+           NULL::uuid, NULL::uuid, NULL::jsonb, $28::integer, t1.depth, jsonb_strip_nulls(jsonb_build_object($20::text, to_jsonb(e.name), $21::text, to_jsonb(et.key), $22::text, to_jsonb(et.key))), false
     FROM t1
     JOIN entities e ON e.id = t1.id AND e.project_id = $1
     JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1
   UNION
-    SELECT e.id, e.key, e.name, et.key, t2.set_name, $26::text,
-           NULL::uuid, NULL::uuid, NULL::jsonb, $27::integer, t2.depth
+    SELECT e.id, e.key, e.name, et.key, t2.set_name, $29::text,
+           NULL::uuid, NULL::uuid, NULL::jsonb, $30::integer, t2.depth, jsonb_strip_nulls(jsonb_build_object($20::text, to_jsonb(e.name), $21::text, to_jsonb(et.key), $22::text, to_jsonb(et.key))), false
     FROM t2
     JOIN entities e ON e.id = t2.id AND e.project_id = $1
     JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1
-        ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth)
+        ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous)
         ORDER BY all_rows.id, all_rows.rank, all_rows.depth
     ) AS capped
     ORDER BY capped.rank, capped.id
-    LIMIT $28
+    LIMIT $31
 ),
-edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth) AS (
+edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous) AS (
     SELECT capped.*
     FROM (
         SELECT DISTINCT ON (all_rows.id) all_rows.*
         FROM (
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, NULL::jsonb, $29::integer, t0.depth
+           r.source_id, r.target_id, NULL::jsonb, $32::integer, t0.depth, NULL::jsonb, NULL::boolean
     FROM t0
     JOIN relations r ON r.id = t0.via_relation AND r.project_id = $1
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
   UNION
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, NULL::jsonb, $30::integer, t1.depth
+           r.source_id, r.target_id, NULL::jsonb, $33::integer, t1.depth, NULL::jsonb, NULL::boolean
     FROM t1
     JOIN relations r ON r.id = t1.via_relation AND r.project_id = $1
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
   UNION
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
-           r.source_id, r.target_id, NULL::jsonb, $31::integer, t2.depth
+           r.source_id, r.target_id, NULL::jsonb, $34::integer, t2.depth, NULL::jsonb, NULL::boolean
     FROM t2
     JOIN relations r ON r.id = t2.via_relation AND r.project_id = $1
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
-        ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth)
+        ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous)
         ORDER BY all_rows.id, all_rows.rank, all_rows.depth
     ) AS capped
     ORDER BY capped.rank, capped.id
-    LIMIT $32
+    LIMIT $35
 )
 SELECT 'node' AS kind, n.* FROM node_rows n
 UNION ALL
 SELECT 'edge' AS kind, e.* FROM edge_rows e
 UNION ALL
-SELECT 'depth_truncated' AS kind, NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer
+SELECT 'depth_truncated' AS kind, NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer, NULL::jsonb, NULL::boolean
 WHERE EXISTS (
         SELECT 1 FROM w1 deep
         WHERE deep.depth > $13
@@ -143,6 +143,6 @@ WHERE EXISTS (
                                          WHERE depth <= $13 AND via_relation IS NOT NULL))
     )
 UNION ALL
-SELECT 'walk_truncated' AS kind, NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer
+SELECT 'walk_truncated' AS kind, NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer, NULL::integer, NULL::jsonb, NULL::boolean
 WHERE EXISTS (SELECT 1 FROM w1_out OFFSET $14)
 ORDER BY 1, 11, 2

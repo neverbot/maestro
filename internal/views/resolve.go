@@ -55,6 +55,15 @@ type Catalogue struct {
 	EntityTypes   map[string]dbq.EntityType
 	RelationTypes map[string]dbq.RelationType
 	schemas       map[uuid.UUID]metamodel.Schema
+	// The same two catalogues addressed by id, which is what a saved
+	// view's stored dependency index holds and therefore what staleness
+	// resolves by first: a rename does not change an id, so a view
+	// written in March still runs in June. They are built here rather
+	// than by a scan over the key maps because every reference of every
+	// stale view would otherwise be a linear search over a game's whole
+	// vocabulary. See stale.go, which is their only reader.
+	entityTypesByID   map[uuid.UUID]dbq.EntityType
+	relationTypesByID map[uuid.UUID]dbq.RelationType
 }
 
 // LoadCatalogue reads one game's vocabulary.
@@ -68,13 +77,16 @@ func (s *Service) LoadCatalogue(ctx context.Context, projectID uuid.UUID) (*Cata
 		return nil, err
 	}
 	cat := &Catalogue{
-		ProjectID:     projectID,
-		EntityTypes:   make(map[string]dbq.EntityType, len(types)),
-		RelationTypes: make(map[string]dbq.RelationType, len(relTypes)),
-		schemas:       make(map[uuid.UUID]metamodel.Schema, len(types)+len(relTypes)),
+		ProjectID:         projectID,
+		EntityTypes:       make(map[string]dbq.EntityType, len(types)),
+		RelationTypes:     make(map[string]dbq.RelationType, len(relTypes)),
+		schemas:           make(map[uuid.UUID]metamodel.Schema, len(types)+len(relTypes)),
+		entityTypesByID:   make(map[uuid.UUID]dbq.EntityType, len(types)),
+		relationTypesByID: make(map[uuid.UUID]dbq.RelationType, len(relTypes)),
 	}
 	for _, row := range types {
 		cat.EntityTypes[strings.ToLower(row.Key)] = row
+		cat.entityTypesByID[row.ID] = row
 		schema, err := metamodel.ParseSchema(row.FieldSchema)
 		if err != nil {
 			return nil, fmt.Errorf("parse field schema of entity type %q: %w", row.Key, err)
@@ -83,6 +95,7 @@ func (s *Service) LoadCatalogue(ctx context.Context, projectID uuid.UUID) (*Cata
 	}
 	for _, row := range relTypes {
 		cat.RelationTypes[strings.ToLower(row.Key)] = row
+		cat.relationTypesByID[row.ID] = row
 		schema, err := metamodel.ParseSchema(row.FieldSchema)
 		if err != nil {
 			return nil, fmt.Errorf("parse field schema of relation type %q: %w", row.Key, err)
@@ -267,7 +280,7 @@ func ResolveAgainst(projectID uuid.UUID, cat *Catalogue, q *Query) (*Resolved, e
 	if err := cat.belongsTo(projectID); err != nil {
 		return nil, err
 	}
-	r, problems := resolveInto(cat, q)
+	r, problems := resolveInto(cat, q, nil)
 	if len(problems) > 0 {
 		return nil, invalidQueryProblems(problems)
 	}
@@ -294,13 +307,24 @@ func ReferencesOf(projectID uuid.UUID, cat *Catalogue, q *Query) ([]TypeRef, err
 	if err := cat.belongsTo(projectID); err != nil {
 		return nil, err
 	}
-	r, _ := resolveInto(cat, q)
+	r, _ := resolveInto(cat, q, nil)
 	return r.Refs, nil
 }
 
 // resolveInto is the pass itself, always returning what it built alongside
 // whatever it could not resolve.
-func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
+//
+// st is nil for every query that is not a stored one. A saved view hands
+// it the dependency index that view was written with, and that is what
+// turns this pass into the staleness report as well: a type reference
+// resolves by id first (a rename does not change an id), by key second,
+// and is dead third, and every judgement this pass already makes about a
+// field, an operator or an enum option gains the diagnostic code that
+// names what moved. **One pass, not two**, because a second walk over the
+// document would be a second implementation of every one of those rules,
+// and the first thing it would drift on is which of them counts as
+// staleness. See stale.go.
+func resolveInto(cat *Catalogue, q *Query, st *staleness) (*Resolved, []metamodel.FieldError) {
 	r := &Resolved{Query: q, Cat: cat, Params: map[string]any{}}
 	var problems []metamodel.FieldError
 	add := func(ptr, message string) {
@@ -322,11 +346,18 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		r.Params[p.Key] = value
 	}
 
+	// The two lookups every type reference in the document goes through,
+	// and the only place a key becomes an id. Each is the three-step
+	// resolution staleness defines — by id, then by key, then dead — and
+	// each records the reference in Refs whether or not it resolved,
+	// because a dependency index that dropped the dead ones could not say
+	// which part of a stale view broke.
 	entityType := func(ptr, key string) *dbq.EntityType {
-		row, ok := cat.EntityTypes[strings.ToLower(key)]
+		row, ok := st.entityTypeAt(cat, ptr, key, true)
 		if !ok {
 			add(ptr, fmt.Sprintf("no entity type %q in this game: declare it with types.upsert, "+
 				"or use types.list to see what this game has", key))
+			st.note(DiagEntityTypeMissing, ptr, key, "")
 			r.Refs = append(r.Refs, TypeRef{Kind: KindEntityType, Key: key, Pointer: ptr})
 			return nil
 		}
@@ -335,10 +366,11 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		return &row
 	}
 	relationType := func(ptr, key string) *dbq.RelationType {
-		row, ok := cat.RelationTypes[strings.ToLower(key)]
+		row, ok := st.relationTypeAt(cat, ptr, key, true)
 		if !ok {
 			add(ptr, fmt.Sprintf("no relation type %q in this game: declare it with "+
 				"relation_types.upsert, or use relation_types.list to see what this game has", key))
+			st.note(DiagRelationTypeMissing, ptr, key, "")
 			r.Refs = append(r.Refs, TypeRef{Kind: KindRelationType, Key: key, Pointer: ptr})
 			return nil
 		}
@@ -346,6 +378,11 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 		r.Refs = append(r.Refs, TypeRef{Kind: KindRelationType, Key: key, ID: &id, Pointer: ptr})
 		return &row
 	}
+	// What a predicate needs beyond its own scope: the staleness sink, and
+	// the two closures above, so an @type operand is resolved by the same
+	// three steps and listed as the same kind of dependency as every other
+	// type reference. Task 6 left that decision here.
+	rc := &resolveCtx{st: st, entityType: entityType, relationType: relationType}
 
 	for i := range q.From {
 		sel := &q.From[i]
@@ -359,7 +396,7 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 				names:   []string{row.Key},
 				schemas: []metamodel.Schema{cat.schemas[row.ID]},
 			}
-			set.Where = resolvePredicate(scope, paramTypes, sel.Where, ptr+"/where", &problems)
+			set.Where = resolvePredicate(scope, paramTypes, sel.Where, ptr+"/where", &problems, rc)
 		}
 		r.Sets = append(r.Sets, set)
 	}
@@ -419,9 +456,9 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 					"raise limits.max_depth (up to %d) or lower this step",
 					step.Depth.Max, r.Limits.MaxDepth, HardMaxDepth))
 		}
-		rs.Where = resolvePredicate(nodeScope, paramTypes, step.Where, ptr+"/where", &problems)
+		rs.Where = resolvePredicate(nodeScope, paramTypes, step.Where, ptr+"/where", &problems, rc)
 		rs.EdgeWhere = resolvePredicate(edgeScope, paramTypes, step.EdgeWhere,
-			ptr+"/edge_where", &problems)
+			ptr+"/edge_where", &problems, rc)
 		r.Steps = append(r.Steps, rs)
 	}
 
@@ -444,13 +481,20 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 				if q.Traverse[j].As != spec.FromStep {
 					continue
 				}
-				for _, key := range q.Traverse[j].Via {
+				for k, key := range q.Traverse[j].Via {
 					// Read from the catalogue rather than through
 					// relationType: the step already listed this key in
 					// Refs at its own pointer, and a second TypeRef for
 					// the same reference would make Task 12 report one
-					// broken dependency twice.
-					if row, ok := cat.RelationTypes[strings.ToLower(key)]; ok {
+					// broken dependency twice. It is read at *the step's*
+					// pointer all the same, so a renamed relation type is
+					// found by the id the step's own reference resolved
+					// by — reading it by key alone would lose exactly the
+					// types a rename moved, and an edge entry would then
+					// judge its label_from against a shorter list than
+					// the edges it actually draws.
+					row, ok := st.relationTypeAt(cat, pointer("traverse", j, "via", k), key, false)
+					if ok {
 						drawn = append(drawn, &row)
 					}
 				}
@@ -471,7 +515,7 @@ func resolveInto(cat *Catalogue, q *Query) (*Resolved, []metamodel.FieldError) {
 	// pass as well as checkProjection: a sixth *AttrRef added to
 	// Projection fails that test, and the line it then gains is the line
 	// this loop reads.
-	r.Projection = resolveProjection(cat, q, add, entityType, relationType)
+	r.Projection = resolveProjection(cat, q, add, entityType, relationType, st)
 
 	return r, problems
 }
@@ -564,13 +608,13 @@ func (sc fieldScope) field(key string) (metamodel.Field, error) {
 			continue
 		}
 		if declared.Type != found.Type {
-			return metamodel.Field{}, fmt.Errorf(
+			return metamodel.Field{}, staleScope(DiagFieldTypeChanged, "",
 				"the field %q is declared %s on %q and %s on %q: a comparison here would "+
 					"have to mean two different things at once",
 				key, found.Type, foundOn, declared.Type, sc.names[i])
 		}
 		if found.Type == metamodel.FieldEnum && !sameOptions(found.Options, declared.Options) {
-			return metamodel.Field{}, fmt.Errorf(
+			return metamodel.Field{}, staleScope(DiagFieldTypeChanged, "",
 				"the field %q is declared enum with different options on %q (%v) and on %q "+
 					"(%v): a value legal for one is not legal for the other",
 				key, foundOn, found.Options, sc.names[i], declared.Options)
@@ -578,11 +622,11 @@ func (sc fieldScope) field(key string) (metamodel.Field, error) {
 	}
 	switch {
 	case !have:
-		return metamodel.Field{}, fmt.Errorf(
+		return metamodel.Field{}, staleScope(DiagFieldMissing, "",
 			"no field %q is declared on %s: use types.get to see its field_schema, or address a "+
 				"built-in with an @ sigil", key, sc.subject)
 	case len(missing) > 0:
-		return metamodel.Field{}, fmt.Errorf(
+		return metamodel.Field{}, staleScope(DiagFieldMissing, "",
 			"the field %q is not declared on every type in scope: %q does not declare it, so the "+
 				"comparison would silently match nothing there",
 			key, strings.Join(missing, `", "`))
@@ -619,7 +663,8 @@ func sameOptions(a, b []string) bool {
 // resolvePredicate walks a predicate tree, giving every leaf the declared
 // type of the field it names and coercing its value to that type.
 func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldType,
-	p *Predicate, ptr string, problems *[]metamodel.FieldError) *ResolvedPredicate {
+	p *Predicate, ptr string, problems *[]metamodel.FieldError,
+	rc *resolveCtx) *ResolvedPredicate {
 	if p == nil {
 		return nil
 	}
@@ -631,7 +676,7 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		out := &ResolvedPredicate{}
 		for i := range p.All {
 			if child := resolvePredicate(scope, paramTypes, &p.All[i],
-				ptr+"/all"+pointer(i), problems); child != nil {
+				ptr+"/all"+pointer(i), problems, rc); child != nil {
 				out.All = append(out.All, *child)
 			}
 		}
@@ -640,14 +685,14 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		out := &ResolvedPredicate{}
 		for i := range p.Any {
 			if child := resolvePredicate(scope, paramTypes, &p.Any[i],
-				ptr+"/any"+pointer(i), problems); child != nil {
+				ptr+"/any"+pointer(i), problems, rc); child != nil {
 				out.Any = append(out.Any, *child)
 			}
 		}
 		return out
 	case p.Not != nil:
 		return &ResolvedPredicate{Not: resolvePredicate(scope, paramTypes, p.Not,
-			ptr+"/not", problems)}
+			ptr+"/not", problems, rc)}
 	}
 
 	leaf := &ResolvedLeaf{Field: p.FieldRef, Op: Operator(p.Op), Pointer: ptr}
@@ -671,6 +716,7 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		field, err := scope.field(p.FieldRef.Key)
 		if err != nil {
 			add(ptr+"/field", err.Error())
+			rc.st.noteScope(err, ptr+"/field", p.FieldRef.Key)
 			return nil
 		}
 		declared = field
@@ -684,6 +730,10 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		}
 		add(ptr+"/op", fmt.Sprintf("the field %q is declared %s, which answers %s — not %q",
 			p.FieldRef.Key, leaf.Type, strings.Join(names, ", "), p.Op))
+		// A saved view whose operator no longer suits its field is a
+		// field whose declared type moved under it: the document did not
+		// change, so the declaration did. Same judgement, one code.
+		rc.st.note(DiagFieldTypeChanged, ptr+"/op", p.FieldRef.Key, string(leaf.Type))
 		return nil
 	}
 
@@ -713,6 +763,7 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		case paramType != leaf.Type:
 			add(ptr+"/value", fmt.Sprintf("the parameter %q is declared %s and the field %q "+
 				"is declared %s", ref.Key, paramType, p.FieldRef.Key, leaf.Type))
+			rc.st.note(DiagFieldTypeChanged, ptr+"/value", p.FieldRef.Key, string(leaf.Type))
 		default:
 			leaf.Value = ParamRef{Key: ref.Key}
 		}
@@ -731,12 +782,18 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 			return nil
 		}
 		for i, raw := range list {
+			at := ptr + pointer("value", i)
 			value, err := coerceOperand(leaf.Type, declared, raw)
 			if err != nil {
-				add(ptr+pointer("value", i), err.Error())
+				add(at, err.Error())
+				rc.st.noteOperand(leaf.Type, raw, at, p.FieldRef.Key)
 				continue
 			}
-			leaf.Values = append(leaf.Values, value)
+			resolved, ok := rc.typeOperand(scope, leaf, at, value)
+			if !ok {
+				continue
+			}
+			leaf.Values = append(leaf.Values, resolved)
 		}
 	case shapeBool:
 		// exists and empty compare against the operand's own type, not the
@@ -766,9 +823,14 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 		value, err := coerceOperand(leaf.Type, declared, p.Value)
 		if err != nil {
 			add(ptr+"/value", err.Error())
+			rc.st.noteOperand(leaf.Type, p.Value, ptr+"/value", p.FieldRef.Key)
 			return nil
 		}
-		leaf.Value = value
+		resolved, ok := rc.typeOperand(scope, leaf, ptr+"/value", value)
+		if !ok {
+			return nil
+		}
+		leaf.Value = resolved
 	}
 	return &ResolvedPredicate{Leaf: leaf}
 }

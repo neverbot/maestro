@@ -142,8 +142,9 @@ func (sc projectionScope) declares(key string) error {
 			}
 		}
 	}
-	return fmt.Errorf("no field %q is declared on %s (%s): use types.get to see a type's "+
-		"field_schema, or address a built-in with an @ sigil",
+	return staleScope(DiagFieldMissing, "",
+		"no field %q is declared on %s (%s): use types.get to see a type's "+
+			"field_schema, or address a built-in with an @ sigil",
 		key, sc.subject, strings.Join(sc.names, ", "))
 }
 
@@ -151,11 +152,26 @@ func (sc projectionScope) declares(key string) error {
 // of every selector, plus the destination types of every step. A step
 // with no to_type opens the scope, because it reaches entities of any
 // type and no schema applies.
-func nodeScopeOf(cat *Catalogue, q *Query) projectionScope {
+//
+// **It resolves each key the way every other reference in this package
+// resolves one** — by the id a saved view recorded at that pointer, then
+// by the key — rather than by the key alone. Reading it by key would
+// make a projection over a *renamed* type report every one of its keys
+// as undeclared, because the scope would have been built from the types
+// the document's old spellings still name and the renamed one would be
+// missing from it. That is this repository's standing defect: a rule
+// established at one position and not carried to the next one along.
+// TestARenamedTypeStillJudgesTheProjectionThatDrawsIt pins it.
+//
+// st is nil everywhere but a saved view's own run, and this position
+// never reports the rename: the same pointers are resolved by
+// resolveInto's own closures, which do, and a diagnostic reported twice
+// is a designer told to repair one thing twice.
+func nodeScopeOf(cat *Catalogue, q *Query, st *staleness) projectionScope {
 	sc := projectionScope{subject: "the entity types this query draws"}
 	seen := map[uuid.UUID]bool{}
-	add := func(key string) {
-		row, ok := cat.EntityTypes[strings.ToLower(key)]
+	add := func(ptr, key string) {
+		row, ok := st.entityTypeAt(cat, ptr, key, false)
 		if !ok || seen[row.ID] {
 			return
 		}
@@ -163,16 +179,16 @@ func nodeScopeOf(cat *Catalogue, q *Query) projectionScope {
 		sc.names = append(sc.names, row.Key)
 		sc.schemas = append(sc.schemas, cat.schemas[row.ID])
 	}
-	for _, sel := range q.From {
-		add(sel.Type)
+	for i, sel := range q.From {
+		add(pointer("from", i, "type"), sel.Type)
 	}
-	for _, step := range q.Traverse {
+	for i, step := range q.Traverse {
 		if len(step.ToType) == 0 {
 			sc.open = true
 			continue
 		}
-		for _, key := range step.ToType {
-			add(key)
+		for j, key := range step.ToType {
+			add(pointer("traverse", i, "to_type", j), key)
 		}
 	}
 	sc.unresolved = len(sc.names) == 0
@@ -191,12 +207,13 @@ func nodeScopeOf(cat *Catalogue, q *Query) projectionScope {
 // view reported as fine while its picture had lost its colours.
 func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 	entityType func(ptr, key string) *dbq.EntityType,
-	relationType func(ptr, key string) *dbq.RelationType) ResolvedProjection {
+	relationType func(ptr, key string) *dbq.RelationType,
+	st *staleness) ResolvedProjection {
 	var out ResolvedProjection
 	if q.Project == nil {
 		return out
 	}
-	scope := nodeScopeOf(cat, q)
+	scope := nodeScopeOf(cat, q, st)
 	for _, attr := range projectionAttrs {
 		ref := attr.Of(q.Project)
 		if ref == nil {
@@ -207,6 +224,7 @@ func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 			if !strings.HasPrefix(ref.Attr, "@") {
 				if err := scope.declares(ref.Attr); err != nil {
 					add(ptr, err.Error())
+					st.noteScope(err, ptr, ref.Attr)
 					continue
 				}
 			}
@@ -241,6 +259,7 @@ func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 			farScope.open = hop.Type == ""
 			if err := farScope.declares(hop.Attr); err != nil {
 				add(ptr+"/related/attr", err.Error())
+				st.noteScope(err, ptr+"/related/attr", hop.Attr)
 				continue
 			}
 		}
@@ -248,7 +267,9 @@ func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 	}
 	for i, key := range q.Project.Fields {
 		if err := scope.declares(key); err != nil {
-			add(pointer("project", "fields", i), err.Error())
+			at := pointer("project", "fields", i)
+			add(at, err.Error())
+			st.noteScope(err, at, key)
 			continue
 		}
 		out.Fields = append(out.Fields, key)

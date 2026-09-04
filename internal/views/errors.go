@@ -102,6 +102,13 @@ var (
 type QueryError struct {
 	Code   string
 	Fields []metamodel.FieldError
+	// Stale is the staleness report, and is set on query_stale and on
+	// nothing else. It is carried *beside* Fields rather than instead of
+	// it because the two are read by different readers: internal/web
+	// publishes Fields as details.fields[].path, which is what an agent
+	// acts on, while a UI banding a warning over a picture wants the
+	// codes and the was/now pair. staleQuery fills both from one list.
+	Stale []Diagnostic
 }
 
 func (e *QueryError) Error() string {

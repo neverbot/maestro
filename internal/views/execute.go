@@ -192,28 +192,42 @@ type Truncated struct {
 // renderer is the point: swapping `graph` for `table` on a saved view
 // must never require rewriting the query.
 //
-// The spec's envelope also carries a staleness report; it is not here,
-// because Diagnostic is Task 12's type and a field declared against a
-// type that does not exist yet is a field nothing can fill.
+// Stale is the staleness report: what this view says that the game no
+// longer has, or no longer spells that way. It is **empty for an ad-hoc
+// run and possible only for a saved one**, because staleness is a
+// statement about a document the game has moved underneath, and only a
+// stored document has a recorded past to have moved away from — see
+// stale.go. A non-empty Stale beside a full picture is the ordinary
+// case: a renamed type still runs, and the rename is reported so a
+// designer can repair the document at leisure.
 type Result struct {
-	Nodes     []Node    `json:"nodes"`
-	Edges     []Edge    `json:"edges"`
-	Stats     Stats     `json:"stats"`
-	Truncated Truncated `json:"truncated"`
+	Nodes     []Node       `json:"nodes"`
+	Edges     []Edge       `json:"edges"`
+	Stats     Stats        `json:"stats"`
+	Truncated Truncated    `json:"truncated"`
+	Stale     []Diagnostic `json:"stale,omitempty"`
 }
 
 // RunRequest is one execution: a parsed query and the parameter values
 // that override its declared defaults.
-//
-// The spec's on_stale switch is not here for the same reason Result has
-// no staleness report: Task 12 owns both, and a knob that is read by
-// nothing is a knob that lies.
 type RunRequest struct {
 	Query  *Query
 	Params map[string]any
 	// IncludeFields selects each node's and each edge's declared fields
 	// into the envelope. Off by default; see Node.
 	IncludeFields bool
+	// OnStale is what to do when this view names something the game no
+	// longer has: OnStaleFail, which is the default and the empty value,
+	// or OnStaleBestEffort. stale.go argues the default.
+	//
+	// **It is read by RunView and refused by Run**, rather than accepted
+	// and ignored there. An ad-hoc query has no stored dependency index,
+	// so nothing can be resolved by an id a rename left alone and nothing
+	// is ever reported stale: a caller that sent on_stale with an inline
+	// document asked for a policy that cannot apply, and being told so is
+	// worth more than a knob that silently does nothing.
+	// TestOnStaleIsRefusedOnAnAdHocRunRatherThanIgnored pins it.
+	OnStale string
 }
 
 // Run compiles and executes one query against one game.
@@ -227,6 +241,12 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	if req.Query == nil {
 		return Result{}, invalidQuery("", "no query document was given")
 	}
+	if req.OnStale != "" {
+		return Result{}, invalidQuery(pointer("on_stale"),
+			"an inline query cannot be stale: staleness is what a *saved* view's stored "+
+				"dependency index answers, and an ad-hoc document has none — run the saved "+
+				"view by key to use this switch, or drop it")
+	}
 	cat, err := s.LoadCatalogue(ctx, projectID)
 	if err != nil {
 		return Result{}, err
@@ -239,8 +259,26 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	if err != nil {
 		return Result{}, err
 	}
+	return s.execute(ctx, projectID, resolved, params, req, nil)
+}
+
+// execute is everything after a query has been resolved and its
+// parameters bound: compile, run inside the bounded read-only
+// transaction, and read the one statement's rows into one envelope.
+//
+// It is factored out of Run because a saved view reaches it by another
+// road — resolved against its own stored dependency index, and possibly
+// with the parts the game no longer has pruned away (stale.go) — and two
+// copies of the collection loop is two places for a truncation flag or a
+// dedupe rule to drift.
+//
+// stale is the report to hand back beside the picture; nil for an ad-hoc
+// run, which cannot have one.
+func (s *Service) execute(ctx context.Context, projectID uuid.UUID, resolved *Resolved,
+	params map[string]any, req RunRequest, stale []Diagnostic,
+) (Result, error) {
 	// A copy, so one run's bindings cannot leak into a *Resolved another
-	// run — or Task 12's staleness report — is still holding.
+	// run — or the staleness report — is still holding.
 	forRun := *resolved
 	forRun.Params = params
 
@@ -419,6 +457,7 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 		MaxDepthReached: deepest,
 		DurationMS:      time.Since(started).Milliseconds(),
 	}
+	result.Stale = stale
 	return result, nil
 }
 

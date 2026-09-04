@@ -594,7 +594,10 @@ func CheckRenderer(name string, params map[string]any, r *Resolved) error {
 			"to judge %q against", name)
 	}
 	rc := &rendererCheck{renderer: renderer, params: params, r: r}
-	rc.scope = nodeScopeOf(r.Cat, r.Query)
+	// nil: a renderer is checked at save time, against a query the caller
+	// is writing now, so there is no stored dependency index to resolve a
+	// renamed type by and nothing has moved under it yet.
+	rc.scope = nodeScopeOf(r.Cat, r.Query, nil)
 
 	var shape, requirements []metamodel.FieldError
 	for given, value := range params {

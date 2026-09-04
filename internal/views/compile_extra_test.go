@@ -112,17 +112,24 @@ func TestAnEdgeEntrysRelationTypeIsResolvedAndListed(t *testing.T) {
 // decision Task 4 left to the compiler: @type is compared against the id
 // a row actually holds, and a key this game does not declare is a
 // refusal, not a picture with nothing in it.
+//
+// **Task 12 moved where the refusal is raised, and this test moved with
+// it.** Task 6 left the operand as text and let the compiler look it up,
+// recording that @type contributed no TypeRef and that the decision was
+// Task 11 and 12's. It is a dependency like any other — the compiler
+// refuses the whole view when the key names nothing — so leaving it out
+// of view_refs meant deleting the type reported that it broke nothing,
+// and renaming it broke a view every other reference would have carried
+// through by id. So resolution refuses it now, at the same pointer, and
+// lists it; the compiler's own lookup stays for the hand-built *Resolved
+// and for a value a run binds to a parameter, which resolution cannot
+// see.
 func TestAMisspelledTypeNameIsRefusedRatherThanDrawnAsNothing(t *testing.T) {
 	g, _ := newGame(t)
-	r, err := g.views.Resolve(t.Context(), g.projectID,
-		mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
+	err := resolveOnly(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 			"traverse":[{"from":"q","via":"available_to","as":"c",
-			  "where":{"field":"@type","op":"eq","value":"clsas"}}]}`))
-	if err != nil {
-		t.Fatalf("resolution passes @type through as text: %v", err)
-	}
-	_, _, err = Compile(r, g.projectID)
-	oneProblem(t, err, "/traverse/0/where/value", `no type "clsas" in this game`)
+			  "where":{"field":"@type","op":"eq","value":"clsas"}}]}`)
+	oneProblem(t, err, "/traverse/0/where/value", `no entity type "clsas" in this game`)
 
 	// The control: the spelling this game does declare compiles, and the
 	// value it binds is an id rather than the key.

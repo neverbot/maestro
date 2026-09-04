@@ -215,13 +215,21 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 			}
 			// The statement's DO UPDATE is guarded on the stored row's own
 			// project id, and a guard that matches nothing updates nothing
-			// and says so. Unreachable from this call — the view was
-			// resolved inside this game and so was the entity, so any row
-			// they collide with is this game's — which is exactly why it is
-			// read rather than assumed: the guard exists for a caller that
-			// reaches the statement another way, and an unread row count is
-			// how a silent no-op gets shipped. See views.sql, where this
-			// was a cross-game overwrite before it was a guard.
+			// and reports zero.
+			//
+			// **Unreachable from this call, and recorded as such rather
+			// than dressed up.** The view was resolved inside this game and
+			// so was every entity, and 0008_views.sql's composite key means
+			// a row they collide with carries this game's project id — so
+			// deleting these three lines leaves the whole package green,
+			// measured. It stays because the alternative is discarding a
+			// row count that can only be zero if an invariant of this
+			// package has been broken, and a silent no-op is how the
+			// cross-game overwrite this guard exists for reached a commit
+			// in the first place (views.sql says what it was). The guard
+			// itself is load-bearing and is asserted by driving the
+			// statement directly, in
+			// TestPositionsOfAnotherGameAreNotReachable.
 			if written == 0 {
 				return fmt.Errorf("write %s: the stored position belongs to another game",
 					pointer("positions", i))

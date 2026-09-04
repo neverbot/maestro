@@ -39,6 +39,19 @@
 --     type id. Its two project filters mask each other and only their
 --     joint removal is observable; the statement's own comment says so
 --     and names the test that asks the question across the games.
+--   * On view_positions, load-bearing on the read and on both deletes,
+--     for the same reason as view_refs and with the same caveat: a view
+--     id is a value a previous answer handed back, and the composite
+--     foreign key says what a row may hold rather than which rows a read
+--     or a DELETE may match. UpsertViewPosition is the interesting one
+--     and it needs *two* mechanisms: the composite keys refuse a parent
+--     from another game on the insert path, and they check nothing at
+--     all on the ON CONFLICT path, where the stored row keeps its own
+--     project id -- so the DO UPDATE carries a project guard of its own.
+--     That is written up on the statement, because it was a real
+--     cross-game overwrite before it was a comment. Each statement here
+--     says which of its filters is doing work and which is redundant
+--     with the one above it.
 --
 -- No write here sets updated_at. 0008_views.sql puts a set_updated_at
 -- trigger on views, so the column has one mechanism behind it rather
@@ -265,3 +278,92 @@ WHERE r.project_id = sqlc.arg('project_id')::uuid
     OR (sqlc.narg('relation_type_id')::uuid IS NOT NULL
         AND r.relation_type_id = sqlc.narg('relation_type_id')::uuid))
 ORDER BY v.name, v.id, r.pointer;
+
+-- name: UpsertViewPosition :execrows
+-- One node's coordinates in one view, written by views.set_positions.
+--
+-- ON CONFLICT rather than delete-then-insert: a drag moves a node that
+-- is already placed, which is the common call, and the primary key
+-- (view_id, entity_id) is exactly the identity of "this node in this
+-- view". updated_at is not in the SET list because 0008_views.sql puts a
+-- set_updated_at trigger on the table, the same rule the rest of this
+-- file follows.
+--
+-- **The isolation takes two mechanisms here, and the first one alone is
+-- not enough -- measured, not reasoned about.** On the insert path there
+-- is nothing to filter and the guard is 0008_views.sql's two composite
+-- foreign keys, (view_id, project_id) into views and
+-- (entity_id, project_id) into entities: a parent from another game has
+-- no matching row and the write raises 23503. On the **conflict** path
+-- those keys check nothing at all. The conflict target is
+-- (view_id, entity_id), project_id is not in the SET list, so the stored
+-- row keeps its own project id, every foreign key stays satisfied, and a
+-- caller passing another game's view id with its own project id
+-- *silently overwrote that game's coordinates*. Seen: the first version
+-- of this statement did exactly that, and the test that was meant to
+-- catch it passed because it asserted the row count rather than the
+-- coordinates.
+--
+-- So the DO UPDATE is guarded on the stored row's own project id, and
+-- the statement is execrows rather than exec: a guard that matches
+-- nothing updates nothing and reports zero, which Go turns into a
+-- refusal (positions.go) instead of the silent success a bare guard
+-- would give. TestPositionsOfAnotherGameAreNotReachable drives both
+-- paths -- an entity with no stored position for the 23503, one with a
+-- stored position for the guard -- and reads the coordinates back.
+INSERT INTO view_positions (view_id, entity_id, project_id, x, y, pinned)
+VALUES (sqlc.arg('view_id')::uuid, sqlc.arg('entity_id')::uuid,
+        sqlc.arg('project_id')::uuid, sqlc.arg('x')::double precision,
+        sqlc.arg('y')::double precision, sqlc.arg('pinned')::boolean)
+ON CONFLICT (view_id, entity_id) DO UPDATE
+SET x = excluded.x, y = excluded.y, pinned = excluded.pinned
+WHERE view_positions.project_id = excluded.project_id;
+
+-- name: ListViewPositions :many
+-- One view's stored positions, addressed the way they were written: by
+-- entity key and type key, never by id, so a caller that has never read
+-- this game can act on the answer.
+--
+-- **p.project_id is the load-bearing filter and the other two are not.**
+-- A view id is a value a previous answer handed back, so nothing but
+-- that filter keeps this read inside one game; dropping it hands another
+-- game's positions to a caller holding a leaked view id, which
+-- TestPositionsOfAnotherGameAreNotReachable asks for directly. The two
+-- join conditions -- e.project_id = p.project_id and
+-- et.project_id = e.project_id -- are implied by 0008_views.sql's and
+-- 0004_metamodel.sql's composite foreign keys and by the primary keys
+-- they join on, so each is redundant with the filter above it and
+-- deleting either alone changes no answer. They are written because a
+-- join to a project-scoped table that does not carry the scope is the
+-- shape this repository has lost a filter to six times, not because a
+-- test can tell them apart.
+SELECT et.key AS entity_type, e.key AS entity_key, p.x, p.y, p.pinned, p.updated_at
+FROM view_positions p
+JOIN entities e ON e.id = p.entity_id AND e.project_id = p.project_id
+JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = e.project_id
+WHERE p.project_id = sqlc.arg('project_id')::uuid
+  AND p.view_id = sqlc.arg('view_id')::uuid
+ORDER BY et.key, e.key;
+
+-- name: DeleteViewPositions :execrows
+-- Every position of one view, for a views.clear_positions call that
+-- named no entities.
+--
+-- Both filters are load-bearing, and for the reason DeleteViewRefs
+-- records: a composite foreign key constrains what a row may *hold*, not
+-- which rows a DELETE may *match*, so without project_id a caller
+-- holding another game's view id would clear that game's arrangement.
+-- execrows because the count is the answer this call gives back -- a
+-- designer clearing a view is told how many placements went.
+DELETE FROM view_positions
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND view_id = sqlc.arg('view_id')::uuid;
+
+-- name: DeleteViewPosition :execrows
+-- One named node's position. Zero rows is a normal answer: an entity
+-- that was never dragged has no row, and clearing it is not an error.
+-- The project filter is load-bearing exactly as it is above.
+DELETE FROM view_positions
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND view_id = sqlc.arg('view_id')::uuid
+  AND entity_id = sqlc.arg('entity_id')::uuid;

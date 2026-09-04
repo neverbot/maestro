@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const deleteView = `-- name: DeleteView :execrows
@@ -29,6 +30,58 @@ type DeleteViewParams struct {
 // a success it can publish an event about.
 func (q *Queries) DeleteView(ctx context.Context, arg DeleteViewParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteView, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteViewPosition = `-- name: DeleteViewPosition :execrows
+DELETE FROM view_positions
+WHERE project_id = $1::uuid
+  AND view_id = $2::uuid
+  AND entity_id = $3::uuid
+`
+
+type DeleteViewPositionParams struct {
+	ProjectID uuid.UUID
+	ViewID    uuid.UUID
+	EntityID  uuid.UUID
+}
+
+// One named node's position. Zero rows is a normal answer: an entity
+// that was never dragged has no row, and clearing it is not an error.
+// The project filter is load-bearing exactly as it is above.
+func (q *Queries) DeleteViewPosition(ctx context.Context, arg DeleteViewPositionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteViewPosition, arg.ProjectID, arg.ViewID, arg.EntityID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteViewPositions = `-- name: DeleteViewPositions :execrows
+DELETE FROM view_positions
+WHERE project_id = $1::uuid
+  AND view_id = $2::uuid
+`
+
+type DeleteViewPositionsParams struct {
+	ProjectID uuid.UUID
+	ViewID    uuid.UUID
+}
+
+// Every position of one view, for a views.clear_positions call that
+// named no entities.
+//
+// Both filters are load-bearing, and for the reason DeleteViewRefs
+// records: a composite foreign key constrains what a row may *hold*, not
+// which rows a DELETE may *match*, so without project_id a caller
+// holding another game's view id would clear that game's arrangement.
+// execrows because the count is the answer this call gives back -- a
+// designer clearing a view is told how many placements went.
+func (q *Queries) DeleteViewPositions(ctx context.Context, arg DeleteViewPositionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteViewPositions, arg.ProjectID, arg.ViewID)
 	if err != nil {
 		return 0, err
 	}
@@ -220,6 +273,74 @@ func (q *Queries) InsertViewRef(ctx context.Context, arg InsertViewRefParams) er
 		arg.Pointer,
 	)
 	return err
+}
+
+const listViewPositions = `-- name: ListViewPositions :many
+SELECT et.key AS entity_type, e.key AS entity_key, p.x, p.y, p.pinned, p.updated_at
+FROM view_positions p
+JOIN entities e ON e.id = p.entity_id AND e.project_id = p.project_id
+JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = e.project_id
+WHERE p.project_id = $1::uuid
+  AND p.view_id = $2::uuid
+ORDER BY et.key, e.key
+`
+
+type ListViewPositionsParams struct {
+	ProjectID uuid.UUID
+	ViewID    uuid.UUID
+}
+
+type ListViewPositionsRow struct {
+	EntityType string
+	EntityKey  string
+	X          float64
+	Y          float64
+	Pinned     bool
+	UpdatedAt  pgtype.Timestamptz
+}
+
+// One view's stored positions, addressed the way they were written: by
+// entity key and type key, never by id, so a caller that has never read
+// this game can act on the answer.
+//
+// **p.project_id is the load-bearing filter and the other two are not.**
+// A view id is a value a previous answer handed back, so nothing but
+// that filter keeps this read inside one game; dropping it hands another
+// game's positions to a caller holding a leaked view id, which
+// TestPositionsOfAnotherGameAreNotReachable asks for directly. The two
+// join conditions -- e.project_id = p.project_id and
+// et.project_id = e.project_id -- are implied by 0008_views.sql's and
+// 0004_metamodel.sql's composite foreign keys and by the primary keys
+// they join on, so each is redundant with the filter above it and
+// deleting either alone changes no answer. They are written because a
+// join to a project-scoped table that does not carry the scope is the
+// shape this repository has lost a filter to six times, not because a
+// test can tell them apart.
+func (q *Queries) ListViewPositions(ctx context.Context, arg ListViewPositionsParams) ([]ListViewPositionsRow, error) {
+	rows, err := q.db.Query(ctx, listViewPositions, arg.ProjectID, arg.ViewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListViewPositionsRow
+	for rows.Next() {
+		var i ListViewPositionsRow
+		if err := rows.Scan(
+			&i.EntityType,
+			&i.EntityKey,
+			&i.X,
+			&i.Y,
+			&i.Pinned,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listViewRefs = `-- name: ListViewRefs :many
@@ -539,6 +660,16 @@ type UpsertViewParams struct {
 //     type id. Its two project filters mask each other and only their
 //     joint removal is observable; the statement's own comment says so
 //     and names the test that asks the question across the games.
+//   - On view_positions, load-bearing on all three statements that carry
+//     a WHERE, for the same reason as view_refs and with the same
+//     caveat: a view id is a value a previous answer handed back, and the
+//     composite foreign key says what a row may hold rather than which
+//     rows a read or a DELETE may match. UpsertViewPosition has no WHERE
+//     at all -- it is an INSERT, and its isolation is the two composite
+//     keys refusing a parent from another game, which is the one place in
+//     this file where "the database refuses it" is the whole mechanism.
+//     Each statement's own comment says which of its filters is doing
+//     work and which is redundant with the one above it.
 //
 // No write here sets updated_at. 0008_views.sql puts a set_updated_at
 // trigger on views, so the column has one mechanism behind it rather
@@ -608,4 +739,69 @@ func (q *Queries) UpsertView(ctx context.Context, arg UpsertViewParams) (View, e
 		&i.UpdatedByTokenID,
 	)
 	return i, err
+}
+
+const upsertViewPosition = `-- name: UpsertViewPosition :execrows
+INSERT INTO view_positions (view_id, entity_id, project_id, x, y, pinned)
+VALUES ($1::uuid, $2::uuid,
+        $3::uuid, $4::double precision,
+        $5::double precision, $6::boolean)
+ON CONFLICT (view_id, entity_id) DO UPDATE
+SET x = excluded.x, y = excluded.y, pinned = excluded.pinned
+WHERE view_positions.project_id = excluded.project_id
+`
+
+type UpsertViewPositionParams struct {
+	ViewID    uuid.UUID
+	EntityID  uuid.UUID
+	ProjectID uuid.UUID
+	X         float64
+	Y         float64
+	Pinned    bool
+}
+
+// One node's coordinates in one view, written by views.set_positions.
+//
+// ON CONFLICT rather than delete-then-insert: a drag moves a node that
+// is already placed, which is the common call, and the primary key
+// (view_id, entity_id) is exactly the identity of "this node in this
+// view". updated_at is not in the SET list because 0008_views.sql puts a
+// set_updated_at trigger on the table, the same rule the rest of this
+// file follows.
+//
+// **The isolation takes two mechanisms here, and the first one alone is
+// not enough -- measured, not reasoned about.** On the insert path there
+// is nothing to filter and the guard is 0008_views.sql's two composite
+// foreign keys, (view_id, project_id) into views and
+// (entity_id, project_id) into entities: a parent from another game has
+// no matching row and the write raises 23503. On the **conflict** path
+// those keys check nothing at all. The conflict target is
+// (view_id, entity_id), project_id is not in the SET list, so the stored
+// row keeps its own project id, every foreign key stays satisfied, and a
+// caller passing another game's view id with its own project id
+// *silently overwrote that game's coordinates*. Seen: the first version
+// of this statement did exactly that, and the test that was meant to
+// catch it passed because it asserted the row count rather than the
+// coordinates.
+//
+// So the DO UPDATE is guarded on the stored row's own project id, and
+// the statement is execrows rather than exec: a guard that matches
+// nothing updates nothing and reports zero, which Go turns into a
+// refusal (positions.go) instead of the silent success a bare guard
+// would give. TestPositionsOfAnotherGameAreNotReachable drives both
+// paths -- an entity with no stored position for the 23503, one with a
+// stored position for the guard -- and reads the coordinates back.
+func (q *Queries) UpsertViewPosition(ctx context.Context, arg UpsertViewPositionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertViewPosition,
+		arg.ViewID,
+		arg.EntityID,
+		arg.ProjectID,
+		arg.X,
+		arg.Y,
+		arg.Pinned,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

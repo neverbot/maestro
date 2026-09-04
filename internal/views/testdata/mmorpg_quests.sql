@@ -41,6 +41,7 @@ node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
         WHERE rel.project_id = $1
           AND rel.relation_type_id = $15
           AND rel.source_id = e.id
+        GROUP BY far.id, far.name
         ORDER BY far.name, far.id
         LIMIT 1
     ) AS p1 ON true
@@ -60,6 +61,7 @@ node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
         WHERE rel.project_id = $1
           AND rel.relation_type_id = $15
           AND rel.source_id = e.id
+        GROUP BY far.id, far.name
         ORDER BY far.name, far.id
         LIMIT 1
     ) AS p1 ON true

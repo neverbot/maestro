@@ -743,6 +743,18 @@ const walkTruncatedKind frag = "walk_truncated"
 //
 // Row count and node count are now the same number, which is what lets
 // execute.go read `rows > cap` as an exact answer in both directions.
+//
+// **`ORDER BY all_rows.id, all_rows.rank, all_rows.depth` names no
+// attribute, and that is only harmless because of a property of the
+// projection.** The dedupe therefore does not say which row's attrs or
+// ambiguity flag survives — but every projection lateral is anchored
+// solely on `e.id` and returns exactly one row (project.go, relatedHop),
+// so all the candidate rows for one id carry identical attrs and an
+// identical flag and the choice cannot be observed. Change either side —
+// a lateral that reads something other than the node's id, or a lateral
+// that may return more than one row — and this ORDER BY has to name the
+// attributes too, or the picture starts depending on which duplicate
+// Postgres produced first.
 func (c *compiler) capOf(arms frag, limit int) frag {
 	return sprintf(`    SELECT capped.*
     FROM (

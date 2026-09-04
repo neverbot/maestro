@@ -424,6 +424,7 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 //	                     AND far.entity_type_id = $t AND far.invalid = false
 //	    WHERE rel.project_id = $1 AND rel.relation_type_id = $r
 //	      AND rel.source_id = e.id
+//	    GROUP BY far.id, far.name
 //	    ORDER BY far.name, far.id
 //	    LIMIT 1
 //	) AS p1 ON true
@@ -450,6 +451,22 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // the *true* number of candidates — not a weaker detection than cap + 1
 // but a stronger one, and free: finding the first far entity by name
 // requires sorting the matches anyway, so stopping at two saves nothing.
+//
+// **The GROUP BY is what makes matches count far entities rather than
+// edges**, and the flag is about entities everywhere it is documented —
+// Node.Ambiguous, this file's header, the plan. Windows are computed
+// after grouping, so grouping by far.id makes one far entity one row
+// whatever number of edges reached it. Without it, `direction: "any"`
+// lied: its anchor is `(rel.source_id = e.id OR rel.target_id = e.id)`,
+// so a relation type declared in **both** directions between the same
+// pair matched twice and flagged a node ambiguous with a single
+// candidate — see TestAReciprocalPairIsOneFarEntityNotTwo, and note that
+// `any` is the natural spelling for a symmetric type such as
+// `connects_to`. Two edges to one zone is not a colour a designer has to
+// resolve; a flag that fires where there is nothing to choose is one
+// designers learn to ignore, which costs what a flag that never fires
+// costs. `out` and `in` were never affected — the unique index on
+// (type, source, target) already makes one row one far entity there.
 //
 // **The ordering is the reason the same query paints the same picture
 // twice.** far.name first because that is the rule the flag documents —
@@ -505,9 +522,15 @@ func (c *compiler) relatedHop(alias, name frag, slot ResolvedAttr) (frag, error)
 		return "", invalidQuery(ptr+"/attr",
 			fmt.Sprintf("is empty: name a declared field key or a built-in such as %s", AttrName))
 	}
+	// groupBy is what makes matches count far *entities*. far.id is the
+	// primary key, so grouping by it leaves far.* and far.fields -> $n
+	// selectable by functional dependency; fet.key is not dependent on it
+	// and has to be named when the @type spelling brings the join in.
+	var groupBy frag = "far.id, far.name"
 	if attr == AttrType {
 		typeJoin = "\n        JOIN entity_types fet ON fet.id = far.entity_type_id" +
 			"\n                             AND fet.project_id = $1"
+		groupBy += ", fet.key"
 	}
 	value, err := c.attrValue("far", "fet", attr, ptr+"/attr")
 	if err != nil {
@@ -521,10 +544,11 @@ func (c *compiler) relatedHop(alias, name frag, slot ResolvedAttr) (frag, error)
         WHERE rel.project_id = $1
           AND rel.relation_type_id = %s
           AND %s
+        GROUP BY %s
         ORDER BY far.name, far.id
         LIMIT 1
     ) AS %s ON true`, value, target, typeFilter, c.invalidFilterHop(), typeJoin,
-		c.b.bind(*hop.RelationTypeID), anchor, name), nil
+		c.b.bind(*hop.RelationTypeID), anchor, groupBy, name), nil
 }
 
 // invalidFilterHop keeps a far entity the metamodel flagged as no longer

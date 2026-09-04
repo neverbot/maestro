@@ -504,3 +504,46 @@ func TestARelatedHopDoesNotColourWithAnInvalidEntity(t *testing.T) {
 		t.Fatalf("include_invalid must lift the exclusion here too, got %#v", got)
 	}
 }
+
+// TestAReciprocalPairIsOneFarEntityNotTwo is the shape the ambiguity flag
+// shipped wrong: `direction: "any"` anchors on
+// `(rel.source_id = e.id OR rel.target_id = e.id)`, so **a relation type
+// declared in both directions between the same two entities matches
+// twice** — two rows, one far entity. Counting rows, the node was flagged
+// ambiguous with a single candidate to choose from.
+//
+// That is the flag lying, not being conservative: Node.Ambiguous's doc,
+// this file's header and the plan all say the flag means *more than one
+// entity was found*, and `any` is the natural spelling for a symmetric
+// relation type — `connects_to` is one this project names itself. A flag
+// that fires where there is nothing to resolve is one designers learn to
+// ignore, which costs exactly what a flag that never fires costs.
+//
+// The two controls are in the test above: two distinct zones still report
+// true, and one zone still reports false.
+func TestAReciprocalPairIsOneFarEntityNotTwo(t *testing.T) {
+	g, _ := newGame(t)
+	// The fixture already carries `defias requires hogger`. The reverse
+	// edge makes the pair reciprocal, which is legal — the unique index is
+	// on (type, source, target) — and is one far entity seen twice.
+	g.relate(t, "requires", "quest", "hogger", "quest", "defias")
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"quest","as":"q"}],
+			"project":{"color_by":{"related":{"via":"requires","direction":"any",
+			                                  "type":"quest","attr":"@name"}}}}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	byKey := nodesByKey(res.Nodes)
+	hogger := byKey["hogger"]
+	if got := hogger.Attrs["color_by"]; got != "The Defias Brotherhood" {
+		t.Errorf("the one far quest must colour the node, got %#v", got)
+	}
+	if hogger.Ambiguous {
+		t.Error("a reciprocal pair is two edges to one entity, and one entity is not a " +
+			"choice: the flag says an entity was picked out of several, so it must be false")
+	}
+	if byKey["defias"].Ambiguous {
+		t.Error("the other end of the same reciprocal pair is not ambiguous either")
+	}
+}

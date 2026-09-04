@@ -29,15 +29,27 @@ import (
 // designer recognises the image, is never consulted for the format, and
 // is never echoed into a response header.
 //
-// **Two bounds, one constant.** http.MaxBytesReader stops the request
-// body at views.MaxAssetBytes+1 so the server never reads a four-gigabyte
-// upload into anything, and internal/views bounds the reader it is
-// handed for the same reason one layer down. They are the same bound
-// twice rather than two bounds: the constant is the domain's, and this
-// file reads it rather than declaring its own.
-// TestAnOversizeUploadIsRefusedByTheTransportToo drives the transport
-// half; internal/views' TestAnOversizeAssetIsRefusedBeforeItIsRead
-// drives the other and counts the bytes.
+// **One size bound, in one place, and the plan's second one is not
+// here.** Task 14 prescribed wrapping the request body in
+// http.MaxBytesReader; measured, that wrapper can never fire. The domain
+// reads through an io.LimitReader of views.MaxAssetBytes+1 in the same
+// read path, so it stops one byte past the cap and the transport's
+// limiter — set at the same cap — is never asked for the byte that would
+// trip it. A guard that cannot fire is the mechanism-nothing-reads this
+// plan refuses everywhere else.
+//
+// Setting the transport's limit one byte *tighter* would make it fire,
+// and that is the version that was rejected: it wins the race, and what
+// it wins with is `http: request body too large` in place of a sentence
+// telling a designer to scale the image down or save it at a lower
+// quality. The refusal a designer reads is worth more than a second copy
+// of a bound that is already applied while reading.
+//
+// The protection is unchanged either way — nothing here reads more than
+// eight megabytes and one byte off the socket, whichever object stops
+// it. internal/views' TestAnOversizeAssetIsRefusedBeforeItIsRead counts
+// the bytes; TestAnOversizeUploadIsRefusedOverTheWire asserts that the
+// refusal reaches a browser as a 400 naming /bytes.
 //
 // **Everything else about the bytes is decided in internal/views**, and
 // deliberately not here: the mime is sniffed there, the dimensions are
@@ -101,14 +113,11 @@ func (s *Server) handleUploadViewAsset(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return
 	}
-	// The transport's own bound, over the domain's constant. +1 so that
-	// a body of exactly the cap is readable and one byte more is not,
-	// which is the same off-by-one internal/views' readBounded makes and
-	// for the same reason: reading exactly the cap cannot tell a file of
-	// that size from the front of a larger one.
-	body := http.MaxBytesReader(w, r.Body, views.MaxAssetBytes+1)
+	// r.Body is handed over unwrapped: the size bound is the domain's and
+	// is applied while reading — see this file's header for why the
+	// second wrapper the plan asked for was measured and left out.
 	asset, err := s.opts.Views.CreateAsset(r.Context(), scope.ProjectID,
-		actorOf(caller), filename, body)
+		actorOf(caller), filename, r.Body)
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return

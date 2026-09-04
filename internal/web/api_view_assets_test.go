@@ -225,22 +225,29 @@ func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 	}
 }
 
-// TestAnOversizeUploadIsRefusedByTheTransportToo drives the
-// http.MaxBytesReader half of the bound.
+// TestAnOversizeUploadIsRefusedOverTheWire asserts that the domain's
+// size bound reaches a browser as something a designer can act on.
 //
-// The domain's own bound is asserted in internal/views, where the bytes
-// pulled off the reader are counted. What this asserts is that the
-// transport carries the same bound over the same constant, so that a
-// four-gigabyte POST is cut off at the socket rather than being handed
-// to the domain in full and refused there.
-func TestAnOversizeUploadIsRefusedByTheTransportToo(t *testing.T) {
+// **The plan asked for an http.MaxBytesReader here and there is none**,
+// because it can never fire: the domain reads through a LimitReader of
+// the same cap in the same read path, so the transport's limiter is
+// never handed the byte that would trip it, and setting it a byte
+// tighter only replaces a sentence about scaling the image down with
+// `http: request body too large`. api_view_assets.go's header records
+// the measurement. What is left to assert here is the mapping — a 400
+// naming /bytes — which is the transport's actual job.
+func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 	f := newAssetFixture(t)
 	oversize := make([]byte, views.MaxAssetBytes+1024)
 	copy(oversize, testPNG(t, 8, 8))
 	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.game, "enormous.png"),
 		"image/png", oversize)
-	if rec.Code == http.StatusOK {
-		t.Fatalf("an oversize upload was accepted: %s", rec.Body.String())
+	assertError(t, rec, http.StatusBadRequest, "invalid_input", "/bytes")
+	// The advice, not merely the status: a designer whose world map is
+	// too big needs to be told what to do about it, and this is the
+	// sentence a transport-level limiter would have replaced.
+	if !strings.Contains(rec.Body.String(), "scale the image down") {
+		t.Fatalf("the refusal was %q, want the domain's own advice", rec.Body.String())
 	}
 	// The control, and it is not a formality: a transport bound set one
 	// byte too tight would refuse every legitimate image and this test

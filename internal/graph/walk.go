@@ -162,14 +162,23 @@ func ReadFrom(w Walk) string { return w.Name + "_out" }
 // the join condition, with two arms guarded by a scalar `direction`, so
 // one arm is dead on every row. Under `any` both arms are live. The
 // answer is *not* to emit one UNION ALL arm per direction: Postgres
-// refuses that outright -- "recursive reference to query \"w\" must not
-// appear more than once" -- and, written in the legal way that gets the
-// same rows (a two-armed edge relation feeding one self-reference), a
-// self-loop matches under both arms and the walk doubles at every level,
-// measured at 2, 4 and 8 rows for depths 1, 2 and 3. So `any` is **one**
-// arm: the near end matches either column and the far end is the scalar
-// CASE of whichever matched, which cannot produce an edge twice from one
-// node.
+// refuses that outright -- SQLSTATE 42P19, "recursive reference to query
+// \"w\" must not appear within its non-recursive term", because a third
+// branch makes the first two the non-recursive term -- and, written in
+// the legal way that gets the same rows (a two-armed edge relation
+// feeding one self-reference), a self-loop matches under both arms and
+// the walk doubles at every level: measured on this project's Postgres
+// at 1, 2, 4 and 8 rows for depths 0 to 3, against 1, 1, 1, 1 for the
+// arm below, both with the guard removed. So `any` is **one** arm: the
+// near end matches either column and the far end is the scalar CASE of
+// whichever matched, which cannot produce an edge twice from one node.
+//
+// Both measurements were taken with the guard removed, and that is the
+// honest statement of what is pinned: with the guard in place the two
+// shapes return the same rows, because the second copy of a self-loop is
+// excluded by the same path test as the first, so **no test in this
+// package can tell them apart**. TestASelfLoopIsNotTraversed says the
+// same thing where a reader of the test will find it.
 func WalkCTE(w Walk) (string, []any) {
 	if !isIdentifier(w.Name) {
 		panic(fmt.Sprintf("graph: a CTE name must be a lower-case identifier, got %q; a name "+

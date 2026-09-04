@@ -476,8 +476,8 @@ type UpsertViewParams struct {
 //     no parent, and a view id is a value a previous answer handed back,
 //     so nothing but the project filter keeps either inside one game.
 //     That includes GetViewByID: a view id in a caller's hand is not
-//     authority to read it. TestReadingAnotherGamesViewIsNotFound and
-//     TestAViewIdFromAnotherGameDoesNotResolve pin the two.
+//     authority to read it. TestReadingAnotherGamesViewIsNotFound pins
+//     both, by key and by id, with a positive control in the same test.
 //   - On view_refs, the filter is **not** the mechanism and is defence
 //     in depth. 0008_views.sql gives the table a composite
 //     FOREIGN KEY (view_id, project_id) REFERENCES views (id, project_id),

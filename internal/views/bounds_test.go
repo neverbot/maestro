@@ -117,6 +117,59 @@ func TestAnUntruncatedResultSaysSo(t *testing.T) {
 	}
 }
 
+// TestTheNodeCapCountsNodesNotRows is the assertion the two tests above
+// cannot make: both draw one set, where a row and a node are trivially
+// the same thing.
+//
+// `max_nodes` is documented as a cap on nodes. It was enforced as a cap
+// on *rows*, and the same entity drawn by two `nodes` entries is two rows
+// — so three quests declared as two overlapping sets came back as the
+// identical three nodes with Truncated.Nodes set at a cap of three, and
+// clear at a cap of six. Nobody was ever told a truncated result was
+// complete, which is why this is the direction it is; being told a whole
+// picture is partial is still a designer chasing a cap that was never
+// reached, and the trim in Go could hand back fewer nodes than the cap
+// allowed.
+//
+// The control is the other direction in the same shape, so a cap that
+// stopped flagging anything at all cannot pass.
+func TestTheNodeCapCountsNodesNotRows(t *testing.T) {
+	g, _ := newGame(t)
+	doc := `{"v":1,"from":[{"type":"quest","as":"a"},{"type":"quest","as":"b"}],
+		"limits":{"max_nodes":%d}}`
+
+	// The fixture's three quests, drawn twice: six rows, three nodes.
+	for _, cap := range []int{3, 4, 6} {
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+			Query: mustParse(t, fmt.Sprintf(doc, cap))})
+		if err != nil {
+			t.Fatalf("cap %d: %v", cap, err)
+		}
+		if len(res.Nodes) != 3 {
+			t.Fatalf("cap %d: two overlapping sets over three quests are three nodes, "+
+				"got %d", cap, len(res.Nodes))
+		}
+		if res.Truncated.Nodes {
+			t.Errorf("cap %d: three nodes under a cap of %d is not truncated — the flag "+
+				"is counting the rows the sets overlap in, not the nodes the caller got",
+				cap, cap)
+		}
+	}
+
+	// The control: six quests over the same two sets really do exceed a
+	// cap of five, and are trimmed to exactly it.
+	seedQuests(t, g, 3)
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, fmt.Sprintf(doc, 5))})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(res.Nodes) != 5 || !res.Truncated.Nodes {
+		t.Fatalf("six nodes under a cap of five is five nodes and a flag, got %d and %+v",
+			len(res.Nodes), res.Truncated)
+	}
+}
+
 // TestAnEdgeResultIsTruncatedToo is the same mechanism at the other
 // collection point, which is a separate arm with a separate cap and would
 // otherwise be held by nothing. Its control is in the same test: the same
@@ -267,6 +320,93 @@ func TestTheStatementBudgetIsClampedToItsHardCap(t *testing.T) {
 	if got := s.statementBudget(); got != 250*time.Millisecond {
 		t.Errorf("a budget under the cap is used as it is, got %s", got)
 	}
+	// `budget <= 0` does two jobs — an unset knob and a nonsensical one —
+	// and only the first was pinned. A negative budget formats as a
+	// negative number of milliseconds, which Postgres refuses outright, so
+	// the arm that turns it into the default is load-bearing.
+	s.statementTimeout = -time.Second
+	if got := s.statementBudget(); got != DefaultStatementTimeout {
+		t.Errorf("a negative budget must fall back to the default, got %s", got)
+	}
+	// The floor. The budget is bound as whole milliseconds and
+	// `statement_timeout = 0` is Postgres's spelling of *no timeout*, so a
+	// sub-millisecond budget must not truncate into an unbounded run.
+	s.statementTimeout = 500 * time.Microsecond
+	if got := s.statementBudget(); got != time.Millisecond {
+		t.Errorf("a sub-millisecond budget must floor at 1ms rather than truncate to an "+
+			"unbounded statement, got %s", got)
+	}
+}
+
+// TestTheBudgetPostgresHoldsIsTheOneThisPackageComputed is the assertion
+// the clamp above cannot make: statementBudget is a pure function, and a
+// pure function nobody calls is worth nothing.
+//
+// Run passes `s.statementBudget()` to runInTx. Change that one identifier
+// to `s.statementTimeout` and every other test in this package stays
+// green — on the default path the knob is zero, `0ms` binds, and *zero
+// means no timeout in Postgres*, so every production view would run
+// unbounded while the bounds table advertises 5s and 15s. The three tests
+// that touch the timeout all set the knob, so the default path was
+// asserted by nobody.
+//
+// So this one asserts the value the *database* came back holding, through
+// Run's own path, on both ends of the clamp:
+//
+//   - knob unset — the production path — must be 5s, which is what fails
+//     the moment Run passes the raw knob;
+//   - knob above the ceiling must be 15s, which is the only assertion
+//     proving the clamp travels through Run rather than sitting unused.
+//
+// The observation goes through Service.observeBounds, which reports what
+// set_config returned rather than what Go computed: the readback is also
+// what makes runInTx refuse a transaction that came back unbounded.
+func TestTheBudgetPostgresHoldsIsTheOneThisPackageComputed(t *testing.T) {
+	g, _ := newGame(t)
+	doc := mustParse(t, `{"v":1,"from":[{"type":"quest"}]}`)
+
+	observe := func(t *testing.T) *[]string {
+		t.Helper()
+		var seen []string
+		g.views.observeBounds = func(timeout, readOnly string) {
+			seen = append(seen, timeout)
+			if readOnly != "on" {
+				t.Errorf("the transaction must be holding transaction_read_only on, got %q",
+					readOnly)
+			}
+		}
+		return &seen
+	}
+
+	seen := observe(t)
+	if _, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: doc}); err != nil {
+		t.Fatalf("the default path must run: %v", err)
+	}
+	if len(*seen) != 1 || (*seen)[0] != "5s" {
+		t.Fatalf("with no knob set, the statement must run under the 5s default this "+
+			"package's table advertises; the database is holding %v. A %q here is "+
+			"Postgres's spelling of *no timeout*, which is the whole defect this test "+
+			"exists for", *seen, "0")
+	}
+
+	g.views.statementTimeout = time.Hour
+	seen = observe(t)
+	if _, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: doc}); err != nil {
+		t.Fatalf("an over-cap knob is clamped, not refused: %v", err)
+	}
+	if len(*seen) != 1 || (*seen)[0] != "15s" {
+		t.Fatalf("an hour must reach the database as the 15s ceiling, got %v", *seen)
+	}
+
+	// And the floor at the other end, measured the same way: 500µs is
+	// still a bound, not the absence of one.
+	g.views.statementTimeout = 500 * time.Microsecond
+	seen = observe(t)
+	_, _ = g.views.Run(t.Context(), g.projectID, RunRequest{Query: doc})
+	if len(*seen) != 1 || (*seen)[0] != "1ms" {
+		t.Fatalf("a sub-millisecond budget must reach the database as 1ms rather than as "+
+			"an unbounded statement, got %v", *seen)
+	}
 }
 
 // TestTheBoundsDoNotLeakOntoTheNextCaller is the pooled-connection half:
@@ -361,14 +501,38 @@ func seedQuests(t *testing.T, g *game, n int) {
 // called it the one deliberate exception. set_config takes its value as a
 // bind parameter, so the exception is unnecessary and this guard needs no
 // allowance carved into it.
+//
+// **It watches the assignment as well as the call**, because the call
+// site alone is one step short of the hole: `statement` is allowed by
+// name, so `statement = statement + " -- " + fromACaller` one line above
+// the Query left both halves of the earlier guard green. An identifier
+// this test lets through must therefore be one whose only value is
+// compileWith's.
 func TestNoStatementTextIsAssembledOutsideTheCompiler(t *testing.T) {
-	// The methods whose first non-context argument is statement text.
-	executors := map[string]bool{"Exec": true, "Query": true, "QueryRow": true}
+	// The pgx methods that take statement text, and which argument of each
+	// one it is (Exec/Query/QueryRow take a ctx first; Batch.Queue does
+	// not; Conn.Prepare takes ctx and a name).
+	//
+	// **This set is a list of the pgx entry points this package uses, and
+	// it has to be revisited whenever a new one is.** The vacuity check
+	// below only fails when a *watched* call disappears, so an unwatched
+	// executor that is added is invisible to it: `batch.Queue("SELECT " +
+	// fromACaller)` executed with every guard in this file silent until
+	// Queue was named here. CopyFrom takes a table identifier rather than
+	// SQL, and is watched anyway — it is a write, this package performs
+	// none, and a composite literal in that position fails the default arm
+	// loudly, which is the answer wanted.
+	executors := map[string]int{
+		"Exec": 1, "Query": 1, "QueryRow": 1,
+		"Queue": 0, "Prepare": 2, "CopyFrom": 1,
+	}
 	// The one identifier allowed to carry a statement: the compiler's
 	// output, which the frag guard already covers end to end.
 	compiled := map[string]bool{"statement": true}
+	// The only call an identifier in `compiled` may be assigned from.
+	const builder = "compileWith"
 
-	found := 0
+	found, built := 0, 0
 	for _, file := range packageFiles(t) {
 		fset := token.NewFileSet()
 		parsed, err := parser.ParseFile(fset, file, nil, 0)
@@ -376,16 +540,63 @@ func TestNoStatementTextIsAssembledOutsideTheCompiler(t *testing.T) {
 			t.Fatalf("parse %s: %v", file, err)
 		}
 		ast.Inspect(parsed, func(n ast.Node) bool {
+			if assign, ok := n.(*ast.AssignStmt); ok {
+				// Route: the value of an allowed identifier, rather than the
+				// argument at the call site. Anything written into
+				// `statement` that is not the compiler's own output makes
+				// the allowance at the call site meaningless.
+				names := false
+				for _, lhs := range assign.Lhs {
+					if ident, ok := unparen(lhs).(*ast.Ident); ok && compiled[ident.Name] {
+						names = true
+					}
+				}
+				if !names {
+					return true
+				}
+				line := fset.Position(assign.Pos()).Line
+				if len(assign.Rhs) != 1 {
+					t.Errorf("%s:%d assigns a statement identifier from %d values; the "+
+						"compiler's output is the only thing it may hold",
+						file, line, len(assign.Rhs))
+					return true
+				}
+				call, ok := unparen(assign.Rhs[0]).(*ast.CallExpr)
+				if !ok {
+					t.Errorf("%s:%d assigns a statement identifier from a %T; only %s may "+
+						"produce a statement this package executes",
+						file, line, assign.Rhs[0], builder)
+					return true
+				}
+				name := ""
+				switch fn := unparen(call.Fun).(type) {
+				case *ast.Ident:
+					name = fn.Name
+				case *ast.SelectorExpr:
+					name = fn.Sel.Name
+				}
+				if name != builder {
+					t.Errorf("%s:%d assigns a statement identifier from %s(); only %s may "+
+						"produce a statement this package executes", file, line, name, builder)
+					return true
+				}
+				built++
+				return true
+			}
 			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) < 2 {
+			if !ok {
 				return true
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || !executors[sel.Sel.Name] {
+			if !ok {
+				return true
+			}
+			at, watched := executors[sel.Sel.Name]
+			if !watched || len(call.Args) <= at {
 				return true
 			}
 			found++
-			switch arg := unparen(call.Args[1]).(type) {
+			switch arg := unparen(call.Args[at]).(type) {
 			case *ast.BasicLit:
 				return true
 			case *ast.Ident:
@@ -405,9 +616,15 @@ func TestNoStatementTextIsAssembledOutsideTheCompiler(t *testing.T) {
 	}
 	// Vacuity: this package executes SQL, and a walk that found none is a
 	// walk that stopped matching rather than a package that stopped
-	// running queries.
+	// running queries. The same for the assignment arm — `statement` is
+	// assigned in Run, and an arm that matched nothing would let anything
+	// through.
 	if found < 2 {
 		t.Fatalf("found %d statements executed in this package; the guard above is no "+
 			"longer watching what it names", found)
+	}
+	if built < 1 {
+		t.Fatalf("found %d assignments of a statement identifier; the assignment arm is "+
+			"watching nothing", built)
 	}
 }

@@ -264,9 +264,29 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			// reasons at once hears the one it can act on, rather than
 			// "current version is N" over a key that would be refused
 			// again at the same version.
+			// The order is what this check is *for*, and it is the only
+			// thing that makes it load-bearing: the post-write check
+			// below catches a respelling whose version matched, and the
+			// re-read after a failed guard catches one whose version did
+			// not, so with a correct version in hand this branch is
+			// redundant. Neither of those can choose which fault to
+			// report when a caller has both, and being told "current
+			// version is N" over a key that would be refused again at
+			// that version is a loop a caller cannot leave by doing what
+			// the error said.
+			// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale pins it.
 			if existing.Key != in.Key {
 				return viewKeyRespellingError(in.Key, existing.Key)
 			}
+			// **Behaviourally redundant with the SQL guard, and kept**,
+			// which is the same position internal/markdown reached for
+			// the identical check: deleting these three lines leaves the
+			// whole package green, because the guarded DO UPDATE refuses
+			// on its own and conflictOnViewKey's re-read reports the same
+			// current version this branch would have. What it earns is
+			// that a caller already known to be wrong is turned away
+			// before its query document, its refs and a version row are
+			// built, sent and rolled back.
 			if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
 				return &metamodel.VersionConflictError{Current: existing.Version}
 			}
@@ -308,6 +328,16 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 		// keeps the stored key — `key` is not in its SET list — so
 		// comparing the returned spelling to the submitted one closes it,
 		// and withTx rolls the write back.
+		//
+		// **That race is staged rather than argued**, because the same
+		// claim was made in internal/markdown for a check that turned out
+		// to be unreachable there: with expected_version 0 spelling a
+		// create, the loser always falls to the failed-guard arm instead.
+		// Here a version is a claim about a row rather than a claim to be
+		// creating one, so the arm is live —
+		// TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling
+		// stages it, and deleting these three lines makes that test
+		// report a nil error over a silently overwritten row.
 		if row.Key != in.Key {
 			return viewKeyRespellingError(in.Key, row.Key)
 		}

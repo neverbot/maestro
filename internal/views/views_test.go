@@ -1078,3 +1078,148 @@ func TestAViewAndItsRefsAreOneChange(t *testing.T) {
 			"must not be stored, or its dependency index describes a query nobody wrote", err)
 	}
 }
+
+// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale is what makes the
+// locked read's spelling check load-bearing, and it is the only thing
+// that does.
+//
+// Measured: with only the respelling test above, deleting that check
+// leaves the package green — the post-write check catches a respelling
+// whose version matched, and the re-read after a failed guard catches one
+// whose version did not. What neither of them can do is choose *which*
+// fault to report when a caller has both, and the order is the whole
+// point: "current version is 1" over a key that would be refused again at
+// version 1 sends a caller round a loop it cannot leave by doing what the
+// error said.
+func TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	if _, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly)); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	in := saveable("ROUTE", questsOnly)
+	in.ExpectedVersion = ptrInt32(9)
+	_, err := g.views.UpsertView(ctx, g.projectID, in)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want the respelling rather than the version conflict", err)
+	}
+	if !strings.Contains(err.Error(), `"route"`) {
+		t.Fatalf("err = %v, want the stored spelling named", err)
+	}
+}
+
+// TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling
+// reaches the post-write spelling check, which is the one refusal in this
+// call that neither the locked read nor the failed-guard re-read can
+// make.
+//
+// The shape is narrow and it is real: a caller that believes it is
+// *updating* — it holds an expected version — against a key that does not
+// exist yet, while another writer is creating it. The locked read finds
+// nothing, so there is nothing to compare a spelling to; the winner lands
+// at version 1; and the guard, asked for version 1, matches — so this
+// call updates a row it never saw, stored under a spelling it did not
+// send. Only comparing the returned key to the submitted one catches it,
+// and withTx rolls the write back.
+//
+// Measured before it was written: with this test absent, deleting the
+// post-write check leaves the package green.
+func TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+
+	other, err := g.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = other.Rollback(ctx) }()
+	if _, err := other.Exec(ctx,
+		`INSERT INTO views (project_id, key, name, query, renderer)
+		 VALUES ($1, 'route', 'Theirs', '{"v":1}'::jsonb, 'graph')`, g.projectID); err != nil {
+		t.Fatalf("the other writer's insert: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		in := saveable("ROUTE", questsOnly)
+		in.Name = "Ours"
+		// The version the winner is about to land on, held by a caller
+		// that never saw the row.
+		in.ExpectedVersion = ptrInt32(1)
+		_, err := g.views.UpsertView(ctx, g.projectID, in)
+		done <- err
+	}()
+
+	waitForABlockedStatement(t, g.pool)
+	if err := other.Commit(ctx); err != nil {
+		t.Fatalf("commit the other writer: %v", err)
+	}
+
+	err = <-done
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want the spelling refusal: the version is not this caller's "+
+			"problem and merging onto it would not help", err)
+	}
+	if !strings.Contains(err.Error(), `"route"`) {
+		t.Fatalf("err = %v, want the stored spelling named", err)
+	}
+	got, err := g.views.ViewByKey(ctx, g.projectID, "route")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Name != "Theirs" || got.Version != 1 {
+		t.Fatalf("view = (%q, %d), want the winner's row untouched: the refused write "+
+			"must have rolled back", got.Name, got.Version)
+	}
+}
+
+// TestARemovalThatLostItsRaceAnnouncesNothing pins the arm that reads
+// how many rows the delete actually removed.
+//
+// RemoveView resolves the key first and deletes by id, so between those
+// two statements another remover can take the row. Without this test the
+// arm is a signal nothing reads: deleting it leaves the package green,
+// and what ships instead is a `view.removed` announced by a caller that
+// removed nothing — a second event for one removal, on a hub whose
+// subscribers re-read on hearing one.
+//
+// The race is staged rather than hoped for. A rival transaction deletes
+// the row and holds its lock; this call's own DELETE blocks on it, and
+// when the rival commits the row is gone and the statement matches
+// nothing. Two goroutines racing would not do: they serialise as often as
+// not, and then the *read* refuses and the arm is never reached.
+func TestARemovalThatLostItsRaceAnnouncesNothing(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+	row, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Subscribed after the creation, so the only event this subscription
+	// can ever see is the removal's.
+	sub := hub.Subscribe(g.projectID, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	rival, err := g.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = rival.Rollback(ctx) }()
+	if _, err := rival.Exec(ctx, `DELETE FROM views WHERE id = $1`, row.ID); err != nil {
+		t.Fatalf("the rival's delete: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- svc.RemoveView(ctx, g.projectID, "route") }()
+	waitForABlockedStatement(t, g.pool)
+	if err := rival.Commit(ctx); err != nil {
+		t.Fatalf("rival commit: %v", err)
+	}
+
+	if err := <-done; !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want not_found: this call removed nothing", err)
+	}
+	requireNothing(t, sub, "the removal removed nothing")
+}

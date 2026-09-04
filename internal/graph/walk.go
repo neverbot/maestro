@@ -209,13 +209,23 @@ func WalkCTE(w Walk) (string, []any) {
 	// they are one match over either column and the scalar CASE of
 	// whichever matched -- one arm, so no edge is ever traversed twice
 	// from the same node.
-	near, far := "r.source_id = w.id", "r.target_id"
+	var near, far string
 	switch w.Direction {
+	case Out:
+		near, far = "r.source_id = w.id", "r.target_id"
 	case In:
 		near, far = "r.target_id = w.id", "r.source_id"
 	case Any:
 		near = "(r.source_id = w.id OR r.target_id = w.id)"
 		far = "CASE WHEN r.source_id = w.id THEN r.target_id ELSE r.source_id END"
+	default:
+		// Including the zero value: a direction this package does not
+		// know is a caller's mistake, and defaulting it to Out would
+		// answer every such walk backwards-compatibly and wrongly, which
+		// is the wrong-answer-without-an-error class this repository
+		// keeps producing. TestAnUnknownDirectionPanics pins it.
+		panic(fmt.Sprintf("graph: unknown direction %q; the three are %q, %q and %q",
+			w.Direction, Out, In, Any))
 	}
 
 	body := fmt.Sprintf(`%[1]s (id, depth, path, via_relation, from_id) AS (

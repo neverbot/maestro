@@ -475,6 +475,31 @@ func TestASeedsOwnBindsAreRenumbered(t *testing.T) {
 	}
 }
 
+// TestAnUnknownDirectionPanics covers the zero value too, which is the
+// one a caller reaches by building a graph.Walk and forgetting the
+// field.
+func TestAnUnknownDirectionPanics(t *testing.T) {
+	t.Parallel()
+	for _, d := range []graph.Direction{"", "outgoing", "OUT", "both"} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("a direction of %q must panic rather than be walked as %q", d, graph.Out)
+				}
+			}()
+			graph.WalkCTE(graph.Walk{
+				Name: "w", ProjectID: uuid.New(), SeedSQL: "SELECT id FROM entities", Direction: d,
+			})
+		}()
+	}
+	// The control: the three this package knows do not panic.
+	for _, d := range []graph.Direction{graph.Out, graph.In, graph.Any} {
+		graph.WalkCTE(graph.Walk{
+			Name: "w", ProjectID: uuid.New(), SeedSQL: "SELECT id FROM entities", Direction: d,
+		})
+	}
+}
+
 func TestACTENameThatIsNotAnIdentifierPanics(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"", "w; DROP TABLE relations", "W", "1w", "a-b"} {
@@ -485,7 +510,12 @@ func TestACTENameThatIsNotAnIdentifierPanics(t *testing.T) {
 						"into a statement is never a caller's text", name)
 				}
 			}()
-			graph.WalkCTE(graph.Walk{Name: name, ProjectID: uuid.New(), SeedSQL: "SELECT id FROM entities"})
+			// Direction is set: without it this test would panic on the
+			// direction instead and stay green with the name guard gone,
+			// which is a test passing for the wrong reason.
+			graph.WalkCTE(graph.Walk{
+				Name: name, ProjectID: uuid.New(), SeedSQL: "SELECT id FROM entities", Direction: graph.Out,
+			})
 		}()
 	}
 }

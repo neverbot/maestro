@@ -41,6 +41,16 @@ type Service struct {
 	// what write it, so that the timeout path can be exercised without a
 	// slow query — nothing else does.
 	statementTimeout time.Duration
+	// observeBounds, when set, is handed the two settings the database
+	// reported back after runInTx installed them — the values Postgres is
+	// actually holding for this transaction, not the values Go computed.
+	// It is unexported and written only by this package's bounds tests,
+	// which is the only way to assert *through Run's own path* that the
+	// budget reaching the statement is statementBudget's and not the raw
+	// knob: on the default path the knob is zero, `0ms` means no timeout
+	// at all in Postgres, and a run that quietly lost its bound looks
+	// exactly like one that kept it. Nothing in production sets it.
+	observeBounds func(statementTimeout, readOnly string)
 }
 
 // New builds the service. The hub may be nil, in which case nothing is

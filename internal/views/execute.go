@@ -85,7 +85,20 @@ type Stats struct {
 // Nodes and Edges are **detected, not inferred**: each collection point
 // is emitted with `LIMIT cap + 1` (compiler.capOf), so a result that came
 // back one row over its cap is a result the graph had more of. Run trims
-// the extra rows and sets the flag.
+// the extra rows and sets the flag. The rows are deduplicated by id
+// before the LIMIT, so a row is a node and the flag is exact in both
+// directions — it is neither set for a graph that fits nor left unset for
+// one that did not.
+//
+// **An edge's endpoints are not guaranteed to be in Nodes.** The two caps
+// are independent and the edge arms are collected from the sets, not from
+// the trimmed node list, so a node truncation leaves the edges that
+// pointed at the trimmed nodes in the result. Dropping them is not the
+// obvious repair it looks like: an `edges: [{between: …}]` entry
+// legitimately draws relations between sets the document chose *not* to
+// draw as nodes, so "endpoint missing" is a normal, untruncated answer
+// too, and a renderer has to tolerate it regardless of this flag. A
+// renderer that wants a closed graph filters on Nodes itself.
 //
 // **Depth is still nobody's**, and false here means "not measured". Every
 // step this build compiles is one hop, so no run can exceed max_depth;
@@ -174,12 +187,14 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	seenEdge := map[uuid.UUID]bool{}
 	// How many rows each collection point actually returned, which is what
 	// *detects* truncation: capOf asked each of them for one row more than
-	// its cap, so a count over the cap is a graph that had more. It is
-	// counted per row rather than per surviving node because the
-	// deduplication below can collapse two rows into one node — a node
-	// count is a count after that collapse, and a collapsed result sitting
-	// exactly on the cap is indistinguishable from a graph that holds
-	// exactly that many.
+	// its cap, so a count over the cap is a graph that had more.
+	//
+	// A row is a node. capOf deduplicates by id *before* the LIMIT, so the
+	// two numbers cannot drift: counting rows while the LIMIT counted
+	// duplicates is what used to report a graph of three quests declared
+	// as two overlapping sets truncated at a cap of three. The maps below
+	// stay as the second half of that rule — the one that decides which
+	// set a node belongs to — and no longer collapse anything.
 	nodeRowsRead, edgeRowsRead := 0, 0
 	collect := func(rows pgx.Rows) error {
 		for rows.Next() {
@@ -416,6 +431,15 @@ func (s *Service) statementBudget() time.Duration {
 	if budget > HardStatementTimeout {
 		budget = HardStatementTimeout
 	}
+	// And a floor, because the value is bound as whole milliseconds and
+	// `statement_timeout = 0` means *no timeout* in Postgres: a budget of
+	// 500µs truncates to "0ms" and would buy an unbounded statement in
+	// exchange for asking for a very short one. A sub-millisecond budget
+	// is not a thing this package can express, so the nearest thing it can
+	// express is the smallest real bound rather than the absence of one.
+	if budget < time.Millisecond {
+		budget = time.Millisecond
+	}
 	return budget
 }
 
@@ -466,11 +490,31 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 	// is_local = true, which is what SET LOCAL means: both settings are
 	// undone when this transaction ends, so a pooled connection handed to
 	// the next caller carries neither.
-	if _, err := tx.Exec(ctx,
+	//
+	// **The settings are read back rather than assumed.** set_config
+	// returns the value that landed, and the value that landed is the only
+	// thing that bounds the statement: `statement_timeout = 0` is
+	// Postgres's spelling of *no timeout*, so a budget that arrived as
+	// zero — a knob passed instead of statementBudget, a duration that
+	// truncated to nothing — would buy an unbounded run while every table
+	// in the documentation says 5s. That is a refusal here rather than a
+	// comment, and observeBounds lets the package's own tests assert the
+	// value the database is holding through Run's own path.
+	var appliedReadOnly, appliedTimeout string
+	if err := tx.QueryRow(ctx,
 		`SELECT set_config('transaction_read_only', 'on', true),
 		        set_config('statement_timeout', $1, true)`,
-		strconv.FormatInt(timeout.Milliseconds(), 10)+"ms"); err != nil {
+		strconv.FormatInt(timeout.Milliseconds(), 10)+"ms").
+		Scan(&appliedReadOnly, &appliedTimeout); err != nil {
 		return fmt.Errorf("bound the transaction: %w", err)
+	}
+	if appliedTimeout == "0" || appliedReadOnly != "on" {
+		return fmt.Errorf("views: the transaction came back unbounded "+
+			"(statement_timeout=%q, transaction_read_only=%q) for a budget of %s; "+
+			"an unbounded statement is not a view", appliedTimeout, appliedReadOnly, timeout)
+	}
+	if s.observeBounds != nil {
+		s.observeBounds(appliedTimeout, appliedReadOnly)
 	}
 	rows, err := tx.Query(ctx, statement, args...)
 	if err != nil {

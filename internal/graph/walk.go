@@ -1,7 +1,8 @@
 // Package graph emits the one bounded traversal Maestro walks a game's
 // relations with: project-filtered in both terms of the recursion,
-// depth-bounded, and guarded against revisiting a node on the path it
-// arrived by.
+// depth-bounded, and guarded against *expanding* a node twice on the
+// path it arrived by -- while still handing the caller the edge that
+// closes a cycle.
 //
 // It exists in neither of its callers on purpose. The views sub-project's
 // query language compiles traversal steps into it; the analysis engine
@@ -53,6 +54,11 @@ const (
 // value is already a bind parameter. This package cannot check that, so
 // it is stated as the contract and nothing here tests it; the views side
 // is where it can be, and must be, pinned.
+//
+// The seed is **not** required to filter on the project: the anchor join
+// this package emits does that itself, and
+// TestTheAnchorFiltersOnTheProjectEvenWhenTheSeedDoesNot pins it with a
+// deliberately project-blind seed.
 type Walk struct {
 	// Name is the CTE's name. It must be a Go-side constant or a
 	// generated identifier such as "s3" -- never anything derived from a
@@ -62,11 +68,30 @@ type Walk struct {
 	// TestACTENameThatIsNotAnIdentifierPanics pins the panic.
 	Name string
 
-	ProjectID       uuid.UUID
-	SeedSQL         string
-	SeedArgs        []any
+	ProjectID uuid.UUID
+	SeedSQL   string
+	SeedArgs  []any
+
+	// RelationTypeIDs is the set of relation types an edge may carry to
+	// be followed. It is the one thing this walk trusts another table
+	// for: the emitted statement compares relations.relation_type_id
+	// against the list and **does not join relation_types**, so there is
+	// no position at which a relation type belonging to another game
+	// could be filtered out. What makes that safe is 0004_metamodel.sql's
+	// composite foreign key relations_relation_type_id_project_id_fkey,
+	// which puts an edge and its type in the same game by construction --
+	// verified against the shipped migration, and the reason
+	// TestAWalkCannotLeaveItsProjectThroughARogueEdge has to drop that
+	// constraint in a throwaway database before it can forge its rows. A
+	// caller passing ids it resolved in another game gets an empty walk,
+	// not another game's edges.
+	//
+	// An empty list follows no edge at all -- not every edge, which is
+	// what dropping the clause would mean.
+	// TestAWalkWithNoRelationTypesReachesOnlyItsSeed pins the difference.
 	RelationTypeIDs []uuid.UUID
-	Direction       Direction
+
+	Direction Direction
 
 	// MinDepth and MaxDepth bound the hops. Depth 0 is the seed itself,
 	// which the recursion always carries because the guard needs it on
@@ -79,21 +104,42 @@ type Walk struct {
 	// bound each caller applies for itself is the drift this package was
 	// extracted to prevent. TestMinDepthDropsTheNearHopsAfterWalkingThem
 	// pins both halves.
+	//
+	// Both are non-negative and MinDepth may not exceed MaxDepth; WalkCTE
+	// panics otherwise. A negative MaxDepth is a walk that returns its
+	// seed and nothing else, a MinDepth above MaxDepth is a walk that
+	// returns nothing at all, and both are the empty answer with no error
+	// that this repository keeps producing -- the same reason the CTE
+	// name and the direction panic. TestANegativeOrInvertedBoundPanics
+	// pins all four shapes.
 	MinDepth int
 	MaxDepth int
 
 	// MaxRows caps the rows a caller can read from the walk. Zero means
-	// no cap.
+	// no cap; a negative value panics rather than meaning "no cap", which
+	// is what an unchecked LIMIT would have made it.
 	//
 	// It is a cap on what comes back, **not** a bound on the work
 	// Postgres does: LIMIT is not allowed in a recursive term, so the cap
 	// is a LIMIT on the wrapper CTE. Postgres's recursion is demand
 	// driven and in practice stops early under it, but nothing here
 	// measures that and this comment does not claim it.
-	// TestMaxRowsCapsWhatComesBack pins the cap on the rows returned, and
-	// which rows survive it is unspecified -- there is no ORDER BY, so a
-	// caller that hits the cap has a truncated answer and must say so
-	// rather than treat it as the whole walk.
+	//
+	// The emitted LIMIT is **MaxRows + 1**, so a caller that reads
+	// MaxRows+1 rows knows its answer was truncated and one that reads
+	// MaxRows or fewer knows it was not. Exactly-at-cap and
+	// truncated-at-cap are otherwise the same answer, and a walk that
+	// cannot say which it is gets reported to a designer as complete.
+	// This is the same cap+1 mechanism Task 7's truncation flags use, and
+	// it is here rather than there because the truncation happens here.
+	// TestMaxRowsReturnsOneRowPastTheCapSoTruncationIsDetectable pins it,
+	// with an uncapped control in the same test.
+	//
+	// Which rows survive the cap is **ORDER BY depth**: a truncated
+	// answer is a prefix of the nearest hops, connected to the seed,
+	// rather than an arbitrary scatter of nodes whose own edges were
+	// dropped. Order within one depth is unspecified.
+	// TestATruncatedWalkIsOrderedByDepth pins the ordering.
 	MaxRows int
 }
 
@@ -115,25 +161,52 @@ func isIdentifier(s string) bool {
 }
 
 // ReadFrom is the CTE a caller reads its result out of: the wrapper that
-// applies MinDepth and the row cap, never the recursion itself.
+// applies MinDepth, the ordering and the row cap, never the recursion
+// itself.
 func ReadFrom(w Walk) string { return w.Name + "_out" }
 
 // WalkCTE returns the bodies of the CTEs one bounded walk needs -- ready
 // to follow a `WITH RECURSIVE` -- and the bind arguments they use,
 // numbered from $1. The caller reads its rows from ReadFrom(w).
 //
-// The columns it produces are (id, depth, path, via_relation, from_id):
-// the node reached, how many hops away, the ids on the path that reached
-// it, the relation walked to get there (null at depth 0) and the node it
-// came from (null at depth 0). A caller that wants the edges a walk
-// traversed reads via_relation; a caller that wants only the nodes reads
-// id and ignores the rest. **One row is one edge traversal**, so a node
-// reachable by two edges arrives twice: collapsing that is the caller's
-// job, and it is the direction that loses no information -- a walk that
-// deduplicated by node would drop one of the two edges between a pair
-// joined in both directions, and a renderer cannot draw an edge it was
-// never handed. TestDirectionAnyTraversesEachEdgeOnceFromEachNode pins
-// the counts on exactly that pair.
+// The columns it produces are (id, depth, path, via_relation, from_id,
+// closed): the node reached, how many hops away, the ids on the path that
+// reached it, the relation walked to get there (null at depth 0), the
+// node it came from (null at depth 0), and whether this hop closed a
+// cycle. A caller that wants the edges a walk traversed reads
+// via_relation; a caller that wants only the nodes reads id and ignores
+// the rest. **One row is one edge traversal**, so a node reachable by two
+// edges arrives twice: collapsing that is the caller's job, and it is the
+// direction that loses no information -- a walk that deduplicated by node
+// would drop one of the two edges between a pair joined in both
+// directions, and a renderer cannot draw an edge it was never handed.
+// TestDirectionAnyTraversesEachEdgeOnceFromEachNode pins the counts on
+// exactly that pair.
+//
+// **What a walk returns for a cycle, which eleven tasks need to read.**
+// A cycle is legal content -- the core spec allows prerequisite cycles
+// deliberately, so that they can be surfaced as design errors, and
+// surfacing one means drawing the edge that closes it. So the hop onto a
+// node already on the path is **returned**, once, with closed = true, and
+// is **not expanded from**. Concretely, walking out from a:
+//
+//   - a self-loop a -> a returns one row: a at depth 1, closed, via the
+//     loop's own relation. TestASelfLoopIsReturnedOnceAndNotExpanded.
+//   - a two-cycle a -> b -> a returns two rows: b at depth 1 and a at
+//     depth 2, closed, via the return edge -- which the earlier shape of
+//     this walk never handed to anybody. TestATwoCycleReturnsItsReturnEdge.
+//   - a three-cycle a -> b -> c -> a returns four rows at min depth 0:
+//     a, b, c and a again at depth 3, closed, via c -> a. Three distinct
+//     relations, three distinct nodes.
+//     TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt.
+//
+// The earlier shape suppressed the *row*, not just the recursion, which
+// meant an n-cycle came back with n-1 of its n edges and a self-loop came
+// back with none. That contradicted this walk's own justification for its
+// row shape -- see the paragraph above about a renderer that cannot draw
+// an edge it was never handed -- and it made the one thing the analysis
+// engine exists to find, a prerequisite cycle, the one thing this walk
+// could not show.
 //
 // **Three things in the emitted statement are load-bearing:**
 //
@@ -142,26 +215,46 @@ func ReadFrom(w Walk) string { return w.Name + "_out" }
 //     far end of it. An anchor-only filter seeds correctly and then lets
 //     the walk leave the project through any edge whose far side lives
 //     elsewhere. TestTheProjectFilterIsInBothTermsOfTheRecursion asserts
-//     it as text, and TestAWalkCannotLeaveItsProjectThroughARogueEdge
-//     asserts it behaviourally by forging, in its own throwaway database
-//     with 0004_metamodel.sql's composite keys dropped, the two rows the
-//     shipped schema makes impossible.
-//   - NOT (... = ANY(path)) is the cycle guard, and it is a correctness
-//     requirement rather than a defensive one: the core spec deliberately
-//     allows prerequisite cycles as design errors to be surfaced, so a
-//     cycle is legal content, and content this engine exists to help with.
-//     It is **not** what makes the walk terminate -- the depth bound
-//     below does that, and removing the guard leaves this package's cycle
-//     test finishing with the same node set. What it stops is the cycle
-//     being re-walked once per level until that bound is reached: three
-//     rows rather than eleven for a three-node cycle at max depth 10 --
-//     and rather than 2047 for the same cycle under direction any, the
-//     branching factor raised to the depth bound.
-//     TestAWalkOverACycleReturnsEachNodeOnce pins the node set and the
-//     row count, and only the row count is red without the guard.
+//     it as text -- counting all three positions, the anchor's included
+//     -- and TestAWalkCannotLeaveItsProjectThroughARogueEdge asserts the
+//     two in the recursive term behaviourally by forging, in its own
+//     throwaway database with 0004_metamodel.sql's composite keys
+//     dropped, the two rows the shipped schema makes impossible.
+//     TestTheAnchorFiltersOnTheProjectEvenWhenTheSeedDoesNot is the
+//     behavioural half of the third: SeedSQL is documented as the
+//     caller's own and this package does not control whether it filters,
+//     so the anchor join is the only thing between a project-blind seed
+//     and another game's entity.
+//   - NOT w.closed in the recursive term is the cycle guard, and it is a
+//     correctness requirement rather than a defensive one. It is **not**
+//     what makes the walk terminate -- the depth bound below does that,
+//     and removing the guard leaves this package's cycle test finishing
+//     with the same node set. What it stops is the cycle being re-walked
+//     once per level until that bound is reached: four rows rather than
+//     eleven for a three-node cycle at max depth 10.
+//     TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt pins
+//     the node set, the row count and the edge set, and only the counts
+//     are red without the guard. The guard is computed against the
+//     **whole** path and not against the seed alone:
+//     TestACycleThatExcludesTheSeedIsGuardedByTheWholePath is the input
+//     that separates the two, because every other fixture's cycle passes
+//     through the seed.
 //   - depth < $n sits in the recursive term, where it prunes, and not in
 //     an outer WHERE, which would materialise the whole walk first.
 //     TestDepthBoundsTheWalk pins what it reaches.
+//
+// A fourth line is load-bearing only under Any:
+// r.id IS DISTINCT FROM w.via_relation, which stops a walk re-traversing
+// the relation it just arrived by. Under Out and In it can never fire.
+// Under Any it is what keeps every single edge from reading as a
+// two-cycle: without it, arriving at b over a -> b and then walking the
+// same edge backwards would emit a closed row for a on every edge in the
+// graph, and an analysis engine looking for prerequisite cycles would
+// find one everywhere. The path guard used to hide this, because the
+// backtrack always lands on the previous node; now that a closing hop is
+// returned rather than suppressed, it has to be excluded on purpose.
+// TestASelfLoopIsReturnedOnceAndNotExpanded and
+// TestDirectionAnyTraversesEachEdgeOnceFromEachNode both fail without it.
 //
 // **The shape this deliberately does not reuse, and why the plan's
 // replacement is not the one that shipped.** ListEntitiesRelatedTo
@@ -180,16 +273,29 @@ func ReadFrom(w Walk) string { return w.Name + "_out" }
 // near end matches either column and the far end is the scalar CASE of
 // whichever matched, which cannot produce an edge twice from one node.
 //
-// Both measurements were taken with the guard removed, and that is the
-// honest statement of what is pinned: with the guard in place the two
-// shapes return the same rows, because the second copy of a self-loop is
-// excluded by the same path test as the first, so **no test in this
-// package can tell them apart**. TestASelfLoopIsNotTraversed says the
-// same thing where a reader of the test will find it.
+// The arm count is now **observable with the guard in place**, which it
+// was not while a closing hop was suppressed: a self-loop under Any is
+// exactly the edge a two-armed shape matches twice, and it now comes back
+// as a returned row rather than as nothing, so the second copy is a
+// second row. TestASelfLoopIsReturnedOnceAndNotExpanded asserts the one
+// row and is red -- with two rows over one relation -- against the
+// two-armed emitter, which is what that test could not do before.
 func WalkCTE(w Walk) (string, []any) {
 	if !isIdentifier(w.Name) {
 		panic(fmt.Sprintf("graph: a CTE name must be a lower-case identifier, got %q; a name "+
 			"derived from a caller's document is how this becomes an injection", w.Name))
+	}
+	switch {
+	case w.MinDepth < 0 || w.MaxDepth < 0:
+		panic(fmt.Sprintf("graph: depth bounds are non-negative, got min %d max %d; a negative "+
+			"bound is an empty or seed-only answer with no error, which is this repository's "+
+			"recurring defect", w.MinDepth, w.MaxDepth))
+	case w.MinDepth > w.MaxDepth:
+		panic(fmt.Sprintf("graph: min depth %d is above max depth %d; that walk returns nothing "+
+			"and says nothing about why", w.MinDepth, w.MaxDepth))
+	case w.MaxRows < 0:
+		panic(fmt.Sprintf("graph: max rows is non-negative, got %d; a negative cap is no cap "+
+			"at all, which is the opposite of what a caller asking for one wants", w.MaxRows))
 	}
 	args := []any{w.ProjectID}
 	bind := func(v any) string {
@@ -228,34 +334,41 @@ func WalkCTE(w Walk) (string, []any) {
 			w.Direction, Out, In, Any))
 	}
 
-	body := fmt.Sprintf(`%[1]s (id, depth, path, via_relation, from_id) AS (
-    SELECT seed.id, 0, ARRAY[seed.id], NULL::uuid, NULL::uuid
+	// A closed row's path ends with a node it already contains -- that is
+	// what closed means -- and it is never expanded from, so every path
+	// the recursion carries forward is simple and the recursion is finite
+	// for that reason as well as for the depth bound.
+	body := fmt.Sprintf(`%[1]s (id, depth, path, via_relation, from_id, closed) AS (
+    SELECT seed.id, 0, ARRAY[seed.id], NULL::uuid, NULL::uuid, false
     FROM (%[2]s) AS seed
     JOIN entities anchor ON anchor.id = seed.id AND anchor.project_id = $1
   UNION ALL
-    SELECT %[3]s, w.depth + 1, w.path || (%[3]s), r.id, w.id
+    SELECT %[3]s, w.depth + 1, w.path || (%[3]s), r.id, w.id, (%[3]s) = ANY(w.path)
     FROM %[1]s w
     JOIN relations r
       ON r.project_id = $1
      AND r.relation_type_id = ANY(%[4]s::uuid[])
+     AND r.id IS DISTINCT FROM w.via_relation
      AND %[5]s
     JOIN entities far
       ON far.id = (%[3]s)
      AND far.project_id = $1
     WHERE w.depth < %[6]s
-      AND NOT (%[3]s) = ANY(w.path)
+      AND NOT w.closed
 )`, w.Name, seed, far, types, near, maxDepth)
 
-	// The wrapper is where MinDepth and the row cap live, because neither
-	// may prune the recursion: a walk with min 2 has to pass through
-	// depth 1 to get there, and LIMIT is not allowed in a recursive term
-	// at all.
+	// The wrapper is where MinDepth, the ordering and the row cap live,
+	// because none of them may prune the recursion: a walk with min 2 has
+	// to pass through depth 1 to get there, and LIMIT is not allowed in a
+	// recursive term at all. The cap is MaxRows + 1 so that the caller can
+	// tell a full answer from a truncated one, and the ORDER BY is what
+	// makes the truncated one a connected prefix of nearest hops.
 	minDepth := bind(w.MinDepth)
 	limit := ""
 	if w.MaxRows > 0 {
-		limit = " LIMIT " + bind(w.MaxRows)
+		limit = " LIMIT " + bind(w.MaxRows+1)
 	}
-	body += fmt.Sprintf(",\n%s AS (SELECT * FROM %s WHERE depth >= %s%s)",
+	body += fmt.Sprintf(",\n%s AS (SELECT * FROM %s WHERE depth >= %s ORDER BY depth%s)",
 		ReadFrom(w), w.Name, minDepth, limit)
 
 	return body, args

@@ -47,24 +47,66 @@ func TestNoCallerValueEverReachesTheStatementText(t *testing.T) {
 	}
 }
 
+// projectScopedTables are the four tables this compiler reads that carry
+// a project_id. Every reference to one of them, in every block, has to
+// filter on it.
+var projectScopedTables = []string{"entity_types", "relation_types", "entities", "relations"}
+
+// tableReference matches a FROM or a JOIN of one of those four and
+// captures the alias it was given. The longer names come first in the
+// alternation because Go's regexp is leftmost-first, not leftmost-longest.
+var tableReference = regexp.MustCompile(
+	`(?i)\b(?:FROM|JOIN)\s+(entity_types|relation_types|entities|relations)\b\s*(?:AS\s+)?([a-z_][a-z0-9_]*)`)
+
 // TestEveryTableReferenceIsProjectFiltered walks the emitted SQL rather
 // than one query's behaviour, so a clause added by a later task cannot
 // quietly drop the filter.
+//
+// **It asserts per table reference, not per block.** Asking whether
+// `project_id = $1` appears *somewhere* in a block passes with a filter
+// deleted, because another table in the same block still carries one: the
+// entity-type join's filter can be removed from nodeUnion and a
+// block-level check stays green. So each reference's own alias has to
+// appear filtered, and all four project-scoped tables have to be
+// exercised by the query below — the earlier vacuity check named two of
+// them, which left entity_types and relation_types outside the test
+// entirely.
+//
+// **Why this text test is the only real guard.** Every project filter
+// this compiler emits is, in the current build, redundant: the selector
+// filters on an entity_type_id resolved in *this* game, the step on a
+// relation_type_id and a to_type resolved the same way, the between arm
+// on its own relation_type_id, and the join-backs join to rows those
+// filters already isolated. So `TestARunFromAnotherGameSeesNothing`
+// cannot fail on a lost project filter under any shape the compiler emits
+// today — the filters are defence in depth against the shapes Tasks 7, 8
+// and 9 add, and this test is what defends them.
 func TestEveryTableReferenceIsProjectFiltered(t *testing.T) {
 	g, _ := newGame(t)
 	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 		"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"}],
-		"edges":[{"from_step":"c"}]}`)
-	refs := regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+(entities|relations)\b`).FindAllString(sql, -1)
-	if len(refs) == 0 {
-		t.Fatalf("no table references found; the assertion below would be vacuous:\n%s", sql)
-	}
+		"edges":[{"from_step":"c"},{"via":"requires","between":["q","q"]}]}`)
+	seen := map[string]int{}
 	for _, block := range strings.Split(sql, "SELECT") {
-		if !strings.Contains(block, "entities") && !strings.Contains(block, "relations") {
-			continue
+		for _, ref := range tableReference.FindAllStringSubmatch(block, -1) {
+			table, alias := strings.ToLower(ref[1]), ref[2]
+			seen[table]++
+			switch strings.ToUpper(alias) {
+			case "AS", "ON", "WHERE", "JOIN", "UNION":
+				t.Errorf("the reference %q has no alias, so this test cannot name its filter:\n%s",
+					ref[0], block)
+				continue
+			}
+			if !strings.Contains(block, alias+".project_id = $1") {
+				t.Errorf("%s is read as %q without %s.project_id = $1 in the same block:\n%s",
+					table, ref[0], alias, block)
+			}
 		}
-		if !strings.Contains(block, "project_id = $1") {
-			t.Errorf("a select over entities or relations does not filter on the project:\n%s", block)
+	}
+	for _, table := range projectScopedTables {
+		if seen[table] == 0 {
+			t.Errorf("the query above reads no %s, so nothing above asserted a filter on it; "+
+				"the assertion is vacuous for that table:\n%s", table, sql)
 		}
 	}
 }

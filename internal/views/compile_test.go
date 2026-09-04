@@ -201,9 +201,29 @@ func TestTheWorkedExamplesCompileToTheseStatements(t *testing.T) {
 // compiles put nothing in the text; it cannot prove that a query nobody
 // wrote will not. What can is the type: a `string` variable does not
 // convert to frag implicitly, so the only way to spell a caller's value
-// into a statement is an explicit `frag(...)`. This test reads compile.go
-// itself and refuses that conversion outside the four helpers that build
-// placeholders, names and formats from things a caller cannot reach.
+// into a statement is an explicit `frag(...)`. This test reads the whole
+// package's syntax tree and refuses that conversion outside the four
+// helpers that build placeholders, names and formats from things a
+// caller cannot reach.
+//
+// **It reads every non-test file in the package, not compile.go alone**,
+// and it closes the four routes a one-file walk over function bodies
+// left open, each of which compiled and left the suite green:
+//
+//  1. a conversion in another file of this package — frag is unexported
+//     but package-scoped, so predicate.go could spell one;
+//  2. no conversion at all — the builder's buffer used to be a bare
+//     strings.Builder, so `b.sql.WriteString(v)` needed no frag; the
+//     sqlText wrapper is what closes this one by construction, and the
+//     `.raw` check below is what keeps the wrapper honest;
+//  3. a parenthesised conversion, `(frag)(v)`, whose call function is not
+//     an *ast.Ident;
+//  4. a local type alias, `type t = frag`, whose conversions do not
+//     mention frag at all.
+//
+// The walk is over each declaration rather than over function bodies, so
+// a package-level variable's initialiser — or a function literal assigned
+// to one — is scanned too.
 func TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere(t *testing.T) {
 	allowed := map[string]bool{
 		"bind":      true, // "$3" from an argument count
@@ -211,37 +231,108 @@ func TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere(t *testing.T) {
 		"joinFrags": true, // fragments joined by a fragment
 		"cteName":   true, // a constant prefix and an int
 	}
-	file, err := parser.ParseFile(token.NewFileSet(), "compile.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse compile.go: %v", err)
-	}
+	// The two methods of sqlText, which are the only code that may touch
+	// the raw strings.Builder underneath a statement.
+	bufferHolders := map[string]bool{"append": true, "String": true}
+
 	found := 0
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
+	for _, file := range packageFiles(t) {
+		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
 		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) != 1 {
+		// Route 4: an alias or a defined type over frag would give a
+		// second spelling of the conversion, which the walk below does
+		// not know to look for. There is no legitimate one.
+		for _, decl := range parsed.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts := spec.(*ast.TypeSpec)
+				if ident, ok := unparen(ts.Type).(*ast.Ident); ok && ident.Name == "frag" {
+					t.Errorf("%s declares %q over frag: a second name for the conversion is a "+
+						"second route for a caller's value into the statement text",
+						file, ts.Name.Name)
+				}
+			}
+		}
+		for _, decl := range parsed.Decls {
+			where := "a package-level declaration in " + file
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				where = fn.Name.Name
+			}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "raw" {
+					// Route 2: writing to the statement's buffer directly
+					// needs no frag conversion at all.
+					if !bufferHolders[where] {
+						t.Errorf("%s reaches a statement's raw buffer; only %v may, and a "+
+							"strings.Builder takes a plain string", where,
+							sortedNames(bufferHolders))
+					}
+					return true
+				}
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) != 1 {
+					return true
+				}
+				// Route 3: (frag)(v) is a conversion whose Fun is an
+				// *ast.ParenExpr rather than an *ast.Ident.
+				ident, ok := unparen(call.Fun).(*ast.Ident)
+				if !ok || ident.Name != "frag" {
+					return true
+				}
+				found++
+				if !allowed[where] {
+					t.Errorf("%s converts a string to statement text; only %v may, and a "+
+						"caller's value has no other route into the SQL", where,
+						sortedNames(allowed))
+				}
 				return true
-			}
-			ident, ok := call.Fun.(*ast.Ident)
-			if !ok || ident.Name != "frag" {
-				return true
-			}
-			found++
-			if !allowed[fn.Name.Name] {
-				t.Errorf("%s converts a string to statement text; only %v may, and a caller's "+
-					"value has no other route into the SQL", fn.Name.Name, sortedNames(allowed))
-			}
-			return true
-		})
+			})
+		}
 	}
 	if found != len(allowed) {
 		t.Fatalf("expected one conversion in each of %v, found %d — if a helper stopped "+
 			"converting, this test is no longer watching what it names",
 			sortedNames(allowed), found)
+	}
+}
+
+// packageFiles is every non-test Go file of this package, which is the
+// unit the guard above has to hold over: frag is unexported, and
+// unexported means visible to all of them.
+func packageFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package directory: %v", err)
+	}
+	var files []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files = append(files, name)
+	}
+	if len(files) < 2 {
+		t.Fatalf("found %d source files; the walk below would be watching one file again", len(files))
+	}
+	return files
+}
+
+// unparen strips the parentheses a conversion may be wrapped in, so that
+// `(frag)(v)` is the same node to this test as `frag(v)`.
+func unparen(e ast.Expr) ast.Expr {
+	for {
+		paren, ok := e.(*ast.ParenExpr)
+		if !ok {
+			return e
+		}
+		e = paren.X
 	}
 }
 

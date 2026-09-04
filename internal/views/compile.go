@@ -36,11 +36,26 @@ type frag string
 // TestNoCallerValueEverReachesTheStatementText is the behavioural
 // assertion; the frag type and its own test are the construction.
 type builder struct {
-	sql  strings.Builder
+	sql  sqlText
 	args []any
 }
 
-func (b *builder) write(literal frag) { b.sql.WriteString(string(literal)) }
+// sqlText is the statement being assembled, and it is a wrapper around
+// strings.Builder rather than a strings.Builder because the difference is
+// the guard. A bare strings.Builder field is package-visible and carries
+// WriteString, so `b.sql.WriteString(set.Name)` would put a caller's
+// value in the text with no frag conversion for a test to find. sqlText
+// exposes one appender, it takes a fragment, and the raw buffer is
+// reachable only as `.raw` — which
+// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere refuses
+// outside this type's own two methods.
+type sqlText struct{ raw strings.Builder }
+
+func (t *sqlText) append(literal frag) { t.raw.WriteString(string(literal)) }
+
+func (t *sqlText) String() string { return t.raw.String() }
+
+func (b *builder) write(literal frag) { b.sql.append(literal) }
 
 // bind puts a value in the argument slice and hands back its placeholder.
 // It is the only route from a Go value into an emitted statement.

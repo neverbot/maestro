@@ -913,6 +913,18 @@ func (c *compiler) predicate(sc leafScope, p *ResolvedPredicate) (frag, error) {
 	return "true", nil
 }
 
+// combine is `all` and `any` over their children.
+//
+// **An empty list compiles to `true` under both spellings**, which for
+// `any` reads "no condition matches nothing" as "no condition filters
+// nothing". Pre-existing from Task 6, where it only ever widened a
+// projection; since Task 8 the same `true` can be an `edge_where`, where
+// it prunes a recursion, and "follow every edge" is arguably the wrong
+// reading of "follow edges satisfying none of these". It is recorded
+// rather than changed, because the change belongs with the validation
+// pass that would refuse an empty list outright — Task 15's — and a
+// silent flip of the identity element between tasks is worse than either
+// reading. Say why before changing it.
 func (c *compiler) combine(sc leafScope, children []ResolvedPredicate, sep frag) (frag, error) {
 	if len(children) == 0 {
 		return "true", nil

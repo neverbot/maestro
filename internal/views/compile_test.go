@@ -122,14 +122,103 @@ func filteredOn(alias string) *regexp.Regexp {
 		`\.project_id = \$1(?:[^0-9]|$)`)
 }
 
+// lateralOpen matches the head of a lateral join, up to and including the
+// paren that opens its body. Case-insensitive, and tolerant of no space
+// before the paren, because this is a guard and a shape it cannot see is
+// the failure it exists to prevent.
+var lateralOpen = regexp.MustCompile(`(?i)\bJOIN\s+LATERAL\s*\(`)
+
+// selectWord counts the word SELECT wherever it appears, in any case.
+// projectFilterProblems splits the statement on the *uppercase* SELECT
+// only, so a lowercase one does not open a new block — which is the
+// lenient direction for the split and the strict one here, and this
+// regexp is deliberately the wider of the two.
+var selectWord = regexp.MustCompile(`(?i)\bSELECT\b`)
+
+// flatLateralProblems is the enforcement half of "no nested SELECT in a
+// lateral", which until now lived only in a comment on
+// compiler.relatedHop.
+//
+// **What the nesting actually costs, measured rather than assumed.** The
+// requirement was reviewed as a silent hole — a filter written after a
+// nested SELECT passing both guards and reaching production unfiltered.
+// It is not: the split puts such a filter in the *next* block, so the
+// reference is left looking unfiltered and is **reported**. Every nesting
+// shape was tried — the outer filter after a nested SELECT, a nested
+// SELECT ahead of the reference, a nested SELECT over a scoped table with
+// and without its own filter, and an outer alias's filter appearing
+// inside the nested block — and every incorrect one was caught while the
+// two correct ones passed. The direction of the error is over-strictness,
+// which is the side of the trade a guard belongs on, and it is why the
+// guard's own table asserts `want: true` for that shape rather than
+// false.
+//
+// **So what this adds is the reason, not the detection.** Over-strictness
+// that reports `relations is read as "FROM relations rel" without
+// rel.project_id = $1 in the same block` about a query whose filter is
+// visibly right there is a failure a later task debugs as a bug in its
+// own SQL. Task 13 adds a lateral for positions; when it nests, it should
+// be told that the guard cannot see past a nested SELECT and that the fix
+// is to keep the lateral flat — not left to rediscover the split. A
+// mechanism a later task trips over is worth more than a sentence it must
+// have read.
+//
+// So: the body of every JOIN LATERAL must hold exactly one SELECT. A
+// lateral that genuinely needs a nested one is not forbidden — it is
+// forbidden *until this guard can parse*, and the message says so.
+func flatLateralProblems(sql string) []string {
+	var problems []string
+	for _, loc := range lateralOpen.FindAllStringIndex(sql, -1) {
+		body, ok := parenBody(sql[loc[1]-1:])
+		if !ok {
+			problems = append(problems, fmt.Sprintf(
+				"a JOIN LATERAL at offset %d never closes its paren, so this guard cannot "+
+					"read its body at all:\n%s", loc[0], sql))
+			continue
+		}
+		if n := len(selectWord.FindAllString(body, -1)); n != 1 {
+			problems = append(problems, fmt.Sprintf(
+				"a JOIN LATERAL body holds %d SELECTs and must hold exactly 1. "+
+					"projectFilterProblems splits the statement on the word SELECT, so it "+
+					"cannot see a project filter written *after* a nested SELECT: it will "+
+					"report the reference as unfiltered even when the filter is right "+
+					"there, and the failure you get will look like a bug in your SQL. Keep "+
+					"the lateral flat, or teach projectFilterProblems to parse before "+
+					"nesting one. Body:\n%s", n, body))
+		}
+	}
+	return problems
+}
+
+// parenBody takes text whose first rune is `(` and returns what is
+// between it and its matching `)`. It counts parens and nothing else,
+// which is sound here because this package emits no string literals and
+// no comments — the same assumption filteredOn records.
+func parenBody(s string) (string, bool) {
+	depth := 0
+	for i, r := range s {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return s[1:i], true
+			}
+		}
+	}
+	return "", false
+}
+
 // projectFilterProblems is the guard itself, factored out of the test
 // that runs it over the compiler's real output so that
 // TestTheProjectFilterGuardSeesTheShapesItMustSee can run it over the
 // shapes that used to slip past. It returns one message per reference it
-// cannot see as filtered, and how many times each table was referenced —
-// the second is what makes the assertion non-vacuous.
+// cannot see as filtered — plus one per lateral whose nesting would put a
+// filter where it cannot see it at all — and how many times each table
+// was referenced; the second is what makes the assertion non-vacuous.
 func projectFilterProblems(sql string) ([]string, map[string]int) {
-	var problems []string
+	problems := flatLateralProblems(sql)
 	seen := map[string]int{}
 	for _, block := range strings.Split(sql, "SELECT") {
 		for _, loc := range tableReference.FindAllStringSubmatchIndex(block, -1) {
@@ -210,6 +299,44 @@ func TestTheProjectFilterGuardSeesTheShapesItMustSee(t *testing.T) {
 		// the filter ahead of the nested SELECT, as the case above does.
 		{"a filter written after a nested SELECT is not seen",
 			"SELECT 1 FROM entities e\nWHERE EXISTS (SELECT 1) AND e.project_id = $1", true},
+		// **And the laterals that would put a filter there.** The case
+		// above is over-strict rather than silent — it reports — and so
+		// were all of these before flatLateralProblems: what changes is
+		// *what the failure says*. The first is the query Task 13 writes
+		// if its positions lateral nests, with every table filtered and
+		// every filter after the nested SELECT; without this check it
+		// failed as "relations is read without rel.project_id = $1",
+		// which is a false accusation the reader has to disprove.
+		{"a lateral with a nested SELECT hides the filters written after it",
+			"SELECT 1 FROM entities e\nWHERE e.project_id = $1\n" +
+				"LEFT JOIN LATERAL (SELECT 1 FROM relations r\n" +
+				"WHERE EXISTS (SELECT 1) AND r.project_id = $1) x ON true", true},
+		{"a lateral with a lowercase nested select is caught too",
+			"LEFT JOIN LATERAL (SELECT 1 FROM relations r " +
+				"WHERE r.project_id = $1 AND r.id IN (select 1)) x ON true", true},
+		{"a lateral whose paren never closes is an error, not a pass",
+			"LEFT JOIN LATERAL (SELECT 1 FROM relations r WHERE r.project_id = $1", true},
+		// The rest of the regexp, looked at rather than assumed: a table
+		// name with no right-hand boundary. `entities_archive` matches the
+		// `entities` alternative, and what follows is not whitespace, so
+		// the alias group captures nothing and the reference is reported
+		// as unaliased. Loud and wrong-for-the-right-reason beats silent,
+		// and this pins which of the two it is.
+		{"a longer identifier sharing a table's prefix is reported, not skipped",
+			"SELECT 1 FROM entities_archive a WHERE a.project_id = $1", true},
+		// Case, which is the other thing the regexp does not say out loud:
+		// tableReference is `(?i)` throughout, so its alias group matches
+		// an uppercase alias too, and aliasKeywords is consulted uppercased
+		// — a keyword is caught in any case. filteredOn, however, is
+		// case-*sensitive*, while Postgres folds an unquoted identifier. So
+		// an alias and its filter spelt differently is reported even though
+		// the SQL is correct. That is over-strictness, which is loud and is
+		// the side of the trade a guard belongs on; it is pinned here so it
+		// is a known cost rather than a surprise.
+		{"an uppercase alias filtered the same way is seen",
+			"SELECT 1 FROM relations Rel WHERE Rel.project_id = $1", false},
+		{"an alias and its filter spelt in different cases is reported, though Postgres folds",
+			"SELECT 1 FROM relations Rel WHERE rel.project_id = $1", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			problems, _ := projectFilterProblems(c.sql)

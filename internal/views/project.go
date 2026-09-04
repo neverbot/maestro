@@ -480,6 +480,17 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // seen. There is no nested SELECT in here at all, and the three
 // references — relations, entities and, for @type, entity_types — each
 // carry their own filter in the JOIN or WHERE that introduces them.
+//
+// **That requirement is enforced, not merely written here**, by
+// flatLateralProblems: the body of every JOIN LATERAL must hold exactly
+// one SELECT, and one that nests fails naming the reason. A sentence in
+// this comment is something the next task has to have read; a failing
+// test is something it trips over. The nesting was measured rather than
+// assumed, and it is over-strictness and not a silent hole — the filter
+// after the nested SELECT lands in the next block, so the reference is
+// *reported* — but a report that says "this table is unfiltered" about a
+// filter the reader can see is a failure Task 13 would debug as a bug in
+// its own SQL. flatLateralProblems is what tells it the truth instead.
 func (c *compiler) relatedHop(alias, name frag, slot ResolvedAttr) (frag, error) {
 	hop := slot.Related
 	ptr := pointer("project", slot.Name, "related")

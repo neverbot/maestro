@@ -303,7 +303,17 @@ var renderers = []Renderer{
 		},
 	},
 	{
-		Name:     RendererTable,
+		Name: RendererTable,
+		// "nodes only", and it does **not** refuse a query that draws
+		// edges. One envelope for every renderer is the property that
+		// lets a saved view swap graph for table without rewriting its
+		// query (Result's own doc comment), so edges a table ignores are
+		// a renderer choice rather than dead weight in the document.
+		// That is the line this catalogue draws between the two: a
+		// *parameter* a renderer's own mode ignores is refused, because
+		// nothing else will ever read it; a *query* member this renderer
+		// ignores is read by the next renderer the view is switched to.
+		// TestATableDoesNotRefuseAQueryThatDrawsEdges pins it.
 		Consumes: "nodes only",
 		Doc: "Rows and columns. Probably the most-used renderer: \"every quest " +
 			"in Elwynn with its level and its rewards\" is a question designers " +
@@ -451,12 +461,16 @@ func CheckRenderer(name string, params map[string]any, r *Resolved) error {
 			"%q is not a renderer this catalogue has: the renderers are %s",
 			name, strings.Join(RendererNames(), ", ")))
 	}
-	if r == nil {
-		// Every requirement below reads the query. A nil one would make
-		// this function answer "fine" for a document nothing had judged —
-		// the check that is not a check.
-		return fmt.Errorf("views: CheckRenderer needs a resolved query to judge %q against",
-			name)
+	if r == nil || r.Query == nil || r.Cat == nil {
+		// Every requirement below reads the query and the game's
+		// vocabulary. A nil one would make this function answer "fine"
+		// for a document nothing had judged — the check that is not a
+		// check — and the three are checked rather than the first,
+		// because Resolved is exported and a caller may hand back one it
+		// built by hand: a nil Query panics one line further on, which is
+		// the same hole one step along.
+		return fmt.Errorf("views: CheckRenderer needs a resolved query and its catalogue "+
+			"to judge %q against", name)
 	}
 	rc := &rendererCheck{renderer: renderer, params: params, r: r}
 	rc.scope = nodeScopeOf(r.Cat, r.Query)
@@ -605,7 +619,7 @@ func (rc *rendererCheck) drawnRelationTypes() map[uuid.UUID]bool {
 		for _, id := range edge.RelationTypeIDs {
 			rc.drawn[id] = true
 		}
-		if edge.Spec.FromStep == "" {
+		if edge.Spec == nil || edge.Spec.FromStep == "" {
 			continue
 		}
 		for _, step := range rc.r.Steps {

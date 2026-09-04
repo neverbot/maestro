@@ -454,6 +454,37 @@ func TestARendererIsJudgedAgainstAResolvedQuery(t *testing.T) {
 		"is not a renderer this catalogue has")
 }
 
+// TestATableDoesNotRefuseAQueryThatDrawsEdges pins a deliberate
+// non-refusal, which is worth a test for the same reason a refusal is:
+// the next reader will ask why the "reads nothing" rule that refuses
+// map's x_field does not refuse a table's edges. Because one envelope
+// serves every renderer, and swapping graph for table must never require
+// rewriting the query.
+func TestATableDoesNotRefuseAQueryThatDrawsEdges(t *testing.T) {
+	g, _ := newGame(t)
+	checkPasses(t, CheckRenderer(RendererTable, map[string]any{"columns": []any{"@name"}},
+		resolveFor(t, g, chainQuery)))
+}
+
+// TestARendererIsJudgedAgainstAWholeResolvedQuery is the nil check one
+// step along: a *Resolved is exported, a Go caller can build one by hand,
+// and a missing Query or Catalogue panics rather than refusing.
+func TestARendererIsJudgedAgainstAWholeResolvedQuery(t *testing.T) {
+	g, _ := newGame(t)
+	full := resolveFor(t, g, questQuery)
+	// The control: the same call with everything filled is accepted.
+	checkPasses(t, CheckRenderer(RendererGraph, map[string]any{"color_by": "label"}, full))
+	for _, half := range []*Resolved{
+		{Cat: full.Cat},
+		{Query: full.Query},
+	} {
+		err := CheckRenderer(RendererGraph, map[string]any{"color_by": "label"}, half)
+		if err == nil || !strings.Contains(err.Error(), "needs a resolved query") {
+			t.Fatalf("a half-built resolved query must be refused, got %v", err)
+		}
+	}
+}
+
 // wrongValueFor is one value guaranteed to be refused for each kind, so
 // that TestEveryDeclaredParameterIsCheckedNotJustStored can drive every
 // declared parameter through the checker its kind names.

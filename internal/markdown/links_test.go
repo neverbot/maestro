@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/realtime"
@@ -976,5 +978,69 @@ func nextEvent(t *testing.T, sub *realtime.Subscription) realtime.Event {
 	case <-time.After(5 * time.Second):
 		t.Fatal("nothing was announced within 5s")
 		return realtime.Event{}
+	}
+}
+
+// TestUpsertDocumentLinksConflictPathCannotWriteAnotherGamesLink drives
+// the statement directly, for the reason its twin in internal/metamodel
+// (TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge) records.
+//
+// 0007_documents.sql's two composite foreign keys make a cross-game link
+// impossible to *insert*: the row's project_id must agree with the
+// document's and with the entity's. They check nothing on the conflict
+// path. The target is (document_id, entity_id), which names no project;
+// project_id is not in the SET list, so the stored row keeps its own and
+// every key stays satisfied. Measured before the guard existed: one game
+// rewrote the role on another game's link and was handed that game's row
+// back.
+//
+// No caller here can reach it — both call sites resolve the document and
+// the entity by key inside the project first — which is the same status
+// the position write's guard has in internal/views, and the same
+// decision: the guard stays, and it is asserted by driving the statement.
+func TestUpsertDocumentLinksConflictPathCannotWriteAnotherGamesLink(t *testing.T) {
+	svc, entities, _, pool := newService(t)
+	ctx := context.Background()
+	mine := newGame(t, pool, "azeroth")
+	theirs := newGame(t, pool, "outland")
+	newQuest(t, entities, mine, "wanted-hogger", "Wanted: Hogger")
+	seedDoc(t, svc, mine, "scripts/wanted-hogger")
+	if err := svc.LinkAdd(ctx, mine, markdown.LinkInput{
+		Path: "scripts/wanted-hogger", EntityType: "quest", EntityKey: "wanted-hogger",
+		Role: "script",
+	}); err != nil {
+		t.Fatalf("LinkAdd: %v", err)
+	}
+
+	var documentID, entityID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`SELECT document_id, entity_id FROM document_links WHERE project_id = $1`,
+		mine).Scan(&documentID, &entityID); err != nil {
+		t.Fatalf("read the stored link: %v", err)
+	}
+	q := dbq.New(pool)
+
+	row, err := q.UpsertDocumentLink(ctx, dbq.UpsertDocumentLinkParams{
+		ProjectID: theirs, DocumentID: documentID, EntityID: entityID, Role: "theirs",
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("UpsertDocumentLink returned %+v (err = %v) for another game's link, "+
+			"want no rows", row, err)
+	}
+
+	// The positive control, both ways: the role is what its own game
+	// wrote, and that game can still rewrite it.
+	links, err := svc.LinksByDocument(ctx, mine, "scripts/wanted-hogger")
+	if err != nil {
+		t.Fatalf("LinksByDocument: %v", err)
+	}
+	if len(links) != 1 || links[0].Role != "script" {
+		t.Fatalf("the link reads back as %+v, want one link with role \"script\": another "+
+			"game must not rewrite it", links)
+	}
+	if _, err := q.UpsertDocumentLink(ctx, dbq.UpsertDocumentLinkParams{
+		ProjectID: mine, DocumentID: documentID, EntityID: entityID, Role: "notes",
+	}); err != nil {
+		t.Fatalf("the owning game cannot rewrite its own link: %v", err)
 	}
 }

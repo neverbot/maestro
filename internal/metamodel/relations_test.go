@@ -2393,3 +2393,88 @@ func TestAnEdgeReadIsScopedToItsGameAndBoundsItsKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge drives the
+// statement directly, because no caller of this package can reach the
+// hole it would leave.
+//
+// UpsertRelation writes project_id as a column value and leans on
+// 0004_metamodel.sql's composite foreign keys for the insert path — but
+// the conflict target is (relation_type_id, source_id, target_id), which
+// names no project, and project_id is not in the SET list. So a stored
+// row keeps its own project id, every key stays satisfied, and the
+// DO UPDATE is an update of another game's edge that hands the caller
+// that game's row back. Measured before the guard existed: this game's
+// project id with another game's three ids overwrote that game's fields
+// and returned its row, project id included — a cross-game write and a
+// cross-game read in one statement.
+//
+// It is unreachable from Service.UpsertRelation, which resolves the type
+// and both endpoints by key inside the project first, exactly as
+// SetPositions does in internal/views — and exactly as there, the guard
+// stays and is asserted here, because a statement that is safe only
+// because of how today's caller happens to address it is a trap for
+// tomorrow's.
+func TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine, theirs := newProject(t, pool), newProject(t, pool)
+	seedWorld(t, svc, mine)
+	seedWorld(t, svc, theirs)
+
+	for _, project := range []uuid.UUID{mine, theirs} {
+		if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
+			Key: "requires", Label: "requires",
+		}); err != nil {
+			t.Fatalf("UpsertRelationType: %v", err)
+		}
+	}
+	edge, err := svc.UpsertRelation(ctx, mine, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+	q := dbq.New(pool)
+	stored, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: mine, ID: edge.ID})
+	if err != nil {
+		t.Fatalf("read the stored edge: %v", err)
+	}
+
+	// The other game, holding this edge's three ids and its own project
+	// id, meets the guard: no row updated, and therefore no row returned.
+	row, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
+		ProjectID:      theirs,
+		RelationTypeID: stored.RelationTypeID,
+		SourceID:       stored.SourceID,
+		TargetID:       stored.TargetID,
+		Fields:         []byte(`{"note":"theirs"}`),
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("UpsertRelation returned %+v (err = %v) for another game's edge, want no rows",
+			row, err)
+	}
+
+	// The positive control, in both directions: the edge is untouched,
+	// and the owning game can still write it.
+	after, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: mine, ID: edge.ID})
+	if err != nil {
+		t.Fatalf("read the edge back: %v", err)
+	}
+	if string(after.Fields) != string(stored.Fields) {
+		t.Fatalf("the edge's fields are %s after another game's write, want %s",
+			after.Fields, stored.Fields)
+	}
+	if _, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
+		ProjectID:      mine,
+		RelationTypeID: stored.RelationTypeID,
+		SourceID:       stored.SourceID,
+		TargetID:       stored.TargetID,
+		Fields:         []byte(`{"note":"mine"}`),
+	}); err != nil {
+		t.Fatalf("the owning game cannot write its own edge: %v", err)
+	}
+}

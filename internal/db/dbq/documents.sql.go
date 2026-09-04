@@ -1156,6 +1156,7 @@ VALUES ($1::uuid, $2::uuid,
         $3::uuid, $4::text)
 ON CONFLICT (document_id, entity_id) DO UPDATE
 SET role = excluded.role
+WHERE document_links.project_id = excluded.project_id
 RETURNING id, project_id, document_id, entity_id, role, created_at
 `
 
@@ -1172,12 +1173,35 @@ type UpsertDocumentLinkParams struct {
 // TestReAddingALinkUpdatesItsRoleRatherThanDuplicatingIt pins it.
 //
 // project_id is written, not filtered, and 0007_documents.sql's two
-// composite keys are what make a cross-game link impossible by
-// construction: this row's project_id must agree with the document's
-// *and* with the entity's, so a document in one game cannot be attached
-// to an entity in another whatever Go believes.
+// composite keys are what make a cross-game link impossible to
+// *insert*: this row's project_id must agree with the document's *and*
+// with the entity's, so a document in one game cannot be attached to an
+// entity in another whatever Go believes.
 // TestALinkRowCannotClaimAGameItsDocumentDoesNotBelongTo forces that
 // refusal from this package.
+//
+// **Those keys check nothing on the conflict path, and the guard below
+// is what does.** The conflict target is (document_id, entity_id), which
+// names no project, and project_id is not in the SET list -- so a stored
+// row keeps its own project id, both composite keys stay satisfied, and
+// the DO UPDATE rewrites another game's link and RETURNs that game's
+// row. Measured, not reasoned about: one game rewrote the role on
+// another game's link and got its row back. A composite key constrains
+// what a row may *hold*, not which rows an ON CONFLICT may *match*,
+// which is the same sentence the delete filters in this file rest on.
+//
+// The load-bearing filter here is therefore
+// WHERE document_links.project_id = excluded.project_id. A guard that
+// matches nothing updates nothing, so the statement returns no row and
+// the caller sees pgx.ErrNoRows rather than a silent success.
+//
+// Unreachable from either call site -- both resolve the document and the
+// entity by key inside the project first -- and kept anyway, for the
+// reason internal/views' position write keeps its twin: a statement that
+// is safe only because of how today's caller happens to address it is a
+// trap for tomorrow's caller.
+// TestUpsertDocumentLinksConflictPathCannotWriteAnotherGamesLink drives
+// the statement directly, which is the only way to observe it.
 func (q *Queries) UpsertDocumentLink(ctx context.Context, arg UpsertDocumentLinkParams) (DocumentLink, error) {
 	row := q.db.QueryRow(ctx, upsertDocumentLink,
 		arg.ProjectID,

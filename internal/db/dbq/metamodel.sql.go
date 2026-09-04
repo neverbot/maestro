@@ -1629,6 +1629,7 @@ ON CONFLICT (relation_type_id, source_id, target_id) DO UPDATE
 SET fields              = excluded.fields,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
+WHERE relations.project_id = excluded.project_id
 RETURNING id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id
 `
 
@@ -1657,9 +1658,39 @@ type UpsertRelationParams struct {
 //
 // No updated_at either -- the set_updated_at trigger owns that column on
 // all four tables. project_id is the column this statement writes rather
-// than a filter it applies, exactly as in UpsertEntity, and the
-// composite foreign keys on the type and both endpoints are what keep an
-// edge inside one game.
+// than a filter it applies, exactly as in UpsertEntity.
+//
+// **The isolation takes two mechanisms, and the composite keys are only
+// the first.** On the insert path there is nothing to filter: the
+// composite foreign keys on the type and on both endpoints have no
+// matching row for a parent from another game and the write raises
+// 23503. On the **conflict** path they check nothing at all. The
+// conflict target is (relation_type_id, source_id, target_id), which
+// names no project, and project_id is not in the SET list -- so the
+// stored row keeps its own project id, every key stays satisfied, and
+// the DO UPDATE is an update of another game's edge that then RETURNs
+// that game's whole row. Measured, not reasoned about: one game calling
+// with its own project id and another game's three ids overwrote that
+// game's fields and was handed back a row carrying the other game's
+// project id -- a cross-game write and a cross-game read in one
+// statement.
+//
+// So the load-bearing filter on this path is the DO UPDATE's own
+// WHERE relations.project_id = excluded.project_id, and it is the only
+// thing here that carries the project through the conflict; the
+// composite keys cannot, because they constrain what a row may *hold*,
+// not which rows an ON CONFLICT may *match*. A guard that matches
+// nothing updates nothing, so the statement returns no row and Go sees
+// pgx.ErrNoRows instead of a silent success.
+//
+// Unreachable from Service.UpsertRelation, which resolves the type and
+// both endpoints by key inside the project before it gets here, and kept
+// anyway for the reason internal/views' position write keeps its twin: a
+// statement that is safe only because of how today's caller happens to
+// address it is a trap for tomorrow's caller.
+// TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge drives the
+// statement directly, which is the only way to observe a filter every
+// service path has already made redundant.
 func (q *Queries) UpsertRelation(ctx context.Context, arg UpsertRelationParams) (Relation, error) {
 	row := q.db.QueryRow(ctx, upsertRelation,
 		arg.ProjectID,

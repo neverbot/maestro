@@ -571,8 +571,6 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 	dropSet := map[int]bool{}
 	dropStep := map[int]bool{}
 	dropEdge := map[int]bool{}
-	dropSlot := map[string]bool{}
-	dropField := map[int]bool{}
 	for _, ptr := range broken {
 		parts := strings.Split(ptr, "/")
 		if len(parts) < 3 {
@@ -595,17 +593,18 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 			if i, ok := index(); ok {
 				dropEdge[i] = true
 			}
-		case "project":
-			if parts[2] == "fields" {
-				if len(parts) > 3 {
-					if i, err := strconv.Atoi(parts[3]); err == nil {
-						dropField[i] = true
-					}
-				}
-				continue
-			}
-			dropSlot[parts[2]] = true
 		}
+		// **A /project pointer prunes nothing, and that is not an
+		// omission.** resolveProjection walks past a slot or a
+		// project.fields key it cannot judge, so the resolved projection
+		// this function is handed already lacks it: a colour source that
+		// broke costs the colour and nothing else, and pruning it a
+		// second time here would be a second implementation of a rule
+		// resolution already applies. The first version of this function
+		// had one, and no mutation of it could be made to change a
+		// picture — which is what a mechanism nothing reads looks like
+		// from the inside. TestBestEffortKeepsTheProjectedFieldsItCanStillRead
+		// is what observes the surviving keys.
 	}
 
 	// The names that are going, and the steps that fall with them. A
@@ -690,30 +689,6 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 		}
 		doc.Nodes = append(doc.Nodes, entry)
 	}
-	var slots []ResolvedAttr
-	for _, slot := range r.Projection.Slots {
-		if dropSlot[slot.Name] {
-			continue
-		}
-		slots = append(slots, slot)
-	}
-	var fields []string
-	kept := 0
-	for i, key := range r.Query.Project.Fields {
-		if dropField[i] {
-			continue
-		}
-		// Resolution drops an undeclared key from Fields, so the two
-		// lists are the document's and the resolved one's and only the
-		// second is what the compiler emits: walk the document for the
-		// index the pointer addresses, and keep the resolved entry that
-		// corresponds to it.
-		if kept < len(r.Projection.Fields) && r.Projection.Fields[kept] == key {
-			fields = append(fields, key)
-			kept++
-		}
-	}
-	out.Projection = ResolvedProjection{Slots: slots, Fields: fields}
 	return &out, true
 }
 

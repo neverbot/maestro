@@ -314,22 +314,36 @@ func TestBestEffortDropsTheStalePartAndSaysWhatItDropped(t *testing.T) {
 // rule that keeps best effort from being the thing on_stale defaults to
 // fail over. A filter that cannot be resolved must not be *dropped*: the
 // set would then come back wider than the document asks for, which is a
-// picture that is wrong rather than short.
+// picture that is wrong rather than one that is short.
+//
+// **The fixture is built so that the widening is visible**, which took
+// some care and is the point of this comment. The obvious construction —
+// filter on a field, then drop that field from the schema — cannot show
+// it: dropping a declared key that entities hold values for marks every
+// one of them invalid, so the widened set draws nothing anyway and a
+// broken implementation looks exactly like a correct one. Narrowing an
+// enum's options invalidates only the rows holding the option that went,
+// which leaves the other two quests valid, drawable, and outside the
+// filter this view asks for. Those two are what a dropped condition
+// would put on the picture.
 func TestBestEffortDropsTheSetRatherThanTheConditionItCannotEvaluate(t *testing.T) {
 	g, _ := newGame(t)
-	// Two sets: one filtered on a field that is about to vanish, one that
-	// is not, so there is something left to draw and something to get
-	// wrong.
+	// One set filtered to the single epic quest, one set that is not
+	// filtered at all, so there is something left to draw and something
+	// to get wrong.
 	g.save(t, "two", `{"v":1,"from":[
-		  {"type":"quest","as":"hard","where":{"field":"min_level","op":"gte","value":20}},
+		  {"type":"quest","as":"epics","where":{"field":"rank","op":"eq","value":"epic"}},
 		  {"type":"zone","as":"z"}],
-		"nodes":[{"set":"hard"},{"set":"z"}]}`)
+		"nodes":[{"set":"epics"},{"set":"z"}]}`)
 	if _, err := g.meta.UpsertEntityType(t.Context(), g.projectID, metamodel.EntityTypeInput{
 		Key: "quest", Label: "Quest", LabelPlural: "Quests", ExpectedVersion: ptrInt32(1),
-		Schema: metamodel.Schema{{Key: "rank", Type: metamodel.FieldEnum,
-			Options: []string{"common", "rare", "epic"}}},
+		Schema: metamodel.Schema{
+			{Key: "min_level", Type: metamodel.FieldNumber},
+			{Key: "tags", Type: metamodel.FieldListText},
+			{Key: "rank", Type: metamodel.FieldEnum, Options: []string{"common", "rare"}},
+		},
 	}); err != nil {
-		t.Fatalf("drop min_level from the quest schema: %v", err)
+		t.Fatalf("drop the epic rank: %v", err)
 	}
 
 	res, err := g.views.RunView(t.Context(), g.projectID, "two",
@@ -339,15 +353,29 @@ func TestBestEffortDropsTheSetRatherThanTheConditionItCannotEvaluate(t *testing.
 	}
 	for _, node := range res.Nodes {
 		if node.Type != "zone" {
-			t.Fatalf("the filtered set must be dropped whole, not widened: %+v", res.Nodes)
+			t.Fatalf("the filtered set must be dropped whole, not run without its filter: %+v",
+				res.Nodes)
 		}
 	}
 	if len(res.Nodes) != 2 {
 		t.Fatalf("the unfiltered set must survive: %+v", res.Nodes)
 	}
 	wants(t, res.Stale, Diagnostic{
-		Code: DiagFieldMissing, Pointer: "/from/0/where/field", Was: "min_level",
+		Code: DiagEnumOptionMissing, Pointer: "/from/0/where/value", Was: "epic",
 	})
+
+	// The control, in the same fixture: with the option still declared,
+	// the filtered set draws the one quest it names.
+	g2, _ := newGame(t)
+	g2.save(t, "two", `{"v":1,"from":[
+		  {"type":"quest","as":"epics","where":{"field":"rank","op":"eq","value":"epic"}},
+		  {"type":"zone","as":"z"}],
+		"nodes":[{"set":"epics"},{"set":"z"}]}`)
+	control, err := g2.views.RunView(t.Context(), g2.projectID, "two", RunRequest{})
+	if err != nil || len(control.Nodes) != 3 {
+		t.Fatalf("the control must draw the epic quest and both zones: %v, %+v",
+			err, control.Nodes)
+	}
 }
 
 // TestBestEffortWithNothingLeftToDrawRefusesRatherThanDrawingNothing.
@@ -844,13 +872,16 @@ func TestARenamedRelationTypeStillJudgesTheEdgeLabelItDraws(t *testing.T) {
 	}
 }
 
-// TestBestEffortKeepsTheProjectedFieldsItCanStillRead: `project.fields`
-// is a list, so pruning it is the one place in this file where an index
-// in the document has to be matched against a shorter list the
-// resolution pass built — resolution drops a key it could not judge, so
-// the two lists are not the same length by the time anything is pruned.
-// Getting that wrong keeps the wrong key or loses a good one, and both
-// look like a working picture.
+// TestBestEffortKeepsTheProjectedFieldsItCanStillRead pins what a
+// best-effort picture carries under `project.fields` when one of the
+// keys has gone.
+//
+// It is also what showed that pruning the projection is nothing pruneStale
+// has to do: resolution already walks past a key it cannot judge, so the
+// resolved list handed to the compiler lacks it before anything is
+// pruned. This test asserts the outcome — the surviving keys, and only
+// those — rather than the mechanism, so it holds whichever pass does the
+// work.
 func TestBestEffortKeepsTheProjectedFieldsItCanStillRead(t *testing.T) {
 	g, _ := newGame(t)
 	// hogger is given a difficulty, because the fixture declares that
@@ -905,5 +936,59 @@ func TestBestEffortKeepsTheProjectedFieldsItCanStillRead(t *testing.T) {
 	}
 	if len(hogger.Fields) != 2 {
 		t.Fatalf("exactly the two keys that resolved: %+v", hogger.Fields)
+	}
+}
+
+// TestARenamedTypeDoesNotSwitchOffTheProjectionsTypoCheck is what
+// actually observes the scope the test above only half reaches.
+//
+// A projection's scope built by key alone does not *refuse* a renamed
+// type's projection — it comes back holding no type at all, which
+// projectionScope reads as "unresolved" and answers every key with a
+// shrug. So the picture is identical and only the judgement is gone: a
+// key the game no longer declares is accepted, and the run draws the
+// flat one-colour picture this package refuses everywhere else. The
+// difference is visible exactly where a key needs refusing.
+//
+// difficulty is the field dropped here because the fixture declares it
+// and no entity holds a value for it, so removing it from the schema
+// flags nothing invalid and this test's subject stays the projection.
+func TestARenamedTypeDoesNotSwitchOffTheProjectionsTypoCheck(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "hard", `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"project":{"color_by":"difficulty"}}`)
+	g.renameEntityType(t, "quest", "mission")
+	if _, err := g.meta.UpsertEntityType(t.Context(), g.projectID, metamodel.EntityTypeInput{
+		Key: "mission", Label: "Quest", LabelPlural: "Quests", ExpectedVersion: ptrInt32(1),
+		Schema: metamodel.Schema{
+			{Key: "min_level", Type: metamodel.FieldNumber},
+			{Key: "tags", Type: metamodel.FieldListText},
+			{Key: "rank", Type: metamodel.FieldEnum, Options: []string{"common", "rare", "epic"}},
+		},
+	}); err != nil {
+		t.Fatalf("drop difficulty from the renamed type: %v", err)
+	}
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "hard", RunRequest{})
+	diags := diagnosticsOf(t, err)
+	wants(t, diags, Diagnostic{
+		Code: DiagFieldMissing, Pointer: "/project/color_by", Was: "difficulty",
+	})
+	wants(t, diags, Diagnostic{
+		Code: DiagEntityTypeRenamed, Pointer: "/from/0/type", Was: "quest", Now: "mission",
+	})
+
+	// The control: the rename alone leaves the projection drawable, so
+	// this test cannot pass by refusing every renamed view.
+	g2, _ := newGame(t)
+	g2.save(t, "hard", `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"project":{"color_by":"difficulty"}}`)
+	g2.renameEntityType(t, "quest", "mission")
+	res, err := g2.views.RunView(t.Context(), g2.projectID, "hard", RunRequest{})
+	if err != nil {
+		t.Fatalf("the control must run: %v", err)
+	}
+	if got := codesOf(res.Stale); len(got) != 1 || got[0] != DiagEntityTypeRenamed {
+		t.Fatalf("codes = %v, want the rename alone", got)
 	}
 }

@@ -568,6 +568,9 @@ type UpsertViewParams struct {
 // about a background would be saying "none". The same distinction
 // markdown's WriteInput.Links draws with a pointer, drawn here by the
 // column simply not being writable from this path.
+// TestAnOrdinaryUpsertLeavesABackgroundStanding writes a background
+// directly and edits the view through this statement, which is what
+// makes the decision above an assertion rather than a paragraph.
 func (q *Queries) UpsertView(ctx context.Context, arg UpsertViewParams) (View, error) {
 	row := q.db.QueryRow(ctx, upsertView,
 		arg.ProjectID,

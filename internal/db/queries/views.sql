@@ -70,6 +70,9 @@
 -- about a background would be saying "none". The same distinction
 -- markdown's WriteInput.Links draws with a pointer, drawn here by the
 -- column simply not being writable from this path.
+-- TestAnOrdinaryUpsertLeavesABackgroundStanding writes a background
+-- directly and edits the view through this statement, which is what
+-- makes the decision above an assertion rather than a paragraph.
 INSERT INTO views (project_id, key, name, description, query, renderer, renderer_params,
                    layout_mode, layout_seed, updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('name')::text,

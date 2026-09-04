@@ -82,9 +82,12 @@ const noVersion int32 = -1
 
 // ViewInput is one saved-view upsert, addressed by its key.
 //
-// Query is the document **as the caller wrote it**, bytes and all, and
-// that is what gets stored: a rename never rewrites it (Task 12), so
-// what is read back is what was written. It is parsed and resolved
+// Query is the document **as the caller wrote it** and that is what gets
+// stored: a rename never rewrites it (Task 12), so what is read back is
+// what was written. Semantically, not byte for byte — the column is
+// jsonb, which normalises whitespace, collapses duplicate keys and
+// reorders an object's keys, so a read-back compares decoded values and
+// TestAViewIsReadBackWithEveryFieldItWasSavedWith does exactly that. It is parsed and resolved
 // before anything is stored, and the refs written beside it are the ones
 // that pass returned — see UpsertView, which is where the difference
 // between a parsed query and a resolved one is spent.
@@ -197,6 +200,16 @@ type ViewDependency struct {
 // the renderer catalogue exists to prevent, and Task 10 found that
 // failure three times in one file because a rule had been written once
 // and copied. There is one caller of that check and this is it.
+//
+// **That "one caller" is a property Task 14 has to keep.** The check
+// takes the query and the parameters together, and this upsert is the
+// only write path over both, so there is no partial update that could
+// change a renderer parameter against a query the check never saw and
+// leave a stored view undrawable. views.set_background is the second
+// write path Task 14 adds: it may write the three background columns,
+// which no renderer rule reads, and it must not grow into a setter for
+// renderer parameters without calling CheckRenderer against the stored
+// query — that is the moment this invariant would be lost.
 func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewInput) (dbq.View, error) {
 	problems := metamodel.RowKeyProblems(pointer("key"), in.Key)
 	problems = append(problems, viewNameProblems(in.Name)...)
@@ -292,6 +305,19 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			}
 		case errors.Is(err, pgx.ErrNoRows):
 			// Creation: no version to match, nothing to lock.
+			//
+			// **Seen and left alone: an update blocked behind a committed
+			// removal resurrects the view.** The blocked caller's locked
+			// read returns no rows, so it takes this path, and its
+			// ExpectedVersion — asserted about a row that no longer
+			// exists — is accepted by an insert that has no version to
+			// guard, storing the view again under a new id and undoing
+			// the designer's deletion. internal/metamodel's type upsert
+			// has byte-identical structure, so this is repository-wide
+			// inherited behaviour rather than anything this sub-project
+			// decided; it is recorded here so the next reader knows it
+			// was observed, and filed as a backlog item rather than
+			// changed under this task.
 		default:
 			return fmt.Errorf("lock view: %w", err)
 		}

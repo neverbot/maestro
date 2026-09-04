@@ -817,6 +817,75 @@ func TestRemovingAnotherGamesViewIsNotFound(t *testing.T) {
 	}
 }
 
+// TestAnOrdinaryUpsertLeavesABackgroundStanding pins the decision
+// UpsertView's SET list makes by omission, which nothing else asserts.
+//
+// The three background columns are deliberately not in the statement's
+// SET list: a background belongs to the picture rather than to the
+// query, is written by its own setter (Task 14), and listing them here
+// would make every ordinary edit of a name or a renderer parameter
+// silently detach the world map a designer put behind the view, because
+// a caller that said nothing about a background would be saying "none".
+// That argument is written where the statement is; a decision argued and
+// unasserted is the shape this task already found four of, and it is
+// testable today by writing the background directly.
+//
+// Task 14 inherits this test: the setter it adds is the *other* write
+// path over these columns, and this one says what the query path must
+// keep doing once there are two.
+func TestAnOrdinaryUpsertLeavesABackgroundStanding(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	first, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	// The background, written directly: there is no setter yet, and the
+	// asset row has to exist because the key to it is a real one.
+	var asset uuid.UUID
+	if err := g.pool.QueryRow(ctx,
+		`INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+		 VALUES ($1, 'azeroth.png', 'image/png', 1024, 768, '\x00') RETURNING id`,
+		g.projectID).Scan(&asset); err != nil {
+		t.Fatalf("insert the background asset: %v", err)
+	}
+	if _, err := g.pool.Exec(ctx,
+		`UPDATE views SET background_asset_id = $2, background_scale = 2.5,
+		        background_offset = '{"x":10,"y":-4}'::jsonb
+		 WHERE id = $1`, first.ID, asset); err != nil {
+		t.Fatalf("set the background: %v", err)
+	}
+
+	// An ordinary edit through the only write path there is: a new name,
+	// a new query, a new renderer parameter, and nothing said about a
+	// background.
+	next := saveable("route", questsToZones)
+	next.Name = "The long way round"
+	next.RendererParams = map[string]any{"arrows": true}
+	next.ExpectedVersion = ptrInt32(first.Version)
+	if _, err := g.views.UpsertView(ctx, g.projectID, next); err != nil {
+		t.Fatalf("the edit: %v", err)
+	}
+
+	got, err := g.views.ViewByKey(ctx, g.projectID, "route")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Name != "The long way round" {
+		t.Fatalf("Name = %q: the edit itself must have landed", got.Name)
+	}
+	if got.BackgroundAssetID == nil || *got.BackgroundAssetID != asset {
+		t.Fatalf("BackgroundAssetID = %v, want %s still standing", got.BackgroundAssetID, asset)
+	}
+	if got.BackgroundScale != 2.5 {
+		t.Fatalf("BackgroundScale = %v, want 2.5 untouched", got.BackgroundScale)
+	}
+	if string(got.BackgroundOffset) != `{"x": 10, "y": -4}` {
+		t.Fatalf("BackgroundOffset = %s, want the offset untouched", got.BackgroundOffset)
+	}
+}
+
 // TestViewsDependingOnATypeAreFoundByIdWithTheirPointers pins the lookup
 // ON DELETE SET NULL exists to serve: which views a type holds up, and
 // where in each query, as one indexed query rather than a scan over every

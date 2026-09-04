@@ -683,13 +683,22 @@ func layoutModeProblem(mode string) string {
 // is shared so that Maestro does not grow a seventh copy of the scan;
 // only the wording and the allowance are decided here.
 //
+// **The length is metamodel.LengthProblem's judgement, not a second
+// one**, for the same reason the control-character scan is CheckText's.
+// It counts runes: this check used to count bytes, which made a view
+// named in Spanish cap at 100 characters where a type labelled in
+// Spanish caps at 200 — two different caps for the same shape of text in
+// two places of one product, which is precisely what the constants above
+// say they exist to prevent. Matching numbers were never the point on
+// their own; the unit has to match too.
+//
 // allowParagraphs is the one asymmetry: a description is free-form prose
 // a designer writes about a picture and a newline in it is their own
 // paragraph break, while a name is rendered as one line in a picker and
 // a newline there is refused exactly like any other control character.
 func checkStorableText(value string, max int, allowParagraphs bool) string {
-	if len(value) > max {
-		return fmt.Sprintf("must be at most %d bytes, and this one is %d", max, len(value))
+	if problem := metamodel.LengthProblem(value, max); problem != "" {
+		return problem
 	}
 	allowed := ""
 	if allowParagraphs {

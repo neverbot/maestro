@@ -268,18 +268,38 @@ func checkName(name string) []FieldError {
 	return problems
 }
 
-// tooLong records an over-length descriptor and reports whether it did.
-// The length is counted in runes, not bytes: a cap measured in bytes
+// LengthProblem is this repository's one rule for how long a piece of a
+// designer's own prose may be, as the message for a value that is over
+// the cap or "" for one that is not.
+//
+// **The length is counted in runes, not bytes**: a cap measured in bytes
 // makes an accented label shorter than an unaccented one for no reason a
 // designer could ever guess, and these columns are a game's own prose in
-// a game's own language.
-func tooLong(path, value string, max int, problems *[]FieldError) bool {
+// a game's own language. The message says "characters" because that is
+// the unit it counts, and a message naming a unit the check does not use
+// is worse than no message.
+//
+// **Exported because internal/views bounds a saved view's name and
+// description against these same two numbers.** It did so with len(),
+// which made a Spanish view name 100 characters where a Spanish type
+// label is 200 — the exact asymmetry the paragraph above forbids,
+// arrived at by copying the byte-counting check from internal/markdown,
+// where counting bytes is right because those values are document paths
+// and kinds rather than prose. Sharing the judgement is what stops the
+// two caps drifting apart again while their numbers stay equal.
+func LengthProblem(value string, max int) string {
 	if utf8.RuneCountInString(value) <= max {
+		return ""
+	}
+	return fmt.Sprintf("must be at most %d characters", max)
+}
+
+// tooLong records an over-length descriptor and reports whether it did.
+func tooLong(path, value string, max int, problems *[]FieldError) bool {
+	problem := LengthProblem(value, max)
+	if problem == "" {
 		return false
 	}
-	*problems = append(*problems, FieldError{
-		Path:    path,
-		Message: fmt.Sprintf("must be at most %d characters", max),
-	})
+	*problems = append(*problems, FieldError{Path: path, Message: problem})
 	return true
 }

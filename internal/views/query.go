@@ -71,6 +71,18 @@ const (
 	// by metamodel.RowKeyProblems; a field key is 64 by Task 3's
 	// fieldKeyProblems). It is what stops a megabyte of text arriving as
 	// one enum value. TestAnOverlongStringIsRefusedWhereverItSits pins it.
+	//
+	// **Counted in bytes, and every message over it says "bytes"**, which
+	// is the opposite of the rule views.go's two prose caps follow and is
+	// deliberate. Those cap a designer's own prose, where a byte count
+	// would make an accented name shorter than an unaccented one for no
+	// reason a designer could guess; this is a machine bound on a query
+	// document — an identifier, an operator, one literal value — set two
+	// orders of magnitude above anything a person types, and what it is
+	// protecting is the size of what gets parsed and stored. The unit was
+	// stated two ways for one constant before this note existed:
+	// renderers.go printed "characters" over the same len() this file
+	// printed "bytes" over.
 	MaxStringLen = 4096
 
 	// MaxParams bounds `params`.

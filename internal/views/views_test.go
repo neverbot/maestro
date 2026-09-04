@@ -642,6 +642,62 @@ func TestAViewsOwnArgumentsAreRefusedBeforePostgresSeesThem(t *testing.T) {
 	}
 }
 
+// TestAViewsProseIsCappedInCharactersNotBytes pins the unit of the two
+// caps, which their numbers alone do not.
+//
+// The constants match internal/metamodel's deliberately, so that a
+// designer does not meet two different caps for the same shape of text
+// in two places of one product. Measured before this test existed, they
+// did not match: this package counted bytes, so a name of 200 accented
+// characters was refused ("must be at most 200 bytes, and this one is
+// 400") where a type label of the same 200 characters saved — a Spanish
+// view name capped at 100 characters and a Spanish type label at 200.
+// The cases below are the ones a byte count gets wrong: exactly the cap
+// in two-byte characters, which must save, and one past it, which must
+// not.
+func TestAViewsProseIsCappedInCharactersNotBytes(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+
+	in := saveable("acentos", questsOnly)
+	in.Name = strings.Repeat("á", MaxViewNameLen)
+	in.Description = strings.Repeat("ó", MaxViewDescriptionLen)
+	if _, err := g.views.UpsertView(ctx, g.projectID, in); err != nil {
+		t.Fatalf("prose exactly on the cap in accented characters must save: %v", err)
+	}
+	got, err := g.views.ViewByKey(ctx, g.projectID, "acentos")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Name != in.Name || got.Description != in.Description {
+		t.Fatal("the stored prose must be what was written, character for character")
+	}
+
+	// One character past the cap is refused, and the message names the
+	// unit it counted — a message saying "bytes" over a rune count is the
+	// same fault in the other direction.
+	over := saveable("pasado", questsOnly)
+	over.Name = strings.Repeat("á", MaxViewNameLen+1)
+	_, err = g.views.UpsertView(ctx, g.projectID, over)
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want invalid_input", err)
+	}
+	want := fmt.Sprintf("must be at most %d characters", MaxViewNameLen)
+	var ve *metamodel.ValidationError
+	if !errors.As(err, &ve) || len(ve.Fields) != 1 || ve.Fields[0].Message != want {
+		t.Fatalf("err = %#v, want one problem reading %q", err, want)
+	}
+	// The same message the metamodel gives for the same value at the same
+	// cap, which is the claim the shared judgement is there to make.
+	_, metaErr := g.meta.UpsertEntityType(ctx, g.projectID, metamodel.EntityTypeInput{
+		Key: "pasado", Label: over.Name, LabelPlural: "Pasados"})
+	var metaVE *metamodel.ValidationError
+	if !errors.As(metaErr, &metaVE) || len(metaVE.Fields) == 0 ||
+		metaVE.Fields[0].Message != want {
+		t.Fatalf("the metamodel says %v for the same value, want %q", metaErr, want)
+	}
+}
+
 // TestEveryProblemWithAViewsArgumentsIsReportedInOnePass: an agent whose
 // name and layout mode are both wrong fixes both in one round trip.
 func TestEveryProblemWithAViewsArgumentsIsReportedInOnePass(t *testing.T) {

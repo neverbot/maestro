@@ -924,8 +924,10 @@ var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any
 		if !ok {
 			return badShape("must be a string, got %s", jsonTypeOf(v))
 		}
+		// Bytes, and it says bytes: MaxStringLen is a byte bound and
+		// query.go's message over the same constant reads the same way.
 		if len(s) > MaxStringLen {
-			return badShape("must be at most %d characters", MaxStringLen)
+			return badShape("must be at most %d bytes, and this one is %d", MaxStringLen, len(s))
 		}
 		return nil
 	},

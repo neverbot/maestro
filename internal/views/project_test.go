@@ -256,11 +256,18 @@ func TestAProjectedFieldDeclaredOnOneOfSeveralTypesIsAllowed(t *testing.T) {
 // TestARelatedHopWithoutATypeReadsEveryNeighbour pins the optional half
 // of the hop: `type` narrows the far side, and leaving it out is a hop
 // over every entity the relation reaches rather than a refusal.
+//
+// The hop below writes neither `direction` nor `attr` either, so it also
+// pins the two defaults applyDefaults fills for it — `out`, the direction
+// a step and an edge entry default to, and @name, which is what "coloured
+// by zone" means. Both are refusals in the compiler when they are empty,
+// so a default that stopped being filled is an error rather than a hop
+// answered backwards or reading nothing.
 func TestARelatedHopWithoutATypeReadsEveryNeighbour(t *testing.T) {
 	g, _ := newGame(t)
 	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
 		Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["defias"],"as":"q"}],
-			"project":{"group_by":{"related":{"via":"requires","direction":"out"}}}}`)})
+			"project":{"group_by":{"related":{"via":"requires"}}}}`)})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -400,5 +407,93 @@ func TestAProjectionSlotIsALateralJoinAheadOfItsNestedSelect(t *testing.T) {
 	problems, _ := projectFilterProblems(sql)
 	for _, problem := range problems {
 		t.Error(problem)
+	}
+}
+
+// TestProjectFieldsCarriesExactlyTheKeysItNames is the middle setting
+// between "no payload" and "the whole payload", and the one the spec's
+// §5.5 recommends: a picture that needs one field per node should pay for
+// one field per node.
+//
+// The two controls are what make it mean something: the key the document
+// named is there, and the key it did not name is *not*, so a run that
+// quietly returned everything fails.
+func TestProjectFieldsCarriesExactlyTheKeysItNames(t *testing.T) {
+	g, _ := newGame(t)
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q"}],
+			"project":{"fields":["min_level"]}}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(res.Nodes) != 1 {
+		t.Fatalf("one quest was selected, got %d", len(res.Nodes))
+	}
+	fields := res.Nodes[0].Fields
+	if got, ok := fields["min_level"].(float64); !ok || got != 22 {
+		t.Fatalf("the named key must be in the payload, got %#v", fields)
+	}
+	if _, present := fields["rank"]; present {
+		t.Fatalf("a key the document did not name must stay out of the payload, got %#v", fields)
+	}
+	// And it is the payload, not an attribute: `fields` asks for content
+	// under the game's own keys, and a slot asks for a presentation
+	// attribute under the slot's name. A field called "color_by" would
+	// otherwise overwrite the colour.
+	if _, present := res.Nodes[0].Attrs["min_level"]; present {
+		t.Fatalf("project.fields belongs to the payload, not to attrs: %#v", res.Nodes[0].Attrs)
+	}
+}
+
+// TestAProjectedFieldsKeyOfAnUndeclaredKeyIsRefused is the same refusal
+// the attribute slots get, at the entry the caller wrote.
+func TestAProjectedFieldsKeyOfAnUndeclaredKeyIsRefused(t *testing.T) {
+	g, _ := newGame(t)
+	_, err := g.views.Resolve(t.Context(), g.projectID, mustParse(t,
+		`{"v":1,"from":[{"type":"quest","as":"q"}],"project":{"fields":["min_level","nope"]}}`))
+	if err == nil {
+		t.Fatal("a payload key no type in the query declares must be refused")
+	}
+	var qe *QueryError
+	if !errors.As(err, &qe) {
+		t.Fatalf("must be a *QueryError, got %T", err)
+	}
+	if len(qe.Fields) != 1 || qe.Fields[0].Path != "/project/fields/1" {
+		t.Fatalf("must be reported at the entry the caller wrote, got %v", qe.Fields)
+	}
+}
+
+// TestARelatedHopDoesNotColourWithAnInvalidEntity is the hop's half of
+// the rule the rest of the compiler already follows: a picture that
+// excludes rows the metamodel flagged as no longer fitting their schema
+// should not be coloured by one either. The control is the same query
+// with include_invalid, where the document has asked for them.
+func TestARelatedHopDoesNotColourWithAnInvalidEntity(t *testing.T) {
+	g, _ := newGame(t)
+	if _, err := g.pool.Exec(t.Context(),
+		`UPDATE entities SET invalid = true WHERE project_id = $1 AND key = 'elwynn'`,
+		g.projectID); err != nil {
+		t.Fatalf("flag the zone invalid: %v", err)
+	}
+	colour := func(doc string) any {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(res.Nodes) != 1 {
+			t.Fatalf("one quest was selected, got %d", len(res.Nodes))
+		}
+		return res.Nodes[0].Attrs["color_by"]
+	}
+	hop := `"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
+	                                          "type":"zone","attr":"@name"}}}`
+	if got := colour(`{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q"}],` +
+		hop + `}`); got != nil {
+		t.Fatalf("an invalid zone must not colour a quest, got %#v", got)
+	}
+	if got := colour(`{"v":1,"include_invalid":true,
+		"from":[{"type":"quest","keys":["hogger"],"as":"q"}],` + hop + `}`); got != "Elwynn Forest" {
+		t.Fatalf("include_invalid must lift the exclusion here too, got %#v", got)
 	}
 }

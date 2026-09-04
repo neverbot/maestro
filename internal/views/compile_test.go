@@ -252,12 +252,19 @@ func TestEveryTableReferenceIsProjectFiltered(t *testing.T) {
 	// finds its rows by an id resolved in this game, and a walk finds them
 	// by walking. Its three filters — the anchor's, the relation's and the
 	// far entity's — are counted here like every other.
+	// It also carries a **one-hop related attribute**, because Task 9's
+	// LEFT JOIN LATERAL is the second shape in this package whose project
+	// filters are not redundant in the same way the rest are: it is
+	// anchored on the node's own id and reads relations and entities
+	// directly. Its three references are counted here like every other.
 	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 		"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"},
 		            {"from":"q","via":"requires","direction":"out","to_type":"quest",
 		             "depth":{"min":1,"max":3},"as":"chain"}],
 		"edges":[{"from_step":"c"},{"from_step":"chain"},
-		         {"via":"requires","between":["q","q"]}]}`)
+		         {"via":"requires","between":["q","q"]}],
+		"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
+		                                  "type":"zone","attr":"@type"}}}}`)
 	problems, seen := projectFilterProblems(sql)
 	for _, problem := range problems {
 		t.Error(problem)

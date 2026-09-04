@@ -411,19 +411,26 @@ func TestEveryProblemOfOneClassComesBackAtOnce(t *testing.T) {
 	g, _ := newGame(t)
 	err := CheckRenderer(RendererMap, map[string]any{
 		"snap": "close", "background_scale": "big", "background_offset": "0,0",
+		"background_asset_id": "not-a-uuid", "coordinate_source": 1,
 	}, resolveFor(t, g, questQuery))
 	var qe *QueryError
 	if !errors.As(err, &qe) {
 		t.Fatalf("expected a *QueryError, got %v", err)
 	}
-	if len(qe.Fields) != 3 {
-		t.Fatalf("expected all three problems in one pass, got %v", qe.Fields)
+	if len(qe.Fields) != 5 {
+		t.Fatalf("expected all five problems in one pass, got %v", qe.Fields)
 	}
-	// And in document order rather than the map's, which has none:
-	// pointerLess is what makes a refusal reproducible.
+	// And in a stable order rather than the map's, which has none:
+	// pointerLess is what makes a refusal reproducible. **Five wrong
+	// parameters and not two**, because Go randomises map iteration per
+	// range: with three keys an unsorted implementation comes back sorted
+	// by luck one run in six, and a guard that passes a mutation one run
+	// in six is not a guard. With five it is one in a hundred and twenty.
 	want := []string{
+		"/renderer_params/background_asset_id",
 		"/renderer_params/background_offset",
 		"/renderer_params/background_scale",
+		"/renderer_params/coordinate_source",
 		"/renderer_params/snap",
 	}
 	for i, ptr := range want {

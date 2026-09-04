@@ -287,7 +287,7 @@ func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 // judgement, spelled once and reused, so an edge label and an edge
 // predicate refuse the same built-ins for the same reason.
 func resolveEdgeLabel(cat *Catalogue, rows []*dbq.RelationType, label, ptr string,
-	add func(ptr, message string)) string {
+	add func(ptr, message string), st *staleness) string {
 	if label == "" {
 		return ""
 	}
@@ -315,6 +315,7 @@ func resolveEdgeLabel(cat *Catalogue, rows []*dbq.RelationType, label, ptr strin
 	}
 	if err := scope.declares(label); err != nil {
 		add(ptr, err.Error())
+		st.noteScope(err, ptr, label)
 		return ""
 	}
 	return label

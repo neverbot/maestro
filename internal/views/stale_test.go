@@ -775,3 +775,135 @@ func TestAStaleViewIsRefusedBeforeItReachesTheDatabase(t *testing.T) {
 		t.Fatalf("codes = %v", got)
 	}
 }
+
+// TestARenamedRelationTypeStillJudgesTheEdgeLabelItDraws is the same rule
+// as the projection's scope, at the third position that resolves a type
+// key a second time: an edges[] entry written as `from_step` inherits the
+// relation types of the step it draws, and Task 9 reads them straight out
+// of the catalogue by key so that one reference does not become two
+// TypeRefs. By key alone, a rename empties that list — and an empty list
+// is an *unresolved* scope, which accepts every label_from without
+// looking at a schema. So the check the entry is supposed to get is
+// silently switched off by a rename somewhere else in the document.
+//
+// What makes it observable is a label_from that should now be refused:
+// the field it names is dropped from the relation type in the same edit
+// that renames it.
+func TestARenamedRelationTypeStillJudgesTheEdgeLabelItDraws(t *testing.T) {
+	g, _ := newGame(t)
+	note := metamodel.Field{Key: "note", Type: metamodel.FieldText}
+	if _, err := g.meta.UpsertRelationType(t.Context(), g.projectID, metamodel.RelationTypeInput{
+		Key: "requires", Label: "Requires", Schema: metamodel.Schema{note},
+		ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("declare the label's field: %v", err)
+	}
+	g.save(t, "chain", `{"v":1,"from":[{"type":"quest","as":"q",
+		  "where":{"field":"@key","op":"eq","value":"defias"}}],
+		"traverse":[{"from":"q","via":"requires","to_type":"quest","as":"pre"}],
+		"edges":[{"from_step":"pre","label_from":"note"}]}`)
+
+	// One edit that renames the type and drops the field the label reads.
+	g.renameRelationType(t, "requires", "depends_on")
+	if _, err := g.meta.UpsertRelationType(t.Context(), g.projectID, metamodel.RelationTypeInput{
+		Key: "depends_on", Label: "Requires", ExpectedVersion: ptrInt32(2),
+	}); err != nil {
+		t.Fatalf("drop the field: %v", err)
+	}
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
+	diags := diagnosticsOf(t, err)
+	wants(t, diags, Diagnostic{
+		Code: DiagFieldMissing, Pointer: "/edges/0/label_from", Was: "note",
+	})
+	wants(t, diags, Diagnostic{
+		Code: DiagRelationTypeRenamed, Pointer: "/traverse/0/via/0",
+		Was: "requires", Now: "depends_on",
+	})
+
+	// The control: with the field still declared, the same rename leaves
+	// the label drawable and the run reports only the rename.
+	g2, _ := newGame(t)
+	if _, err := g2.meta.UpsertRelationType(t.Context(), g2.projectID, metamodel.RelationTypeInput{
+		Key: "requires", Label: "Requires", Schema: metamodel.Schema{note},
+		ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("declare the label's field: %v", err)
+	}
+	g2.save(t, "chain", `{"v":1,"from":[{"type":"quest","as":"q",
+		  "where":{"field":"@key","op":"eq","value":"defias"}}],
+		"traverse":[{"from":"q","via":"requires","to_type":"quest","as":"pre"}],
+		"edges":[{"from_step":"pre","label_from":"note"}]}`)
+	g2.renameRelationType(t, "requires", "depends_on")
+	res, err := g2.views.RunView(t.Context(), g2.projectID, "chain", RunRequest{})
+	if err != nil {
+		t.Fatalf("the control must run: %v", err)
+	}
+	if got := codesOf(res.Stale); len(got) != 1 || got[0] != DiagRelationTypeRenamed {
+		t.Fatalf("codes = %v, want the rename alone", got)
+	}
+}
+
+// TestBestEffortKeepsTheProjectedFieldsItCanStillRead: `project.fields`
+// is a list, so pruning it is the one place in this file where an index
+// in the document has to be matched against a shorter list the
+// resolution pass built — resolution drops a key it could not judge, so
+// the two lists are not the same length by the time anything is pruned.
+// Getting that wrong keeps the wrong key or loses a good one, and both
+// look like a working picture.
+func TestBestEffortKeepsTheProjectedFieldsItCanStillRead(t *testing.T) {
+	g, _ := newGame(t)
+	// hogger is given a difficulty, because the fixture declares that
+	// field and no entity holds a value for it — a key pruned correctly
+	// and a key never written are the same empty payload, and this test
+	// has to be able to tell them apart.
+	if _, err := g.meta.UpsertEntity(t.Context(), g.projectID, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+		Fields: map[string]any{"min_level": 22, "rank": "rare",
+			"tags": []any{"kill", "elite"}, "difficulty": 4},
+		ExpectedVersion: ptrInt32(1),
+	}); err != nil {
+		t.Fatalf("give hogger a difficulty: %v", err)
+	}
+	// include_invalid, because dropping a declared key from a schema is
+	// what marks every entity holding a value for it invalid, and a
+	// picture of nothing would answer this test's question by accident.
+	g.save(t, "cards", `{"v":1,"include_invalid":true,"from":[{"type":"quest","as":"q"}],
+		"project":{"fields":["min_level","rank","difficulty"]}}`)
+	if _, err := g.meta.UpsertEntityType(t.Context(), g.projectID, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests", ExpectedVersion: ptrInt32(1),
+		Schema: metamodel.Schema{
+			{Key: "rank", Type: metamodel.FieldEnum, Options: []string{"common", "rare", "epic"}},
+			{Key: "difficulty", Type: metamodel.FieldNumber},
+		},
+	}); err != nil {
+		t.Fatalf("drop min_level: %v", err)
+	}
+
+	res, err := g.views.RunView(t.Context(), g.projectID, "cards",
+		RunRequest{OnStale: OnStaleBestEffort})
+	if err != nil {
+		t.Fatalf("best effort: %v", err)
+	}
+	wants(t, res.Stale, Diagnostic{
+		Code: DiagFieldMissing, Pointer: "/project/fields/0", Was: "min_level",
+	})
+	var hogger *Node
+	for i := range res.Nodes {
+		if res.Nodes[i].Key == "hogger" {
+			hogger = &res.Nodes[i]
+		}
+	}
+	if hogger == nil {
+		t.Fatalf("the nodes are not stale and must all be drawn: %+v", res.Nodes)
+	}
+	if hogger.Fields["rank"] != "rare" || hogger.Fields["difficulty"] != float64(4) {
+		t.Fatalf("the two keys that survive must still be carried: %+v", hogger.Fields)
+	}
+	if _, gone := hogger.Fields["min_level"]; gone {
+		t.Fatalf("the dropped key must not come back: %+v", hogger.Fields)
+	}
+	if len(hogger.Fields) != 2 {
+		t.Fatalf("exactly the two keys that resolved: %+v", hogger.Fields)
+	}
+}

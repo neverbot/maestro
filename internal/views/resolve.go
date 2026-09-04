@@ -501,7 +501,7 @@ func resolveInto(cat *Catalogue, q *Query, st *staleness) (*Resolved, []metamode
 			}
 		}
 		edge.LabelFrom = resolveEdgeLabel(cat, drawn, spec.LabelFrom,
-			pointer("edges", i, "label_from"), add)
+			pointer("edges", i, "label_from"), add, st)
 		r.Edges = append(r.Edges, edge)
 	}
 

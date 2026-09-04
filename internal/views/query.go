@@ -362,6 +362,15 @@ func applyDefaults(q *Query) {
 		q.Traverse[i].Where.normalise()
 		q.Traverse[i].EdgeWhere.normalise()
 	}
+	// An edge entry defaults its direction the way a step does. It used
+	// to be the one place an empty direction was read as "out" further
+	// down instead, which made the same empty string a refusal in a step
+	// and a silent default in an edge.
+	for i := range q.Edges {
+		if q.Edges[i].Direction == "" {
+			q.Edges[i].Direction = DirectionOut
+		}
+	}
 	if len(q.Nodes) == 0 {
 		for _, name := range declaredSets(q) {
 			q.Nodes = append(q.Nodes, NodeSet{Set: name})

@@ -163,7 +163,12 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	}
 	defer rows.Close()
 
-	var result Result
+	// Empty rather than nil, because a nil slice serialises as JSON null
+	// and an empty result is `{"nodes": [], "edges": []}` — a picture
+	// with nothing in it, not an absent picture. Task 15's REST mirror
+	// hands this envelope to clients that would otherwise have to handle
+	// both spellings of "no nodes".
+	result := Result{Nodes: []Node{}, Edges: []Edge{}}
 	seenNode := map[uuid.UUID]bool{}
 	seenEdge := map[uuid.UUID]bool{}
 	for rows.Next() {

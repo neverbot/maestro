@@ -471,13 +471,16 @@ func (c *compiler) edge(i int) (frag, error) {
 		"r.target_id IN (SELECT id FROM %s))", right, left)
 	var endpoints frag
 	switch spec.Spec.Direction {
-	case "", DirectionOut:
+	case DirectionOut:
 		endpoints = forward
 	case DirectionIn:
 		endpoints = backward
 	case DirectionAny:
 		endpoints = sprintf("(%s OR %s)", forward, backward)
 	default:
+		// Including the empty string, which applyDefaults fills — the
+		// same rule a step follows, rather than the silent "out" this arm
+		// used to read an empty direction as.
 		return "", invalidQuery(pointer("edges", i, "direction"),
 			fmt.Sprintf("must be %q, %q or %q (got %q)",
 				DirectionOut, DirectionIn, DirectionAny, spec.Spec.Direction))

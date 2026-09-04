@@ -1,6 +1,7 @@
 package views
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
@@ -529,5 +530,31 @@ func TestMaxDepthReachedCountsTheHopsThatContributedANode(t *testing.T) {
 		"nodes":[{"set":"cls"},{"set":"quests"}]}`
 	if got := depthOf(drawnShallow); got != 1 {
 		t.Errorf("a set that drew no node contributes no depth, got %d", got)
+	}
+}
+
+// TestAnEmptyResultSerialisesAsEmptyListsNotNull: a nil slice marshals as
+// JSON null, and an envelope whose nodes are null is a different shape
+// from one whose nodes are [] for every client that reads it — Task 15's
+// REST mirror included.
+func TestAnEmptyResultSerialisesAsEmptyListsNotNull(t *testing.T) {
+	g, _ := newGame(t)
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
+			"where":{"field":"@key","op":"eq","value":"no-such-quest"}}]}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(res.Nodes) != 0 || len(res.Edges) != 0 {
+		t.Fatalf("this query draws nothing: %d nodes, %d edges", len(res.Nodes), len(res.Edges))
+	}
+	encoded, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"nodes":[]`, `"edges":[]`} {
+		if !strings.Contains(string(encoded), want) {
+			t.Errorf("an empty result carries %s, got %s", want, encoded)
+		}
 	}
 }

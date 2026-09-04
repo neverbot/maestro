@@ -194,3 +194,29 @@ func TestAGlobPatternMapsItsWildcardsAndEscapesEverythingElse(t *testing.T) {
 		}
 	}
 }
+
+// TestAnEdgeEntrysEmptyDirectionIsFilledOnceAndRefusedAfter closes the
+// asymmetry a step and an edge entry used to have: a step refused an
+// empty direction while an edge entry read it as "out" in a switch arm of
+// its own. Now applyDefaults fills both, and the compiler refuses what is
+// left — which is only reachable from a *Resolved a Go caller built.
+func TestAnEdgeEntrysEmptyDirectionIsFilledOnceAndRefusedAfter(t *testing.T) {
+	g, _ := newGame(t)
+	doc := `{"v":1,"from":[{"type":"quest","as":"quests"}],
+		"edges":[{"via":"requires","between":["quests","quests"]}]}`
+	parsed := mustParse(t, doc)
+	if got := parsed.Edges[0].Direction; got != DirectionOut {
+		t.Fatalf("an edge entry's direction defaults to %q, got %q", DirectionOut, got)
+	}
+	resolved, err := g.views.Resolve(t.Context(), g.projectID, parsed)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	// The control: the filled default compiles.
+	if _, _, err := Compile(resolved, g.projectID); err != nil {
+		t.Fatalf("the defaulted direction must compile: %v", err)
+	}
+	resolved.Edges[0].Spec.Direction = ""
+	_, _, err = Compile(resolved, g.projectID)
+	oneProblem(t, err, "/edges/0/direction", `must be "out"`)
+}

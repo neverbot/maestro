@@ -211,6 +211,13 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden statements in 
 // reads rather than a behaviour they infer — and the ids are already $n
 // by construction, because every value the compiler handles is a bind
 // parameter.
+//
+// **These files are load-bearing, not a convenience.** Three invariants
+// are red *here and nowhere else*: the selector's project filter, the
+// exclusion of invalid rows in a step, and a step's destination-type
+// filter. Regenerating with -update rather than reading the diff deletes
+// all three in one keystroke, which is why the failure message says so
+// before it names the flag.
 func TestTheWorkedExamplesCompileToTheseStatements(t *testing.T) {
 	g, _ := newGame(t)
 	for _, example := range workedExamples {
@@ -228,8 +235,11 @@ func TestTheWorkedExamplesCompileToTheseStatements(t *testing.T) {
 				t.Fatalf("read %s (run go test -run TestTheWorkedExamplesCompileToTheseStatements -update): %v", path, err)
 			}
 			if got := sql + "\n"; got != string(want) {
-				t.Errorf("the emitted statement changed.\n--- want ---\n%s\n--- got ---\n%s",
-					want, got)
+				t.Errorf("the emitted statement changed. **Read this diff before you "+
+					"regenerate it**: the selector's project filter, the invalid-row "+
+					"exclusion and a step's destination-type filter are red here and in no "+
+					"other test, so -update on an unread diff deletes three invariants.\n"+
+					"--- want ---\n%s\n--- got ---\n%s", want, got)
 			}
 		})
 	}

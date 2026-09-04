@@ -1105,3 +1105,63 @@ func TestATypeThatIsGoneIsReportedOnceAndNotAgainByTheFieldsItDeclared(t *testin
 		t.Fatalf("both positions are addressed: %+v", qe)
 	}
 }
+
+// TestARefIdIsTrustedOnlyWhenItsKeyIsTheOneTheDocumentSpells is the
+// pairing check the id-first road needs to be safe.
+//
+// `RunView` reads the document and the dependency index in two separate
+// pool statements, with no transaction and no version check between them.
+// Task 11 writes the pair in *one* transaction, so they are consistent on
+// disk; a read does not pair them. An upsert committing between the two
+// statements hands a run document version N beside refs version N+1, and
+// every ref whose pointer survived the edit then redirects by id to the
+// type the *new* document names.
+//
+// The state that race produces for an instant is exactly the row edit
+// below — the same kind of direct edit the rename tests use, for the same
+// reason: the product has no way to produce it on purpose. Trusting the
+// id there draws the wrong types, returns success, and calls the
+// disagreement a rename, which is the wrong-picture-that-looks-right the
+// default policy exists to prevent, arriving with a diagnostic that
+// misdescribes it.
+//
+// The check that closes it is one comparison: trust the stored id only
+// when the ref's own key is the key the document spells at that pointer.
+// After a rename the document and the ref still agree — both hold the old
+// spelling, since neither is rewritten — and only the catalogue differs,
+// so every rename test above is untouched.
+func TestARefIdIsTrustedOnlyWhenItsKeyIsTheOneTheDocumentSpells(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "quests", `{"v":1,"from":[{"type":"quest","as":"q"}]}`)
+	zone := g.typeIDOf(t, KindEntityType, "zone")
+	tag, err := g.pool.Exec(t.Context(),
+		`UPDATE view_refs SET ref_key = 'zone', entity_type_id = $2
+		 WHERE project_id = $1 AND pointer = '/from/0/type'`, g.projectID, zone)
+	if err != nil {
+		t.Fatalf("repoint the ref row: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("repointing changed %d rows", tag.RowsAffected())
+	}
+
+	res, err := g.views.RunView(t.Context(), g.projectID, "quests", RunRequest{})
+	if err != nil {
+		t.Fatalf("the document names a live type and must run: %v", err)
+	}
+	drawn := make([]string, 0, len(res.Nodes))
+	for _, n := range res.Nodes {
+		drawn = append(drawn, n.Type+"/"+n.Key)
+	}
+	if len(res.Nodes) != 3 {
+		t.Fatalf("the document says quest and the picture must be the quests, drew %v", drawn)
+	}
+	for _, n := range res.Nodes {
+		if n.Type != "quest" {
+			t.Fatalf("drew a %s: the index does not describe this document, so its id "+
+				"must not be trusted, %v", n.Type, drawn)
+		}
+	}
+	if len(res.Stale) != 0 {
+		t.Fatalf("nothing in this game moved under this view, got %+v", res.Stale)
+	}
+}

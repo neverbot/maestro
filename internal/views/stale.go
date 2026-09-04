@@ -197,14 +197,34 @@ type staleness struct {
 }
 
 // storedID is the id this view recorded at this position for this kind of
-// type, or nil: no such reference, a reference of the other kind, or a
-// reference whose type has since been deleted (ON DELETE SET NULL).
-func (st *staleness) storedID(kind, ptr string) *uuid.UUID {
+// type, or nil: no such reference, a reference of the other kind, a
+// reference that does not describe this document, or a reference whose
+// type has since been deleted (ON DELETE SET NULL).
+//
+// **The key comparison is what makes the id safe to follow.** RunView
+// reads the document and the index in two separate statements, with no
+// transaction and no version check pairing them; Task 11 writes them in
+// one transaction, but a read does not. An upsert committing between the
+// two hands a run document version N beside refs version N+1, and every
+// ref whose pointer survived the edit would then redirect by id to the
+// type the *new* document names — the wrong picture, returned green, and
+// described as a rename. Requiring the ref's own key to be the key the
+// document spells here closes that: the two are written from the same
+// document, so a disagreement means the index is not this document's.
+//
+// It costs the rename path nothing, which is the reason it can be
+// unconditional. **Neither the document nor the ref row is rewritten by a
+// rename** — that is this file's header decision — so after one they still
+// agree with each other on the old spelling and only the catalogue has
+// moved. A mismatch is never a rename; it is an index describing a
+// document this run is not holding, and falling through to the by-key
+// lookup answers from the document alone.
+func (st *staleness) storedID(kind, ptr, key string) *uuid.UUID {
 	if st == nil {
 		return nil
 	}
 	ref, ok := st.stored[ptr]
-	if !ok || ref.Kind != kind {
+	if !ok || ref.Kind != kind || !strings.EqualFold(ref.RefKey, key) {
 		return nil
 	}
 	if kind == KindEntityType {
@@ -221,7 +241,7 @@ func (st *staleness) storedID(kind, ptr string) *uuid.UUID {
 // a diagnostic reported twice is a designer told to repair one thing
 // twice.
 func (st *staleness) entityTypeAt(cat *Catalogue, ptr, key string, note bool) (dbq.EntityType, bool) {
-	if id := st.storedID(KindEntityType, ptr); id != nil {
+	if id := st.storedID(KindEntityType, ptr, key); id != nil {
 		if row, ok := cat.entityTypesByID[*id]; ok {
 			if note && !strings.EqualFold(row.Key, key) {
 				st.note(DiagEntityTypeRenamed, ptr, key, row.Key)
@@ -237,7 +257,7 @@ func (st *staleness) entityTypeAt(cat *Catalogue, ptr, key string, note bool) (d
 func (st *staleness) relationTypeAt(cat *Catalogue, ptr, key string,
 	note bool,
 ) (dbq.RelationType, bool) {
-	if id := st.storedID(KindRelationType, ptr); id != nil {
+	if id := st.storedID(KindRelationType, ptr, key); id != nil {
 		if row, ok := cat.relationTypesByID[*id]; ok {
 			if note && !strings.EqualFold(row.Key, key) {
 				st.note(DiagRelationTypeRenamed, ptr, key, row.Key)

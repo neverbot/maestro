@@ -370,26 +370,50 @@ const rowColumns frag = "(id, key, name, type_key, set_name, role, " +
 const emptyRow frag = "SELECT NULL::uuid, NULL::text, NULL::text, NULL::text, NULL::text, " +
 	"NULL::text, NULL::uuid, NULL::uuid, NULL::jsonb, NULL::integer WHERE false"
 
-// capOf is the tail both collection points carry: the ordering the result
-// is trimmed by, and one row more than the cap.
+// capOf is the body both collection points carry: the arms, deduplicated
+// by id, ordered the way the result is, and cut at one row more than the
+// cap.
 //
 // **The extra row is how truncation is detected rather than inferred.**
 // With a plain LIMIT n, a result of exactly n rows and a graph that
 // happens to hold n are the same answer, so the flag could only ever be a
 // guess. With n + 1, the collection point that came back full says so by
-// arriving one row over, and Run trims it — see truncation in execute.go,
-// which counts *rows* rather than the nodes left after the deduplication,
-// because two rows can collapse into one node and the row count is the
-// only thing that knows the limit was reached.
+// arriving one row over, and Run trims it.
 //
-// The ORDER BY is the same one the outer statement applies (rank, then
-// id; columns 10 and 1 of rowColumns), and it has to be here as well as
-// there: without it the rows the LIMIT keeps are whichever Postgres
-// produced first, so a truncated result would drop a different arbitrary
-// third of the graph on every run and the trim in Go would be trimming a
-// different set than the one the document's declaration order asks for.
-func (c *compiler) capOf(limit int) frag {
-	return sprintf("\n    ORDER BY 10, 1\n    LIMIT %s", c.b.bind(limit+1))
+// **The DISTINCT ON is what makes `max_nodes` a cap on nodes rather than
+// on rows**, and it is here rather than only in Go because the LIMIT is
+// here. UNION collapses two *identical* rows, but the same entity drawn
+// by two `nodes` entries differs in set_name and rank, so it survives as
+// two rows; before this, a graph of three quests declared as two
+// overlapping sets arrived as six rows and was reported truncated at a
+// cap of three — with the identical three nodes coming back either way.
+// Counting rows never *under*-reported, so no truncated result was ever
+// called complete, but an over-report is a designer told their picture is
+// partial when it is whole, and the trim in Go could then also deliver
+// fewer nodes than the cap allowed.
+//
+// The dedupe keeps `ORDER BY id, rank`: the lowest rank per id, which is
+// the same "first entry that claimed it" rule the Go deduplication in
+// execute.go applies, so the two cannot disagree about which set a node
+// belongs to. The outer ordering is the one the final statement applies
+// (rank, then id), and it has to be here as well as there: without it the
+// rows the LIMIT keeps are whichever Postgres produced first, so a
+// truncated result would drop a different arbitrary third of the graph on
+// every run.
+//
+// Row count and node count are now the same number, which is what lets
+// execute.go read `rows > cap` as an exact answer in both directions.
+func (c *compiler) capOf(arms frag, limit int) frag {
+	return sprintf(`    SELECT capped.*
+    FROM (
+        SELECT DISTINCT ON (all_rows.id) all_rows.*
+        FROM (
+    %s
+        ) AS all_rows %s
+        ORDER BY all_rows.id, all_rows.rank
+    ) AS capped
+    ORDER BY capped.rank, capped.id
+    LIMIT %s`, arms, rowColumns, c.b.bind(limit+1))
 }
 
 // nodeUnion collects the sets the document asked to draw. Each arm joins
@@ -415,8 +439,8 @@ func (c *compiler) nodeUnion() (frag, error) {
 	if len(arms) == 0 {
 		arms = append(arms, emptyRow)
 	}
-	return sprintf("%s %s AS (\n    %s%s\n)", nodeRows, rowColumns,
-		joinFrags(arms, "\n  UNION\n    "), c.capOf(c.r.Limits.MaxNodes)), nil
+	return sprintf("%s %s AS (\n%s\n)", nodeRows, rowColumns,
+		c.capOf(joinFrags(arms, "\n  UNION\n    "), c.r.Limits.MaxNodes)), nil
 }
 
 // edgeUnion collects the relations the document asked to draw, in the two
@@ -435,8 +459,8 @@ func (c *compiler) edgeUnion() (frag, error) {
 	if len(arms) == 0 {
 		arms = append(arms, emptyRow)
 	}
-	return sprintf("%s %s AS (\n    %s%s\n)", edgeRows, rowColumns,
-		joinFrags(arms, "\n  UNION\n    "), c.capOf(c.r.Limits.MaxEdges)), nil
+	return sprintf("%s %s AS (\n%s\n)", edgeRows, rowColumns,
+		c.capOf(joinFrags(arms, "\n  UNION\n    "), c.r.Limits.MaxEdges)), nil
 }
 
 func (c *compiler) edge(i int) (frag, error) {

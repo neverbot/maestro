@@ -22,6 +22,10 @@ t0 (id, set_name, from_id, via_relation) AS (
     WHERE ((jsonb_typeof((far.fields -> $5)) = 'number' AND (far.fields ->> $5)::numeric >= $6) AND (jsonb_typeof((far.fields -> $7)) = 'number' AND (far.fields ->> $7)::numeric <= $8))
 ),
 node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank) AS (
+    SELECT capped.*
+    FROM (
+        SELECT DISTINCT ON (all_rows.id) all_rows.*
+        FROM (
     SELECT e.id, e.key, e.name, et.key, s0.set_name, $12::text,
            NULL::uuid, NULL::uuid, NULL::jsonb, $13::integer
     FROM s0
@@ -33,10 +37,17 @@ node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
     FROM t0
     JOIN entities e ON e.id = t0.id AND e.project_id = $1
     JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1
-    ORDER BY 10, 1
+        ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank)
+        ORDER BY all_rows.id, all_rows.rank
+    ) AS capped
+    ORDER BY capped.rank, capped.id
     LIMIT $16
 ),
 edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank) AS (
+    SELECT capped.*
+    FROM (
+        SELECT DISTINCT ON (all_rows.id) all_rows.*
+        FROM (
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
            r.source_id, r.target_id, NULL::jsonb, $17::integer
     FROM t0
@@ -50,7 +61,10 @@ edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
     WHERE r.project_id = $1
       AND r.relation_type_id = ANY($19::uuid[])
       AND (r.source_id IN (SELECT id FROM t0) AND r.target_id IN (SELECT id FROM t0))
-    ORDER BY 10, 1
+        ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank)
+        ORDER BY all_rows.id, all_rows.rank
+    ) AS capped
+    ORDER BY capped.rank, capped.id
     LIMIT $20
 )
 SELECT 'node' AS kind, n.* FROM node_rows n

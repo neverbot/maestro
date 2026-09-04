@@ -341,3 +341,45 @@ func TestAValueOfTheWrongJsonbTypeIsSkippedRatherThanRaised(t *testing.T) {
 		t.Fatalf("the two numeric rows answer and the stale one does not, got %v", got)
 	}
 }
+
+// TestAGlobPatternDoesNotLeakThePerCentItWasGiven is the behavioural half
+// of the same rule, and the test the operator had none of: `matches
+// "50%*"` asks for names that start "50%", not for names that start "50".
+// The control row is in the same fixture, so an empty answer cannot pass.
+func TestAGlobPatternDoesNotLeakThePerCentItWasGiven(t *testing.T) {
+	g, _ := newGame(t)
+	g.entity(t, "quest", "half", "50% Off", nil)
+	g.entity(t, "quest", "fifty", "50 Silver", nil)
+
+	literal, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
+			"where":{"field":"@name","op":"matches","value":"50%*"}}]}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := keysOf(literal.Nodes); len(got) != 1 || got[0] != "half" {
+		t.Fatalf(`matches "50%%*" must match only the name that holds a per-cent, got %v`, got)
+	}
+	// The control: the same glob without the per-cent matches both, which
+	// is what makes the assertion above about the escape and not about an
+	// empty answer.
+	both, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
+			"where":{"field":"@name","op":"matches","value":"50*"}}]}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := keysOf(both.Nodes); len(got) != 2 {
+		t.Fatalf(`matches "50*" is the control and matches both, got %v`, got)
+	}
+	// A `?` is one character, and the underscore a caller writes is not.
+	single, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"quest",
+			"where":{"field":"@name","op":"matches","value":"5?%*"}}]}`)})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := keysOf(single.Nodes); len(got) != 1 || got[0] != "half" {
+		t.Fatalf(`matches "5?%%*" must map ? and keep the per-cent literal, got %v`, got)
+	}
+}

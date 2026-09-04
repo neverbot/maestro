@@ -898,30 +898,58 @@ func lengthComparison(op Operator) Operator {
 // starting "50". The escape character is backslash and the pattern says
 // so with ESCAPE '\'.
 func likeOperand(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return r.Replace(s)
+	return escapeLike(s, false)
+}
+
+// escapeLike walks the operand once, escaping the three characters LIKE
+// reads — backslash, per-cent and underscore — and, when glob is set,
+// mapping `*` and `?` onto their LIKE equivalents *as it goes*.
+//
+// One pass rather than chained replacers, because the chained version was
+// wrong: it escaped the caller's characters and then ran a second
+// replacer that turned every `\%` back into a bare `%`, undoing the
+// escape it had just written. `matches "50%"` came out as the pattern
+// `50%` — a prefix match on "50" — and `matches "a_b"` as `a_b`, matching
+// any character between the a and the b. A single pass cannot undo its
+// own work, because it never looks at a character it already wrote.
+func escapeLike(s string, glob bool) string {
+	var out strings.Builder
+	out.Grow(len(s) + 4)
+	for _, r := range s {
+		switch {
+		case glob && r == '*':
+			out.WriteByte('%')
+		case glob && r == '?':
+			out.WriteByte('_')
+		case r == '\\' || r == '%' || r == '_':
+			out.WriteByte('\\')
+			out.WriteRune(r)
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
 }
 
 // likePattern turns one text operand into the ILIKE pattern its operator
 // means. `matches` is the literal-anchored glob the operator table
-// promises: * becomes % and ? becomes _, **after** the escape, and
-// nothing else is a metacharacter — there is no regex operator here.
+// promises: `*` becomes `%` and `?` becomes `_`, every other character is
+// a literal — including a per-cent or an underscore the caller wrote,
+// which is escaped — and there is no regex operator here.
 func likePattern(op Operator, raw any) string {
 	value, ok := raw.(string)
 	if !ok {
 		value = fmt.Sprint(raw)
 	}
-	escaped := likeOperand(value)
 	switch op {
 	case OpContains:
-		return "%" + escaped + "%"
+		return "%" + escapeLike(value, false) + "%"
 	case OpStartsWith:
-		return escaped + "%"
+		return escapeLike(value, false) + "%"
 	case OpMatches:
-		return strings.NewReplacer(`\%`, "%", `\_`, "_").Replace(
-			strings.NewReplacer("*", `\%`, "?", `\_`).Replace(escaped))
+		return escapeLike(value, true)
 	}
-	return escaped
+	return escapeLike(value, false)
 }
 
 // textList narrows a resolved operand list to the []string a text array

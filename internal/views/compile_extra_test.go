@@ -167,3 +167,30 @@ func TestAnEdgeEntryNamingASelectorIsRefused(t *testing.T) {
 	_, _, err = Compile(r, g.projectID)
 	oneProblem(t, err, "/edges/0/from_step", "walks no relations")
 }
+
+// TestAGlobPatternMapsItsWildcardsAndEscapesEverythingElse pins the
+// operator table's promise for `matches`: `*` and `?` are the only
+// metacharacters, and a per-cent or an underscore the caller wrote is a
+// literal. The previous emitter escaped the caller's characters and then
+// ran a second replacer that unescaped them again, so `matches "50%"`
+// compiled to the pattern `50%` — a prefix match — and nothing tested it.
+func TestAGlobPatternMapsItsWildcardsAndEscapesEverythingElse(t *testing.T) {
+	for _, c := range []struct {
+		op          Operator
+		value, want string
+	}{
+		{OpMatches, "50%", `50\%`},
+		{OpMatches, "a_b", `a\_b`},
+		{OpMatches, "50%*", `50\%%`},
+		{OpMatches, "Hogg?r", "Hogg_r"},
+		{OpMatches, `back\slash`, `back\\slash`},
+		{OpMatches, "*plain*", "%plain%"},
+		{OpStartsWith, "50%", `50\%%`},
+		{OpStartsWith, "a*b", `a*b%`},
+		{OpContains, "a_b", `%a\_b%`},
+	} {
+		if got := likePattern(c.op, c.value); got != c.want {
+			t.Errorf("%s %q compiles to the pattern %q, want %q", c.op, c.value, got, c.want)
+		}
+	}
+}

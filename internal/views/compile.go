@@ -569,6 +569,21 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 		// extra hop is dropped below and never reaches the picture; what
 		// it buys is the difference between "the chain ends here" and "the
 		// bound stopped here", which a designer cannot see any other way.
+		//
+		// **It is the widest level of the walk, and it costs about what
+		// the whole walk below it costs.** Measured on this project's
+		// Postgres, an eight-entity clique walked `any` at depth 1..4,
+		// best of twenty-one runs: 36.1 ms as emitted, 18.3 ms with this
+		// line reading Depth.Max — a factor of 1.97 on a dense graph,
+		// because a breadth-first level of a clique is bigger than every
+		// level before it put together. That is the price of the flag,
+		// and it is stated here rather than left for a designer to
+		// discover on a slow view: a one-hop step is not probed at all
+		// (see Truncated.Depth) precisely because the same argument runs
+		// the other way there. The probe's own predicate is free beside
+		// it — the honest "is anything past the bound *new*" test below
+		// measured 36.1 ms against 34.8 ms for the bare "is there a row
+		// past the bound" it replaced, inside the run-to-run spread.
 		MaxDepth: step.Step.Depth.Max + 1,
 		// Four times the node cap, so a pathological branching factor
 		// cannot build a giant intermediate before the outer limit

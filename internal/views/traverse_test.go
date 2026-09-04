@@ -153,6 +153,18 @@ func TestACycleInContentIsDrawnRatherThanHung(t *testing.T) {
 	// the guard the cycle is re-entered once per level to the bound and
 	// past it, so a whole picture is reported partial — and that is the
 	// assertion the guard is red under.
+	//
+	// **It is a general detector, and it borrows its specificity from
+	// internal/graph.** "The walk went deeper than it should have" is
+	// what this flag says, and a mutation to the depth ceiling fires it
+	// too, so it does not name the path guard on its own. The test that
+	// does is
+	// TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt in
+	// internal/graph, whose row count is the guard's own signature —
+	// eleven rows for a three-node cycle against four. This assertion is
+	// the views-level half: it says the defect is visible in the
+	// envelope a designer reads, not that it is the only thing that could
+	// have caused it.
 	if res.Truncated.Depth {
 		t.Errorf("the whole cycle is drawn and there is nothing past it, so this picture " +
 			"is not depth-truncated")

@@ -415,6 +415,36 @@ type resolveCtx struct {
 // *spelling* of a key rather than about a type, compile to a subquery
 // over the key text, and would be a dependency on a string rather than on
 // a declared thing — Task 6's review recorded that split, and it stands.
+//
+// **The three operators are treated alike, and neq is the one where that
+// costs something.** Deleting the type an `eq` or an `in` names really
+// does change the picture: those narrow to it, and once it is gone they
+// select nothing. A negation does not — nothing is of a type this game no
+// longer has, so "type is not X" selects exactly what it selected before
+// — and reporting the view broken there is a delete a designer is asked
+// to reconsider for a picture that would not have moved. That asymmetry
+// is real, it was measured, and the reference is still a hard dependency
+// on purpose:
+//
+//   - **The no-op is an accident of today's rows, not a property of the
+//     document.** Resolution's own step 2 exists because deleting a type
+//     and re-declaring it under the same key is the common shape of a
+//     designer fixing a mistake — and the moment that happens the
+//     negation narrows again, with no version bump and nothing said. A
+//     reference that is dead now and live again on Tuesday is exactly
+//     what a stale report is for.
+//   - **The alternative puts a second rule in this function.** What makes
+//     an operand a reference would then depend on the operator twice, on
+//     two different axes — spelling versus thing, and narrowing versus
+//     widening — and the second axis is where the first drift would be.
+//   - **The deletion report would have to promise something harder.**
+//     Today it lists the views that *name* the type, which view_refs can
+//     answer exactly; exempting negations makes it "the views whose
+//     picture changes", which no index can answer.
+//
+// TestANegatedTypeComparisonIsADependencyLikeAnyOther pins it, so the
+// asymmetry is a decision on the record rather than something nobody
+// noticed.
 func (rc *resolveCtx) typeOperand(scope fieldScope, leaf *ResolvedLeaf, ptr string,
 	value any,
 ) (any, bool) {
@@ -574,17 +604,41 @@ func (s *Service) runStored(ctx context.Context, projectID uuid.UUID, q *Query,
 	}
 	pruned, ok := pruneStale(r, broken)
 	if !ok {
-		// Every seed set is gone, so best effort is no effort: there is
-		// nothing left to draw, and an empty picture with a warning
-		// beside it reads as "this game has nothing", which is the lie
-		// the whole switch exists to avoid.
+		// Best effort refuses for two reasons and answers the same way
+		// for both, because they are the same answer: there is no picture
+		// this run can honestly draw.
+		//
+		// **Every seed set is gone**, so best effort is no effort — and
+		// an empty picture with a warning beside it reads as "this game
+		// has nothing", which is the lie the whole switch exists to
+		// avoid.
+		//
+		// That guard is about the *query*, not about the result, and the
+		// difference is worth stating because the sentence above invites
+		// the wrong reading. It cannot promise a non-empty picture and
+		// does not try to: a run whose seed sets all survive can still
+		// come back with nothing — a narrowing schema invalidates the
+		// rows that held a value for the field it dropped, and pruning
+		// cannot see that, so best effort answers zero nodes, no error
+		// and a warning attached. Refusing empty results is not the fix
+		// either; a legitimately empty query is a thing a designer asks
+		// for. What this arm covers is the one case pruning *made* empty,
+		// where the emptiness is this function's own doing.
+		//
+		// **Or a problem was raised at a position pruning cannot act
+		// on**, in which case dropping nothing and running the document
+		// whole would execute it with that problem standing, which is the
+		// silently widened picture by another road.
 		return Result{}, staleQuery(st.diags, problems)
 	}
 	return s.execute(ctx, projectID, pruned, params, req, st.diags)
 }
 
 // pruneStale drops the parts of a resolved query that cannot run, and
-// says whether anything is left.
+// says whether best effort has a picture left to draw: false when every
+// seed set went, and false when a problem was raised at a position this
+// function cannot act on, since running the document whole would then
+// execute it with that problem standing.
 //
 // **The unit it drops is the smallest whole thing that can still be
 // drawn, and it never weakens a condition.** That is the rule the whole
@@ -617,25 +671,35 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 	dropEdge := map[int]bool{}
 	for _, ptr := range broken {
 		parts := strings.Split(ptr, "/")
-		if len(parts) < 3 {
-			continue
-		}
-		index := func() (int, bool) {
-			n, err := strconv.Atoi(parts[2])
-			return n, err == nil
-		}
-		switch parts[1] {
-		case "from":
-			if i, ok := index(); ok {
-				dropSet[i] = true
+		// **Every broken pointer has to be accounted for, and one this
+		// switch cannot act on refuses the run.** Falling through was the
+		// silent widening this whole file exists to prevent, arriving by
+		// the one road nobody watches: a pointer outside the three
+		// document positions prunes nothing, and best effort then
+		// executes the document whole with a resolution problem standing
+		// against it — a picture drawn as if the problem were not there,
+		// with a warning beside it saying it is. A renderer parameter
+		// naming a type this game deleted is exactly that pointer, and it
+		// is why this is a live arm rather than defence in depth.
+		handled := false
+		if len(parts) >= 3 {
+			index := func() (int, bool) {
+				n, err := strconv.Atoi(parts[2])
+				return n, err == nil
 			}
-		case "traverse":
-			if i, ok := index(); ok {
-				dropStep[i] = true
-			}
-		case "edges":
-			if i, ok := index(); ok {
-				dropEdge[i] = true
+			switch parts[1] {
+			case "from":
+				if i, ok := index(); ok {
+					dropSet[i], handled = true, true
+				}
+			case "traverse":
+				if i, ok := index(); ok {
+					dropStep[i], handled = true, true
+				}
+			case "edges":
+				if i, ok := index(); ok {
+					dropEdge[i], handled = true, true
+				}
 			}
 		}
 		// **A /project pointer prunes nothing, and that is not an
@@ -649,6 +713,17 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 		// picture — which is what a mechanism nothing reads looks like
 		// from the inside. TestBestEffortKeepsTheProjectedFieldsItCanStillRead
 		// is what observes the surviving keys.
+		//
+		// It counts as acted on for that reason and not by omission: the
+		// pruning happened, one pass earlier, and the guard above is
+		// asking whether anything acted on the problem rather than
+		// whether this function did.
+		if len(parts) >= 2 && parts[1] == "project" {
+			handled = true
+		}
+		if !handled {
+			return nil, false
+		}
 	}
 
 	// The names that are going, and the steps that fall with them. A

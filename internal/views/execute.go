@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -241,11 +242,23 @@ func (s *Service) Run(ctx context.Context, projectID uuid.UUID, req RunRequest) 
 	if req.Query == nil {
 		return Result{}, invalidQuery("", "no query document was given")
 	}
-	if req.OnStale != "" {
+	// **fail is accepted here and best_effort is not**, which is not a
+	// softening of the rule above it. An ad-hoc run *is* the fail policy:
+	// a document that cannot be resolved against this game is refused,
+	// which is what a caller asking for `fail` is asking for, so refusing
+	// the word would be refusing a caller for stating something true —
+	// and a REST layer or a UI that fills the field in on every request,
+	// from a form whose default is the default, would be refused for
+	// having a default. What cannot be honoured is best_effort: there is
+	// no stored dependency index to say which parts of the document are
+	// stale, so there is nothing to prune on and nothing to report, and a
+	// knob accepted and ignored is a knob that lies.
+	if req.OnStale != "" && !strings.EqualFold(req.OnStale, OnStaleFail) {
 		return Result{}, invalidQuery(pointer("on_stale"),
-			"an inline query cannot be stale: staleness is what a *saved* view's stored "+
-				"dependency index answers, and an ad-hoc document has none — run the saved "+
-				"view by key to use this switch, or drop it")
+			fmt.Sprintf("an inline query cannot be stale: staleness is what a *saved* "+
+				"view's stored dependency index answers, and an ad-hoc document has "+
+				"none — run the saved view by key to use this switch, drop it, or pass "+
+				"%q, which is what an ad-hoc run already does", OnStaleFail))
 	}
 	cat, err := s.LoadCatalogue(ctx, projectID)
 	if err != nil {

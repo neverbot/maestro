@@ -1332,3 +1332,178 @@ func TestARendererParameterReadingADroppedFieldIsReported(t *testing.T) {
 		Code: DiagFieldMissing, Pointer: "/renderer_params/axis_field", Was: "min_level",
 	})
 }
+
+// TestANegatedTypeComparisonIsADependencyLikeAnyOther pins the one place
+// the `@type` dependency costs more than it buys, so the asymmetry stays
+// a decision rather than becoming a surprise.
+//
+// A deleted type cannot change what `@type neq` selects: nothing is of a
+// type this game no longer has, so the view below would draw exactly what
+// it drew. It is still reported broken and still refused, for the three
+// reasons written at typeOperand — chiefly that the no-op is a property
+// of today's rows and not of the document, and re-declaring the key
+// (which resolution's step 2 exists for) makes the negation narrow again
+// with nothing said.
+func TestANegatedTypeComparisonIsADependencyLikeAnyOther(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "notclasses", `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":["available_to","takes_place_in"],"as":"t",
+		  "where":{"field":"@type","op":"neq","value":"class"}}]}`)
+	res, err := g.views.RunView(t.Context(), g.projectID, "notclasses", RunRequest{})
+	if err != nil || len(res.Nodes) != 5 {
+		t.Fatalf("the control: three quests and the two zones, got %d nodes, %v",
+			len(res.Nodes), err)
+	}
+
+	id := g.typeIDOf(t, KindEntityType, "class")
+	broke, err := g.views.RemoveTypeReportingViews(t.Context(), g.projectID,
+		KindEntityType, id, true)
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if len(broke) != 1 || broke[0].ViewKey != "notclasses" {
+		t.Fatalf("a view naming the type in a negation names it, got %+v", broke)
+	}
+
+	_, err = g.views.RunView(t.Context(), g.projectID, "notclasses", RunRequest{})
+	wants(t, diagnosticsOf(t, err), Diagnostic{
+		Code: DiagEntityTypeMissing, Pointer: "/traverse/0/where/value", Was: "class",
+	})
+}
+
+// TestAnAdHocRunAcceptsTheFailPolicyItAlreadyImplements is the other side
+// of the refusal above. `fail` is what an ad-hoc run does — an
+// unresolvable document is refused — so a caller that says so is stating
+// a true fact, and a REST layer or a UI that fills the field in on every
+// request from a form whose default is the default would be refused for
+// having a default.
+func TestAnAdHocRunAcceptsTheFailPolicyItAlreadyImplements(t *testing.T) {
+	g, _ := newGame(t)
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, questsOnly), OnStale: OnStaleFail})
+	if err != nil || len(res.Nodes) != 3 {
+		t.Fatalf("fail is what this run already does: %v, %d nodes", err, len(res.Nodes))
+	}
+	if res.Stale != nil {
+		t.Fatalf("an ad-hoc run still has no staleness report: %+v", res.Stale)
+	}
+
+	// And a value that is neither is still refused, rather than read as
+	// one of the two.
+	_, err = g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, questsOnly), OnStale: "whatever"})
+	oneProblem(t, err, "/on_stale", "an inline query cannot be stale")
+}
+
+// TestBestEffortRefusesAProblemPruningCannotActOn is the guard against
+// the silent widening by the one road nothing watched: a broken pointer
+// outside the three document positions the pruner knows how to drop.
+//
+// It prunes nothing, so the document runs whole with a resolution problem
+// standing against it — a picture drawn as if the problem were not there,
+// with a warning beside it saying that it is. A renderer parameter naming
+// a deleted relation type is that pointer, which is what makes this a
+// live arm rather than defence in depth: the containment renderer without
+// its containment relation draws one flat row of boxes, and drawing that
+// under a warning is exactly the wrong-picture-that-looks-right.
+func TestBestEffortRefusesAProblemPruningCannotActOn(t *testing.T) {
+	g, _ := newGame(t)
+	g.saveNested(t, "nest", nestedView, "requires", nil)
+	id := g.typeIDOf(t, KindRelationType, "requires")
+	if err := g.meta.RemoveRelationType(t.Context(), g.projectID, id, true); err != nil {
+		t.Fatalf("remove relation type: %v", err)
+	}
+
+	_, err := g.views.RunView(t.Context(), g.projectID, "nest",
+		RunRequest{OnStale: OnStaleBestEffort})
+	wants(t, diagnosticsOf(t, err), Diagnostic{
+		Code: DiagRelationTypeMissing, Pointer: "/renderer_params/contain_via", Was: "requires",
+	})
+}
+
+// TestBestEffortCanStillAnswerWithAnEmptyPictureItDidNotPrune records
+// what the "an empty picture reads as this game has nothing" guard does
+// *not* cover, because the sentence invites the wrong reading.
+//
+// The guard is about the query — every seed set pruned away — and not
+// about the result. Emptiness also arrives by a road pruning cannot see:
+// narrowing a schema invalidates the rows that held a value for what it
+// dropped, so a seed set that survives whole comes back with no rows at
+// all. Refusing empty results is not the fix; a legitimately empty query
+// is a thing a designer asks for. This pins the measurement rather than a
+// wish: zero nodes, no error, and the warning attached.
+func TestBestEffortCanStillAnswerWithAnEmptyPictureItDidNotPrune(t *testing.T) {
+	g, _ := newGame(t)
+	// Two selectors, so nothing here is the "every seed set is gone"
+	// case: quests filtered on an enum option, plus the zones. The
+	// projection is what breaks, at /project, which prunes nothing.
+	g.save(t, "epics", `{"v":1,"from":[
+		  {"type":"quest","as":"epics","where":{"field":"rank","op":"eq","value":"epic"}}],
+		"project":{"color_by":"difficulty"}}`)
+	// quest keeps rank exactly as the filter needs it, and loses
+	// min_level and difficulty. Every quest holds a min_level, so every
+	// quest is now an invalid row: the seed set survives whole, its
+	// condition still resolves, and it selects nothing. What breaks is
+	// the projection, at /project/color_by, which prunes nothing.
+	if _, err := g.meta.UpsertEntityType(t.Context(), g.projectID, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests", ExpectedVersion: ptrInt32(1),
+		Schema: metamodel.Schema{
+			{Key: "tags", Type: metamodel.FieldListText},
+			{Key: "rank", Type: metamodel.FieldEnum,
+				Options: []string{"common", "rare", "epic"}},
+		},
+	}); err != nil {
+		t.Fatalf("narrow quest: %v", err)
+	}
+
+	res, err := g.views.RunView(t.Context(), g.projectID, "epics",
+		RunRequest{OnStale: OnStaleBestEffort})
+	if err != nil {
+		t.Fatalf("best effort has a seed set to draw and must not refuse: %v", err)
+	}
+	if len(res.Nodes) != 0 {
+		t.Fatalf("the rows the narrowing invalidated are gone, got %d nodes", len(res.Nodes))
+	}
+	if len(res.Stale) == 0 {
+		t.Fatalf("the empty picture must at least arrive with its warning")
+	}
+}
+
+// TestTheDependencyListIsOneRowPerReferenceAndNotPerView pins the shape
+// of the deletion report, which nothing asserted and which a caller can
+// read exactly one way too many.
+//
+// It is one row per *reference*, so a view naming the type at three
+// positions comes back three times. That is intentional and it is what
+// the pointers are for — a designer told to repair a view wants the three
+// positions, not the view's name three times — but it means a caller
+// counting rows and reporting "three views broken" is wrong, and nothing
+// said so. Now something does.
+func TestTheDependencyListIsOneRowPerReferenceAndNotPerView(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "thrice", `{"v":1,"from":[
+		  {"type":"quest","as":"a","where":{"field":"@type","op":"eq","value":"quest"}}],
+		"traverse":[{"from":"a","via":"requires","to_type":"quest","as":"pre"}]}`)
+
+	id := g.typeIDOf(t, KindEntityType, "quest")
+	deps, err := g.views.ViewsDependingOn(t.Context(), g.projectID, KindEntityType, id)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	at := map[string]bool{}
+	for _, dep := range deps {
+		if dep.ViewKey != "thrice" {
+			t.Fatalf("another view came back: %+v", deps)
+		}
+		at[dep.Pointer] = true
+	}
+	for _, want := range []string{"/from/0/type", "/from/0/where/value",
+		"/traverse/0/to_type/0"} {
+		if !at[want] {
+			t.Fatalf("no row at %s: %+v", want, deps)
+		}
+	}
+	if len(deps) != 3 {
+		t.Fatalf("one row per reference, and this view holds three: %+v", deps)
+	}
+}

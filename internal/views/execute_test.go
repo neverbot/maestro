@@ -558,3 +558,63 @@ func TestAnEmptyResultSerialisesAsEmptyListsNotNull(t *testing.T) {
 		}
 	}
 }
+
+// TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows pins the two
+// filters a step's entity join carries that only the golden files were
+// red for: `to_type` and the invalid exclusion. A golden file is a diff a
+// reviewer might regenerate; this is an answer from the database.
+//
+// The fixture needs a relation of the walked type reaching a row of
+// another type, which the seed does not have, and an invalid row on the
+// far side, which it does not either — so the test makes both.
+func TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows(t *testing.T) {
+	g, _ := newGame(t)
+	// A zone that is "available_to" the mage: nothing in the metamodel
+	// constrains a relation type's endpoints, and a step's to_type is
+	// what keeps a walk to one kind of thing.
+	g.relate(t, "available_to", "zone", "elwynn", "class", "mage")
+	if _, err := g.pool.Exec(t.Context(),
+		`UPDATE entities SET invalid = true WHERE project_id = $1 AND key = 'cook'`,
+		g.projectID); err != nil {
+		t.Fatalf("flag the row: %v", err)
+	}
+	walk := func(extra string) []string {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+			Query: mustParse(t, `{"v":1,`+extra+`"from":[{"type":"class","as":"cls",
+				"where":{"field":"@key","op":"eq","value":"mage"}}],
+				"traverse":[{"from":"cls","via":"available_to","direction":"in",
+				             "to_type":"quest","as":"reachable"}],
+				"nodes":[{"set":"reachable"}]}`)})
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		got := keysOf(res.Nodes)
+		sort.Strings(got)
+		return got
+	}
+	if got := strings.Join(walk(""), ","); got != "defias,hogger" {
+		t.Fatalf("the walk draws valid quests only — not the zone, not the flagged row: %v", got)
+	}
+	// The control for the invalid filter: lifting it draws the third one,
+	// and still not the zone.
+	if got := strings.Join(walk(`"include_invalid":true,`), ","); got != "cook,defias,hogger" {
+		t.Fatalf("include_invalid lifts the exclusion and to_type still holds: %v", got)
+	}
+	// The control for to_type: without it the zone is reachable, which is
+	// what makes the assertions above about the filter and not about the
+	// fixture.
+	res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+		Query: mustParse(t, `{"v":1,"from":[{"type":"class","as":"cls",
+			"where":{"field":"@key","op":"eq","value":"mage"}}],
+			"traverse":[{"from":"cls","via":"available_to","direction":"in","as":"reachable"}],
+			"nodes":[{"set":"reachable"}]}`)})
+	if err != nil {
+		t.Fatalf("run without to_type: %v", err)
+	}
+	got := keysOf(res.Nodes)
+	sort.Strings(got)
+	if strings.Join(got, ",") != "defias,elwynn,hogger" {
+		t.Fatalf("without to_type the zone is reached too, got %v", got)
+	}
+}

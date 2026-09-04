@@ -216,9 +216,11 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 	}
 	ctes = append(ctes, nodes, edges)
 
-	// WITH RECURSIVE even though nothing recurses yet: Task 8's multi-hop
-	// steps arrive as recursive CTEs in this same list, and RECURSIVE is
-	// a property of the WITH clause rather than of a single CTE.
+	// WITH RECURSIVE whether or not this query has a multi-hop step in it.
+	// RECURSIVE is a property of the WITH clause rather than of a single
+	// CTE, it costs nothing when nothing recurses, and spelling it
+	// conditionally would make the keyword one more thing that can be
+	// wrong about a statement.
 	b.write("WITH RECURSIVE ")
 	b.write(joinFrags(ctes, ",\n"))
 	b.write("\nSELECT 'node' AS kind, n.* FROM ")

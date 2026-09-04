@@ -246,6 +246,15 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		if mapped := oversizeForIndex(err); errors.Is(mapped, ErrInvalidInput) {
 			return dbq.Document{}, mapped
 		}
+		// 0007_documents.sql gives documents the same two composite
+		// foreign keys into api_tokens that every table in
+		// 0004_metamodel.sql carries, so a token scoped to another game
+		// cannot be recorded as this document's writer. The judgement is
+		// metamodel's, shared rather than copied — see actorColumns,
+		// which is where the column names live.
+		if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+			return dbq.Document{}, mapped
+		}
 		return dbq.Document{}, fmt.Errorf("upsert document: %w", err)
 	}
 	// **There is deliberately no `row.Path != in.Path` check here**, and
@@ -285,6 +294,24 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		AuthorUserID:  in.Actor.UserID,
 		AuthorTokenID: in.Actor.TokenID,
 	}); err != nil {
+		// document_versions names its actor `author_`, not `updated_by_`
+		// — a version is authored once and never edited — under the same
+		// composite key shape, which is the prefix actorColumns was
+		// missing.
+		//
+		// **Unreachable today, and kept for the reason the row-count
+		// arms in internal/views are.** A version is never inserted
+		// outside the transaction that wrote its document, and
+		// documents' own composite key is checked first, so a foreign
+		// token is always refused one statement earlier: deleting these
+		// three lines leaves TestADocumentWrittenWithAnotherGamesTokenIsRefusedAsSuch
+		// green. What it costs to keep is nothing, and what it buys is
+		// that a future snapshot-writing path — a restore, a squash —
+		// does not inherit a raw SQLSTATE by being written somewhere
+		// this arm was never added.
+		if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+			return dbq.Document{}, mapped
+		}
 		return dbq.Document{}, fmt.Errorf("insert document version: %w", err)
 	}
 	return row, nil
@@ -460,6 +487,13 @@ func (s *Service) Delete(ctx context.Context, projectID uuid.UUID, in DeleteInpu
 			return s.deleteRefusal(ctx, q, projectID, in)
 		}
 		if err != nil {
+			// The soft delete writes updated_by_* and the tombstone
+			// below writes author_*, so a foreign token trips a
+			// composite key on either statement; both are mapped rather
+			// than the first one only.
+			if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
 			return fmt.Errorf("soft delete document: %w", err)
 		}
 		removed = row
@@ -482,6 +516,9 @@ func (s *Service) Delete(ctx context.Context, projectID uuid.UUID, in DeleteInpu
 			AuthorUserID:  in.Actor.UserID,
 			AuthorTokenID: in.Actor.TokenID,
 		}); err != nil {
+			if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
 			return fmt.Errorf("insert tombstone version: %w", err)
 		}
 		return nil

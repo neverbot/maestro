@@ -1074,3 +1074,59 @@ func newToken(t *testing.T, pool *pgxpool.Pool, game, user uuid.UUID, label stri
 	}
 	return id
 }
+
+// TestADocumentWrittenWithAnotherGamesTokenIsRefusedAsSuch closes a gap
+// Task 14 recorded rather than fixed.
+//
+// 0007_documents.sql gives both documents and document_versions the
+// composite key into api_tokens that every audit column in this product
+// carries, so the database already refuses this write; what was missing
+// was the *sentence*. Without the mapping the refusal reaches a server
+// log as SQLSTATE 23503 over
+// document_versions_author_token_id_project_id_fkey, which says nothing
+// about a credential bound to the wrong game — the exact defect
+// metamodel.ActorConstraintViolation exists to remove, and which was
+// mapped in the metamodel and in views and in neither of the two write
+// paths here.
+//
+// The wire code stays internal_error and that is deliberate: the actor
+// is resolved by the transport from the credential the call arrived
+// with and is never caller-supplied, so there is nothing an agent can
+// change. errors.go states that argument where the sentinel is aliased.
+func TestADocumentWrittenWithAnotherGamesTokenIsRefusedAsSuch(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	azeroth := newGame(t, pool, "azeroth")
+	outland := newGame(t, pool, "outland")
+	user := newUser(t, pool, "designer@example.test")
+	foreign := newToken(t, pool, outland, user, "another game's agent")
+
+	_, err := svc.Write(ctx, azeroth, markdown.WriteInput{
+		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
+		Actor: markdown.Actor{TokenID: &foreign},
+	})
+	if !errors.Is(err, markdown.ErrActorNotInGame) {
+		t.Fatalf("a foreign token must be refused as such, got %v", err)
+	}
+
+	// The positive control: a token of this game writes the same
+	// document, so the refusal above is about the token's scope and not
+	// about the write being impossible.
+	own := newToken(t, pool, azeroth, user, "this game's agent")
+	if _, err := svc.Write(ctx, azeroth, markdown.WriteInput{
+		Path: "bible", Content: "one\n", ExpectedVersion: ptrInt32(0),
+		Actor: markdown.Actor{TokenID: &own},
+	}); err != nil {
+		t.Fatalf("this game's own token must be able to write: %v", err)
+	}
+
+	// The tombstone's author travels the same column, and Delete is the
+	// other write path that fills it: the mapping has to be on both, so
+	// a soft delete under a foreign token is asserted too.
+	if _, err := svc.Delete(ctx, azeroth, markdown.DeleteInput{
+		Path: "bible", ExpectedVersion: ptrInt32(1),
+		Actor: markdown.Actor{TokenID: &foreign},
+	}); !errors.Is(err, markdown.ErrActorNotInGame) {
+		t.Fatalf("a foreign token must be refused on a delete too, got %v", err)
+	}
+}

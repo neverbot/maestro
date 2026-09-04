@@ -153,12 +153,35 @@ func decodeFields(raw []byte) (map[string]any, error) {
 // somewhere else.
 // TestTheUploaderIsRecordedAndAForeignTokenIsRefused (internal/views) is
 // what caught it.
-
+//
+// **author_* is in the list too, and completing the list one prefix at a
+// time is itself the pattern this comment keeps recording.** Extending a
+// shared helper rather than copying it is the right move and was still
+// one column short: 0007_documents.sql's document_versions names its
+// actor `author_user_id` / `author_token_id`, because a version is
+// authored once and never edited, and it carries byte-identical
+// FOREIGN KEY (author_token_id, project_id) REFERENCES api_tokens
+// (id, project_id) — so the same foreign-token write was reaching an
+// agent as internal_error there while it was mapped everywhere else.
+// The sweep that found it is over the migrations rather than over Go: a
+// prefix is added here when a migration declares a composite key into
+// api_tokens under a new name, and there are now three such names.
+//
+// **The mapping is only worth anything where it is called**, and
+// internal/markdown had no caller at all. The defence for leaving it —
+// the actor on a write is resolved by the transport from the credential
+// the call arrived with, is never caller-supplied, and so is
+// internal_error's to report — is the argument errors.go makes for
+// ErrActorNotInGame not being a wire code, and it is why the sentinel
+// stays off the wire. It is not an argument for the *log* line being a
+// generated constraint name instead of a sentence. documents.go's three
+// write paths call it now, for the reason internal/views' two do.
 // actorColumns are the audit columns whose composite foreign key means
 // "this credential belongs to another game".
 var actorColumns = []string{
 	"updated_by_token_id", "updated_by_user_id",
 	"created_by_token_id", "created_by_user_id",
+	"author_token_id", "author_user_id",
 }
 
 func ActorConstraintViolation(err error) error {

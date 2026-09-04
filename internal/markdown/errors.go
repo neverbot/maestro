@@ -30,6 +30,15 @@ var (
 	ErrNotFound        = metamodel.ErrNotFound
 	ErrVersionConflict = metamodel.ErrVersionConflict
 	ErrInvalidInput    = metamodel.ErrInvalidInput
+	// ErrActorNotInGame is not in the wire vocabulary and that is
+	// deliberate, exactly as it is in internal/views: the actor on a
+	// write is resolved by the transport from the credential the call
+	// arrived with and is never caller-supplied, so an agent can do
+	// nothing about it and internal_error is the honest report. What it
+	// buys is the *server's* side of the story — a token scoped to
+	// another game, named as such, instead of SQLSTATE 23503 over
+	// document_versions_author_token_id_project_id_fkey.
+	ErrActorNotInGame = metamodel.ErrActorNotInGame
 )
 
 // invalidInput is the one shape every refusal of a caller's argument

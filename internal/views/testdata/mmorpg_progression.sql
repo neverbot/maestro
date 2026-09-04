@@ -23,7 +23,7 @@ t0 (id, set_name, from_id, via_relation, depth) AS (
 ),
 w1 (id, depth, path, via_relation, from_id, closed) AS (
     SELECT seed.id, 0, ARRAY[seed.id], NULL::uuid, NULL::uuid, false
-    FROM (SELECT id FROM t0) AS seed
+    FROM (SELECT DISTINCT id FROM t0) AS seed
     JOIN entities anchor ON anchor.id = seed.id AND anchor.project_id = $1
   UNION ALL
     SELECT r.target_id, w.depth + 1, w.path || (r.target_id), r.id, w.id, (r.target_id) = ANY(w.path)

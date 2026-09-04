@@ -493,9 +493,15 @@ func walkDirection(i int, d string) (graph.Direction, error) {
 // from this step's own start, which is what makes Stats.MaxDepthReached
 // answerable for a step that reads from another step. The walk counts
 // from its own seed, so the seed row's own depth is added back: path[1]
-// is the id the walk started from (Postgres arrays are 1-based), and the
-// from-set is grouped by id first so a node its own step reached twice
-// cannot multiply this step's rows.
+// is the id the walk started from (Postgres arrays are 1-based).
+//
+// The from-set is grouped by id before that join, taking each seed's
+// shortest depth. **Nothing observes it**, and that is recorded rather
+// than dressed up as a correctness guard: removing the grouping leaves
+// the whole suite green, because capOf deduplicates by id with
+// ORDER BY id, rank, depth and therefore keeps the shallowest row of a
+// node reached at two depths anyway. What it stops is this CTE holding
+// one row per *spelling* of its seed, which is work and not an answer.
 func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 	step := c.r.Steps[i]
 	direction, err := walkDirection(i, step.Step.Direction)
@@ -524,9 +530,13 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 	walkName := cteName(walkPrefix, i)
 	outName := walkName + "_out"
 	walk := graph.Walk{
-		Name:            string(walkName),
-		ProjectID:       c.projectID,
-		SeedSQL:         string(sprintf("SELECT id FROM %s", from.name)),
+		Name:      string(walkName),
+		ProjectID: c.projectID,
+		// DISTINCT because one row of a step is one edge traversal, so a
+		// set can name the same entity several times: an anchor per
+		// spelling would walk the whole graph below it once per spelling,
+		// for rows the collection points then deduplicate anyway.
+		SeedSQL:         string(sprintf("SELECT DISTINCT id FROM %s", from.name)),
 		RelationTypeIDs: step.RelationTypeIDs,
 		Direction:       direction,
 		EdgePredicate:   string(edgeWhere),

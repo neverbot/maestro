@@ -136,6 +136,27 @@ func TestACycleInContentIsDrawnRatherThanHung(t *testing.T) {
 	if !closing {
 		t.Errorf("the edge that closes the cycle (z requires x) must be drawn")
 	}
+	// x is the seed and is two hops from nothing: it is claimed by the
+	// `start` entry at depth 0, and z, at two, is the furthest node the
+	// picture holds. The closing hop onto x at depth 3 is an edge, not a
+	// third distance to the same quest.
+	if res.Stats.MaxDepthReached != 2 {
+		t.Errorf("z is the furthest node at two hops and x is the seed at none, stats say %d",
+			res.Stats.MaxDepthReached)
+	}
+	// **The counts alone do not see the path guard**, and this is where
+	// that is said. The plan's own mutation for this test — break the
+	// guard and watch it hang — neither hangs nor fails: the depth bound
+	// terminates the walk on its own, the node and edge sets are
+	// deduplicated, and the depth stat survives too because a node kept at
+	// two distances keeps the shorter. What is left is this flag. Without
+	// the guard the cycle is re-entered once per level to the bound and
+	// past it, so a whole picture is reported partial — and that is the
+	// assertion the guard is red under.
+	if res.Truncated.Depth {
+		t.Errorf("the whole cycle is drawn and there is nothing past it, so this picture " +
+			"is not depth-truncated")
+	}
 }
 
 // TestMinDepthDropsTheNearHops is the views-level half of the bound

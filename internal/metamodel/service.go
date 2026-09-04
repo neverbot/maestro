@@ -139,14 +139,37 @@ func decodeFields(raw []byte) (map[string]any, error) {
 // in with it — a user id that resolves to no row is the same class of
 // fault, an actor this instance cannot vouch for, arriving from the same
 // place.
+//
+// **created_by_* is in the list too, and was not for two sub-projects.**
+// The scan named the two `updated_by_` columns only, which was complete
+// for 0004_metamodel.sql and stopped being complete at
+// 0007_documents.sql; 0008_views.sql's view_assets is a table whose only
+// audit columns are `created_by_`, because an asset's bytes never change
+// and there is no update path to record. Its upload with a foreign token
+// therefore came back as a raw SQLSTATE 23503 over a generated
+// constraint name — the same defect this function exists to remove, one
+// column prefix along. Both prefixes are named in actorColumns, in one
+// place, so a third table cannot fall out of step by being written
+// somewhere else.
+// TestTheUploaderIsRecordedAndAForeignTokenIsRefused (internal/views) is
+// what caught it.
+
+// actorColumns are the audit columns whose composite foreign key means
+// "this credential belongs to another game".
+var actorColumns = []string{
+	"updated_by_token_id", "updated_by_user_id",
+	"created_by_token_id", "created_by_user_id",
+}
+
 func ActorConstraintViolation(err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
 		return err
 	}
-	if strings.Contains(pgErr.ConstraintName, "updated_by_token_id") ||
-		strings.Contains(pgErr.ConstraintName, "updated_by_user_id") {
-		return ErrActorNotInGame
+	for _, column := range actorColumns {
+		if strings.Contains(pgErr.ConstraintName, column) {
+			return ErrActorNotInGame
+		}
 	}
 	return err
 }

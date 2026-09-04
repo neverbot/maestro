@@ -998,3 +998,87 @@ func assertRefusedErr(t *testing.T, err error, path, want string) {
 	t.Fatalf("expected a problem at %s containing %q, got %v",
 		path, want, fmt.Sprint(ve.Fields))
 }
+
+// TestEveryByteOfEveryMagicNumberIsLoadBearing turns the WAV case above
+// into the table it should have been.
+//
+// The WAV case pinned one byte of one magic number — the second half of
+// RIFF/WEBP — and four mutations of exactly the same shape survived the
+// whole package afterwards: the PNG signature cut from eight bytes to
+// four, the JPEG one from three to two, the WebP VP8 start code check
+// disabled, and svgLooking's xml-declaration arm dropped. Each is a
+// widened allowlist, which is the one direction this file's whole
+// defence is written against.
+//
+// **The VP8 one is not cosmetic.** With that check gone, a RIFF/WEBP
+// container whose first chunk is `VP8 ` followed by ten arbitrary bytes
+// yields dimensions inside every bound, and the garbage is *stored* as
+// an image rather than refused — so the row that drives it asserts the
+// refusal and the emptiness of the listing, not just the error.
+//
+// The shape of each row is "one byte short of legitimate": a file
+// carrying the prefix of a magic number and then plausible bytes. A
+// sniffer that compares fewer bytes than the format declares accepts
+// every one of them.
+func TestEveryByteOfEveryMagicNumberIsLoadBearing(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+
+	// A real PNG's first four bytes, then a body that is not one. Under
+	// an eight-byte comparison this is refused as no image at all; under
+	// a four-byte one it is sniffed as image/png and hits the decoder.
+	shortPNG := append([]byte{0x89, 'P', 'N', 'G'}, []byte("not really a png at all")...)
+	// SOI and nothing else: the third byte of magicJPEG is what tells a
+	// JPEG from an arbitrary file that happens to begin 0xFF 0xD8.
+	shortJPEG := append([]byte{0xff, 0xd8}, []byte("\x00\x00 arbitrary bytes")...)
+	// A VP8 chunk whose three-byte start code is wrong. Everything else
+	// about it is well formed, and the two 14-bit dimensions it carries
+	// are perfectly in bounds — which is the whole point: the start code
+	// is the only thing that says these bytes are a frame header.
+	badStartCode := webpVP8(64, 48)
+	badStartCode[23] = 0x00 // body[3], the first byte of the start code.
+
+	for _, tc := range []struct {
+		name string
+		raw  []byte
+		want string
+	}{
+		{"a PNG signature cut short", shortPNG, "are not a image/png"},
+		{"a JPEG signature cut short", shortJPEG, "are not a image/png"},
+		{"a RIFF that is not a WEBP", func() []byte {
+			wave := append([]byte("RIFF"), 0, 0, 0, 0)
+			wave = append(wave, "WAVEfmt "...)
+			return append(wave, make([]byte, 16)...)
+		}(), "are not a image/png"},
+		{"a VP8 frame with a wrong start code", badStartCode,
+			"carries no start code"},
+		{"an XML declaration with no <svg in the first bytes", []byte(
+			"<?xml version=\"1.0\"?>\n<!-- a comment long enough to push the element " +
+				"past anything a prefix check would see -->\n"), "look like an SVG"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertRefused(t, createAsset(t, g, "map.png", tc.raw), pointer("bytes"), tc.want)
+		})
+	}
+
+	// The control every row shares: not one of them was stored. Without
+	// it the VP8 row would pass on the refusal alone while a widened
+	// check quietly wrote garbage into view_assets.
+	assets, err := g.views.ListAssets(ctx, g.projectID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(assets) != 0 {
+		t.Fatalf("%d assets stored, want none: %v", len(assets), assets)
+	}
+
+	// The positive controls, in the same test, so that no row above can
+	// be passing because uploads are broken: the full-length magic
+	// number of each format is accepted.
+	for _, ok := range [][]byte{pngBytes(t, 8, 8), jpegBytes(t, 16, 16),
+		webpVP8(64, 48), webpVP8X(24, 12), webpVP8L(30, 10)} {
+		if err := createAsset(t, g, "map.png", ok); err != nil {
+			t.Fatalf("a well-formed image must still be accepted: %v", err)
+		}
+	}
+}

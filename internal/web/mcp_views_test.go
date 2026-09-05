@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
@@ -27,6 +28,7 @@ import (
 // tested in internal/views, and it is not re-tested here.
 
 type viewsFixture struct {
+	pool    *pgxpool.Pool
 	deps    web.MCPDeps
 	caller  web.Caller
 	game    uuid.UUID
@@ -83,6 +85,7 @@ func newViewsFixture(t *testing.T) viewsFixture {
 		t.Fatalf("CallerForToken: %v", err)
 	}
 	f := viewsFixture{
+		pool:   pool,
 		deps:   web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Views: vs},
 		caller: caller, game: game.ID, other: other.ID, srv: srv,
 		ownerID: owner.ID, views: vs, meta: mm,
@@ -757,5 +760,200 @@ func TestTheListingFlagsAStaleViewAndNotAHealthyOne(t *testing.T) {
 	if flags["healthy"] {
 		t.Error("a view nothing touched is flagged stale: the flag says nothing if it says " +
 			"the same for both")
+	}
+}
+
+// --- The arguments a description promises and the transport has to
+// carry ---
+//
+// Each of the four tests below was written because dropping one
+// documented argument on the way into the domain left the whole web
+// suite green. The domain tests every one of these behaviours; what
+// nothing asserted is that the argument an agent sends *arrives*, which
+// is the only thing this layer can be wrong about and the failure a
+// caller would meet as a knob that silently does nothing.
+
+// TestARunCarriesItsStalePolicyAndReportsWhatItPruned drives on_stale
+// through the tool, and it is two claims in one because the two are
+// unobservable apart: best_effort has to reach RunView, and what
+// best_effort learned has to reach the caller.
+//
+// The control is the same view run with no policy at all, which is
+// refused — so an answer cannot pass here by being empty, and the
+// policy is what makes the difference rather than the query.
+func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+	f.save(t, "route", `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"takes_place_in","to_type":"zone","as":"z"}]}`, "graph")
+
+	// The game moves under a document nobody edited: the relation type
+	// the second step walks is gone.
+	relation, err := f.meta.RelationTypeByKey(ctx, f.game, "takes_place_in")
+	if err != nil {
+		t.Fatalf("read the relation type: %v", err)
+	}
+	if err := f.meta.RemoveRelationType(ctx, f.game, relation.ID, false); err != nil {
+		t.Fatalf("delete the relation type: %v", err)
+	}
+
+	// The default policy: refused, with the code that says why.
+	if _, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
+		web.ViewsRunInput{Key: "route"}); err == nil {
+		t.Fatal("a stale view ran under the default policy: the control does not hold")
+	}
+
+	run, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
+		web.ViewsRunInput{Key: "route", OnStale: "best_effort"})
+	if err != nil {
+		t.Fatalf("best_effort was not honoured: %v", err)
+	}
+	// What survived the pruning: the quests are still drawn, so this is
+	// a picture and not an empty answer that satisfies the next
+	// assertion by drawing nothing.
+	nodes, ok := run["nodes"].([]views.Node)
+	if !ok || len(nodes) == 0 {
+		t.Fatalf("best_effort drew nothing: %v", run["nodes"])
+	}
+	// And what it pruned reaches the caller, which is the other half:
+	// a run that quietly drew three-quarters of a picture and said
+	// nothing is the silent-wrong-answer this whole surface refuses.
+	stale, present := run["stale"]
+	if !present {
+		t.Fatal("the envelope carried no stale member: best_effort pruned a step and " +
+			"told the caller nothing")
+	}
+	encoded, err := json.Marshal(stale)
+	if err != nil {
+		t.Fatalf("marshal stale: %v", err)
+	}
+	if !strings.Contains(string(encoded), "takes_place_in") {
+		t.Errorf("stale = %s, want the relation type that broke", encoded)
+	}
+}
+
+// TestARunCarriesItsIncludeFieldsFlag: the flag selects each node's
+// declared fields into the envelope, and the same run with it off is the
+// control — a test asserting only the presence would pass against a
+// transport that hard-wired the flag on.
+func TestARunCarriesItsIncludeFieldsFlag(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+	f.save(t, "route", questsQuery, "graph")
+
+	with, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
+		web.ViewsRunInput{Key: "route", IncludeFields: true})
+	if err != nil {
+		t.Fatalf("views.run with fields: %v", err)
+	}
+	nodes, ok := with["nodes"].([]views.Node)
+	if !ok || len(nodes) == 0 {
+		t.Fatalf("the run drew nothing: %v", with["nodes"])
+	}
+	found := false
+	for _, node := range nodes {
+		if _, has := node.Fields["min_level"]; has {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("include_fields was sent and no node carried its declared fields")
+	}
+
+	without, err := web.MCPViewsRun(ctx, f.deps, f.caller, f.game,
+		web.ViewsRunInput{Key: "route"})
+	if err != nil {
+		t.Fatalf("views.run without fields: %v", err)
+	}
+	for _, node := range without["nodes"].([]views.Node) {
+		if len(node.Fields) != 0 {
+			t.Errorf("a run that did not ask for fields carried %v: the flag says nothing "+
+				"if the answer is the same either way", node.Fields)
+		}
+	}
+}
+
+// TestValidateJudgesTheRendererAndTheParametersTheCallSent is the tool's
+// own reason to exist, asserted on the wire.
+//
+// views.validate's description says naming a renderer "is the only way a
+// renderer parameter can be judged". That is a promise about two
+// arguments arriving, and both were droppable: without the renderer the
+// domain skips the check entirely, and without the parameters it judges
+// a call nobody made — the map renderer's default mode requires nothing,
+// so an empty map validates whatever the caller sent.
+//
+// The verdict flips on the parameters alone, with the renderer fixed,
+// which is what makes this a test of the binding rather than of the
+// catalogue.
+func TestValidateJudgesTheRendererAndTheParametersTheCallSent(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+
+	// The query projects the field the coordinates are read from, which
+	// is what the map renderer's "fields" mode requires of the document.
+	const projected = `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"project":{"fields":["min_level"]}}`
+
+	// "fields" mode needs two declared number fields named, and this
+	// call names neither: the refusal the description promises.
+	_, err := web.MCPViewsValidate(ctx, f.deps, f.caller, f.game, web.ViewsValidateInput{
+		Query: json.RawMessage(projected), Renderer: "map",
+		RendererParams: map[string]any{"coordinate_source": "fields"},
+	})
+	if err == nil {
+		t.Fatal("a map view in \"fields\" mode naming no coordinate fields validated")
+	}
+	if !strings.Contains(err.Error(), "x_field") {
+		t.Errorf("err = %v, want it to name the parameter that is missing", err)
+	}
+
+	// The same renderer, the same query, two more parameters: accepted.
+	// The verdict moved on the binding, so the binding arrived.
+	if _, err := web.MCPViewsValidate(ctx, f.deps, f.caller, f.game, web.ViewsValidateInput{
+		Query: json.RawMessage(projected), Renderer: "map",
+		RendererParams: map[string]any{"coordinate_source": "fields",
+			"x_field": "min_level", "y_field": "min_level"},
+	}); err != nil {
+		t.Fatalf("the repaired parameters were refused: %v", err)
+	}
+
+	// And the same refused parameters with no renderer named: accepted,
+	// because there is nothing to judge them against. That is the
+	// control for the renderer argument itself — the refusal above is
+	// the renderer arriving, not the parameters being wrong on their own.
+	if _, err := web.MCPViewsValidate(ctx, f.deps, f.caller, f.game, web.ViewsValidateInput{
+		Query:          json.RawMessage(projected),
+		RendererParams: map[string]any{"coordinate_source": "fields"},
+	}); err != nil {
+		t.Fatalf("a query validated on its own was refused: %v", err)
+	}
+}
+
+// TestAnUpsertRecordsTheCallerWhoMadeIt is the attribution Task 14's
+// round reasoned about, asserted where it is put on the wire. The
+// domain stores whatever Actor it is handed; what nothing asserted is
+// that this surface hands it the caller's own, so an upsert by an agent
+// was free to land with no attribution at all.
+func TestAnUpsertRecordsTheCallerWhoMadeIt(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+	f.save(t, "route", questsQuery, "graph")
+
+	var user, token *uuid.UUID
+	if err := f.pool.QueryRow(ctx,
+		`SELECT updated_by_user_id, updated_by_token_id FROM views
+		 WHERE project_id = $1 AND key = 'route'`, f.game).Scan(&user, &token); err != nil {
+		t.Fatalf("read the audit columns: %v", err)
+	}
+	if token == nil {
+		t.Fatal("a view saved by an agent has no updated_by_token_id: the tool dropped " +
+			"the caller on the way into the domain")
+	}
+	if f.caller.TokenID == nil || *token != *f.caller.TokenID {
+		t.Errorf("updated_by_token_id = %v, want this call's own token %v", token, f.caller.TokenID)
+	}
+	if user == nil || *user != f.ownerID {
+		t.Errorf("updated_by_user_id = %v, want the token's owner %s", user, f.ownerID)
 	}
 }

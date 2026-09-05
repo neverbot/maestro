@@ -16,9 +16,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/paging"
 )
 
 // Background assets: the images a `map` view is drawn over, and the one
@@ -81,15 +83,24 @@ import (
 //     decode the pixels this process declined to, and 20000x20000 is
 //     1.6 GB of RGBA in a designer's tab. The bound protects the
 //     client, which is the only reader that expands these bytes.
-//   - **The size bound is applied while reading, never after.**
-//     readBounded stops at MaxAssetBytes+1, so a caller streaming four
-//     gigabytes is refused having buffered eight megabytes and one
-//     byte. internal/web wraps the request body in http.MaxBytesReader
-//     over the same constant, which is the same bound one layer up
-//     rather than a second one: TestAnOversizeAssetIsRefusedBeforeItIsRead
-//     counts the bytes this package pulls from the reader, because
-//     "refused" and "refused before it was read" are different claims
-//     and only one of them is worth making.
+//   - **The size bound is applied while reading, never after, and it is
+//     applied here only.** readBounded stops at MaxAssetBytes+1, so a
+//     caller streaming four gigabytes is refused having buffered eight
+//     megabytes and one byte. internal/web hands the request body over
+//     unwrapped: this comment used to say it wrapped it in
+//     http.MaxBytesReader over the same constant, and that wrapper was
+//     measured, found unable to fire -- the limited read below takes the
+//     byte that would have tripped it -- and removed, which left this
+//     sentence describing code that is not there.
+//     api_view_assets.go's header carries the whole argument.
+//     TestAnOversizeAssetIsRefusedBeforeItIsRead counts the bytes this
+//     package pulls from the reader, because "refused" and "refused
+//     before it was read" are different claims and only one of them is
+//     worth making.
+//   - **How many, as well as how big.** MaxAssetsPerGame is the
+//     aggregate bound; every other number here is per asset, and for a
+//     sub-project a game could hold as many eight-megabyte images as
+//     anyone cared to upload.
 //
 // **This file is the second write path over a view's row, and it stays
 // the narrow one.** UpsertView is the only place a query and its
@@ -131,6 +142,45 @@ const (
 	// a mime hint. It is capped in runes, through metamodel.LengthProblem,
 	// for the reason MaxViewNameLen is.
 	MaxAssetFilenameLen = 200
+	// MaxAssetsPerGame is how many background images one game may hold,
+	// and it is the bound every other bound in this file was missing.
+	//
+	// **Every other one is per asset.** Eight megabytes an image, forty
+	// megapixels a canvas -- and nothing at all on how many. Any writer
+	// with an editor role, which includes an agent's token, could push
+	// unbounded bytes into Postgres eight megabytes at a time and no
+	// statement in this package would notice. The file header argues at
+	// length that MaxAssetBytes protects *memory*; nothing protected
+	// disk.
+	//
+	// **A count rather than an aggregate byte total, and the reason is
+	// the bytea.** bytes is a toasted, compressed column: summing
+	// octet_length over it makes Postgres detoast every stored image on
+	// every upload, so the cheaper-looking bound is the one that reads
+	// the whole game's pixels to decide whether to accept eight
+	// megabytes. A count is answered from view_assets_project_idx
+	// without touching an image (CountViewAssets says the same where the
+	// statement is), and it composes with MaxAssetBytes into a worst
+	// case that can be stated rather than measured: a hundred assets of
+	// eight megabytes is 800 MB a game, which is a number an operator
+	// can multiply by their number of games and reason about.
+	//
+	// A hundred is generous for what this is: one background per zone of
+	// a hand-drawn world, or one circuit map per track. A game that
+	// really needs more is a conversation with whoever runs the
+	// instance, which is what a refusal naming the cap starts.
+	MaxAssetsPerGame = 100
+)
+
+// The bounds on one asset listing. A game holds tens of assets rather
+// than thousands -- MaxAssetsPerGame is a hundred -- so the default page
+// shows most games' whole library in one call and the cap is a little
+// above the per-game limit, which means a caller that asks for
+// everything gets everything and still gets a cursor if the cap ever
+// rises.
+const (
+	defaultAssetPage int32 = 50
+	maxAssetPage     int32 = 200
 )
 
 // Asset is one background image as it reads back, without its bytes.
@@ -208,20 +258,55 @@ func (s *Service) CreateAsset(ctx context.Context, projectID uuid.UUID, actor Ac
 		return Asset{}, err
 	}
 
-	row, err := s.q.InsertViewAsset(ctx, dbq.InsertViewAssetParams{
-		ProjectID: projectID, Filename: filename, Mime: mime,
-		Width: width, Height: height, Bytes: raw,
-		CreatedByUserID: actor.UserID, CreatedByTokenID: actor.TokenID,
+	var row dbq.InsertViewAssetRow
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
+		// **The per-game cap, counted in the transaction that inserts.**
+		// Not because that makes it exact -- two uploads racing each
+		// other both count MaxAssetsPerGame-1 and both land, so the
+		// stored total can overshoot by the number of concurrent
+		// uploaders -- but because a count taken outside the transaction
+		// can be stale by any amount at all. This is a quota rather than
+		// a security boundary: what it exists to stop is unbounded
+		// growth, and a bound that can be exceeded by the handful of
+		// browsers a game has open at once still stops that. Locking the
+		// game to make it exact would serialise every upload in it
+		// against a number nobody reads.
+		held, err := q.CountViewAssets(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("count view assets: %w", err)
+		}
+		if held >= MaxAssetsPerGame {
+			return &metamodel.ValidationError{
+				Code: metamodel.CodeInvalidInput,
+				Fields: []metamodel.FieldError{{
+					Path: pointer("bytes"),
+					Message: fmt.Sprintf("would be background image %d and a game may "+
+						"hold %d: delete an image this game no longer draws over, with "+
+						"the asset route, before uploading another",
+						held+1, MaxAssetsPerGame),
+				}},
+			}
+		}
+
+		row, err = q.InsertViewAsset(ctx, dbq.InsertViewAssetParams{
+			ProjectID: projectID, Filename: filename, Mime: mime,
+			Width: width, Height: height, Bytes: raw,
+			CreatedByUserID: actor.UserID, CreatedByTokenID: actor.TokenID,
+		})
+		if err != nil {
+			// The same mapping every write in this repository carries: a
+			// token from another game trips a composite foreign key, and
+			// SQLSTATE 23503 over a generated constraint name says nothing
+			// about a credential scoped to the wrong project.
+			if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
+				return mapped
+			}
+			return fmt.Errorf("insert view asset: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
-		// The same mapping every write in this repository carries: a
-		// token from another game trips a composite foreign key, and
-		// SQLSTATE 23503 over a generated constraint name says nothing
-		// about a credential scoped to the wrong project.
-		if mapped := metamodel.ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
-			return Asset{}, mapped
-		}
-		return Asset{}, fmt.Errorf("insert view asset: %w", err)
+		return Asset{}, err
 	}
 	return Asset{
 		ID: row.ID, Filename: row.Filename, Mime: row.Mime,
@@ -229,20 +314,100 @@ func (s *Service) CreateAsset(ctx context.Context, projectID uuid.UUID, actor Ac
 	}, nil
 }
 
-// ListAssets is every asset of one game, oldest first, without bytes.
-func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID) ([]Asset, error) {
-	rows, err := s.q.ListViewAssets(ctx, projectID)
+// AssetFilter narrows an asset listing. There is nothing to filter on --
+// an asset has no key, no kind and no owner -- so it carries a position
+// and a size and nothing else.
+//
+// Cursor is the NextCursor of a previous call. It belongs to the game it
+// was issued for and to no other, and it is a position rather than a
+// snapshot; paging.Cursor carries the whole contract.
+type AssetFilter struct {
+	Cursor string
+	Limit  int32
+}
+
+// AssetPage is one page of a game's assets plus the cursor for the next.
+//
+// **NextCursor is set when the page came back full**, and empty
+// otherwise, so a caller looping until it is empty is correct and must
+// expect a final empty page rather than treating one as an error. The
+// rest of the contract is paging.Cursor's, stated once for every domain
+// that pages. Cursor.Sort, for this listing, is the row's created_at in
+// RFC 3339 -- the same shape internal/metamodel's relation listing uses,
+// and for the same reason: the sort key is a timestamp and ties on it
+// are ordinary, so the id is what divides them.
+type AssetPage struct {
+	Assets     []Asset
+	NextCursor string
+}
+
+// ListAssets is one page of a game's assets, oldest first, without bytes.
+//
+// **It used to be every asset, with no limit at all** -- the whole
+// game's library in one answer, in a package whose query file contained
+// exactly one LIMIT -- while view_assets_project_idx's own comment said
+// its order existed so a page could be sought to rather than read whole
+// and sorted. It is paged now, through the same mechanism every other
+// listing in this product uses.
+func (s *Service) ListAssets(ctx context.Context, projectID uuid.UUID,
+	f AssetFilter,
+) (AssetPage, error) {
+	limit := paging.Size(f.Limit, defaultAssetPage, maxAssetPage)
+	fingerprint := assetListingFingerprint(projectID)
+	after, err := paging.Decode(f.Cursor, fingerprint, refuseViewCursor)
 	if err != nil {
-		return nil, fmt.Errorf("list view assets: %w", err)
+		return AssetPage{}, err
 	}
-	out := make([]Asset, 0, len(rows))
+
+	params := dbq.ListViewAssetsPageParams{ProjectID: projectID, Limit: limit}
+	if after.ID != uuid.Nil {
+		at, err := time.Parse(time.RFC3339Nano, after.Sort)
+		if err != nil {
+			// Only a hand-edited cursor reaches this: the encode below
+			// writes the format this parses and the fingerprint has
+			// already agreed. It is still the caller's own argument.
+			return AssetPage{}, refuseViewCursor("is not a cursor this listing issued: " +
+				"it carries no creation time")
+		}
+		params.AfterCreatedAt = pgtype.Timestamptz{Time: at, Valid: true}
+		params.AfterID = &after.ID
+	}
+
+	rows, err := s.q.ListViewAssetsPage(ctx, params)
+	if err != nil {
+		return AssetPage{}, fmt.Errorf("list view assets: %w", err)
+	}
+	page := AssetPage{Assets: make([]Asset, 0, len(rows))}
 	for _, row := range rows {
-		out = append(out, Asset{
+		page.Assets = append(page.Assets, Asset{
 			ID: row.ID, Filename: row.Filename, Mime: row.Mime,
 			Width: row.Width, Height: row.Height, CreatedAt: row.CreatedAt.Time,
 		})
 	}
-	return out, nil
+	// paging.Size never returns a limit below one, so a full page is
+	// never an empty one and there is no separate emptiness check.
+	if len(rows) == int(limit) {
+		last := rows[len(rows)-1]
+		page.NextCursor = paging.Encode(paging.Cursor{
+			Sort:        last.CreatedAt.Time.Format(time.RFC3339Nano),
+			ID:          last.ID,
+			Fingerprint: fingerprint,
+		})
+	}
+	return page, nil
+}
+
+// assetListingFingerprint digests the listing a cursor was issued under.
+//
+// The project id first and the domain discriminator second, for the
+// reasons viewListingFingerprint sets out at length: without the project
+// id two games' listings share a fingerprint and one game's cursor pages
+// the other's rows from a position that means nothing there, and without
+// a discriminator this listing's cursor and the view listing's over the
+// same game would be interchangeable. There is no filter part because
+// this listing has no filter.
+func assetListingFingerprint(projectID uuid.UUID) string {
+	return paging.Fingerprint(projectID.String(), "view_assets")
 }
 
 // ReadAsset loads one asset with its bytes, for the serving route.

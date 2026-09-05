@@ -125,23 +125,40 @@ func (s *Server) handleUploadViewAsset(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, viewAssetOutput(r.PathValue("game"), asset))
 }
 
-// handleListViewAssets lists this game's assets.
+// handleListViewAssets lists one page of this game's assets.
+//
+// **It is paged, and it was not.** The listing answered with every asset
+// a game held, in a product where every other listing takes a cursor and
+// a limit; `cursor` and `limit` are read here exactly as api_docs.go and
+// api_metamodel.go read them, and next_cursor is answered under the same
+// name, so a client that can page one listing can page this one.
 func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
 	_ Caller, scope ProjectScope,
 ) {
 	if !s.requireViewsService(w) {
 		return
 	}
-	assets, err := s.opts.Views.ListAssets(r.Context(), scope.ProjectID)
+	cursor, ok := queryString(w, r, "cursor")
+	if !ok {
+		return
+	}
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	page, err := s.opts.Views.ListAssets(r.Context(), scope.ProjectID,
+		views.AssetFilter{Cursor: cursor, Limit: limit})
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
 	}
-	out := make([]ViewAssetOutput, 0, len(assets))
-	for _, a := range assets {
+	out := make([]ViewAssetOutput, 0, len(page.Assets))
+	for _, a := range page.Assets {
 		out = append(out, viewAssetOutput(r.PathValue("game"), a))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assets": out})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"assets": out, "next_cursor": page.NextCursor,
+	})
 }
 
 // handleServeViewAsset writes one asset's bytes.

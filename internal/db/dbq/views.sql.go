@@ -14,7 +14,7 @@ import (
 
 const clearBackgroundKnobsForAsset = `-- name: ClearBackgroundKnobsForAsset :exec
 UPDATE views
-SET background_scale = 1, background_offset = '{"x":0,"y":0}'::jsonb
+SET background_scale = DEFAULT, background_offset = DEFAULT
 WHERE project_id = $1::uuid
   AND background_asset_id = $2::uuid
 `
@@ -46,9 +46,46 @@ type ClearBackgroundKnobsForAssetParams struct {
 // asset id is a value a previous answer handed back -- and
 // background_asset_id is what makes this one asset's views rather than
 // the whole game's.
+//
+// **DEFAULT rather than the literals, which is one store instead of
+// three.** This statement used to spell `1` and `{"x":0,"y":0}` itself,
+// assets.go spells them again as DefaultBackgroundScale and
+// DefaultBackgroundOffset, and 0008_views.sql declares them a third
+// time as the columns' own defaults. Postgres has the spelling that
+// makes the column the single store: an UPDATE ... SET col = DEFAULT
+// writes exactly what the DDL declares, so changing a default in the
+// migration cannot leave this statement resetting to the old one. The Go
+// constants stay -- SetBackground has to have something to *write* when
+// a caller says nothing -- but they are no longer a second answer to
+// what "reset" means.
 func (q *Queries) ClearBackgroundKnobsForAsset(ctx context.Context, arg ClearBackgroundKnobsForAssetParams) error {
 	_, err := q.db.Exec(ctx, clearBackgroundKnobsForAsset, arg.ProjectID, arg.BackgroundAssetID)
 	return err
+}
+
+const countViewAssets = `-- name: CountViewAssets :one
+SELECT count(*) FROM view_assets
+WHERE project_id = $1::uuid
+`
+
+// How many assets one game holds, for the per-game cap.
+//
+// **A count rather than a sum of octet_length(bytes), and the reason is
+// the bytea.** The bound this serves is on disk, so an aggregate byte
+// total looks like the more honest question -- but bytes is a toasted,
+// compressed column, and summing its length makes Postgres detoast every
+// stored image on every upload: up to the whole game's worth of pixels
+// read and decompressed to decide whether to accept eight megabytes.
+// This statement reads no image at all; it is answered from
+// view_assets_project_idx, whose leading column is project_id. What a
+// count buys instead is a stated worst case rather than a measured one:
+// MaxAssetsPerGame times MaxAssetBytes, which is the number assets.go
+// writes down.
+func (q *Queries) CountViewAssets(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countViewAssets, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const deleteView = `-- name: DeleteView :execrows
@@ -507,15 +544,26 @@ func (q *Queries) InsertViewRef(ctx context.Context, arg InsertViewRefParams) er
 	return err
 }
 
-const listViewAssets = `-- name: ListViewAssets :many
+const listViewAssetsPage = `-- name: ListViewAssetsPage :many
 SELECT id, project_id, filename, mime, width, height, created_at,
        created_by_user_id, created_by_token_id
 FROM view_assets
 WHERE project_id = $1::uuid
+  AND ($2::uuid IS NULL
+       OR (created_at, id) > ($3::timestamptz,
+                              $2::uuid))
 ORDER BY created_at, id
+LIMIT $4::int
 `
 
-type ListViewAssetsRow struct {
+type ListViewAssetsPageParams struct {
+	ProjectID      uuid.UUID
+	AfterID        *uuid.UUID
+	AfterCreatedAt pgtype.Timestamptz
+	Limit          int32
+}
+
+type ListViewAssetsPageRow struct {
 	ID               uuid.UUID
 	ProjectID        uuid.UUID
 	Filename         string
@@ -527,8 +575,26 @@ type ListViewAssetsRow struct {
 	CreatedByTokenID *uuid.UUID
 }
 
-// Every asset of one game, newest last, in view_assets_project_idx's own
-// order (project_id, created_at, id) so the index serves the sort.
+// One page of a game's assets, oldest first, in view_assets_project_idx's
+// own order (project_id, created_at, id) so the index serves the sort
+// and the keyset seek.
+//
+// **The limit and the cursor are the correction.** This listing had
+// neither, and answered with every asset a game held -- while the
+// index's own comment said the order existed "so a page can be sought to
+// rather than read whole and sorted". An unpaged listing is also the
+// half of the aggregate bound that a per-asset cap cannot supply: a
+// hundred assets is a hundred rows in one answer.
+//
+// The keyset is (created_at, id) and matches the ORDER BY exactly, for
+// the reason ListRelations' own comment sets out: a comparison that
+// disagrees with its sort order skips or repeats rows at a page boundary
+// and says nothing about it. created_at ties are ordinary here -- a
+// browser uploading a folder writes several rows inside one clock tick
+// -- so the id tiebreak is load-bearing rather than defensive.
+// after_id alone guards the clause, because a row comparison against a
+// NULL half yields NULL, which reads as false and would answer an
+// unpaged call with nothing.
 //
 // **The project filter is the whole mechanism.** An asset has no key and
 // names no parent, so nothing else scopes this read; without it a
@@ -536,18 +602,23 @@ type ListViewAssetsRow struct {
 // asks for it directly, with a positive control in the same test.
 //
 // **bytes is not selected, deliberately.** The cap is 8 MB an asset, so
-// a game with forty of them would answer this call with 320 MB read out
-// of the database, marshalled and thrown away by every caller but the
-// serving route. width, height and mime are what a picker needs.
-func (q *Queries) ListViewAssets(ctx context.Context, projectID uuid.UUID) ([]ListViewAssetsRow, error) {
-	rows, err := q.db.Query(ctx, listViewAssets, projectID)
+// a full page of them would be read out of the database, marshalled and
+// thrown away by every caller but the serving route. width, height and
+// mime are what a picker needs.
+func (q *Queries) ListViewAssetsPage(ctx context.Context, arg ListViewAssetsPageParams) ([]ListViewAssetsPageRow, error) {
+	rows, err := q.db.Query(ctx, listViewAssetsPage,
+		arg.ProjectID,
+		arg.AfterID,
+		arg.AfterCreatedAt,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListViewAssetsRow
+	var items []ListViewAssetsPageRow
 	for rows.Next() {
-		var i ListViewAssetsRow
+		var i ListViewAssetsPageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,

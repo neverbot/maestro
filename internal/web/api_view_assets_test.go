@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -391,5 +393,71 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "no views") {
 		t.Errorf("body = %q, want it to say the instance serves no views",
 			rec.Body.String())
+	}
+}
+
+// TestTheAssetListingPagesOverTheWire is the transport half of the
+// listing's correction.
+//
+// The route answered with every asset a game held, with no limit and no
+// cursor, in a product where every other listing reads `cursor` and
+// `limit` off the query string and answers `next_cursor`. A client that
+// can page documents or entities must be able to page this the same way,
+// which is what the parameter *names* here are for — the service half
+// (TestTheAssetListingIsPagedAndItsCursorIsItsOwn) pins the keyset
+// itself.
+func TestTheAssetListingPagesOverTheWire(t *testing.T) {
+	f := newAssetFixture(t)
+	for i := 0; i < 5; i++ {
+		f.upload(t, f.game, fmt.Sprintf("map-%d.png", i), "image/png", testPNG(t, 8+i, 8))
+	}
+
+	list := func(query string) (ids []string, next string) {
+		t.Helper()
+		rec := f.send(t, f.cookie, http.MethodGet,
+			"/api/games/"+f.game.String()+"/view-assets"+query, "", nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list%s = %d: %s", query, rec.Code, rec.Body.String())
+		}
+		var listing struct {
+			Assets     []web.ViewAssetOutput `json:"assets"`
+			NextCursor string                `json:"next_cursor"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &listing); err != nil {
+			t.Fatalf("decode listing: %v", err)
+		}
+		for _, a := range listing.Assets {
+			ids = append(ids, a.ID)
+		}
+		return ids, listing.NextCursor
+	}
+
+	var walked []string
+	query := "?limit=2"
+	for pages := 0; ; pages++ {
+		if pages > 4 {
+			t.Fatal("the listing did not terminate: the cursor is not advancing")
+		}
+		ids, next := list(query)
+		if len(ids) > 2 {
+			t.Fatalf("page %d carried %d assets, want the limit of 2 honoured", pages, len(ids))
+		}
+		walked = append(walked, ids...)
+		if next == "" {
+			break
+		}
+		query = "?limit=2&cursor=" + url.QueryEscape(next)
+	}
+	whole, next := list("")
+	if next != "" {
+		t.Fatalf("five assets under the default page size returned a cursor %q", next)
+	}
+	if len(walked) != len(whole) {
+		t.Fatalf("the paged walk saw %d assets, the unpaged listing %d", len(walked), len(whole))
+	}
+	for i := range whole {
+		if walked[i] != whole[i] {
+			t.Fatalf("asset %d: paged walk saw %s, unpaged listing %s", i, walked[i], whole[i])
+		}
 	}
 }

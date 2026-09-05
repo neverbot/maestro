@@ -142,7 +142,6 @@ func (g *game) upload(t *testing.T, filename string, raw []byte) Asset {
 // at all.
 func TestAnSVGIsRefusedWhateverItCallsItself(t *testing.T) {
 	g, _ := newGame(t)
-	ctx := context.Background()
 
 	// The name says PNG; the bytes say otherwise, and the bytes decide.
 	err := createAsset(t, g, "world-map.png", []byte(svgSource))
@@ -173,10 +172,7 @@ func TestAnSVGIsRefusedWhateverItCallsItself(t *testing.T) {
 		pointer("bytes"), "are not a image/png")
 
 	// The control: nothing at all is stored by any of the three.
-	assets, err := g.views.ListAssets(ctx, g.projectID)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	assets := listedAssets(t, g)
 	if len(assets) != 0 {
 		t.Fatalf("a refused upload stored %d assets, want none: %v", len(assets), assets)
 	}
@@ -305,11 +301,7 @@ func TestABodyOneBytePastTheCapIsNotStoredTruncated(t *testing.T) {
 		pointer("bytes"), "is larger than")
 	// And nothing of it was stored, truncated or otherwise: two assets
 	// exist, the one at the cap and the one this test's control uploaded.
-	stored, err := g.views.ListAssets(context.Background(), g.projectID)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	for _, a := range stored {
+	for _, a := range listedAssets(t, g) {
 		if a.Filename == "one-byte-over.png" {
 			t.Fatalf("an over-cap upload was stored: a bound that reads exactly the " +
 				"cap cannot tell a file of that size from the front of a larger one")
@@ -345,7 +337,6 @@ func TestAnEmptyUploadIsRefused(t *testing.T) {
 // round, so a transposition is a failure rather than a coincidence.
 func TestWidthAndHeightAreDecodedAndReadBack(t *testing.T) {
 	g, _ := newGame(t)
-	ctx := context.Background()
 	cases := []struct {
 		name          string
 		raw           []byte
@@ -364,10 +355,7 @@ func TestWidthAndHeightAreDecodedAndReadBack(t *testing.T) {
 	// Read back through the listing, which is what views.list_assets
 	// answers with and therefore the only surface that proves these
 	// columns are readable at all.
-	assets, err := g.views.ListAssets(ctx, g.projectID)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	assets := listedAssets(t, g)
 	if len(assets) != len(cases) {
 		t.Fatalf("listed %d assets, want %d", len(assets), len(cases))
 	}
@@ -524,24 +512,17 @@ func TestTheUploaderIsRecordedAndAForeignTokenIsRefused(t *testing.T) {
 // no key and names no parent that could scope the read.
 func TestAssetsOfAnotherGameAreNotListed(t *testing.T) {
 	azeroth, outland := newGame(t)
-	ctx := context.Background()
 	mine := azeroth.upload(t, "azeroth.png", pngBytes(t, 8, 8))
 	theirs := outland.upload(t, "outland.png", pngBytes(t, 9, 9))
 
-	assets, err := azeroth.views.ListAssets(ctx, azeroth.projectID)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	assets := listedAssets(t, azeroth)
 	if len(assets) != 1 || assets[0].ID != mine.ID {
 		t.Fatalf("azeroth listed %v, want only its own asset %s", assets, mine.ID)
 	}
 	// The positive control in the same test: the other game's asset is
 	// really there, so the assertion above cannot pass because nothing
 	// was written.
-	others, err := outland.views.ListAssets(ctx, outland.projectID)
-	if err != nil {
-		t.Fatalf("list outland: %v", err)
-	}
+	others := listedAssets(t, outland)
 	if len(others) != 1 || others[0].ID != theirs.ID {
 		t.Fatalf("outland listed %v, want its own asset %s", others, theirs.ID)
 	}
@@ -970,6 +951,17 @@ func paramsFor(name string) map[string]any {
 
 // createAsset is CreateAsset with the bytes in hand, returning only the
 // error, for the tests that are about refusals.
+// listedAssets is one unpaged page of a game's assets, for the tests
+// that are about what is stored rather than about paging.
+func listedAssets(t *testing.T, g *game) []Asset {
+	t.Helper()
+	page, err := g.views.ListAssets(context.Background(), g.projectID, AssetFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	return page.Assets
+}
+
 func createAsset(t *testing.T, g *game, filename string, raw []byte) error {
 	t.Helper()
 	_, err := g.views.CreateAsset(context.Background(), g.projectID, Actor{},
@@ -1022,7 +1014,6 @@ func assertRefusedErr(t *testing.T, err error, path, want string) {
 // every one of them.
 func TestEveryByteOfEveryMagicNumberIsLoadBearing(t *testing.T) {
 	g, _ := newGame(t)
-	ctx := context.Background()
 
 	// A real PNG's first four bytes, then a body that is not one. Under
 	// an eight-byte comparison this is refused as no image at all; under
@@ -1064,10 +1055,7 @@ func TestEveryByteOfEveryMagicNumberIsLoadBearing(t *testing.T) {
 	// The control every row shares: not one of them was stored. Without
 	// it the VP8 row would pass on the refusal alone while a widened
 	// check quietly wrote garbage into view_assets.
-	assets, err := g.views.ListAssets(ctx, g.projectID)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
+	assets := listedAssets(t, g)
 	if len(assets) != 0 {
 		t.Fatalf("%d assets stored, want none: %v", len(assets), assets)
 	}
@@ -1142,4 +1130,139 @@ func TestChangingTheRendererAwayFromMapIsRefusedWhileABackgroundIsAttached(t *te
 	if _, err := g.views.UpsertView(ctx, g.projectID, stay); err != nil {
 		t.Fatalf("an edit that keeps the map renderer must land: %v", err)
 	}
+}
+
+// TestAGameCannotHoldMoreAssetsThanTheCap is the bound that was missing
+// while every other bound in this file was present.
+//
+// Eight megabytes an asset and forty megapixels a canvas, and nothing at
+// all on how many: twelve uploads under one filename all landed, and so
+// would twelve thousand. Any editor — a designer, or an agent's token,
+// and one token is one game — could push unbounded bytes into Postgres
+// eight megabytes at a time.
+//
+// The refusal names the count and the cap, because "delete one first" is
+// the only recovery and a caller has to know how many it is holding.
+func TestAGameCannotHoldMoreAssetsThanTheCap(t *testing.T) {
+	azeroth, outland := newGame(t)
+	ctx := context.Background()
+
+	// The cap is a hundred, so this fills it through the pool rather
+	// than through a hundred image encodings.
+	filler := pngBytes(t, 8, 8)
+	for i := 0; i < MaxAssetsPerGame; i++ {
+		if _, err := azeroth.pool.Exec(ctx,
+			`INSERT INTO view_assets (project_id, filename, mime, width, height, bytes)
+			 VALUES ($1, $2, 'image/png', 8, 8, $3)`,
+			azeroth.projectID, fmt.Sprintf("map-%03d.png", i), filler); err != nil {
+			t.Fatalf("seed asset %d: %v", i, err)
+		}
+	}
+	assertRefused(t, createAsset(t, azeroth, "one-too-many.png", filler),
+		pointer("bytes"), fmt.Sprintf("a game may hold %d", MaxAssetsPerGame))
+
+	// The cap is per game and not per instance: the other game is
+	// untouched, which is the control that stops a global counter from
+	// passing this test.
+	if err := createAsset(t, outland, "outland.png", filler); err != nil {
+		t.Fatalf("another game must still be able to upload: %v", err)
+	}
+
+	// And the recovery the message names works: delete one, upload one.
+	page, err := azeroth.views.ListAssets(ctx, azeroth.projectID, AssetFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if err := azeroth.views.RemoveAsset(ctx, azeroth.projectID, page.Assets[0].ID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := createAsset(t, azeroth, "room-for-one-more.png", filler); err != nil {
+		t.Fatalf("after a deletion the upload must land: %v", err)
+	}
+}
+
+// TestTheAssetListingIsPagedAndItsCursorIsItsOwn pins the limit and the
+// keyset the listing did not have.
+//
+// It answered with every asset a game held — the whole library in one
+// call — while view_assets_project_idx's own comment said its order
+// existed "so a page can be sought to rather than read whole and
+// sorted". The rows are asserted in order and without repetition,
+// because a keyset whose comparison disagrees with its sort order skips
+// or repeats at a page boundary and says nothing about it.
+func TestTheAssetListingIsPagedAndItsCursorIsItsOwn(t *testing.T) {
+	azeroth, outland := newGame(t)
+	ctx := context.Background()
+
+	// Seven assets, uploaded in one burst so several share a created_at
+	// to the microsecond: the id tiebreak in the keyset is what keeps
+	// those rows apart, and a fixture whose timestamps are all distinct
+	// cannot tell whether it is there.
+	want := make([]uuid.UUID, 0, 7)
+	for i := 0; i < 7; i++ {
+		want = append(want, azeroth.upload(t, fmt.Sprintf("map-%d.png", i),
+			pngBytes(t, 8+i, 8)).ID)
+	}
+
+	var got []uuid.UUID
+	filter := AssetFilter{Limit: 3}
+	for pages := 0; ; pages++ {
+		if pages > 5 {
+			t.Fatal("the listing did not terminate: a cursor is not advancing")
+		}
+		page, err := azeroth.views.ListAssets(ctx, azeroth.projectID, filter)
+		if err != nil {
+			t.Fatalf("page %d: %v", pages, err)
+		}
+		if len(page.Assets) > 3 {
+			t.Fatalf("page %d carried %d assets, want the limit of 3 to be applied",
+				pages, len(page.Assets))
+		}
+		for _, a := range page.Assets {
+			got = append(got, a.ID)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		filter.Cursor = page.NextCursor
+	}
+	if len(got) != len(want) {
+		t.Fatalf("paging returned %d assets, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("asset %d of the walk is %s, want %s: the page boundary skipped or "+
+				"repeated a row", i, got[i], want[i])
+		}
+	}
+
+	// A cursor belongs to the game it was issued for. The other game's
+	// listing must refuse it rather than page its own rows from a
+	// position that means nothing there — the defect internal/paging's
+	// package comment records.
+	first, err := azeroth.views.ListAssets(ctx, azeroth.projectID, AssetFilter{Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	_, err = outland.views.ListAssets(ctx, outland.projectID,
+		AssetFilter{Cursor: first.NextCursor})
+	assertRefused(t, err, pointer("cursor"), "cursor")
+
+	// And a cursor from the *view* listing of the same game is refused
+	// too: without a domain part in the fingerprint the two would be
+	// interchangeable and each would page the other perfectly.
+	if _, err := azeroth.views.UpsertView(ctx, azeroth.projectID,
+		saveable("route", questsOnly)); err != nil {
+		t.Fatalf("save a view: %v", err)
+	}
+	views, err := azeroth.views.ListViews(ctx, azeroth.projectID, ViewFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("list views: %v", err)
+	}
+	if views.NextCursor == "" {
+		t.Fatal("the view listing returned no cursor, so this half asserts nothing")
+	}
+	_, err = azeroth.views.ListAssets(ctx, azeroth.projectID,
+		AssetFilter{Cursor: views.NextCursor})
+	assertRefused(t, err, pointer("cursor"), "cursor")
 }

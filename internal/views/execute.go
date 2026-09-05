@@ -201,12 +201,30 @@ type Truncated struct {
 // stale.go. A non-empty Stale beside a full picture is the ordinary
 // case: a renamed type still runs, and the rename is reported so a
 // designer can repair the document at leisure.
+// Positions is the arrangement a designer dragged, and it is **filled by
+// RunView and never by Run**, for the reason Stale is: an ad-hoc query
+// has no saved view, so there is nothing a position could belong to. A
+// node that was never dragged is simply absent from this list — it is
+// not returned at the origin, because (0, 0) is a place a designer may
+// deliberately have put something and "unplaced" is not a coordinate.
+// The list is addressed by the entity's two keys, exactly as
+// GetPositions answers, so a client can match a position to a node
+// without ever reading an id.
+//
+// **`omitempty` collapses two things here and the wire does not.** An
+// ad-hoc run and a saved view nobody has ever dragged both marshal to no
+// `positions` member from this struct, which is fine for a Go caller —
+// it has the two entry points in front of it — and not fine for an agent,
+// which asked one tool either way. internal/web's own output type is
+// what carries the distinction: `positions` is an array, empty or full,
+// on every run of a saved key, and is absent on an inline query.
 type Result struct {
 	Nodes     []Node       `json:"nodes"`
 	Edges     []Edge       `json:"edges"`
 	Stats     Stats        `json:"stats"`
 	Truncated Truncated    `json:"truncated"`
 	Stale     []Diagnostic `json:"stale,omitempty"`
+	Positions []Position   `json:"positions,omitempty"`
 }
 
 // RunRequest is one execution: a parsed query and the parameter values

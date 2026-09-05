@@ -2,16 +2,19 @@ package views
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/realtime"
 )
 
 func ptrBool(v bool) *bool { return &v }
@@ -884,5 +887,285 @@ func TestAPositionCallRefusesItsArgumentsInTheSameOrder(t *testing.T) {
 	if errors.Is(err, ErrNotFound) {
 		t.Fatalf("clear: err = %v, want the arguments judged before the view is "+
 			"resolved", err)
+	}
+}
+
+// TestAPositionWritePublishesItsInvalidation is Task 15's decision,
+// asserted rather than described: a drag reaches every subscriber a
+// query edit reaches, because a browser holding a picture has no other
+// way to learn the arrangement moved under it.
+//
+// The two subscribers are the two a wrong gating would silently cut
+// out — a viewer, excluded by any MinRole above viewer, and a token
+// caller, excluded by HumanOnly regardless of role. They are the same
+// pair TestViewEventsReachEveryMemberOfTheGameIncludingAgents uses for
+// view.upserted, which is the claim: the gating of this kind *is* that
+// one's, not a second decision that happens to agree today.
+//
+// All three write paths publish. A test that only drove SetPositions
+// would leave both clears free to go quiet, and a wiped arrangement is
+// the invalidation that matters most.
+func TestAPositionWritePublishesItsInvalidation(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+
+	row, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
+	if err != nil {
+		t.Fatalf("save the view: %v", err)
+	}
+
+	viewer := hub.Subscribe(g.projectID, "viewer", false)
+	defer hub.Unsubscribe(viewer)
+	agent := hub.Subscribe(g.projectID, "viewer", true)
+	defer hub.Unsubscribe(agent)
+
+	for _, step := range []struct {
+		what string
+		do   func() error
+	}{
+		{"a drag", func() error {
+			return svc.SetPositions(ctx, g.projectID, "route", placed())
+		}},
+		{"a clear of one node", func() error {
+			_, err := svc.ClearPositions(ctx, g.projectID, "route",
+				[]EntityAddress{{EntityType: "quest", EntityKey: "hogger"}})
+			return err
+		}},
+		{"a clear of the whole view", func() error {
+			_, err := svc.ClearPositions(ctx, g.projectID, "route", nil)
+			return err
+		}},
+	} {
+		if err := step.do(); err != nil {
+			t.Fatalf("%s: %v", step.what, err)
+		}
+		for who, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
+			got := receive(t, sub)
+			if got.Kind != "view.positions" {
+				t.Fatalf("%s after %s got %q, want view.positions", who, step.what, got.Kind)
+			}
+			assertPositionsPayload(t, who, got, row.ID, "route")
+		}
+	}
+}
+
+// assertPositionsPayload checks the {id, key} a view.positions event
+// carries, and — the half worth having — that it carries nothing else.
+// A coordinate on this payload would be a value a client could render
+// instead of re-reading, and publication order is not commit order, so
+// two drags in flight would leave it rendering the earlier one for good.
+// A version would be worse still: a position write deliberately does not
+// advance one, so it could not have moved.
+func assertPositionsPayload(t *testing.T, who string, e realtime.Event,
+	wantID uuid.UUID, wantKey string,
+) {
+	t.Helper()
+	raw, err := json.Marshal(e.Payload)
+	if err != nil {
+		t.Fatalf("%s: marshal payload: %v", who, err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("%s: decode payload: %v", who, err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("%s: payload = %v, want the id and the key and nothing else", who, got)
+	}
+	if got["id"] != wantID.String() || got["key"] != wantKey {
+		t.Fatalf("%s: payload = %v, want {%s, %q}", who, got, wantID, wantKey)
+	}
+}
+
+// TestNoPositionEventIsPublishedWhenTheWriteIsRefused is the control the
+// test above cannot be without: a publish placed before the write, or
+// outside the transaction's error check, announces an arrangement that
+// never landed, and every subscriber's reaction is to re-read a picture
+// that did not change.
+//
+// Three refusals, one per pass SetPositions and ClearPositions make: the
+// call's own arguments, the addresses they name, and the view itself.
+func TestNoPositionEventIsPublishedWhenTheWriteIsRefused(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+
+	if _, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsOnly)); err != nil {
+		t.Fatalf("save the view: %v", err)
+	}
+	sub := hub.Subscribe(g.projectID, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	for _, tc := range []struct {
+		why string
+		do  func() error
+	}{
+		{"the call named no position at all", func() error {
+			return svc.SetPositions(ctx, g.projectID, "route", nil)
+		}},
+		{"the call named an entity this game does not have", func() error {
+			return svc.SetPositions(ctx, g.projectID, "route",
+				[]PositionInput{{EntityType: "quest", EntityKey: "nosuchquest", X: 1, Y: 1}})
+		}},
+		{"the call named a view this game does not have", func() error {
+			return svc.SetPositions(ctx, g.projectID, "nosuchview", placed())
+		}},
+		{"the clear named an entity this game does not have", func() error {
+			_, err := svc.ClearPositions(ctx, g.projectID, "route",
+				[]EntityAddress{{EntityType: "quest", EntityKey: "nosuchquest"}})
+			return err
+		}},
+		{"the clear named a view this game does not have", func() error {
+			_, err := svc.ClearPositions(ctx, g.projectID, "nosuchview", nil)
+			return err
+		}},
+	} {
+		t.Run(tc.why, func(t *testing.T) {
+			if err := tc.do(); err == nil {
+				t.Fatalf("the call was accepted; this test needs it refused")
+			}
+			requireNothing(t, sub, tc.why)
+		})
+	}
+}
+
+// TestNoPositionEventIsPublishedWhenTheCommitFails is the one placement
+// the refusal test above cannot catch, and it is the reason this file
+// pays for a throwaway constraint.
+//
+// Every refusal SetPositions can produce happens *before* its
+// transaction opens — the arguments, then the addresses, then the view —
+// so a publish written as the last statement inside the transaction's
+// callback, or above the error check that follows it, differs from the
+// correct one by nothing a refusal can reach. A rolled-back write and a
+// refused write look identical from outside, and the difference is a
+// subscriber told to re-read an arrangement the database threw away.
+//
+// A deferred foreign key from view_positions.view_id to projects.id is
+// satisfied by nothing — a view's id is not a project id — and being
+// DEFERRABLE INITIALLY DEFERRED it is checked at COMMIT, so every
+// statement inside the transaction succeeds and only the commit fails.
+// views_test.go's TestNoViewEventIsPublishedWhenTheCommitFails is the
+// model, and testutil.NewPool's per-test database is what makes it safe.
+func TestNoPositionEventIsPublishedWhenTheCommitFails(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+
+	if _, err := svc.UpsertView(ctx, g.projectID, saveable("route", questsOnly)); err != nil {
+		t.Fatalf("save the view: %v", err)
+	}
+	if _, err := g.pool.Exec(ctx,
+		`ALTER TABLE view_positions ADD CONSTRAINT zz_fail_at_commit
+		   FOREIGN KEY (view_id) REFERENCES projects (id) DEFERRABLE INITIALLY DEFERRED`); err != nil {
+		t.Fatalf("install the deferred constraint: %v", err)
+	}
+
+	sub := hub.Subscribe(g.projectID, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	if err := svc.SetPositions(ctx, g.projectID, "route", placed()); err == nil {
+		t.Fatal("the commit was accepted; this test needs it to fail")
+	}
+	// The control that the failure is the commit's and not an earlier
+	// refusal: nothing is stored, so every statement did run.
+	if got := mustGetPositions(t, g, "route"); len(got) != 0 {
+		t.Fatalf("%d positions survived a failed commit", len(got))
+	}
+	requireNothing(t, sub, "the transaction did not commit")
+}
+
+// TestASavedViewsRunCarriesItsArrangementAndAnAdHocOneDoesNot is the
+// positions member of the run envelope, which Task 13 deferred to Task
+// 15 on the ground that nothing read one before Task 16.
+//
+// Three claims, and the second and third are the ones a naive
+// implementation would get wrong:
+//
+//   - a saved run carries the arrangement, addressed by the same two
+//     keys GetPositions answers with, so a client matches a position to
+//     a node without ever reading an id;
+//   - a node nobody dragged is **absent**, not returned at the origin —
+//     (0, 0) is a place a designer may deliberately have chosen, and the
+//     fixture drags one node there on purpose so the two cannot be
+//     confused;
+//   - an ad-hoc run carries none at all, because an inline query has no
+//     saved view for a position to belong to, exactly as it has no
+//     staleness.
+func TestASavedViewsRunCarriesItsArrangementAndAnAdHocOneDoesNot(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	mustSaveView(t, g, "route")
+	if err := g.views.SetPositions(ctx, g.projectID, "route", placed()); err != nil {
+		t.Fatalf("set positions: %v", err)
+	}
+
+	saved, err := g.views.RunView(ctx, g.projectID, "route", RunRequest{})
+	if err != nil {
+		t.Fatalf("RunView: %v", err)
+	}
+	if len(saved.Positions) != 2 {
+		t.Fatalf("Positions = %+v, want the two that were dragged", saved.Positions)
+	}
+	// The drawn nodes outnumber the placed ones, which is what makes the
+	// absence assertion below mean something: an implementation padding
+	// the list to one entry per node would have three.
+	if len(saved.Nodes) <= len(saved.Positions) {
+		t.Fatalf("the view draws %d nodes and %d are placed; this test needs an unplaced one",
+			len(saved.Nodes), len(saved.Positions))
+	}
+	placedKeys := map[string]Position{}
+	for _, p := range saved.Positions {
+		placedKeys[p.EntityType+"/"+p.EntityKey] = p
+	}
+	hogger, ok := placedKeys["quest/hogger"]
+	if !ok || hogger.X != 12.5 || hogger.Y != -40.25 || !hogger.Pinned {
+		t.Fatalf("quest/hogger = %+v, want the coordinates it was dragged to", hogger)
+	}
+	// defias was dragged *to the origin* with pinned false, so a run that
+	// invented a default for unplaced nodes would be indistinguishable
+	// from one that read this row — which is why it is here and why the
+	// third quest is checked for absence rather than for (0, 0).
+	defias, ok := placedKeys["quest/defias"]
+	if !ok || defias.X != 0 || defias.Y != 0 || defias.Pinned {
+		t.Fatalf("quest/defias = %+v, want the origin it was dragged to, unpinned", defias)
+	}
+	// And the node nobody dragged is absent rather than at the origin.
+	// Named rather than counted: a count is the same either way once the
+	// list is two long, and it is the *identity* of the missing one that
+	// says an implementation did not invent a coordinate for it.
+	undragged := 0
+	for _, n := range saved.Nodes {
+		if _, drawn := placedKeys[n.Type+"/"+n.Key]; drawn {
+			continue
+		}
+		undragged++
+		if n.Key == "hogger" || n.Key == "defias" {
+			t.Fatalf("%s/%s was dragged and is missing from the arrangement", n.Type, n.Key)
+		}
+	}
+	if undragged == 0 {
+		t.Fatal("every drawn node was dragged; this test cannot see an invented coordinate")
+	}
+
+	// The ad-hoc twin: the same document, run inline, carries nothing.
+	q, err := ParseQuery([]byte(questsOnly))
+	if err != nil {
+		t.Fatalf("ParseQuery: %v", err)
+	}
+	adhoc, err := g.views.Run(ctx, g.projectID, RunRequest{Query: q})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(adhoc.Positions) != 0 {
+		t.Fatalf("an inline query answered with %+v: an ad-hoc document has no saved "+
+			"view for a position to belong to", adhoc.Positions)
+	}
+	if len(adhoc.Nodes) != len(saved.Nodes) {
+		t.Fatalf("the two runs drew %d and %d nodes; the control only holds if they "+
+			"draw the same picture", len(adhoc.Nodes), len(saved.Nodes))
 	}
 }

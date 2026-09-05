@@ -58,11 +58,39 @@ const (
 	// it cannot explain is what it gets instead of the invalidation.
 	eventViewUpserted = "view.upserted"
 	eventViewRemoved  = "view.removed"
+
+	// eventViewPositions fires from SetPositions and from ClearPositions
+	// once their write has landed.
+	//
+	// **It is a third kind, and Task 15 decided it rather than inheriting
+	// the silence.** Task 13 published nothing for a drag, on the ground
+	// that only two kinds were registered and a third would have reached
+	// nobody. That ground is gone — this task registers the kinds — and the
+	// argument on the other side is the one this file's header already
+	// makes for an invalidation: a browser holding a picture has no other
+	// way to learn the picture changed, and a drag is exactly that
+	// situation, with the same reader and no error anywhere in between. Two
+	// designers in one shared session would otherwise see different
+	// arrangements indefinitely, each convinced theirs is the arrangement.
+	//
+	// **ClearPositions publishes it too**, both in its whole-view form and
+	// its per-entity one: a wiped arrangement is the invalidation that
+	// matters most, and a client that learned about drags and not about
+	// clears would hold the one picture nobody can see any more.
+	//
+	// The gating is view.upserted's — the same MinRole and the same
+	// HumanOnly, through the same two constants — because a caller who may
+	// not learn that a view changed may not learn that its nodes moved
+	// either, and the question a MinRole answers ("could this subscriber
+	// have read the thing on demand") has the same answer for a position as
+	// for the query that draws it: views.get and views.run are open to
+	// every member of the game.
+	eventViewPositions = "view.positions"
 )
 
 // viewEventMinRole and viewEventHumanOnly are the gating decided above,
-// named so the two call sites read as the decision rather than as two
-// bare literals a later edit could drift apart. They are their own
+// named so each of the four call sites reads as the decision rather than
+// as two bare literals a later edit could drift apart. They are their own
 // constants and not an alias of another domain's pair: the three
 // decisions happen to agree today, and naming one in terms of another
 // would make a later change to either silently change both.
@@ -71,7 +99,7 @@ const (
 	viewEventHumanOnly = false
 )
 
-// viewEvent is the payload of the view.* events.
+// viewEvent is the payload of view.upserted and view.removed.
 //
 // **Identity only**, for the reason this file's header gives: id and
 // key address the row, and a client that wants the query re-reads it.
@@ -90,4 +118,28 @@ type viewEvent struct {
 	ID      uuid.UUID `json:"id"`
 	Key     string    `json:"key"`
 	Version int32     `json:"version"`
+}
+
+// viewPositionsEvent is the payload of view.positions: the view's id and
+// its key, and nothing else.
+//
+// **It carries no coordinates, and that is the rule rather than a
+// judgement made here.** This file's header says a payload never carries
+// a value a client could then treat as current, and an arrangement is
+// exactly such a value — publication order is not commit order, so two
+// drags in flight can arrive in the other order and leave a client
+// rendering the earlier one for good. The reader re-reads through
+// views.get or views.run, which is also what keeps this payload from
+// handing an arrangement to a subscriber whose own read would have been
+// refused: the re-read is scoped, the event is not a back door around it.
+//
+// **It carries no version either**, and that is not an oversight of the
+// pair above. A position write deliberately does not advance the view's
+// version (positions.go says why), so a version on this payload would be
+// a number that did not move for a change that did — which is worse than
+// absent, because a subscriber merging on it would believe it had
+// learned something.
+type viewPositionsEvent struct {
+	ID  uuid.UUID `json:"id"`
+	Key string    `json:"key"`
 }

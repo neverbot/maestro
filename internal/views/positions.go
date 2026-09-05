@@ -46,18 +46,14 @@ import (
 // document, and making it one would hand every agent holding a version a
 // conflict for a change to something it never wrote.
 //
-// **No event is published here, and that is Task 15's decision to make
-// rather than a loss this file records.** internal/views publishes
-// view.upserted and view.removed, and those are the two kinds the
-// transport registers today (the views plan, Task 15), so a kind
-// published from here would reach nothing. But the argument the events
-// design makes for an invalidation — a browser holding a picture has no
-// other way to learn the picture changed — is the argument for a drag
-// exactly as it is for an edit, with the same reader and no error
-// anywhere in between: two designers in one session would see different
-// arrangements indefinitely. Task 15's block carries it as a checklist
-// item, with the kind, its payload and its gating named, so it is
-// decided where the kinds are registered instead of regretted here.
+// **A position write publishes view.positions**, from SetPositions and
+// from ClearPositions alike, once the write has landed. Task 13 left the
+// decision to Task 15 because only two kinds were registered then and a
+// third would have reached nobody; Task 15 registered it, on the
+// argument the events design already makes for an invalidation — a
+// browser holding a picture has no other way to learn the picture
+// changed, and a drag is that situation exactly. events.go carries the
+// payload, the gating and the reasoning.
 
 // MaxPositions is the most positions one SetPositions call may carry.
 //
@@ -205,7 +201,7 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 		ids[i] = row.ID
 	}
 
-	return s.withTx(ctx, func(q *dbq.Queries) error {
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
 		for i, p := range positions {
 			pinned := DefaultPinned
 			if p.Pinned != nil {
@@ -242,6 +238,17 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	// After withTx has returned, never from inside fn: an event published
+	// inside the transaction announces an arrangement that may still roll
+	// back, and every subscriber's only reaction is to re-read.
+	// Service.publish's own doc comment states the rule for the whole
+	// package.
+	s.publish(projectID, eventViewPositions, viewEventMinRole, viewEventHumanOnly,
+		viewPositionsEvent{ID: view.ID, Key: view.Key})
+	return nil
 }
 
 // ClearPositions drops stored positions, and returns how many rows went.
@@ -297,6 +304,18 @@ func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewK
 		if err != nil {
 			return 0, fmt.Errorf("clear view positions: %w", err)
 		}
+		// Announced whether or not a row went. A clear that removed
+		// nothing changed nothing, so this is the one publish in the
+		// package that could be argued away — and it is kept, because the
+		// count this call answers with is the caller's own information
+		// and not a subscriber's: a browser that has been told "re-read
+		// this view's positions" and finds the same arrangement has lost
+		// one read, while a browser not told has lost the picture. The
+		// removal event next door refuses the same shape for the opposite
+		// reason: a removal that removed nothing is an error there, so
+		// nothing reaches the publish at all.
+		s.publish(projectID, eventViewPositions, viewEventMinRole, viewEventHumanOnly,
+			viewPositionsEvent{ID: view.ID, Key: view.Key})
 		return removed, nil
 	}
 
@@ -323,6 +342,8 @@ func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewK
 		}
 		removed += gone
 	}
+	s.publish(projectID, eventViewPositions, viewEventMinRole, viewEventHumanOnly,
+		viewPositionsEvent{ID: view.ID, Key: view.Key})
 	return removed, nil
 }
 
@@ -345,8 +366,21 @@ func (s *Service) GetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 	if err != nil {
 		return nil, err
 	}
+	return s.positionsOf(ctx, projectID, view.ID)
+}
+
+// positionsOf is GetPositions once the view has already been resolved.
+//
+// It exists because RunView holds the row already and reads the same
+// rows into Result.Positions: a second ViewByKey there would be a second
+// lookup of a row this package is holding, and — worse — a second place
+// that decides which columns a position is made of, which is how the two
+// answers would start to differ.
+func (s *Service) positionsOf(ctx context.Context, projectID, viewID uuid.UUID) (
+	[]Position, error,
+) {
 	rows, err := s.q.ListViewPositions(ctx, dbq.ListViewPositionsParams{
-		ProjectID: projectID, ViewID: view.ID,
+		ProjectID: projectID, ViewID: viewID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list view positions: %w", err)

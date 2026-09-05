@@ -558,8 +558,33 @@ func (s *Service) RunView(ctx context.Context, projectID uuid.UUID, key string,
 				"do not parse: %w", key, err)
 		}
 	}
-	return s.runStored(ctx, projectID, q, &staleness{stored: stored}, req,
+	result, err := s.runStored(ctx, projectID, q, &staleness{stored: stored}, req,
 		view.Renderer, params)
+	if err != nil {
+		return Result{}, err
+	}
+	// The arrangement, read here and nowhere in Run: positions belong to
+	// a *saved* view, so an ad-hoc query has none for the same reason it
+	// has no staleness. Read after the run rather than before it because
+	// a run that refuses answers with no envelope at all, and a read that
+	// only ever feeds a refused answer is a read nothing needs.
+	//
+	// It is read outside the run's own transaction, which is deliberate
+	// rather than overlooked: that transaction is read-only and bounded
+	// by a statement timeout the picture's cost is measured against, and
+	// a drag committing between the two is a picture one drag old — which
+	// is what view.positions exists to tell the reader about, and what a
+	// client re-reads on. Nothing here is compared against the nodes, so
+	// a position for a node this run did not draw comes back too: it is
+	// the same arrangement the next run of a widened query will use, and
+	// dropping it would make an edit to the query look like a lost
+	// afternoon of map work.
+	positions, err := s.positionsOf(ctx, projectID, view.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	result.Positions = positions
+	return result, nil
 }
 
 // runStored resolves a stored query against the game and decides what the

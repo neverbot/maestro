@@ -13,6 +13,7 @@ import (
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/views"
 )
 
 // This file is the game-content half of the MCP surface: the tools an
@@ -499,6 +500,87 @@ type RemovedOutput struct {
 	Removed bool `json:"removed"`
 }
 
+// BrokenViewOutput is one saved view a type removal broke, at the
+// pointer in its own query document that names the type.
+//
+// **One row per reference and not per view**: a view naming a type at
+// three positions comes back three times, because the pointers are the
+// repair and a designer holding the name three times has learned
+// nothing. A caller counting rows is counting positions, not views.
+type BrokenViewOutput struct {
+	ViewKey string `json:"view_key"`
+	Name    string `json:"name"`
+	Key     string `json:"key"`
+	Pointer string `json:"pointer"`
+}
+
+// TypeRemovedOutput is what removing an entity type or a relation type
+// answers with: the fact of the removal, and the saved views that
+// referenced the type.
+//
+// **Deleting a type views depend on is allowed and the report is the
+// courtesy that makes it survivable.** The design spec is explicit that
+// refusing with in_use is the wrong call — a view is derived and can be
+// rewritten in one call, while making a type undeletable because a
+// six-month-old diagram mentions it pushes designers into deleting views
+// in order to delete types. What they are owed instead is the list, with
+// the pointer into each document, so the repair is a known amount of
+// work rather than a surprise the next time a view is opened.
+//
+// broke_views is `[]` and never null, the rule this surface applies to
+// every list it hands back: a client reading "nothing broke" must not
+// have two spellings of it to handle.
+type TypeRemovedOutput struct {
+	Removed    bool               `json:"removed"`
+	BrokeViews []BrokenViewOutput `json:"broke_views"`
+}
+
+// removeTypeReportingViews is the one place a type is removed on this
+// surface, for either kind.
+//
+// The list has to be read *before* the removal and inside its
+// transaction: view_refs' foreign key is ON DELETE SET NULL, so the same
+// deletion that lets a ref row outlive its type empties the column the
+// lookup matches on, and asking afterwards finds nothing and reports
+// that nothing broke — a wrong answer rather than an error. That
+// ordering lives in views.RemoveTypeReportingViews, which is why this
+// goes through it rather than reading the list here and then calling the
+// metamodel.
+//
+// **The nil-Views branch is a build without a views service, not a
+// shortcut.** MCPDeps.Views is optional — a server built without one
+// registers no views tools at all — and there a removal can break no
+// view, so the report is empty by construction rather than by omission.
+func removeTypeReportingViews(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
+	kind string, id uuid.UUID, cascade bool) (TypeRemovedOutput, error) {
+	out := TypeRemovedOutput{BrokeViews: []BrokenViewOutput{}}
+	if deps.Views == nil {
+		var err error
+		switch kind {
+		case views.KindEntityType:
+			err = deps.Metamodel.RemoveEntityType(ctx, projectID, id, cascade)
+		default:
+			err = deps.Metamodel.RemoveRelationType(ctx, projectID, id, cascade)
+		}
+		if err != nil {
+			return TypeRemovedOutput{}, err
+		}
+		out.Removed = true
+		return out, nil
+	}
+	broke, err := deps.Views.RemoveTypeReportingViews(ctx, projectID, kind, id, cascade)
+	if err != nil {
+		return TypeRemovedOutput{}, err
+	}
+	for _, dep := range broke {
+		out.BrokeViews = append(out.BrokeViews, BrokenViewOutput{
+			ViewKey: dep.ViewKey, Name: dep.Name, Key: dep.RefKey, Pointer: dep.Pointer,
+		})
+	}
+	out.Removed = true
+	return out, nil
+}
+
 // --- Tool implementations ---
 
 // MCPTypesUpsert implements types.upsert.
@@ -577,9 +659,9 @@ func typesGet(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.U
 }
 
 // MCPTypesRemove implements types.remove.
-func MCPTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRemoveInput) (RemovedOutput, error) {
+func MCPTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRemoveInput) (TypeRemovedOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
-		return RemovedOutput{}, err
+		return TypeRemovedOutput{}, err
 	}
 	return typesRemove(ctx, deps, caller, projectID, in)
 }
@@ -587,15 +669,12 @@ func MCPTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 // typesRemove is MCPTypesRemove without the token-binding check, for the
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See this file's header.
-func typesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRemoveInput) (RemovedOutput, error) {
+func typesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRemoveInput) (TypeRemovedOutput, error) {
 	id, err := parseID("id", in.ID)
 	if err != nil {
-		return RemovedOutput{}, err
+		return TypeRemovedOutput{}, err
 	}
-	if err := deps.Metamodel.RemoveEntityType(ctx, projectID, id, in.Cascade); err != nil {
-		return RemovedOutput{}, err
-	}
-	return RemovedOutput{Removed: true}, nil
+	return removeTypeReportingViews(ctx, deps, projectID, views.KindEntityType, id, in.Cascade)
 }
 
 // MCPRelationTypesUpsert implements relation_types.upsert.
@@ -682,9 +761,9 @@ func relationTypesGet(ctx context.Context, deps MCPDeps, caller Caller, projectI
 }
 
 // MCPRelationTypesRemove implements relation_types.remove.
-func MCPRelationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRemoveInput) (RemovedOutput, error) {
+func MCPRelationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRemoveInput) (TypeRemovedOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
-		return RemovedOutput{}, err
+		return TypeRemovedOutput{}, err
 	}
 	return relationTypesRemove(ctx, deps, caller, projectID, in)
 }
@@ -692,15 +771,12 @@ func MCPRelationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, pr
 // relationTypesRemove is MCPRelationTypesRemove without the token-binding check, for the
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See this file's header.
-func relationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRemoveInput) (RemovedOutput, error) {
+func relationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRemoveInput) (TypeRemovedOutput, error) {
 	id, err := parseID("id", in.ID)
 	if err != nil {
-		return RemovedOutput{}, err
+		return TypeRemovedOutput{}, err
 	}
-	if err := deps.Metamodel.RemoveRelationType(ctx, projectID, id, in.Cascade); err != nil {
-		return RemovedOutput{}, err
-	}
-	return RemovedOutput{Removed: true}, nil
+	return removeTypeReportingViews(ctx, deps, projectID, views.KindRelationType, id, in.Cascade)
 }
 
 // MCPEntitiesUpsert implements entities.upsert.
@@ -1337,10 +1413,14 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"return it). Without cascade, a type that still has entities is refused as " +
 			"in_use. With cascade it takes its entities with it, and every edge touching " +
 			"one of them goes too. Removing a type also prunes its id out of every relation " +
-			"type's endpoint lists, which changes rules other content is judged against.",
-		OutputSchema: removedOutputSchema,
+			"type's endpoint lists, which changes rules other content is judged against. " +
+			"Deleting a type saved views reference is allowed, and broke_views lists them, " +
+			"one row per reference with the JSON pointer into that view's own query " +
+			"document, so the repair is a known amount of work rather than a surprise the " +
+			"next time somebody opens one.",
+		OutputSchema: typeRemovedOutputSchema,
 		Annotations:  &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: boolPtr(true)},
-	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in TypesRemoveInput) (RemovedOutput, error) {
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in TypesRemoveInput) (TypeRemovedOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPTypesRemove(ctx, deps, caller, projectID, in)
 	})
@@ -1390,10 +1470,13 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "relation_types.remove",
 		Description: "Remove a relation type by id. Without cascade, one that still has edges " +
-			"is refused as in_use; with cascade every edge of the type goes with it.",
-		OutputSchema: removedOutputSchema,
+			"is refused as in_use; with cascade every edge of the type goes with it. " +
+			"Deleting a type saved views reference is allowed, and broke_views lists them, " +
+			"one row per reference with the JSON pointer into that view's own query " +
+			"document.",
+		OutputSchema: typeRemovedOutputSchema,
 		Annotations:  &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: boolPtr(true)},
-	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesRemoveInput) (RemovedOutput, error) {
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesRemoveInput) (TypeRemovedOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPRelationTypesRemove(ctx, deps, caller, projectID, in)
 	})
@@ -1913,6 +1996,26 @@ var relationsUpsertOutputSchema = &jsonschema.Schema{
 			},
 		}),
 		"failed": arrayOf(bulkFailureSchema),
+	},
+}
+
+// typeRemovedOutputSchema is removedOutputSchema plus the list a type
+// removal owes its caller. broke_views is required rather than optional:
+// a client that has to tell "nothing broke" from "this build does not
+// report" is a client that will assume the first.
+var typeRemovedOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"removed", "broke_views"},
+	Properties: map[string]*jsonschema.Schema{
+		"removed": boolSchema(),
+		"broke_views": {Type: "array", Items: &jsonschema.Schema{
+			Type:     "object",
+			Required: []string{"view_key", "name", "key", "pointer"},
+			Properties: map[string]*jsonschema.Schema{
+				"view_key": stringSchema(), "name": stringSchema(),
+				"key": stringSchema(), "pointer": stringSchema(),
+			},
+		}},
 	},
 }
 

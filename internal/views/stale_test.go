@@ -6,10 +6,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/realtime"
 )
 
 // This file is staleness: a view saved against one vocabulary, run
@@ -486,6 +488,60 @@ func TestDeletingATypeListsTheViewsItBroke(t *testing.T) {
 	// breaks a view; it does not remove one.
 	if _, err := g.views.ViewByKey(t.Context(), g.projectID, "factions"); err != nil {
 		t.Fatalf("a broken view is still a view: %v", err)
+	}
+}
+
+// TestRemovingATypeThroughTheViewsReportStillAnnouncesIt is the event
+// half of the call above, and it exists because this service composes a
+// write it does not own.
+//
+// RemoveTypeReportingViews is the only path a transport has to the
+// broken-view report, so it is the path every type deletion in the
+// product takes — and it removes the type through *this* package's
+// metamodel handle. That handle was built with a nil hub, on the
+// argument that this package calls only read accessors on it; the
+// argument was true when it was written and stopped being true here.
+// With a nil hub the removal announced nothing at all, so a designer
+// watching a game would never learn a type had gone — a silence, not a
+// boundary. The handle takes the same hub now, and this is what says so.
+//
+// Both kinds, because a rule carried to one of two callers is the defect
+// this sub-project found nineteen times.
+func TestRemovingATypeThroughTheViewsReportStillAnnouncesIt(t *testing.T) {
+	g, _ := newGame(t)
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+
+	for _, tc := range []struct {
+		kind, key, want string
+	}{
+		{KindEntityType, "faction", "type.removed"},
+		{KindRelationType, "requires", "relation_type.removed"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			sub := hub.Subscribe(g.projectID, "owner", false)
+			defer hub.Unsubscribe(sub)
+			id := g.typeIDOf(t, tc.kind, tc.key)
+			if _, err := svc.RemoveTypeReportingViews(t.Context(), g.projectID,
+				tc.kind, id, true); err != nil {
+				t.Fatalf("remove %s: %v", tc.key, err)
+			}
+			deadline := time.After(2 * time.Second)
+			for {
+				select {
+				case got := <-sub.C:
+					// A cascading removal announces the content it took
+					// with it as well, so the kind this test is about is
+					// waited for rather than assumed to arrive first.
+					if got.Kind == tc.want {
+						return
+					}
+				case <-deadline:
+					t.Fatalf("removing %s through the views report published no %s",
+						tc.key, tc.want)
+				}
+			}
+		})
 	}
 }
 

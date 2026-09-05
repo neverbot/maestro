@@ -143,6 +143,31 @@ func (f viewsRESTFixture) call(t *testing.T, cookie *http.Cookie, method, path s
 	return rec
 }
 
+// uploadAsset puts one PNG in the game through the upload route and
+// answers its id. It goes through the route rather than the service
+// because everything in this file that needs an asset needs one a
+// browser could have produced, and the id is what views.set_background
+// takes.
+func (f viewsRESTFixture) uploadAsset(t *testing.T, filename string) string {
+	t.Helper()
+	body := bytes.NewReader(testPNG(t, 24, 16))
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/games/"+f.game.String()+"/view-assets?filename="+filename, body)
+	req.Header.Set("Content-Type", "image/png")
+	req.AddCookie(f.cookie)
+	rec := httptest.NewRecorder()
+	f.srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("upload %s = %d: %s", filename, rec.Code, rec.Body.String())
+	}
+	var asset web.ViewAssetOutput
+	decodeInto(t, rec, &asset)
+	if asset.ID == "" {
+		t.Fatalf("upload %s answered no id: %s", filename, rec.Body.String())
+	}
+	return asset.ID
+}
+
 // TestTheViewRoutesAreTheSameContractAsTheTools walks the whole surface
 // over HTTP: save, read back, list, run, validate, arrange, background,
 // remove. It is not a re-test of the domain — it is the claim that the
@@ -227,6 +252,57 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 	decodeInto(t, rec, &cleared)
 	if cleared.Removed != 1 {
 		t.Fatalf("cleared %d, want the one that was written", cleared.Removed)
+	}
+
+	// The background, which the doc comment above has always promised
+	// and the body did not drive. It is its own step and not a
+	// re-test of the domain: this route extracts the view key from the
+	// path itself — the tool takes it in the body — so the key
+	// extraction is the one thing the REST mirror can be uniquely wrong
+	// about here, and deleting it left the whole suite green.
+	//
+	// A background needs a renderer that draws one, so the placement
+	// runs against a second view; the clear runs against it too, since
+	// clearing is the arm that reaches a different statement.
+	asset := f.uploadAsset(t, "azeroth.png")
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
+		"key": "atlas", "name": "The atlas", "renderer": "map",
+		"query": json.RawMessage(questsQuery), "expected_version": 0,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST a map view = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/atlas/background"),
+		map[string]any{"asset_id": asset, "scale": 2.0, "offset": map[string]any{"x": 5, "y": -7}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST background = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/atlas"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET after background = %d: %s", rec.Code, rec.Body.String())
+	}
+	var placed web.ViewOutput
+	decodeInto(t, rec, &placed)
+	if placed.BackgroundAssetID == nil || *placed.BackgroundAssetID != asset {
+		t.Fatalf("background asset = %v, want %s", placed.BackgroundAssetID, asset)
+	}
+	if placed.BackgroundScale != 2 || placed.BackgroundOffset.X != 5 ||
+		placed.BackgroundOffset.Y != -7 {
+		t.Fatalf("background placement = %+v, want scale 2 at (5,-7)", placed)
+	}
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/atlas/background"),
+		map[string]any{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST background clear = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/atlas"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET after the clear = %d: %s", rec.Code, rec.Body.String())
+	}
+	var clearedBackground web.ViewOutput
+	decodeInto(t, rec, &clearedBackground)
+	if clearedBackground.BackgroundAssetID != nil {
+		t.Fatalf("background survived the clear: %v", clearedBackground.BackgroundAssetID)
 	}
 
 	rec = f.call(t, f.cookie, http.MethodDelete, f.path("/views/by-key/route"), nil)
@@ -317,7 +393,7 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 }
 
 // TestAViewEventReachesAViewerAndATokenAlike is the read-back for the
-// three view.* kinds, and it is a different claim from internal/views'
+// four view.* kinds, and it is a different claim from internal/views'
 // own event tests: those prove the hub was published to, this proves a
 // subscriber actually receives it, over the endpoint it subscribes to,
 // on a server wired the way main.go wires it.
@@ -358,6 +434,9 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 	// whole SSEMaxLifetime — a minute of waiting for a test that has
 	// already passed, which is how a suite stops being run.
 	t.Cleanup(ts.Close)
+	// Uploaded before the streams open, so the upload's own traffic
+	// cannot arrive as a frame this test then reads as a view event.
+	background := f.uploadAsset(t, "ground.png")
 	viewerStream := openStream(t, ts, f.game.String(), viewerCookie.Value)
 	agentStream := openTokenStream(t, ts, f.game.String(), secret)
 
@@ -377,8 +456,11 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 		kind string
 		do   func()
 	}{
+		// The renderer is map because one of the four kinds below is a
+		// background, and only that renderer draws one. Nothing else in
+		// this test reads the renderer.
 		{"a save", "view.upserted", func() {
-			post("/views", map[string]any{"key": "route", "name": "Route", "renderer": "graph",
+			post("/views", map[string]any{"key": "route", "name": "Route", "renderer": "map",
 				"query": json.RawMessage(questsQuery), "expected_version": 0})
 		}},
 		{"a drag", "view.positions", func() {
@@ -388,6 +470,19 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 		}},
 		{"a clear", "view.positions", func() {
 			post("/views/by-key/route/positions/clear", map[string]any{})
+		}},
+		// A background is the map renderer's ground, and a browser
+		// holding a picture has no other way to learn the ground moved
+		// — the argument view.positions is published on, which
+		// views.sql states from the storage side as "a dragged node is
+		// the same kind of act as a placed background". Both arms are
+		// driven, because a clear removes the picture's ground as
+		// surely as a placement changes it.
+		{"a background", "view.background", func() {
+			post("/views/by-key/route/background", map[string]any{"asset_id": background})
+		}},
+		{"a background clear", "view.background", func() {
+			post("/views/by-key/route/background", map[string]any{})
 		}},
 		{"a removal", "view.removed", func() {
 			if rec := f.call(t, f.cookie, http.MethodDelete,
@@ -411,8 +506,13 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 			// no coordinates, because publication order is not commit
 			// order and a client rendering a payload would eventually
 			// render the older of two drags.
-			if step.kind == "view.positions" && strings.Contains(data, `"x"`) {
-				t.Errorf("%s got coordinates on a view.positions payload: %s", who, data)
+			// The same holds for a background: identity only, no
+			// asset id and no version, since the write advances none.
+			if step.kind != "view.upserted" && step.kind != "view.removed" &&
+				(strings.Contains(data, `"x"`) || strings.Contains(data, `"version"`) ||
+					strings.Contains(data, `"asset`)) {
+				t.Errorf("%s got a value on a %s payload, want identity only: %s",
+					who, step.kind, data)
 			}
 		}
 	}

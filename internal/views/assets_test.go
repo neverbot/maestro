@@ -21,6 +21,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/realtime"
 )
 
 // The fixtures. Every one of them is built here rather than checked in
@@ -565,6 +566,109 @@ func (g *game) backedView(t *testing.T, key string, asset uuid.UUID,
 		t.Fatalf("set the background of %s: %v", key, err)
 	}
 	return row.ID
+}
+
+// TestABackgroundWritePublishesItsInvalidation is the fourth kind,
+// asserted rather than described.
+//
+// The argument is view.positions', verbatim: a browser holding a picture
+// has no other way to learn the picture changed, and a background is
+// more of the picture than a drag is — it is the map renderer's ground.
+// views.sql states the equivalence from the storage side ("a dragged
+// node is the same kind of act as a placed background"), so the two
+// writes cannot differ on whether anyone is told.
+//
+// Both arms are driven. A clear removes the ground as surely as a
+// placement changes it, and a test that drove only the placement would
+// leave the clear free to go quiet.
+//
+// The two subscribers are the pair a wrong gating would silently cut
+// out — a viewer, excluded by any MinRole above viewer, and a token
+// caller, excluded by HumanOnly — which is the same pair the position
+// and upsert tests use, because the gating of this kind *is* theirs.
+func TestABackgroundWritePublishesItsInvalidation(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+
+	asset := g.upload(t, "ground.png", pngBytes(t, 8, 8))
+	in := saveable("world", questsOnly)
+	in.Renderer = RendererMap
+	row, err := svc.UpsertView(ctx, g.projectID, in)
+	if err != nil {
+		t.Fatalf("save the view: %v", err)
+	}
+
+	viewer := hub.Subscribe(g.projectID, "viewer", false)
+	defer hub.Unsubscribe(viewer)
+	agent := hub.Subscribe(g.projectID, "viewer", true)
+	defer hub.Unsubscribe(agent)
+	for _, step := range []struct {
+		what string
+		in   BackgroundInput
+	}{
+		{"a placement", BackgroundInput{AssetID: &asset.ID}},
+		{"a clear", BackgroundInput{}},
+	} {
+		if err := svc.SetBackground(ctx, g.projectID, "world", step.in); err != nil {
+			t.Fatalf("%s: %v", step.what, err)
+		}
+		for who, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
+			got := receive(t, sub)
+			if got.Kind != "view.background" {
+				t.Fatalf("%s after %s got %q, want view.background", who, step.what, got.Kind)
+			}
+			// The same payload assertion the position kind gets, and it
+			// is the same claim: identity only, no asset id a client
+			// could render instead of re-reading, and no version — this
+			// statement advances none, so a version here could not have
+			// moved.
+			assertPositionsPayload(t, who, got, row.ID, "world")
+		}
+	}
+}
+
+// TestNoBackgroundEventIsPublishedWhenTheWriteIsRefused is the control
+// the test above cannot be without: a publish placed before the write
+// announces a ground that never landed, and every subscriber's reaction
+// is to re-read a picture that did not change.
+//
+// Two refusals, one per pass SetBackground makes: the call's own
+// arguments, and the view itself.
+func TestNoBackgroundEventIsPublishedWhenTheWriteIsRefused(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	hub := realtime.NewHub()
+	svc := New(g.pool, hub)
+
+	in := saveable("world", questsOnly)
+	in.Renderer = RendererMap
+	if _, err := svc.UpsertView(ctx, g.projectID, in); err != nil {
+		t.Fatalf("save the view: %v", err)
+	}
+	sub := hub.Subscribe(g.projectID, "owner", false)
+	defer hub.Unsubscribe(sub)
+
+	scale := 2.0
+	if err := svc.SetBackground(ctx, g.projectID, "world",
+		BackgroundInput{Scale: &scale}); err == nil {
+		t.Fatal("a scale with no image must be refused")
+	}
+	if err := svc.SetBackground(ctx, g.projectID, "nothing-here",
+		BackgroundInput{}); err == nil {
+		t.Fatal("a background on a view that does not exist must be refused")
+	}
+	requireNothing(t, sub, "a refused background write")
+
+	// The positive control in the same test, so the assertion above
+	// cannot pass because this hub never carried anything.
+	if err := svc.SetBackground(ctx, g.projectID, "world", BackgroundInput{}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if got := receive(t, sub); got.Kind != "view.background" {
+		t.Fatalf("the control published %q, want view.background", got.Kind)
+	}
 }
 
 // TestABackgroundIsWrittenWholeAndReadBack is the read-back for the

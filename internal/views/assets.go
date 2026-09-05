@@ -553,6 +553,14 @@ type BackgroundInput struct {
 // columns either, and a dragged node is the same kind of act -- so
 // "who moved the map" is a column on the placement, in the change that
 // wants it for positions too. The statement says the same.
+//
+// **It publishes view.background** once the write has landed, for the
+// reason the sentence above gives from the other side: if a dragged node
+// and a placed background are the same kind of act, they cannot differ
+// on whether anyone is told. events.go argues the kind; the payload is
+// the view's id and key with no version, since this statement moves no
+// version. TestAViewEventReachesAViewerAndATokenAlike drives the
+// placement and the clear over the route a browser uses.
 func (s *Service) SetBackground(ctx context.Context, projectID uuid.UUID, viewKey string,
 	in BackgroundInput,
 ) error {
@@ -607,6 +615,14 @@ func (s *Service) SetBackground(ctx context.Context, projectID uuid.UUID, viewKe
 		// broken is how a silent no-op reaches a green test run.
 		return fmt.Errorf("%w: no view %q in this game", ErrNotFound, viewKey)
 	}
+	// After the write and never before it, exactly as the position
+	// writes publish: a background is the map renderer's ground and a
+	// browser holding a picture has no other way to learn the ground
+	// moved. events.go argues the kind, its payload and its gating; a
+	// clear (a nil AssetID) publishes as well as a placement, because
+	// removing the ground changes the picture as much as placing one.
+	s.publish(projectID, eventViewBackground, viewEventMinRole, viewEventHumanOnly,
+		viewPlacementEvent{ID: view.ID, Key: view.Key})
 	return nil
 }
 

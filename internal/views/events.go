@@ -86,10 +86,43 @@ const (
 	// for the query that draws it: views.get and views.run are open to
 	// every member of the game.
 	eventViewPositions = "view.positions"
+
+	// eventViewBackground fires from SetBackground once its write has
+	// landed, and it is the fourth kind for the third task's reason
+	// rather than for a fourth one.
+	//
+	// **The argument for view.positions applies to it verbatim, and more
+	// so.** A background is more of the picture than a drag is — it is
+	// the map renderer's ground, the thing every node is placed on top of
+	// — and a browser holding a picture has no other way to learn the
+	// picture changed. views.sql's own header states the equivalence from
+	// the storage side, where the two writes are argued as one kind of
+	// act: "a dragged node is the same kind of act as a placed
+	// background". Publishing one and not the other would leave two
+	// designers in one shared session looking at different grounds
+	// indefinitely, which is the situation the drag event exists to
+	// prevent.
+	//
+	// **The payload is the view's id and key and no version**, the same
+	// shape and for the same reason: SetBackground deliberately does not
+	// advance the view's version (views.sql says why, at the statement),
+	// so a version here would be a number that did not move for a change
+	// that did. The image itself is not in the payload for the rule the
+	// header states — a client re-reads through views.get, which is also
+	// what keeps a background asset id away from a subscriber whose own
+	// read would have been refused.
+	//
+	// **A clear publishes too.** Removing the ground changes the picture
+	// as much as placing one, exactly as the whole-view position clear
+	// does, and a client told about placements and not about removals
+	// would hold the one ground nobody can see any more.
+	//
+	// The gating is view.upserted's, through the same two constants.
+	eventViewBackground = "view.background"
 )
 
 // viewEventMinRole and viewEventHumanOnly are the gating decided above,
-// named so each of the four call sites reads as the decision rather than
+// named so each of the six call sites reads as the decision rather than
 // as two bare literals a later edit could drift apart. They are their own
 // constants and not an alias of another domain's pair: the three
 // decisions happen to agree today, and naming one in terms of another
@@ -120,8 +153,13 @@ type viewEvent struct {
 	Version int32     `json:"version"`
 }
 
-// viewPositionsEvent is the payload of view.positions: the view's id and
-// its key, and nothing else.
+// viewPlacementEvent is the payload of view.positions and
+// view.background: the view's id and its key, and nothing else.
+//
+// **One type for both kinds, because both are the same claim** — this
+// view's *placement* moved, re-read it — and the two payloads carrying
+// the same three-sentence argument as two structs would be one decision
+// written twice.
 //
 // **It carries no coordinates, and that is the rule rather than a
 // judgement made here.** This file's header says a payload never carries
@@ -139,7 +177,7 @@ type viewEvent struct {
 // a number that did not move for a change that did — which is worse than
 // absent, because a subscriber merging on it would believe it had
 // learned something.
-type viewPositionsEvent struct {
+type viewPlacementEvent struct {
 	ID  uuid.UUID `json:"id"`
 	Key string    `json:"key"`
 }

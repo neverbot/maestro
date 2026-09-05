@@ -247,7 +247,7 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 	// Service.publish's own doc comment states the rule for the whole
 	// package.
 	s.publish(projectID, eventViewPositions, viewEventMinRole, viewEventHumanOnly,
-		viewPositionsEvent{ID: view.ID, Key: view.Key})
+		viewPlacementEvent{ID: view.ID, Key: view.Key})
 	return nil
 }
 
@@ -315,7 +315,7 @@ func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewK
 		// reason: a removal that removed nothing is an error there, so
 		// nothing reaches the publish at all.
 		s.publish(projectID, eventViewPositions, viewEventMinRole, viewEventHumanOnly,
-			viewPositionsEvent{ID: view.ID, Key: view.Key})
+			viewPlacementEvent{ID: view.ID, Key: view.Key})
 		return removed, nil
 	}
 
@@ -343,7 +343,7 @@ func (s *Service) ClearPositions(ctx context.Context, projectID uuid.UUID, viewK
 		removed += gone
 	}
 	s.publish(projectID, eventViewPositions, viewEventMinRole, viewEventHumanOnly,
-		viewPositionsEvent{ID: view.ID, Key: view.Key})
+		viewPlacementEvent{ID: view.ID, Key: view.Key})
 	return removed, nil
 }
 

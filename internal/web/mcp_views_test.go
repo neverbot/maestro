@@ -596,13 +596,23 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 			"nothing", len(renderers), len(operators))
 	}
 
-	upsert, ok := descriptions["views.upsert"]
-	if !ok {
-		t.Fatal("views.upsert is not registered")
+	// **Both tools that judge a renderer carry the catalogue**, and
+	// views.validate is the one that would be missed: it is the tool
+	// that exists so a renderer parameter can be iterated, its own text
+	// says naming a renderer "is the only way a renderer parameter can
+	// be judged", and it named no renderer and no parameter. A loop
+	// requiring the catalogue on the upsert alone is a guard against
+	// exactly the drift it let through.
+	for _, name := range []string{"views.upsert", "views.validate"} {
+		if strings.Count(descriptions[name], renderers) != 1 {
+			t.Errorf("%s does not carry the generated renderer catalogue verbatim, exactly "+
+				"once: an agent choosing a renderer or a parameter is then reading a "+
+				"hand-written copy that can lie", name)
+		}
 	}
-	if strings.Count(upsert, renderers) != 1 {
-		t.Error("views.upsert does not carry the generated renderer catalogue verbatim: an " +
-			"agent choosing a renderer is then reading a hand-written copy that can lie")
+
+	if _, ok := descriptions["views.upsert"]; !ok {
+		t.Fatal("views.upsert is not registered")
 	}
 	for _, name := range []string{"views.upsert", "views.run", "views.validate"} {
 		if strings.Count(descriptions[name], operators) != 1 {

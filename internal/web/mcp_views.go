@@ -929,8 +929,9 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 				"**Staleness has no meaning here.** A document handed over for validation "+
 				"has no recorded past to have moved away from, so a misspelling in it is "+
 				"query_invalid rather than query_stale. Ask views.run about a saved view to "+
-				"learn what the game moved under it.\n\n%s\n\n%s\n\n%s",
-			views.OperatorDescription(), viewsQueryDoc, retryAdvice),
+				"learn what the game moved under it.\n\n%s\n\n%s\n\n%s\n\n%s",
+			views.RendererDescription(), views.OperatorDescription(),
+			viewsQueryDoc, retryAdvice),
 		OutputSchema: viewsValidateOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in ViewsValidateInput) (ViewsValidateOutput, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -858,6 +859,7 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 				"%s\n\n%s\n\n%s\n\n%s",
 			viewsKeyDoc, strings.Join(views.LayoutModes(), ", "),
 			views.RendererDescription(), views.OperatorDescription(), viewsQueryDoc, retryAdvice),
+		InputSchema:  queryDocumentInput[ViewsUpsertInput]("views.upsert"),
 		OutputSchema: viewOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in ViewsUpsertInput) (ViewOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -903,6 +905,7 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 				"not one, and a half-drawn graph is worse than a bounded one.\n\n%s\n\n%s",
 			viewsQueryDoc, viewsEnvelopeDoc, viewsStaleDoc,
 			views.OperatorDescription(), retryAdvice),
+		InputSchema:  queryDocumentInput[ViewsRunInput]("views.run"),
 		OutputSchema: viewsRunOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in ViewsRunInput) (map[string]any, error) {
@@ -932,6 +935,7 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 				"learn what the game moved under it.\n\n%s\n\n%s\n\n%s\n\n%s",
 			views.RendererDescription(), views.OperatorDescription(),
 			viewsQueryDoc, retryAdvice),
+		InputSchema:  queryDocumentInput[ViewsValidateInput]("views.validate"),
 		OutputSchema: viewsValidateOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in ViewsValidateInput) (ViewsValidateOutput, error) {
@@ -1081,6 +1085,40 @@ var viewOutputSchema = &jsonschema.Schema{
 	},
 }
 
+// queryDocumentInput is the input schema of a tool that takes a query
+// document, and it exists because the SDK infers a schema from the Go
+// type and json.RawMessage is a []byte.
+//
+// Inferred, `query` arrives on the wire as `{"type": ["null", "array"]}`
+// — an array of bytes — so every call sending the document as the object
+// it is was refused by input validation before any handler ran. The three
+// tools that take one were therefore **uncallable over the real
+// transport**, while every test in this package passed: they call the
+// MCP* functions directly, which is where the isolation invariant is
+// pinned and where nothing crosses a schema.
+//
+// The substitution is made at the one type that has the problem rather
+// than by hand-writing three schemas, so a member added to any of these
+// inputs still appears without anybody remembering to add it — the drift
+// a hand-written schema invites. `{}` and not `{"type": "object"}`:
+// ParseQuery is what judges a document, at the pointers an agent can act
+// on, and a schema that refused a non-object first would answer the same
+// mistake with a worse message.
+func queryDocumentInput[T any](tool string) *jsonschema.Schema {
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+			reflect.TypeFor[json.RawMessage](): {},
+		},
+	})
+	if err != nil {
+		// Registration time, and mcp.AddTool panics on a bad schema for
+		// the same reason: a tool whose arguments cannot be described is
+		// not a tool a server can serve.
+		panic(fmt.Sprintf("input schema for %s: %v", tool, err))
+	}
+	return schema
+}
+
 var viewsRemovedOutputSchema = &jsonschema.Schema{
 	Type:       "object",
 	Required:   []string{"removed"},
@@ -1104,11 +1142,18 @@ var viewsRunOutputSchema = &jsonschema.Schema{
 		"nodes": {Type: "array", Items: objectSchema()},
 		"edges": {Type: "array", Items: objectSchema()},
 		"stats": {
-			Type:     "object",
-			Required: []string{"duration_ms", "node_count", "edge_count", "max_depth_reached"},
+			Type: "object",
+			// The four members views.Stats actually carries. They were
+			// spelled node_count and edge_count here and nodes and edges
+			// on the struct, which the SDK enforces on the way out: every
+			// run over the real transport failed output validation, and
+			// nothing in this package read the schema, so nothing said
+			// so. TestEveryViewsToolIsCallableOverTheRealTransport is
+			// what reads it now.
+			Required: []string{"duration_ms", "nodes", "edges", "max_depth_reached"},
 			Properties: map[string]*jsonschema.Schema{
-				"duration_ms": integerSchema(), "node_count": integerSchema(),
-				"edge_count": integerSchema(), "max_depth_reached": integerSchema(),
+				"duration_ms": integerSchema(), "nodes": integerSchema(),
+				"edges": integerSchema(), "max_depth_reached": integerSchema(),
 			},
 		},
 		"truncated": {

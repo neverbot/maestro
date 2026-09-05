@@ -1,15 +1,18 @@
 package web_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
@@ -176,6 +179,8 @@ type e2eWorld struct {
 	deps   web.MCPDeps
 	agent  web.Caller
 	guest  web.Caller
+	secret string         // the agent's token, for the over-the-wire steps
+	vs     *views.Service // for the one thing no tool does: uploading an image
 	game   uuid.UUID
 	other  uuid.UUID
 	typeID map[string]uuid.UUID // entity type key -> id
@@ -213,6 +218,7 @@ func newE2EWorld(t *testing.T) *e2eWorld {
 	if err != nil {
 		t.Fatalf("Create the second game: %v", err)
 	}
+	var agentSecret string
 	mint := func(project uuid.UUID, label string) web.Caller {
 		t.Helper()
 		secret, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
@@ -225,6 +231,9 @@ func newE2EWorld(t *testing.T) *e2eWorld {
 		if err != nil {
 			t.Fatalf("CallerForToken %s: %v", label, err)
 		}
+		if agentSecret == "" {
+			agentSecret = secret
+		}
 		return caller
 	}
 	w := &e2eWorld{
@@ -236,7 +245,9 @@ func newE2EWorld(t *testing.T) *e2eWorld {
 		game:  game.ID, other: other.ID,
 		typeID: map[string]uuid.UUID{},
 		entity: map[string]uuid.UUID{},
+		vs:     vs,
 	}
+	w.secret = agentSecret
 	w.seed(t)
 	return w
 }
@@ -1044,5 +1055,200 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	if still.Version != 2 {
 		t.Errorf("the view is at version %d after the sweep, want the 2 the repair left",
 			still.Version)
+	}
+}
+
+// TestASavedViewArrivesOverTheRealTransport is the walk's last step and
+// the one the plan asks to be done by hand: a real MCP client, over
+// HTTP, with a real token, saving a view and running it — and reading
+// the envelope out of StructuredContent, which is what a client actually
+// consumes.
+//
+// **It is a different test from the walk above, and the difference is
+// the point.** Every other assertion in this file calls the MCP*
+// functions directly, which is where the isolation invariant is pinned
+// and where a story can be told; nothing there passes through the tool
+// registration, the input schemas, the output schemas or the SDK's own
+// marshalling. Three of those four can be wrong while every test in this
+// package is green, and one of them was: views.run's declared output
+// schema required two stats members the envelope has never carried
+// (node_count, edge_count) and omitted the two it does (nodes, edges).
+// Nothing read the schema, so nothing said so.
+func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
+	w := newE2EWorld(t)
+	ctx := context.Background()
+	httpSrv := httptest.NewServer(w.srv)
+	defer httpSrv.Close()
+	session := connectMCP(t, httpSrv.URL, w.secret)
+
+	upsert, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "views.upsert",
+		Arguments: map[string]any{
+			"key": "mage-2030", "name": "What a Mage can reach, 20 to 30",
+			"query": json.RawMessage(e2eQuery), "renderer": "graph",
+			"renderer_params":  map[string]any{"color_by": "color_by"},
+			"expected_version": 0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(views.upsert): %v", err)
+	}
+	if upsert.IsError {
+		var msg any
+		decodeToolText(t, upsert, &msg)
+		t.Fatalf("views.upsert over the wire: %v", msg)
+	}
+
+	run, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "views.run",
+		Arguments: map[string]any{"key": "mage-2030"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(views.run): %v", err)
+	}
+	if run.IsError {
+		var msg any
+		decodeToolText(t, run, &msg)
+		t.Fatalf("views.run over the wire: %v", msg)
+	}
+	var envelope struct {
+		Nodes []struct {
+			Key   string         `json:"key"`
+			Attrs map[string]any `json:"attrs"`
+		} `json:"nodes"`
+		Stats struct {
+			Nodes      int   `json:"nodes"`
+			Edges      int   `json:"edges"`
+			DurationMS int64 `json:"duration_ms"`
+		} `json:"stats"`
+		Positions []map[string]any `json:"positions"`
+	}
+	decodeStructured(t, run, &envelope)
+	got := map[string]string{}
+	for _, n := range envelope.Nodes {
+		if colour, ok := n.Attrs["color_by"].(string); ok {
+			got[n.Key] = colour
+		}
+	}
+	for _, key := range e2eReachable {
+		if got[key] != e2eZoneOf[key] {
+			t.Errorf("over the wire %s came back coloured %q, want %q", key, got[key], e2eZoneOf[key])
+		}
+	}
+	if envelope.Stats.Nodes != len(envelope.Nodes) {
+		t.Errorf("the wire's stats say %d nodes over %d in the envelope",
+			envelope.Stats.Nodes, len(envelope.Nodes))
+	}
+	// A saved view always carries the member, empty here because nothing
+	// has been dragged in this world.
+	if envelope.Positions == nil {
+		t.Error("a run of a saved view arrived over the wire with no positions member")
+	}
+}
+
+// TestEveryViewsToolIsCallableOverTheRealTransport drives all ten tools
+// through the mounted MCP endpoint, with arguments that are meant to
+// succeed.
+//
+// **It is a schema test wearing a smoke test's clothes**, and that is
+// the point of driving every tool rather than one. The SDK validates a
+// call's arguments against the registered *input* schema before any
+// handler runs, and the handler's answer against the registered *output*
+// schema before it reaches the wire; both schemas are inferred from Go
+// types or written by hand, and neither is read by any test that calls
+// the MCP* functions directly. Two were wrong at once when this test was
+// written — the query document declared as an array of bytes on three
+// tools, and views.run's stats declaring two members the envelope has
+// never carried — and the whole package was green.
+//
+// The table is checked against the registry, so a tool added without a
+// call here fails rather than going unexercised.
+func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
+	w := newE2EWorld(t)
+	ctx := context.Background()
+	httpSrv := httptest.NewServer(w.srv)
+	defer httpSrv.Close()
+	session := connectMCP(t, httpSrv.URL, w.secret)
+
+	// Uploading is REST-only and browser-only by design, so there is no
+	// tool for it and this one setup step goes through the service.
+	asset, err := w.vs.CreateAsset(ctx, w.game, views.Actor{}, "world.png",
+		bytes.NewReader(testPNG(t, 8, 4)))
+	if err != nil {
+		t.Fatalf("upload a background: %v", err)
+	}
+
+	calls := map[string]map[string]any{
+		"views.upsert": {
+			"key": "mage-2030", "name": "What a Mage can reach, 20 to 30",
+			// map, because views.set_background is in this sweep and only a
+			// renderer that draws a background accepts one.
+			"query": json.RawMessage(e2eQuery), "renderer": "map",
+			"renderer_params":  map[string]any{"coordinate_source": "manual"},
+			"expected_version": 0,
+		},
+		"views.list":     {},
+		"views.get":      {"key": "mage-2030"},
+		"views.run":      {"key": "mage-2030"},
+		"views.validate": {"query": json.RawMessage(e2eQuery)},
+		"views.set_positions": {"key": "mage-2030", "positions": []map[string]any{
+			{"entity_type": "quest", "entity_key": "wanted-hogger", "x": 1.5, "y": -2.5},
+		}},
+		"views.clear_positions": {"key": "mage-2030"},
+		"views.list_assets":     {},
+		"views.set_background": {"key": "mage-2030", "asset_id": asset.ID.String(),
+			"scale": 2.5, "offset": map[string]any{"x": 10, "y": -4}},
+		// Last, deliberately: it takes the view every other call needs.
+		"views.remove": {"key": "mage-2030"},
+	}
+	// The order matters — a view has to exist before it can be run — so
+	// the map is driven through a list and the map is what the registry
+	// is compared against.
+	order := []string{
+		"views.upsert", "views.list", "views.get", "views.run", "views.validate",
+		"views.set_positions", "views.clear_positions", "views.list_assets",
+		"views.set_background", "views.remove",
+	}
+	if len(order) != len(calls) {
+		t.Fatalf("the ordering names %d tools and the table has %d", len(order), len(calls))
+	}
+	registered := 0
+	for _, name := range w.srv.ScopedToolNamesForTest() {
+		if !strings.HasPrefix(name, "views.") {
+			continue
+		}
+		registered++
+		if _, ok := calls[name]; !ok {
+			t.Fatalf("%s is registered and this test does not call it: add it, or its "+
+				"input and output schemas are asserted by nothing at all", name)
+		}
+	}
+	if registered != len(calls) {
+		t.Fatalf("%d views tools are registered and the table has %d", registered, len(calls))
+	}
+	if registered == 0 {
+		t.Fatal("no views tool is registered; this test would pass vacuously")
+	}
+
+	for _, name := range order {
+		t.Run(name, func(t *testing.T) {
+			result, err := session.CallTool(ctx, &mcp.CallToolParams{
+				Name: name, Arguments: calls[name],
+			})
+			if err != nil {
+				t.Fatalf("CallTool(%s): %v", name, err)
+			}
+			if result.IsError {
+				var msg any
+				decodeToolText(t, result, &msg)
+				t.Fatalf("%s over the wire: %v", name, msg)
+			}
+			// Every one of these tools declares an output schema, so a
+			// successful call must carry structured content: an answer
+			// that arrived only as prose is one no client can read.
+			if result.StructuredContent == nil {
+				t.Fatalf("%s answered with no structured content", name)
+			}
+		})
 	}
 }

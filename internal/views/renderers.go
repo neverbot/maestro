@@ -539,8 +539,8 @@ func RendererNames() []string {
 }
 
 // RendererDescription is the catalogue as prose, **generated from the
-// table above and from nothing else**, so that Task 15's tool description
-// cannot drift from what CheckRenderer enforces. A hand-written sentence
+// table above and from nothing else**, so that views.upsert's tool
+// description cannot drift from what CheckRenderer enforces. A hand-written sentence
 // naming a knob that does not exist is a knob an agent will send and this
 // package will refuse; a knob added to the table and left out of the
 // prose is one no agent will ever find.

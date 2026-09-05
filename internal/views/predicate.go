@@ -53,7 +53,8 @@ const (
 const TypeTimestamp metamodel.FieldType = "timestamp"
 
 // operatorsByType is the spec's §2.3 table, and it is the contract: the
-// tool description is generated from it (Task 15), so an addition here is
+// tool description is generated from it (OperatorDescription), so an
+// addition here is
 // an addition to the language and shows up on the wire in the same
 // commit.
 //

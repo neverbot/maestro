@@ -48,8 +48,8 @@ const (
 	// by default. internal/web's member, token and invite events set it
 	// true because each mirrors a REST listing requireHumanCaller
 	// refuses a token caller outright; a view inverts that in both
-	// directions. Task 15 mounts views.list, views.get and views.run on
-	// MCP for agents specifically, so an agent may already read every
+	// directions. views.list, views.get and views.run are mounted on MCP
+	// for agents specifically, so an agent may already read every
 	// one of these rows whenever it likes and withholding the push buys
 	// no confidentiality at all. It also costs the most here: an agent
 	// composing against a view — validating, upserting, running it in a

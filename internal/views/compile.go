@@ -1126,7 +1126,7 @@ func builtinColumn(sc leafScope, name string) (frag, error) {
 // nothing, which §3 calls the most expensive failure mode this language
 // has. The refusal is raised by the compiler rather than by resolution,
 // so a caller that wants to catch it before running has to compile —
-// which views.validate (Task 15) does.
+// which views.validate does.
 //
 // The pattern operators cannot be answered by an id, so they compile
 // against the type's key through a scalar subquery, project-filtered like

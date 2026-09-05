@@ -49,8 +49,9 @@ type Options struct {
 	// Metamodel and Markdown and for the same reason it is a field here:
 	// whoever constructs the service has to hand this package the same
 	// instance, over the same pool and the same hub. Today only the
-	// background-asset routes read it (api_view_assets.go); the views.*
-	// tools and their REST mirror are Task 15.
+	// background-asset routes (api_view_assets.go), the ten views.* MCP
+	// tools (mcp_views.go) and their REST mirror (api_views.go) all read
+	// it.
 	Views *views.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the

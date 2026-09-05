@@ -718,11 +718,12 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 // the caller can act on — so the message names the budget that elapsed
 // and the three bounds to lower.
 //
-// **Task 15 has to map this type explicitly.** mcpErrorFor's retryable
-// arm deliberately drops the database's own message and substitutes a
-// generic one, which is right for a lock wait and would throw this advice
-// away; the views tools need an arm for *TimeoutError before that one.
-// Recorded in Task 7's corrections and in Task 15's block.
+// **internal/web maps this type explicitly, and ahead of its retryable
+// arm.** mcpErrorFor's retryable arm deliberately drops the database's
+// own message and substitutes a generic one, which is right for a lock
+// wait and would throw this advice away — so both surfaces carry an arm
+// for *TimeoutError before that one, pinned by
+// TestATimedOutViewKeepsItsAdviceOnBothSurfaces.
 type TimeoutError struct {
 	Budget time.Duration
 	Limits ResolvedLimits

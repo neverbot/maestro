@@ -72,6 +72,16 @@ const (
 	errCodeEndpointTypeMismatch = "endpoint_type_mismatch"
 	errCodeInUse                = "in_use"
 
+	// The views domain's four. internal/views/errors.go argues each of
+	// them as a *different recovery* and argues why there is no fifth for
+	// a timeout: 57014 already maps to errCodeRetryable, whose meaning —
+	// resend — is the right first advice, and a code naming the same
+	// recovery as an existing code is how a vocabulary rots.
+	errCodeQueryInvalid         = "query_invalid"
+	errCodeRendererRequirements = "renderer_requirements"
+	errCodeLimitExceeded        = "limit_exceeded"
+	errCodeQueryStale           = "query_stale"
+
 	errCodeSlugTaken            = "slug_taken"
 	errCodeSlugInvalid          = "slug_invalid"
 	errCodeNameInvalid          = "name_invalid"

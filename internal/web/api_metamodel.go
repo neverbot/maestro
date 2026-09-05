@@ -13,6 +13,7 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/roles"
+	"github.com/neverbot/maestro/internal/views"
 )
 
 // This file is the human half of the game-content surface: the REST
@@ -183,6 +184,7 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 	var (
 		conflict    *metamodel.VersionConflictError
 		docConflict *markdown.ConflictError
+		viewTimeout *views.TimeoutError
 	)
 	switch {
 	// Unreachable through a route today — requireProject resolves the
@@ -222,6 +224,36 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 	// sentinels answer nil from fieldDetails and are unaffected.
 	case errors.Is(err, metamodel.ErrNotFound):
 		writeCodedError(w, http.StatusNotFound, errCodeNotFound, err.Error(), fieldDetails(err))
+	// The views domain's four, arm for arm with mcpErrorFor and in the
+	// same order. The statuses are the only thing this side adds:
+	//
+	//   - 400 for query_invalid and limit_exceeded: the document, or a
+	//     bound written into it, is the caller's own malformed argument.
+	//   - 422 for renderer_requirements: the request was well formed and
+	//     was refused by a rule the catalogue declares, which is exactly
+	//     what invalid_schema and schema_violation are 422 for.
+	//   - 409 for query_stale: the caller is not wrong, the game moved
+	//     under a document it saved earlier — the same statement
+	//     version_conflict and in_use make.
+	case errors.Is(err, views.ErrQueryInvalid):
+		writeCodedError(w, http.StatusBadRequest, errCodeQueryInvalid, err.Error(), fieldDetails(err))
+	case errors.Is(err, views.ErrRendererRequirements):
+		writeCodedError(w, http.StatusUnprocessableEntity, errCodeRendererRequirements, err.Error(), fieldDetails(err))
+	case errors.Is(err, views.ErrLimitExceeded):
+		writeCodedError(w, http.StatusBadRequest, errCodeLimitExceeded, err.Error(), fieldDetails(err))
+	case errors.Is(err, views.ErrQueryStale):
+		writeCodedError(w, http.StatusConflict, errCodeQueryStale, err.Error(), staleDetails(err))
+	// Before the retryable arm, for the reason mcpErrorFor's twin of this
+	// one gives at length: the arm below drops the error's own message,
+	// which is right for a lock wait and would discard the one thing a
+	// timed-out view adds. A designer in a browser gets the same advice
+	// an agent does, which is the claim
+	// TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor makes about this
+	// whole function.
+	case errors.As(err, &viewTimeout):
+		slog.WarnContext(r.Context(), "a view run exceeded its statement budget",
+			"path", r.URL.Path, "error", err)
+		writeCodedError(w, http.StatusServiceUnavailable, errCodeRetryable, viewTimeout.Error(), nil)
 	case metamodel.IsRetryable(err):
 		// Logged, not carried: the database's own "canceling statement
 		// due to lock timeout" describes this server's internals, not
@@ -254,7 +286,7 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 // weakest true statement available.
 func statusForCode(code string) int {
 	switch code {
-	case errCodeInvalidInput:
+	case errCodeInvalidInput, errCodeQueryInvalid, errCodeLimitExceeded:
 		return http.StatusBadRequest
 	case errCodeScopeViolation:
 		return http.StatusForbidden
@@ -262,6 +294,15 @@ func statusForCode(code string) int {
 		return http.StatusNotFound
 	case errCodeUnauthorized:
 		return http.StatusUnauthorized
+	// query_stale is 409 here for the same reason writeDomainError gives
+	// it 409: the caller is not wrong, the game moved. It reaches this
+	// switch only through an *MCPError this layer built, which the views
+	// surface does not do today — the domain's own sentinel takes the arm
+	// above — and the entry is here because statusForCode's default is
+	// 422, and answering "the game moved" as "your request was refused"
+	// would be a lie the moment this layer does build one.
+	case errCodeQueryStale:
+		return http.StatusConflict
 	default:
 		return http.StatusUnprocessableEntity
 	}

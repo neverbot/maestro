@@ -726,7 +726,17 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 type TimeoutError struct {
 	Budget time.Duration
 	Limits ResolvedLimits
-	err    error
+	// Err is the database's own failure, which is the *pgconn.PgError
+	// carrying 57014. It is exported rather than hidden, and the reason
+	// is a test rather than a use: this type's defining property is that
+	// it unwraps to something metamodel.IsRetryable admits, and that is
+	// what makes internal/web's arm ordering load-bearing — an arm placed
+	// after the retryable one would catch nothing and drop this advice.
+	// A surface that cannot build the real shape can only assert the
+	// ordering with a value that satisfies one arm, which passes under
+	// either order. internal/web's
+	// TestATimedOutViewKeepsItsAdviceOnBothSurfaces builds one.
+	Err error
 }
 
 func (e *TimeoutError) Error() string {
@@ -737,7 +747,7 @@ func (e *TimeoutError) Error() string {
 		"traverse step", e.Budget, e.Limits.MaxDepth, e.Limits.MaxNodes, e.Limits.MaxEdges)
 }
 
-func (e *TimeoutError) Unwrap() error { return e.err }
+func (e *TimeoutError) Unwrap() error { return e.Err }
 
 // runFailure turns the one database failure this package can say
 // something useful about into the sentence that says it, and leaves every
@@ -752,7 +762,7 @@ func runFailure(err error, budget time.Duration, limits ResolvedLimits) error {
 	if !errors.As(err, &pgErr) || pgErr.Code != pgErrQueryCanceled {
 		return err
 	}
-	return &TimeoutError{Budget: budget, Limits: limits, err: err}
+	return &TimeoutError{Budget: budget, Limits: limits, Err: err}
 }
 
 // pgErrQueryCanceled is SQLSTATE 57014, one of the four

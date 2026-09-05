@@ -12,6 +12,7 @@ import (
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/views"
 )
 
 // MCPError is a typed domain error that describes its own wire shape: a
@@ -107,6 +108,7 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	var (
 		conflict    *metamodel.VersionConflictError
 		docConflict *markdown.ConflictError
+		viewTimeout *views.TimeoutError
 	)
 	switch {
 	case errors.Is(err, projects.ErrProjectNotFound):
@@ -162,6 +164,48 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	// pin both halves.
 	case errors.Is(err, metamodel.ErrNotFound):
 		return mcpErrorResult(errCodeNotFound, err.Error(), fieldDetails(err))
+
+	// The views domain's four codes, each naming a different recovery —
+	// internal/views/errors.go argues the set, and argues why there is no
+	// fifth for a timeout. TestEveryViewsSentinelHasAWireCode drives
+	// views.Sentinels() through this function rather than repeating the
+	// list, so a fifth sentinel added there cannot be forgotten here.
+	//
+	// All four carry fieldDetails, which reads *views.QueryError's Fields
+	// as JSON pointers into the query document: `/traverse/0/via/0` is
+	// the whole reason this sub-project addresses itself by pointer, and
+	// publishing it as details.fields[].path needs no translation — a
+	// pointer is a path like any other.
+	case errors.Is(err, views.ErrQueryInvalid):
+		return mcpErrorResult(errCodeQueryInvalid, err.Error(), fieldDetails(err))
+	case errors.Is(err, views.ErrRendererRequirements):
+		return mcpErrorResult(errCodeRendererRequirements, err.Error(), fieldDetails(err))
+	case errors.Is(err, views.ErrLimitExceeded):
+		return mcpErrorResult(errCodeLimitExceeded, err.Error(), fieldDetails(err))
+	// query_stale carries a second list beside the fields: the codes and
+	// the was/now pairs a UI bands over a picture. internal/views fills
+	// both from one list (QueryError.Stale) precisely so the two readers
+	// do not have to share one shape.
+	case errors.Is(err, views.ErrQueryStale):
+		return mcpErrorResult(errCodeQueryStale, err.Error(), staleDetails(err))
+
+	// **Before the retryable arm, and that ordering is the whole point.**
+	// A *views.TimeoutError unwraps to the pgconn.PgError carrying 57014,
+	// so metamodel.IsRetryable admits it and the arm below would catch it
+	// — with the right code, and having thrown the message away. That
+	// substitution is correct for a lock wait, whose recovery really is
+	// "resend and change nothing", and it is exactly wrong here: this
+	// error's own sentence names the budget that elapsed and the three
+	// bounds to lower, which is the only thing that helps once resending
+	// has stopped working. The code stays `retryable`, because the first
+	// recovery is still to resend; what changes is that the second one
+	// reaches the caller.
+	// TestATimedOutViewKeepsItsAdviceOnBothSurfaces pins it, and is red
+	// with this arm moved below the one after it.
+	case errors.As(err, &viewTimeout):
+		slog.WarnContext(ctx, "mcp view run exceeded its statement budget",
+			"tool", toolName, "user_id", caller.UserID, "token_id", caller.TokenID, "error", err)
+		return mcpErrorResult(errCodeRetryable, viewTimeout.Error(), nil)
 
 	case metamodel.IsRetryable(err):
 		// Checked before the default arm and after every mapping that
@@ -224,6 +268,7 @@ func fieldDetails(err error) map[string]any {
 		validation *metamodel.ValidationError
 		schemaErr  *metamodel.SchemaError
 		missing    *markdown.MissingError
+		queryErr   *views.QueryError
 	)
 	var problems []metamodel.FieldError
 	switch {
@@ -242,6 +287,17 @@ func fieldDetails(err error) map[string]any {
 	// both of those and would fail if either went back to nil.
 	case errors.As(err, &missing):
 		problems = missing.Fields()
+	// A query refusal's paths are JSON pointers rather than field names,
+	// which is a difference in what the string says and in nothing else:
+	// both surfaces publish it as details.fields[].path unchanged, and an
+	// agent that can act on `name` can act on `/traverse/0/via/0`. The
+	// views domain also reports a *row's* own arguments (`/name`,
+	// `/positions/0/x`) as a metamodel.ValidationError, which the first
+	// arm above already reads — the two conventions meet in that package
+	// deliberately, and this file publishes both without flattening them
+	// into one.
+	case errors.As(err, &queryErr):
+		problems = queryErr.Fields
 	default:
 		return nil
 	}
@@ -253,4 +309,44 @@ func fieldDetails(err error) map[string]any {
 		fields = append(fields, map[string]string{"path": problem.Path, "message": problem.Message})
 	}
 	return map[string]any{"fields": fields}
+}
+
+// staleDetails is fieldDetails plus the diagnostics a stale view carries,
+// under details.stale.
+//
+// The two lists answer different readers and are deliberately not one.
+// details.fields is what an agent acts on: an addressed sentence per
+// broken position, in the same shape every other refusal on this wire
+// uses, so a caller with one error handler needs no second one. Under
+// details.stale is the machine-readable half — a code, a pointer, and the
+// was/now pair — which is what a UI bands over a picture it has decided
+// to draw anyway, and what an agent uses to tell a rename it can repair
+// from a type that is simply gone. internal/views fills both from one
+// list, so they cannot disagree about what moved.
+func staleDetails(err error) map[string]any {
+	var queryErr *views.QueryError
+	if !errors.As(err, &queryErr) || len(queryErr.Stale) == 0 {
+		return fieldDetails(err)
+	}
+	details := fieldDetails(err)
+	if details == nil {
+		details = map[string]any{}
+	}
+	stale := make([]map[string]string, 0, len(queryErr.Stale))
+	for _, d := range queryErr.Stale {
+		entry := map[string]string{"code": d.Code, "pointer": d.Pointer}
+		// was and now are omitted rather than sent empty, matching the
+		// domain's own json tags: "the game says nothing" and "the game
+		// says the empty string" are different statements and only the
+		// first is ever true here.
+		if d.Was != "" {
+			entry["was"] = d.Was
+		}
+		if d.Now != "" {
+			entry["now"] = d.Now
+		}
+		stale = append(stale, entry)
+	}
+	details["stale"] = stale
+	return details
 }

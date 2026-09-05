@@ -734,3 +734,67 @@ func checkLimits(l *Limits) error {
 	})
 	return &QueryError{Code: CodeLimitExceeded, Fields: problems}
 }
+
+// fieldTypeOrder is the order the generated description prints the
+// operator table in, and it is the declaration order of
+// internal/metamodel's own six types with this package's pseudo-type
+// last. A slice rather than a range over the map, because Go randomises
+// map iteration and a tool description that comes back in a different
+// order on every start is a description a client cannot diff.
+//
+// TestTheOperatorDescriptionIsGeneratedFromTheTable requires every key of
+// operatorsByType to appear here and every entry here to be a key of it,
+// so a seventh field type cannot be printed without a row or given a row
+// without being printed.
+var fieldTypeOrder = []metamodel.FieldType{
+	metamodel.FieldText, metamodel.FieldLongText, metamodel.FieldNumber,
+	metamodel.FieldBool, metamodel.FieldEnum, metamodel.FieldListText,
+	TypeTimestamp,
+}
+
+// OperatorDescription is the operator table as prose, **generated from
+// operatorsByType and from the built-in table and from nothing else**.
+//
+// It exists for the reason RendererDescription does, and the risk is the
+// same one: the table *is* the contract — an operator a field type does
+// not admit is a refusal, and one it does admit and nobody documents is
+// an operator no agent will ever send — so a hand-written paragraph
+// beside it is a paragraph that will be wrong the first time a row moves.
+// TestTheOperatorDescriptionIsGeneratedFromTheTable reads this text back
+// and compares it with the table in both directions.
+//
+// The two sentences that are not rows are here because they are
+// properties of the table that no row can state. `list<text>` is the
+// whole list family, because the metamodel declares no list<number> and
+// no list<enum> for these operators to apply to, so `contains_any` over
+// a list of numbers is a string comparison today. And the built-ins are
+// judged as though they were declared fields of the type printed beside
+// them, which is what makes `@created_at gt 20` a comparison between a
+// timestamp and an integer rather than a legal one.
+func OperatorDescription() string {
+	var b strings.Builder
+	b.WriteString("The operator table. Which operators a condition may use is decided by " +
+		"the *declared type* of the field it names, and an operator that type does not " +
+		"answer is refused at its own pointer rather than compiled into something that " +
+		"draws nothing.\n")
+	for _, typ := range fieldTypeOrder {
+		ops := operatorsByType[typ]
+		names := make([]string, 0, len(ops))
+		for _, op := range ops {
+			names = append(names, string(op))
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", typ, strings.Join(names, ", "))
+	}
+	b.WriteString("\n\nlist<text> is the whole list family: the metamodel declares no " +
+		"list<number> and no list<enum>, so contains_any over a list of numbers is a " +
+		"string comparison.\n")
+	b.WriteString("\nThe built-in attributes are written with an @ sigil and are judged " +
+		"as fields of the type named here")
+	for _, builtin := range builtins {
+		fmt.Fprintf(&b, "\n- %s: %s", builtin.Name, builtin.Type)
+	}
+	b.WriteString("\n\nA declared field is named without a sigil. A field this game does " +
+		"not declare is refused, and so is an operator its declared type does not " +
+		"answer — both at the pointer of the condition that wrote it.\n")
+	return b.String()
+}

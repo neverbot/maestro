@@ -947,16 +947,27 @@ func (c *compiler) predicate(sc leafScope, p *ResolvedPredicate) (frag, error) {
 
 // combine is `all` and `any` over their children.
 //
-// **An empty list compiles to `true` under both spellings**, which for
-// `any` reads "no condition matches nothing" as "no condition filters
-// nothing". Pre-existing from Task 6, where it only ever widened a
-// projection; since Task 8 the same `true` can be an `edge_where`, where
-// it prunes a recursion, and "follow every edge" is arguably the wrong
-// reading of "follow edges satisfying none of these". It is recorded
-// rather than changed, because the change belongs with the validation
-// pass that would refuse an empty list outright — Task 15's — and a
-// silent flip of the identity element between tasks is worse than either
-// reading. Say why before changing it.
+// **The empty list is refused by the parser, so this arm is unreachable
+// from any document, and Task 15 settled it there rather than here.**
+// Tasks 8 and 9 left the question open: an empty list compiles to `true`
+// under both spellings, which is the identity of `all` and the *wrong*
+// identity of `any`, and since Task 8 the same `true` can be an
+// `edge_where`, where "follow edges satisfying none of these" would
+// become "follow every edge" and prune nothing. The settlement is the one
+// those tasks pointed at — refuse it outright — and it turned out to be
+// already made: checkPredicate's own `children` refuses an empty
+// combinator at its own pointer, with the argument the open question
+// wanted ("an empty combinator has no truth value, and guessing one would
+// silently widen or narrow the query"). What was missing was the record
+// and the assertion; TestAnEmptyCombinatorIsRefusedAtEveryPositionThatTakesOne
+// pins both spellings at every predicate position, including the
+// edge_where the identity element would have mattered most in.
+//
+// The `true` stays as defence in depth, for the reason Compile keeps its
+// other refusals: Compile is exported and takes a *Resolved a Go caller
+// may have built by hand, and `true` is the arm that draws everything
+// rather than nothing — the safe direction for a value no document can
+// produce.
 func (c *compiler) combine(sc leafScope, children []ResolvedPredicate, sep frag) (frag, error) {
 	if len(children) == 0 {
 		return "true", nil

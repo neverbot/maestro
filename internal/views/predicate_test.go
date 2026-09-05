@@ -943,3 +943,174 @@ func TestAParameterDefaultIsBoundedLikeAValue(t *testing.T) {
 		}
 	}
 }
+
+// TestAnEmptyCombinatorIsRefusedAtEveryPositionThatTakesOne settles the
+// open question Tasks 8 and 9 left to Task 15: an empty `all` or `any`
+// has no truth value a document can have meant, so it is refused rather
+// than given one.
+//
+// The refusal was already in the parser and only `{"all":[]}` at a
+// selector's `where` was pinned. That is not the position the question
+// was asked about: `combine` compiles an empty list to `true`, which is
+// the identity of `all` and the wrong identity of `any`, and since Task
+// 8 the same `true` can be an `edge_where`, where it prunes nothing and
+// the walk follows every edge — the widest possible reading of "follow
+// edges satisfying none of these". So both spellings are driven at every
+// predicate position the language has.
+func TestAnEmptyCombinatorIsRefusedAtEveryPositionThatTakesOne(t *testing.T) {
+	for _, tc := range []struct{ doc, at string }{
+		{`{"v":1,"from":[{"type":"quest","where":{"all":[]}}]}`, "/from/0/where/all"},
+		{`{"v":1,"from":[{"type":"quest","where":{"any":[]}}]}`, "/from/0/where/any"},
+		{`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "traverse":[{"from":"q","via":"requires","as":"p","where":{"any":[]}}]}`,
+			"/traverse/0/where/any"},
+		{`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "traverse":[{"from":"q","via":"requires","as":"p","edge_where":{"any":[]}}]}`,
+			"/traverse/0/edge_where/any"},
+		{`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "traverse":[{"from":"q","via":"requires","as":"p","edge_where":{"all":[]}}]}`,
+			"/traverse/0/edge_where/all"},
+		// Nested, because the walk descends and the refusal has to
+		// survive the descent: an empty list one level down is the same
+		// missing truth value.
+		{`{"v":1,"from":[{"type":"quest","where":{"not":{"any":[]}}}]}`,
+			"/from/0/where/not/any"},
+	} {
+		parseFails(t, tc.doc, tc.at, "must hold at least one condition")
+	}
+
+	// The controls: one condition at the two positions the identity
+	// element would have mattered at is accepted, so the rule is about
+	// emptiness and not about the position.
+	for _, doc := range []string{
+		`{"v":1,"from":[{"type":"quest","where":{"any":[{"field":"min_level","op":"gt","value":1}]}}]}`,
+		`{"v":1,"from":[{"type":"quest","as":"q"}],
+		  "traverse":[{"from":"q","via":"requires","as":"p",
+		    "edge_where":{"any":[{"field":"@type","op":"eq","value":"requires"}]}}]}`,
+	} {
+		if _, err := ParseQuery([]byte(doc)); err != nil {
+			t.Fatalf("a combinator with one condition must parse: %v", err)
+		}
+	}
+}
+
+// TestTheOperatorDescriptionIsGeneratedFromTheTable is the operator
+// table's own version of the renderer catalogue's description guard, and
+// it exists for the same reason: the text an agent reads is the contract,
+// and a hand-written paragraph beside a table is a paragraph that will be
+// wrong the first time the table moves.
+//
+// It parses the generated text back into a type→operators map and
+// compares it with operatorsByType in **both** directions. One direction
+// alone is half a guard: a row printed and not declared is an operator an
+// agent will send and this package will refuse, and a row declared and
+// not printed is an operator no agent will ever find.
+func TestTheOperatorDescriptionIsGeneratedFromTheTable(t *testing.T) {
+	text := OperatorDescription()
+	printed := map[metamodel.FieldType][]Operator{}
+	printedBuiltins := map[string]metamodel.FieldType{}
+	for _, line := range strings.Split(text, "\n") {
+		rest, ok := strings.CutPrefix(line, "- ")
+		if !ok {
+			continue
+		}
+		name, values, ok := strings.Cut(rest, ": ")
+		if !ok {
+			t.Fatalf("a bullet with no colon: %q", line)
+		}
+		if strings.HasPrefix(name, "@") {
+			printedBuiltins[name] = metamodel.FieldType(values)
+			continue
+		}
+		ops := make([]Operator, 0)
+		for _, op := range strings.Split(values, ", ") {
+			ops = append(ops, Operator(op))
+		}
+		printed[metamodel.FieldType(name)] = ops
+	}
+
+	if len(printed) != len(operatorsByType) {
+		t.Fatalf("the description prints %d field types and the table declares %d",
+			len(printed), len(operatorsByType))
+	}
+	for typ, want := range operatorsByType {
+		got, ok := printed[typ]
+		if !ok {
+			t.Errorf("%s admits %v and the description never mentions it: an operator no "+
+				"agent can find is an operator nobody sends", typ, want)
+			continue
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s: the description prints %v and the table declares %v", typ, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("%s: the description prints %v and the table declares %v", typ, got, want)
+				break
+			}
+		}
+	}
+	for typ := range printed {
+		if _, ok := operatorsByType[typ]; !ok {
+			t.Errorf("the description prints %s and the table declares nothing for it: an "+
+				"agent sending one of those operators gets a refusal", typ)
+		}
+	}
+
+	// The built-in half, both ways as well: a sigil printed with the
+	// wrong type is a condition an agent writes and this package refuses,
+	// and one left out is a vocabulary an agent has to guess.
+	if len(printedBuiltins) != len(builtins) {
+		t.Fatalf("the description prints %d built-ins and the table declares %d",
+			len(printedBuiltins), len(builtins))
+	}
+	for _, builtin := range builtins {
+		if printedBuiltins[builtin.Name] != builtin.Type {
+			t.Errorf("%s is printed as %q and declared as %q",
+				builtin.Name, printedBuiltins[builtin.Name], builtin.Type)
+		}
+	}
+
+	// The list-family sentence is a property of the table no row can
+	// state, so it is asserted as a fact rather than left to the reader.
+	if !strings.Contains(text, "list<number>") {
+		t.Error("the description does not say that list<text> is the whole list family: an " +
+			"agent sending contains_any at a number list gets a string comparison and no word")
+	}
+}
+
+// TestEveryFieldTypeInTheTableIsPrintedInADeterministicOrder closes the
+// door the description guard cannot see through. fieldTypeOrder is what
+// makes the text stable across process starts — Go randomises map
+// iteration — and it is a second list beside operatorsByType, which is
+// exactly the shape that drifts.
+func TestEveryFieldTypeInTheTableIsPrintedInADeterministicOrder(t *testing.T) {
+	if len(fieldTypeOrder) != len(operatorsByType) {
+		t.Fatalf("fieldTypeOrder names %d types and the table declares %d",
+			len(fieldTypeOrder), len(operatorsByType))
+	}
+	seen := map[metamodel.FieldType]bool{}
+	for _, typ := range fieldTypeOrder {
+		if seen[typ] {
+			t.Errorf("%s is named twice", typ)
+		}
+		seen[typ] = true
+		if _, ok := operatorsByType[typ]; !ok {
+			t.Errorf("fieldTypeOrder names %s and the table declares nothing for it", typ)
+		}
+	}
+	for typ := range operatorsByType {
+		if !seen[typ] {
+			t.Errorf("the table declares %s and fieldTypeOrder never prints it", typ)
+		}
+	}
+	// And the order really is stable, which is the only reason the slice
+	// exists: twenty generations of the same text.
+	first := OperatorDescription()
+	for i := 0; i < 20; i++ {
+		if OperatorDescription() != first {
+			t.Fatal("the description changed between two calls in one process")
+		}
+	}
+}

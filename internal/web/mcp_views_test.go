@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -635,16 +636,49 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 	// Nothing only this repository knows, on every views tool. Task 14
 	// swept the renderer catalogue for exactly this and the tools' own
 	// prose is written one layer up, where the same mistake is available.
-	repositoryOnly := []string{"Task 1", "Task 6", "Task 15", "§5", "finding ", ".go:", "sub-project"}
+	//
+	// **Patterns and not substrings**, which is the correction a review
+	// round made after the first version of this guard was measured: a
+	// list of the literals that happened to have leaked ("Task 1",
+	// "Task 6", "§5") catches those and the numbers they are prefixes
+	// of, and lets through every task number and section nobody had
+	// leaked yet. A guard against a *kind* of mistake has to describe
+	// the kind.
+	repositoryOnly := []struct {
+		what  string
+		re    *regexp.Regexp
+		leaks string
+	}{
+		{"a task number", regexp.MustCompile(`(?i)\btasks?\s+\d+`), "Task 9"},
+		{"a spec section", regexp.MustCompile(`§\s*\d`), "§3.2"},
+		{"a numbered finding", regexp.MustCompile(`(?i)\bfindings?\s+\d+`), "finding 11"},
+		{"a source filename", regexp.MustCompile(`(?i)\b[\w-]+\.(?:go|sql|md)\b`), "positions.go"},
+		{"this repository's sub-project word",
+			regexp.MustCompile(`(?i)\bsub-projects?\b`), "sub-project 5"},
+		{"an open question", regexp.MustCompile(`(?i)\bopen questions?\b|\bO[1-9]\d*\b`), "O3"},
+		{"a plan or spec document",
+			regexp.MustCompile(`(?i)\bthe (?:plan|spec|design doc)\b`), "the plan"},
+	}
+	// Each pattern is checked against the leak it is written for, so a
+	// regexp that matches nothing at all cannot sit here looking like
+	// coverage — the failure mode of the substring list it replaces,
+	// one level up.
+	for _, guard := range repositoryOnly {
+		if !guard.re.MatchString(guard.leaks) {
+			t.Errorf("the guard for %s does not match %q, so it guards nothing",
+				guard.what, guard.leaks)
+		}
+	}
 	swept := 0
 	for name, text := range descriptions {
 		if !strings.HasPrefix(name, "views.") {
 			continue
 		}
 		swept++
-		for _, leak := range repositoryOnly {
-			if strings.Contains(text, leak) {
-				t.Errorf("%s's description names %q, which an agent has never seen", name, leak)
+		for _, guard := range repositoryOnly {
+			if found := guard.re.FindString(text); found != "" {
+				t.Errorf("%s's description names %q — %s, which an agent has never seen",
+					name, found, guard.what)
 			}
 		}
 	}

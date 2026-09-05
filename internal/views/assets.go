@@ -438,11 +438,18 @@ func backgroundProblems(renderer string, in BackgroundInput) []metamodel.FieldEr
 	if !RendererReadsBackground(renderer) {
 		problems = append(problems, metamodel.FieldError{
 			Path: pointer("asset_id"),
+			// The repair names the order the two calls have to be made
+			// in, because the other one is refused as well: UpsertView
+			// enforces the same rule from its own side, so "change the
+			// renderer, then set the background" is the only sequence
+			// that works and the previous wording — which named
+			// views.upsert with no order — pointed at the call that
+			// produced the forbidden state.
 			Message: fmt.Sprintf("is a background image and this view's renderer is %q, "+
 				"which draws none: only %q reads a background, so the image would be "+
-				"stored and read by nothing. Change the renderer through views.upsert, "+
-				"or leave the background unset",
-				renderer, RendererMap),
+				"stored and read by nothing. Change the renderer to %q through "+
+				"views.upsert first, then set this background — or leave it unset",
+				renderer, RendererMap, RendererMap),
 		})
 	}
 	if in.Scale != nil {

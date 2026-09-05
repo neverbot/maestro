@@ -303,6 +303,43 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
 				return &metamodel.VersionConflictError{Current: existing.Version}
 			}
+			// **The rule SetBackground enforces, on the other write path
+			// over the same row.** Task 14's own correction established
+			// that a background stored under a renderer that draws none
+			// is a value nothing reads, and put Renderer.ReadsBackground
+			// in the catalogue as the one statement of which renderers
+			// read one — and then consulted it from exactly one of the
+			// two writers of background_asset_id. This upsert never
+			// touches that column, so changing the renderer from `map`
+			// to anything else left the image attached and produced,
+			// through the front door, the state the setter refuses.
+			// The refusal there even named this call as the way to
+			// change the renderer.
+			//
+			// It is a refusal rather than a silent clear for the reason
+			// every write in this package refuses rather than repairs: a
+			// designer who spent an afternoon placing a world map must
+			// not lose it to an agent editing the query, and the
+			// repair — clear the background first — is one call the
+			// message names. TestChangingTheRendererAwayFromMapIsRefusedWhileABackgroundIsAttached
+			// drives it.
+			//
+			// It sits after the version check, so a caller that is also
+			// stale hears the version first, which is the order this
+			// whole branch exists to fix.
+			if existing.BackgroundAssetID != nil && !RendererReadsBackground(in.Renderer) {
+				return &metamodel.ValidationError{
+					Code: metamodel.CodeInvalidInput,
+					Fields: []metamodel.FieldError{{
+						Path: pointer("renderer"),
+						Message: fmt.Sprintf("is %q, which draws no background, and this "+
+							"view has one attached: it would be stored and read by "+
+							"nothing. Clear it first with views.set_background and a null "+
+							"asset_id, then change the renderer — only %q reads a "+
+							"background", in.Renderer, RendererMap),
+					}},
+				}
+			}
 		case errors.Is(err, pgx.ErrNoRows):
 			// Creation: no version to match, nothing to lock.
 			//

@@ -833,10 +833,20 @@ func TestRemovingAnotherGamesViewIsNotFound(t *testing.T) {
 // Task 14 inherits this test: the setter it adds is the *other* write
 // path over these columns, and this one says what the query path must
 // keep doing once there are two.
+//
+// **The view is a `map` here, and it was a `graph` when this test was
+// written.** A background under a renderer that draws none is a state
+// the product refuses on both write paths now, so a fixture that wrote
+// one directly was pinning "an edit leaves a background standing" over a
+// row that could not exist — and the interesting case is an edit of a
+// view that legitimately has one. The renderer parameter the edit
+// changes is map's own `snap`, for the same reason.
 func TestAnOrdinaryUpsertLeavesABackgroundStanding(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()
-	first, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
+	initial := saveable("route", questsOnly)
+	initial.Renderer = RendererMap
+	first, err := g.views.UpsertView(ctx, g.projectID, initial)
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -861,8 +871,9 @@ func TestAnOrdinaryUpsertLeavesABackgroundStanding(t *testing.T) {
 	// a new query, a new renderer parameter, and nothing said about a
 	// background.
 	next := saveable("route", questsToZones)
+	next.Renderer = RendererMap
 	next.Name = "The long way round"
-	next.RendererParams = map[string]any{"arrows": true}
+	next.RendererParams = map[string]any{"snap": float64(10)}
 	next.ExpectedVersion = ptrInt32(first.Version)
 	if _, err := g.views.UpsertView(ctx, g.projectID, next); err != nil {
 		t.Fatalf("the edit: %v", err)

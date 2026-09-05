@@ -1082,3 +1082,64 @@ func TestEveryByteOfEveryMagicNumberIsLoadBearing(t *testing.T) {
 		}
 	}
 }
+
+// TestChangingTheRendererAwayFromMapIsRefusedWhileABackgroundIsAttached
+// closes the half of Task 14's own rule that reached only one of the two
+// writers of background_asset_id.
+//
+// SetBackground refuses a background under a renderer that draws none —
+// the image would be stored and read by nothing — and its refusal used
+// to say "change the renderer through views.upsert", naming the call
+// that produced exactly the state it was refusing: UpsertView never
+// consulted Renderer.ReadsBackground, so save with `map`, set a
+// background, upsert with `graph`, and the row carried an image under a
+// renderer that draws none, with the scale and the offset still set.
+//
+// The refusal rather than a silent clear is the same call every write in
+// this package makes: a designer's placed world map is not an agent's to
+// discard while editing a query, and the repair is one named call.
+func TestChangingTheRendererAwayFromMapIsRefusedWhileABackgroundIsAttached(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	asset := g.upload(t, "azeroth.png", pngBytes(t, 37, 19))
+	g.backedView(t, "world", asset.ID, 3, Point{X: 10, Y: -4})
+
+	away := saveable("world", questsOnly)
+	away.Renderer = RendererGraph
+	away.ExpectedVersion = ptrInt32(1)
+	_, err := g.views.UpsertView(ctx, g.projectID, away)
+	assertRefused(t, err, pointer("renderer"), "draws no background")
+
+	// Nothing moved: the refusal is a refusal and not a partial write.
+	got, err := g.views.ViewByKey(ctx, g.projectID, "world")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.Renderer != RendererMap || got.BackgroundAssetID == nil {
+		t.Fatalf("view = (%s, %v), want the map renderer and its background intact",
+			got.Renderer, got.BackgroundAssetID)
+	}
+
+	// The repair the message names, in order: clear the background, then
+	// change the renderer. Both halves are asserted, because a refusal
+	// whose stated recovery does not work is worse than no message.
+	if err := g.views.SetBackground(ctx, g.projectID, "world", BackgroundInput{}); err != nil {
+		t.Fatalf("clearing a background must be legal: %v", err)
+	}
+	if _, err := g.views.UpsertView(ctx, g.projectID, away); err != nil {
+		t.Fatalf("after clearing the background the renderer change must land: %v", err)
+	}
+
+	// And the other direction is untouched: an edit that keeps a
+	// background-drawing renderer is an ordinary edit. The positive
+	// control that stops the check above from refusing every upsert of a
+	// view that has an image.
+	g.backedView(t, "atlas", asset.ID, 1, Point{})
+	stay := saveable("atlas", questsOnly)
+	stay.Renderer = RendererMap
+	stay.Name = "The atlas"
+	stay.ExpectedVersion = ptrInt32(1)
+	if _, err := g.views.UpsertView(ctx, g.projectID, stay); err != nil {
+		t.Fatalf("an edit that keeps the map renderer must land: %v", err)
+	}
+}

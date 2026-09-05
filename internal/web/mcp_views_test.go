@@ -957,3 +957,64 @@ func TestAnUpsertRecordsTheCallerWhoMadeIt(t *testing.T) {
 		t.Errorf("updated_by_user_id = %v, want the token's owner %s", user, f.ownerID)
 	}
 }
+
+// TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces is a
+// transport test and not a re-test of the domain, which covers the pair
+// well. What nothing asserted is that the two arguments the description
+// promises ever leave this layer: reducing the listing input to its
+// limit alone left the whole web suite green, and "a cursor belongs to
+// the game and the filter it was issued for" is a wire claim with no
+// wire test.
+func TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+	f.save(t, "one", questsQuery, "graph")
+	f.save(t, "two", questsQuery, "graph")
+	f.save(t, "atlas", questsQuery, "map")
+
+	only, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
+		web.ViewsListInput{Renderer: "map"})
+	if err != nil {
+		t.Fatalf("views.list filtered: %v", err)
+	}
+	if len(only.Items) != 1 || only.Items[0].Key != "atlas" {
+		t.Fatalf("the renderer filter answered %+v, want only the map view", only.Items)
+	}
+	// The control in the same test: the two graph views really are
+	// there, so the assertion above cannot pass on an empty listing.
+	whole, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game, web.ViewsListInput{})
+	if err != nil {
+		t.Fatalf("views.list: %v", err)
+	}
+	if len(whole.Items) != 3 {
+		t.Fatalf("the unfiltered listing answered %+v, want all three", whole.Items)
+	}
+
+	// The cursor, through the filter it was issued for.
+	page, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
+		web.ViewsListInput{Renderer: "graph", Limit: 1})
+	if err != nil {
+		t.Fatalf("views.list paged: %v", err)
+	}
+	if len(page.Items) != 1 || page.NextCursor == nil {
+		t.Fatalf("page one = %+v with cursor %v, want one row and a cursor",
+			page.Items, page.NextCursor)
+	}
+	next, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
+		web.ViewsListInput{Renderer: "graph", Limit: 1, Cursor: *page.NextCursor})
+	if err != nil {
+		t.Fatalf("views.list page two: %v", err)
+	}
+	if len(next.Items) != 1 || next.Items[0].Key == page.Items[0].Key {
+		t.Fatalf("page two = %+v, want the other graph view", next.Items)
+	}
+
+	// And the claim the description makes about a cursor: it belongs to
+	// the filter it was issued for. A page-one cursor replayed against a
+	// different renderer is refused rather than answered from a listing
+	// the caller is not walking.
+	if _, err := web.MCPViewsList(ctx, f.deps, f.caller, f.game,
+		web.ViewsListInput{Renderer: "map", Cursor: *page.NextCursor}); err == nil {
+		t.Error("a cursor issued for the graph filter was accepted against the map one")
+	}
+}

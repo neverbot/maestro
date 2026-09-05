@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -523,5 +524,124 @@ func decodeInto(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 	t.Helper()
 	if err := json.Unmarshal(rec.Body.Bytes(), v); err != nil {
 		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+}
+
+// TestTheViewListingCarriesItsRendererAndCursorOverREST is the REST half
+// of the claim mcp_views_test.go makes for the tool: these two arguments
+// travel as query parameters here rather than in a body, which is a
+// second place for them to be dropped, and removing them from the
+// listing input left the whole suite green.
+func TestTheViewListingCarriesItsRendererAndCursorOverREST(t *testing.T) {
+	f := newViewsRESTFixture(t)
+	for _, view := range []struct{ key, renderer string }{
+		{"one", "graph"}, {"two", "graph"}, {"atlas", "map"},
+	} {
+		if rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
+			"key": view.key, "name": view.key, "renderer": view.renderer,
+			"query": json.RawMessage(questsQuery), "expected_version": 0,
+		}); rec.Code != http.StatusOK {
+			t.Fatalf("save %s = %d: %s", view.key, rec.Code, rec.Body.String())
+		}
+	}
+
+	list := func(query string) web.ViewsListOutput {
+		t.Helper()
+		rec := f.call(t, f.cookie, http.MethodGet, f.path("/views"+query), nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /views%s = %d: %s", query, rec.Code, rec.Body.String())
+		}
+		var out web.ViewsListOutput
+		decodeInto(t, rec, &out)
+		return out
+	}
+
+	only := list("?renderer=map")
+	if len(only.Items) != 1 || only.Items[0].Key != "atlas" {
+		t.Fatalf("?renderer=map answered %+v, want only the map view", only.Items)
+	}
+	// The control: all three are really there, so the filter is doing
+	// the narrowing rather than an empty listing satisfying the check.
+	if whole := list(""); len(whole.Items) != 3 {
+		t.Fatalf("the unfiltered listing answered %+v, want all three", whole.Items)
+	}
+
+	page := list("?renderer=graph&limit=1")
+	if len(page.Items) != 1 || page.NextCursor == nil {
+		t.Fatalf("page one = %+v with cursor %v", page.Items, page.NextCursor)
+	}
+	next := list("?renderer=graph&limit=1&cursor=" + url.QueryEscape(*page.NextCursor))
+	if len(next.Items) != 1 || next.Items[0].Key == page.Items[0].Key {
+		t.Fatalf("page two = %+v, want the other graph view", next.Items)
+	}
+	// A cursor belongs to the filter it was issued for, on this surface
+	// too: replayed against another renderer it is refused as the
+	// caller's own argument rather than answered.
+	rec := f.call(t, f.cookie, http.MethodGet,
+		f.path("/views?renderer=map&cursor="+url.QueryEscape(*page.NextCursor)), nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a cursor from another filter = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute
+// makes the check on these routes real rather than decorative. It is not
+// a security hole — the scope always wins, and a session caller reaching
+// another game is refused by the admission check before any of this —
+// but the refusal the field exists to make was unasserted on every one
+// of the routes that call it, and removing the check from the run route
+// left the whole suite green.
+//
+// The field is a confirmation and never a selector: a client that has
+// lost track of which game it is editing is told so, rather than told
+// its write succeeded in the other one.
+func TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute(t *testing.T) {
+	f := newViewsRESTFixture(t)
+	if rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
+		"key": "route", "name": "Route", "renderer": "graph",
+		"query": json.RawMessage(questsQuery), "expected_version": 0,
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("seed a view: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for _, route := range []struct {
+		suffix string
+		body   map[string]any
+	}{
+		{"/views", map[string]any{"key": "route", "name": "Route", "renderer": "graph",
+			"query": json.RawMessage(questsQuery), "expected_version": 1}},
+		{"/views/run", map[string]any{"key": "route"}},
+		{"/views/validate", map[string]any{"query": json.RawMessage(questsQuery)}},
+		{"/views/by-key/route/positions", map[string]any{"positions": []any{
+			map[string]any{"entity_type": "quest", "entity_key": "hogger", "x": 1, "y": 2},
+		}}},
+		{"/views/by-key/route/positions/clear", map[string]any{}},
+		{"/views/by-key/route/background", map[string]any{}},
+	} {
+		t.Run(route.suffix, func(t *testing.T) {
+			// The control first: the same body with no project_id at all
+			// is accepted, so the refusal below is about the field and
+			// not about the request being malformed.
+			if rec := f.call(t, f.cookie, http.MethodPost, f.path(route.suffix),
+				route.body); rec.Code != http.StatusOK {
+				t.Fatalf("without a project_id = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+			body := map[string]any{"project_id": f.other.String()}
+			for k, v := range route.body {
+				body[k] = v
+			}
+			rec := f.call(t, f.cookie, http.MethodPost, f.path(route.suffix), body)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("a project_id naming another game = %d, want 403: %s",
+					rec.Code, rec.Body.String())
+			}
+			var answer struct {
+				Error string `json:"error"`
+			}
+			decodeInto(t, rec, &answer)
+			if answer.Error != "scope_violation" {
+				t.Errorf("error = %q, want scope_violation", answer.Error)
+			}
+		})
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
+	"github.com/neverbot/maestro/internal/views"
 )
 
 // TestEveryMCPToolGoesThroughAddScopedTool is the MCP counterpart of
@@ -54,6 +55,17 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 		// comparison: a docs tool registered with mcp.AddTool directly
 		// would otherwise never be seen here.
 		Markdown: markdown.New(pool, nil),
+		// And a views service, for the same reason and one domain along.
+		// **This is the shape of the defect this test exists to catch,
+		// arriving in the test itself**: the comment above says "the
+		// build with the most tools on it", and a domain added later
+		// makes that false in silence — the ten views.* tools would have
+		// been outside the comparison entirely, and one of them
+		// registered with mcp.AddTool directly would have been invisible
+		// here while every sentence in this file claimed otherwise.
+		// Every new domain service belongs in this Options literal in the
+		// commit that adds it.
+		Views: views.New(pool, nil),
 	})
 
 	ctx := context.Background()

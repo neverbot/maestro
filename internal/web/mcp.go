@@ -12,6 +12,7 @@ import (
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/views"
 )
 
 // MCPDeps are the domain services the MCP tools need. Keeping them in one
@@ -38,6 +39,14 @@ type MCPDeps struct {
 	// it too, and answers with entities alone when it is nil.
 	// cmd/maestro always builds one.
 	Markdown *markdown.Service
+
+	// Views is the saved-view domain the tools in mcp_views.go serve.
+	// Optional in the same sense as the two above: a Server built without
+	// one still starts and still answers every other tool, because
+	// newMCPServer registers the views tools only when it is present
+	// (TestTheViewsToolsAreAbsentWithoutAViewsService). cmd/maestro
+	// always builds one.
+	Views *views.Service
 }
 
 // WhoamiOutput is the shape returned by the whoami tool. Its ProjectID
@@ -320,8 +329,15 @@ type gamesGetInput struct{ ScopedArgs }
 func addScopedTool[In scopedInput, Out any](s *Server, srv *mcp.Server, deps MCPDeps, tool *mcp.Tool, handler func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in In) (Out, error)) {
 	if s.mcpScopedTools == nil {
 		s.mcpScopedTools = map[string]bool{}
+		s.mcpToolDescriptions = map[string]string{}
 	}
 	s.mcpScopedTools[tool.Name] = true
+	// The description is recorded beside the name for the same reason the
+	// name is recorded at all: it is the half of a tool an agent actually
+	// reads, and the only way a test can assert that a generated table
+	// reached the wire — rather than that a function which generates one
+	// exists — is to read what was registered.
+	s.mcpToolDescriptions[tool.Name] = tool.Description
 	mcp.AddTool(srv, tool, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 		caller, ok := CallerFrom(ctx)
 		if !ok {
@@ -369,8 +385,7 @@ func readOnlyTool() *mcp.ToolAnnotations {
 // from anything captured in the closure below.
 func (s *Server) newMCPServer() *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "maestro", Version: s.opts.Version}, nil)
-	deps := MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects,
-		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown}
+	deps := s.deps()
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name:         "whoami",
@@ -411,6 +426,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 	// The prose tools, on the same terms — see MCPDeps.Markdown.
 	if deps.Markdown != nil {
 		s.addDocsTools(srv, deps)
+	}
+
+	// The saved-view tools, on the same terms — see MCPDeps.Views.
+	if deps.Views != nil {
+		s.addViewsTools(srv, deps)
 	}
 
 	return srv

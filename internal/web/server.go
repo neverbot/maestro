@@ -191,6 +191,13 @@ type Server struct {
 	// registered any other way — the MCP counterpart of
 	// TestEveryGameScopedRouteGoesThroughRequireProject above.
 	mcpScopedTools map[string]bool
+	// mcpToolDescriptions is the text each of those tools was registered
+	// with. It exists so a test can read what an agent actually reads:
+	// asserting that a description-generating function exists says
+	// nothing about whether its output reached the wire, and the
+	// generated renderer catalogue and operator table are contracts that
+	// have to arrive rather than merely be available.
+	mcpToolDescriptions map[string]string
 
 	// hub, sseMaxLifetime and sseHeartbeatInterval back the SSE endpoint
 	// (events.go). See Options.Hub, Options.SSEMaxLifetime and
@@ -359,6 +366,27 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("POST /api/games/{game}/view-assets", s.handleUploadViewAsset)
 	s.registerContentRoute("GET /api/games/{game}/view-assets/{id}", s.handleServeViewAsset)
 	s.registerContentRoute("DELETE /api/games/{game}/view-assets/{id}", s.handleRemoveViewAsset)
+	// The saved-view surface (api_views.go), registered unconditionally
+	// for the reason the two blocks around it are: a registration gated
+	// on the service being present is invisible to
+	// TestEveryContentRouteIsRegisteredAsContent and
+	// TestEveryContentWriteRouteRefusesAViewer, both of which build their
+	// server from stubOptions.
+	//
+	// The two GETs are reads and a viewer reaches them. Everything else
+	// is a POST or a DELETE and is gated by registerContentRoute from its
+	// own method — including `run`, which is a read spelled as a POST
+	// because a query document does not fit in a URL. api_views.go's
+	// header records what that costs and why the alternatives are worse.
+	s.registerContentRoute("GET /api/games/{game}/views", s.handleListViews)
+	s.registerContentRoute("POST /api/games/{game}/views", s.handleUpsertView)
+	s.registerContentRoute("GET /api/games/{game}/views/by-key/{key}", s.handleGetView)
+	s.registerContentRoute("DELETE /api/games/{game}/views/by-key/{key}", s.handleRemoveView)
+	s.registerContentRoute("POST /api/games/{game}/views/run", s.handleRunView)
+	s.registerContentRoute("POST /api/games/{game}/views/validate", s.handleValidateView)
+	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/positions", s.handleSetViewPositions)
+	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/positions/clear", s.handleClearViewPositions)
+	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/background", s.handleSetViewBackground)
 	s.registerContentRoute("GET /api/games/{game}/docs", s.handleListDocs)
 	s.registerContentRoute("POST /api/games/{game}/docs", s.handleWriteDoc)
 	s.registerContentRoute("GET /api/games/{game}/docs/one", s.handleReadDoc)

@@ -71,6 +71,13 @@ const (
 // layoutModes is the closed list, in the order a refusal names them.
 var layoutModes = []string{LayoutAuto, LayoutManual, LayoutMixed}
 
+// LayoutModes is the closed list, for the tool description that has to
+// print it. It returns a copy, so a caller cannot edit the list this
+// package validates against, and it is generated from the same slice
+// layoutModeProblem reads — a fourth mode added there appears on the wire
+// in the same commit rather than being a mode no agent knows to send.
+func LayoutModes() []string { return append([]string(nil), layoutModes...) }
+
 // noVersion is the expected_version an upsert passes when its caller has
 // no version to expect. Versions start at 1 and only ever climb, so no
 // stored row can equal it: the guarded DO UPDATE is then a no-op on the

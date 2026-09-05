@@ -1,0 +1,427 @@
+package web_test
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/neverbot/maestro/internal/config"
+	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/testutil"
+	"github.com/neverbot/maestro/internal/views"
+	"github.com/neverbot/maestro/internal/web"
+)
+
+// The saved-view routes, over HTTP.
+//
+// Everything about the query language and about what a view stores is
+// decided in internal/views and tested there. What is tested here is
+// what only the transport can be wrong about: that both surfaces answer
+// with the same codes and the same envelope, that a viewer may run a
+// view and may not save one, and that the view.* events reach a
+// subscriber over the endpoint a browser actually subscribes to.
+
+type viewsRESTFixture struct {
+	srv     *web.Server
+	ids     *identity.Service
+	proj    *projects.Service
+	views   *views.Service
+	meta    *metamodel.Service
+	game    uuid.UUID
+	other   uuid.UUID
+	ownerID uuid.UUID
+	cookie  *http.Cookie
+	hub     *realtime.Hub
+}
+
+// newViewsRESTFixture wires a server the way cmd/maestro does: one hub,
+// handed to every domain service and to Options.Hub alike, so a
+// published event actually reaches /events. A fixture whose services
+// take a nil hub cannot see any of that and would leave the wiring
+// proved only by reading main.go.
+func newViewsRESTFixture(t *testing.T) viewsRESTFixture {
+	t.Helper()
+	pool := testutil.NewPool(t)
+	cfg := config.Config{
+		SessionTTL: testConfig().SessionTTL,
+		InviteTTL:  testConfig().InviteTTL,
+		Argon2:     testConfig().Argon2,
+	}
+	ids := identity.New(pool, cfg)
+	projSvc := projects.New(pool)
+	hub := realtime.NewHub()
+	mm := metamodel.New(pool, hub)
+	vs := views.New(pool, hub)
+	srv := web.NewServer(web.Options{
+		Version: "test", Config: cfg, Identity: ids, Projects: projSvc,
+		Metamodel: mm, Views: vs, Hub: hub,
+		SSEMaxLifetime: time.Minute, SSEHeartbeatInterval: time.Minute,
+	})
+	ctx := context.Background()
+	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	game, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create game: %v", err)
+	}
+	other, err := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
+	if err != nil {
+		t.Fatalf("Create the second game: %v", err)
+	}
+	f := viewsRESTFixture{
+		srv: srv, ids: ids, proj: projSvc, views: vs, meta: mm,
+		game: game.ID, other: other.ID, ownerID: owner.ID, hub: hub,
+		cookie: loginAs(t, srv, "owner@studio.com"),
+	}
+	f.seed(t)
+	return f
+}
+
+func (f viewsRESTFixture) seed(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := f.meta.UpsertEntityType(ctx, f.game, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: []metamodel.Field{{Key: "min_level", Type: metamodel.FieldNumber}},
+	}); err != nil {
+		t.Fatalf("seed the quest type: %v", err)
+	}
+	for _, in := range []metamodel.EntityInput{
+		{TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"min_level": 22}},
+		{TypeKey: "quest", Key: "defias", Name: "The Defias Brotherhood",
+			Fields: map[string]any{"min_level": 28}},
+	} {
+		if _, err := f.meta.UpsertEntity(ctx, f.game, in); err != nil {
+			t.Fatalf("seed %s: %v", in.Key, err)
+		}
+	}
+}
+
+func (f viewsRESTFixture) path(suffix string) string {
+	return "/api/games/" + f.game.String() + suffix
+}
+
+// call makes one request as the given cookie, with a JSON body when one
+// is given.
+func (f viewsRESTFixture) call(t *testing.T, cookie *http.Cookie, method, path string,
+	body any,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		reader = bytes.NewReader(raw)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	f.srv.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestTheViewRoutesAreTheSameContractAsTheTools walks the whole surface
+// over HTTP: save, read back, list, run, validate, arrange, background,
+// remove. It is not a re-test of the domain — it is the claim that the
+// REST mirror reaches the same cores, in the same order, and hands back
+// the same shapes.
+func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
+	f := newViewsRESTFixture(t)
+
+	rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
+		"key": "route", "name": "The route", "renderer": "graph",
+		"query": json.RawMessage(questsQuery), "expected_version": 0,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /views = %d: %s", rec.Code, rec.Body.String())
+	}
+	var saved web.ViewOutput
+	decodeInto(t, rec, &saved)
+	if saved.Version != 1 || saved.Key != "route" {
+		t.Fatalf("saved = %+v, want route at version 1", saved)
+	}
+
+	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/route"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET one = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got web.ViewOutput
+	decodeInto(t, rec, &got)
+	if got.ID != saved.ID {
+		t.Fatalf("read back %s, want %s", got.ID, saved.ID)
+	}
+
+	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET listing = %d: %s", rec.Code, rec.Body.String())
+	}
+	var listing web.ViewsListOutput
+	decodeInto(t, rec, &listing)
+	if len(listing.Items) != 1 || listing.Items[0].Key != "route" || listing.Items[0].Stale {
+		t.Fatalf("listing = %+v, want one row, not stale", listing.Items)
+	}
+
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/run"), map[string]any{"key": "route"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST run = %d: %s", rec.Code, rec.Body.String())
+	}
+	var run map[string]any
+	decodeInto(t, rec, &run)
+	nodes, _ := run["nodes"].([]any)
+	if len(nodes) != 2 {
+		t.Fatalf("run drew %d nodes, want the two quests: %s", len(nodes), rec.Body.String())
+	}
+	// The envelope's empty lists are lists and never null, which is the
+	// promise the domain makes and this is where a client reads it.
+	if _, ok := run["positions"].([]any); !ok {
+		t.Fatalf("positions = %v, want an array on a saved run", run["positions"])
+	}
+
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/validate"), map[string]any{
+		"query": json.RawMessage(questsQuery),
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST validate = %d: %s", rec.Code, rec.Body.String())
+	}
+	var validated web.ViewsValidateOutput
+	decodeInto(t, rec, &validated)
+	if !validated.Valid || len(validated.Refs) != 1 || validated.Limits.MaxNodes == 0 {
+		t.Fatalf("validate = %+v", validated)
+	}
+
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/route/positions"),
+		map[string]any{"positions": []any{
+			map[string]any{"entity_type": "quest", "entity_key": "hogger", "x": 3, "y": 4},
+		}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST positions = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = f.call(t, f.cookie, http.MethodPost, f.path("/views/by-key/route/positions/clear"), map[string]any{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST positions/clear = %d: %s", rec.Code, rec.Body.String())
+	}
+	var cleared web.ViewsPositionsRemovedOutput
+	decodeInto(t, rec, &cleared)
+	if cleared.Removed != 1 {
+		t.Fatalf("cleared %d, want the one that was written", cleared.Removed)
+	}
+
+	rec = f.call(t, f.cookie, http.MethodDelete, f.path("/views/by-key/route"), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/route"), nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET after DELETE = %d, want 404", rec.Code)
+	}
+}
+
+// TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode is the wire codes
+// arriving at a browser: the same code an agent gets, the status this
+// surface adds, and the pointer as data rather than inside prose a
+// client would have to parse.
+func TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode(t *testing.T) {
+	f := newViewsRESTFixture(t)
+	rec := f.call(t, f.cookie, http.MethodPost, f.path("/views/validate"), map[string]any{
+		"query": json.RawMessage(`{"v":1,"from":[{"type":"qeust"}]}`),
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error   string `json:"error"`
+		Details struct {
+			Fields []map[string]string `json:"fields"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+	if body.Error != "query_invalid" {
+		t.Errorf("error = %q, want query_invalid", body.Error)
+	}
+	if len(body.Details.Fields) != 1 || body.Details.Fields[0]["path"] != "/from/0/type" {
+		t.Fatalf("details.fields = %v, want the pointer into the document", body.Details.Fields)
+	}
+}
+
+// TestAViewerRunsAViewAndCannotSaveOne is open question O3, made true
+// rather than intended — for the half a convention test cannot make.
+// TestEveryContentWriteRouteRefusesAViewer already drives every write at
+// a viewer; what it cannot say is that a viewer can still *read*, and a
+// surface that refused a viewer everything would satisfy it.
+//
+// Running is the interesting case, because it is a read spelled as a
+// POST: over REST it is therefore gated as a write, which is what
+// api_views.go's header records as the cost of that spelling. So the
+// read a viewer must keep is the listing and the view itself.
+func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
+	f := newViewsRESTFixture(t)
+	ctx := context.Background()
+	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	if _, err := f.views.UpsertView(ctx, f.game, views.ViewInput{
+		Key: "route", Name: "Route", Query: []byte(questsQuery), Renderer: "graph",
+	}); err != nil {
+		t.Fatalf("seed a view: %v", err)
+	}
+	cookie := loginAs(t, f.srv, "viewer@studio.com")
+
+	if rec := f.call(t, cookie, http.MethodGet, f.path("/views"), nil); rec.Code != http.StatusOK {
+		t.Fatalf("a viewer listing views = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.call(t, cookie, http.MethodGet, f.path("/views/by-key/route"), nil); rec.Code != http.StatusOK {
+		t.Fatalf("a viewer opening a view = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec := f.call(t, cookie, http.MethodPost, f.path("/views"), map[string]any{
+		"key": "another", "name": "Another", "renderer": "graph",
+		"query": json.RawMessage(questsQuery), "expected_version": 0,
+	})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("a viewer saving a view = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+	// Nothing was stored by the refused write.
+	if _, err := f.views.ViewByKey(ctx, f.game, "another"); err == nil {
+		t.Fatal("the refused write stored a view anyway")
+	}
+}
+
+// TestAViewEventReachesAViewerAndATokenAlike is the read-back for the
+// three view.* kinds, and it is a different claim from internal/views'
+// own event tests: those prove the hub was published to, this proves a
+// subscriber actually receives it, over the endpoint it subscribes to,
+// on a server wired the way main.go wires it.
+//
+// **Two subscribers, and both are load-bearing.** A viewer is the one a
+// MinRole above viewer would cut out, and a token caller is the one
+// HumanOnly true would cut out — and internal/web's own member, token
+// and invite events all set HumanOnly true, so a test that only ever
+// subscribed with a cookie would stay green if somebody published a
+// view event that way and agents had silently stopped being told.
+func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
+	f := newViewsRESTFixture(t)
+	ctx := context.Background()
+
+	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	secret, _, err := f.ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: f.game, UserID: f.ownerID, Label: "view agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	viewerCookie := loginAs(t, f.srv, "viewer@studio.com")
+
+	ts := httptest.NewServer(f.srv)
+	// t.Cleanup rather than defer, and registered *before* the streams
+	// are opened: cleanups run last-registered-first, so each stream's
+	// own body close runs ahead of this, and httptest.Server.Close blocks
+	// until every in-flight request has finished. With a defer here the
+	// two open SSE handlers were still running, and the test sat out the
+	// whole SSEMaxLifetime — a minute of waiting for a test that has
+	// already passed, which is how a suite stops being run.
+	t.Cleanup(ts.Close)
+	viewerStream := openStream(t, ts, f.game.String(), viewerCookie.Value)
+	agentStream := openTokenStream(t, ts, f.game.String(), secret)
+
+	// Every write goes through the *route*, not through the service:
+	// this test is about the wiring, and a direct service call would
+	// prove the domain publishes and nothing about whether the server
+	// this process serves is holding the same hub.
+	post := func(suffix string, body any) {
+		t.Helper()
+		if rec := f.call(t, f.cookie, http.MethodPost, f.path(suffix), body); rec.Code != http.StatusOK {
+			t.Fatalf("POST %s = %d: %s", suffix, rec.Code, rec.Body.String())
+		}
+	}
+
+	for _, step := range []struct {
+		what string
+		kind string
+		do   func()
+	}{
+		{"a save", "view.upserted", func() {
+			post("/views", map[string]any{"key": "route", "name": "Route", "renderer": "graph",
+				"query": json.RawMessage(questsQuery), "expected_version": 0})
+		}},
+		{"a drag", "view.positions", func() {
+			post("/views/by-key/route/positions", map[string]any{"positions": []any{
+				map[string]any{"entity_type": "quest", "entity_key": "hogger", "x": 1, "y": 2},
+			}})
+		}},
+		{"a clear", "view.positions", func() {
+			post("/views/by-key/route/positions/clear", map[string]any{})
+		}},
+		{"a removal", "view.removed", func() {
+			if rec := f.call(t, f.cookie, http.MethodDelete,
+				f.path("/views/by-key/route"), nil); rec.Code != http.StatusOK {
+				t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+			}
+		}},
+	} {
+		step.do()
+		for who, reader := range map[string]*bufio.Reader{
+			"the viewer": viewerStream, "the agent": agentStream,
+		} {
+			kind, _, data := readOneSSEFrame(t, reader)
+			if kind != step.kind {
+				t.Fatalf("%s got %q after %s, want %s", who, kind, step.what, step.kind)
+			}
+			if !strings.Contains(data, `"key":"route"`) {
+				t.Errorf("%s got payload %s, want the view's key in it", who, data)
+			}
+			// A position event carries the identity and nothing else —
+			// no coordinates, because publication order is not commit
+			// order and a client rendering a payload would eventually
+			// render the older of two drags.
+			if step.kind == "view.positions" && strings.Contains(data, `"x"`) {
+				t.Errorf("%s got coordinates on a view.positions payload: %s", who, data)
+			}
+		}
+	}
+}
+
+// decodeInto reads a successful JSON response body.
+func decodeInto(t *testing.T, rec *httptest.ResponseRecorder, v any) {
+	t.Helper()
+	if err := json.Unmarshal(rec.Body.Bytes(), v); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
+	}
+}

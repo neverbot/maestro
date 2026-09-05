@@ -48,3 +48,17 @@ func (s *Server) RegisteredPatternsForTest() []string {
 func (s *Server) ContentPatternsForTest() []string {
 	return append([]string(nil), s.contentPatterns...)
 }
+
+// ToolDescriptionsForTest returns the description every tool registered
+// through addScopedTool was registered with. It exists for
+// TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated
+// (mcp_views_test.go), which reads the text an agent actually reads: a
+// test that called views.RendererDescription() itself would prove the
+// function exists, not that its output ever reached a tool.
+func (s *Server) ToolDescriptionsForTest() map[string]string {
+	out := make(map[string]string, len(s.mcpToolDescriptions))
+	for name, description := range s.mcpToolDescriptions {
+		out[name] = description
+	}
+	return out
+}

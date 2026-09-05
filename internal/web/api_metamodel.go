@@ -75,11 +75,11 @@ import (
 const maxContentRequestBodyBytes = 4 << 20
 
 // deps builds the MCPDeps the shared cores take. Built per call rather
-// than cached: it is three pointer copies, and a cached copy would be a
+// than cached: it is four pointer copies, and a cached copy would be a
 // second place Options' services are read from.
 func (s *Server) deps() MCPDeps {
 	return MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects,
-		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown}
+		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown, Views: s.opts.Views}
 }
 
 // requireContentService refuses a game-content route on an instance

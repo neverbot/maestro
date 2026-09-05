@@ -343,9 +343,14 @@ var renderers = []Renderer{
 		Name:            RendererMap,
 		Consumes:        "nodes, edges optional, coordinates required",
 		ReadsBackground: true,
+		// No plan reference in a description an agent reads: "Task 13" is
+		// a heading in a document no caller has, and it reached the wire
+		// inside the generated tool description — 6447 characters of it,
+		// carrying that string. It came from Task 10 and survived this
+		// task's own rewrite of the sentence around it.
 		Doc: "Nodes at coordinates, optionally over a background image. The " +
-			"coordinates are either the ones designers dragged (Task 13's " +
-			"positions) or two number fields the game declares. The background " +
+			"coordinates are either the ones designers dragged and saved with " +
+			"views.set_positions, or two number fields the game declares. The background " +
 			"image is not a renderer parameter: it is a column of the view, " +
 			"written with views.set_background, because it is a reference to a " +
 			"stored asset and only a foreign key can keep that reference honest.",

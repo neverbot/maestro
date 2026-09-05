@@ -101,6 +101,27 @@ import (
 //     aggregate bound; every other number here is per asset, and for a
 //     sub-project a game could hold as many eight-megabyte images as
 //     anyone cared to upload.
+//   - **The dimension bounds are per canvas, and an animated file has
+//     more than one frame. Recorded, not bounded, and here is the
+//     judgement.** Both PNG and WebP carry animation -- APNG's acTL
+//     chunk, WebP's ANIM/ANMF under a VP8X whose flags say so -- and the
+//     header decode above stops before either: png.DecodeConfig returns
+//     at IHDR and webpConfig reads the first chunk and no more, so
+//     nothing here ever sees a frame count. MaxAssetPixels therefore
+//     bounds one canvas and a browser's cost is that canvas times
+//     however many frames it decides to hold decoded.
+//
+//     No bound is added today, for two reasons. MaxAssetBytes already
+//     caps the compressed whole at eight megabytes, and every frame's
+//     data is inside it -- what animation buys an attacker is the same
+//     bytes replayed, not more of them. And the only *cheap* check is
+//     the WebP one, a flag bit webpConfig already has in its hand:
+//     refusing animated WebP while APNG walks through would be a bound
+//     that reads as protection and is not one, which is worse than the
+//     gap stated plainly. If a designer's tab is ever measured falling
+//     over on an animated background, the change is both formats at
+//     once -- the VP8X flag, and a scan for acTL ahead of the first IDAT
+//     -- and it belongs with a test per format.
 //
 // **This file is the second write path over a view's row, and it stays
 // the narrow one.** UpsertView is the only place a query and its
@@ -517,6 +538,21 @@ type BackgroundInput struct {
 //     the message, and refused by 0008_views.sql's composite foreign key
 //     regardless -- the constraint is the guarantee, the lookup is the
 //     sentence.
+//
+// **What this call does to the audit columns, decided: nothing.** It
+// leaves version alone, for the reason above, and it leaves
+// updated_by_user_id and updated_by_token_id alone as well -- while the
+// timestamp trigger fires, so a view reads as modified with its
+// attribution still pointing at whoever last edited the query. That
+// asymmetry is the lesser of the two: `updated_by` on views answers
+// "who wrote what this view says", which is the query document and the
+// renderer parameters, and it is the pair a reader compares against a
+// version they hold; repointing it at someone who changed no part of
+// that document would make one row disagree with itself. Placement
+// carries no attribution anywhere here -- view_positions has no audit
+// columns either, and a dragged node is the same kind of act -- so
+// "who moved the map" is a column on the placement, in the change that
+// wants it for positions too. The statement says the same.
 func (s *Service) SetBackground(ctx context.Context, projectID uuid.UUID, viewKey string,
 	in BackgroundInput,
 ) error {

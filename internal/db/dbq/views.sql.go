@@ -988,6 +988,24 @@ type SetViewBackgroundParams struct {
 // query document the version guards (positions.go makes the same call
 // for a drag), and updated_at moves on its own through
 // views_set_updated_at.
+//
+// **updated_by_user_id and updated_by_token_id are untouched too, and
+// that is decided rather than inherited.** The consequence is legible
+// and was worth stating: this statement fires the timestamp trigger, so
+// after a background is placed the view reads as modified while its
+// attribution still points at whoever last edited the query. The
+// alternative -- moving the attribution without moving the version --
+// would be worse: `updated_by` on this table answers "who wrote what
+// this view *says*", which is the query document and the renderer
+// parameters, and it is the pair a reader compares against a version
+// they hold. Repointing it at someone who changed no part of that
+// document would make the two halves of one row disagree.
+//
+// Placement carries no attribution anywhere in this sub-project:
+// view_positions has no audit columns at all, and a dragged node is the
+// same kind of act as a placed background. Whoever wants "who moved the
+// map" wants it for positions too, and that is a column on the
+// placement rather than a repointing of the document's.
 func (q *Queries) SetViewBackground(ctx context.Context, arg SetViewBackgroundParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setViewBackground,
 		arg.BackgroundAssetID,

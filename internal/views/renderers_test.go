@@ -1208,3 +1208,37 @@ func TestEveryTypeNamingParameterKindIsARecordedReference(t *testing.T) {
 		}
 	}
 }
+
+// TestTheRendererDescriptionNamesNothingOnlyThisRepositoryKnows keeps
+// the catalogue's prose readable by its actual audience.
+//
+// `map`'s Doc said the coordinates were "the ones designers dragged
+// (Task 13's positions)", and the generated description really carried
+// it: an agent reading that description has no plan, no task numbering
+// and no way to find out what Task 13 is, so the parenthesis was noise
+// at best and a dead reference at worst. It came from Task 10 and
+// survived a rewrite of the sentence around it, which is why this is a
+// sweep rather than a fix.
+//
+// The list is of things that only make sense inside this repository: a
+// plan task, a spec section, a Go file, a migration, a numbered review
+// finding. The description may name tools, parameters, renderers and
+// wire codes — everything a caller can act on — and nothing else.
+func TestTheRendererDescriptionNamesNothingOnlyThisRepositoryKnows(t *testing.T) {
+	description := RendererDescription()
+	for _, forbidden := range []string{
+		"Task ", "§", "finding ", "correction ", ".sql", ".go",
+	} {
+		if strings.Contains(description, forbidden) {
+			t.Errorf("the renderer description contains %q, which names something only "+
+				"this repository knows: an agent reading it cannot act on that",
+				forbidden)
+		}
+	}
+	// The vacuity guard: a description that had gone empty would pass
+	// every assertion above.
+	if len(description) < 1000 {
+		t.Fatalf("the description is %d characters, which is too short to be the "+
+			"catalogue: this test would pass over nothing", len(description))
+	}
+}

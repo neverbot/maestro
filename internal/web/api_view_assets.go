@@ -177,9 +177,18 @@ func (s *Server) handleListViewAssets(w http.ResponseWriter, r *http.Request,
 //     rather than relied on, because this is the one route whose safety
 //     depends on it: a browser that sniffs its own type out of bytes a
 //     designer uploaded is the whole of the risk the closed mime list
-//     exists to bound. TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType
-//     asserts it on this response, so moving or narrowing the global
-//     middleware cannot silently take it away from here.
+//     exists to bound. Moving or narrowing the global middleware must
+//     not silently take it away from here.
+//
+//     **That claim is now assertable, and for a while it was not.**
+//     TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType goes
+//     through the full server, where securityHeaders sets the same
+//     header outermost — so deleting this line left the whole web suite
+//     green, and a line whose own comment calls it load-bearing could be
+//     removed in silence. TestTheServingRoutesNoSniffHeaderIsItsOwn
+//     calls this handler directly, with no middleware in front of it,
+//     which is the only place in this package that can tell the two
+//     sources apart.
 //
 //   - Cache-Control, long and immutable, because an asset's bytes never
 //     change: there is no update path, and a new image is a new asset

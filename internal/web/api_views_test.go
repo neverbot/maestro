@@ -310,6 +310,14 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
 	}
+	// The answer's one member, which is the whole of what this route
+	// says: a `removed` that was always false would leave a client
+	// unable to tell a deletion from a refusal it did not read.
+	var removed web.ViewsRemovedOutput
+	decodeInto(t, rec, &removed)
+	if !removed.Removed {
+		t.Errorf("DELETE answered %+v, want removed true", removed)
+	}
 	rec = f.call(t, f.cookie, http.MethodGet, f.path("/views/by-key/route"), nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("GET after DELETE = %d, want 404", rec.Code)

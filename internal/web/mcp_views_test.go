@@ -1028,3 +1028,92 @@ func TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces(t *testing.T) {
 		t.Error("a cursor issued for the graph filter was accepted against the map one")
 	}
 }
+
+// TestTheAssetListingToolPagesWithItsOwnCursor is the gap the REST twin
+// hides. The browser's asset listing is its own handler (api_view_assets.go)
+// and is paged by its own test; this tool's core is a second
+// implementation of the same read, and dropping its cursor and limit
+// left the whole web suite green — an agent asking for a page would
+// have been handed the whole listing, and the next_cursor it sent back
+// would have been ignored in silence.
+func TestTheAssetListingToolPagesWithItsOwnCursor(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+	all := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		all[f.upload(t, f.game)] = true
+	}
+
+	whole, err := web.MCPViewsListAssets(ctx, f.deps, f.caller, f.game,
+		web.ViewsListAssetsInput{})
+	if err != nil {
+		t.Fatalf("views.list_assets: %v", err)
+	}
+	if len(whole.Items) != 3 || whole.NextCursor != nil {
+		t.Fatalf("the unpaged listing = %d items with cursor %v, want all three and none",
+			len(whole.Items), whole.NextCursor)
+	}
+
+	page, err := web.MCPViewsListAssets(ctx, f.deps, f.caller, f.game,
+		web.ViewsListAssetsInput{Limit: 2})
+	if err != nil {
+		t.Fatalf("views.list_assets paged: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("page one carried %d assets, want the limit of 2 honoured", len(page.Items))
+	}
+	if page.NextCursor == nil {
+		t.Fatal("page one carried no next_cursor and there is a third asset to reach")
+	}
+	next, err := web.MCPViewsListAssets(ctx, f.deps, f.caller, f.game,
+		web.ViewsListAssetsInput{Limit: 2, Cursor: *page.NextCursor})
+	if err != nil {
+		t.Fatalf("views.list_assets page two: %v", err)
+	}
+	if len(next.Items) != 1 {
+		t.Fatalf("page two carried %d assets, want the one that was left", len(next.Items))
+	}
+	// The walk saw each asset once: a cursor that started over would
+	// satisfy every count above and hand the same page back forever.
+	seen := map[string]bool{}
+	for _, item := range append(append([]web.ViewAssetOutput{}, page.Items...), next.Items...) {
+		if seen[item.ID] {
+			t.Fatalf("asset %s came back on both pages", item.ID)
+		}
+		seen[item.ID] = true
+	}
+	if len(seen) != len(all) {
+		t.Fatalf("the paged walk saw %d assets, the unpaged listing %d", len(seen), len(all))
+	}
+}
+
+// TestRemovingAViewSaysSoAndThenTheViewIsGone. views.remove's whole
+// answer is one boolean, and nothing asserted it: hard-wiring it to
+// false left the web suite green, so an agent could not have told a
+// deletion from a refusal.
+func TestRemovingAViewSaysSoAndThenTheViewIsGone(t *testing.T) {
+	f := newViewsFixture(t)
+	ctx := context.Background()
+	f.save(t, "route", questsQuery, "graph")
+
+	out, err := web.MCPViewsRemove(ctx, f.deps, f.caller, f.game,
+		web.ViewsRemoveInput{Key: "route"})
+	if err != nil {
+		t.Fatalf("views.remove: %v", err)
+	}
+	if !out.Removed {
+		t.Error("views.remove answered removed false for a view it deleted")
+	}
+	// And it really is gone, so the boolean is not the only thing being
+	// asserted here.
+	if _, err := web.MCPViewsGet(ctx, f.deps, f.caller, f.game,
+		web.ViewsGetInput{Key: "route"}); err == nil {
+		t.Fatal("the view survived views.remove")
+	}
+	// A key that names no view is not_found rather than a cheerful
+	// removed true.
+	if _, err := web.MCPViewsRemove(ctx, f.deps, f.caller, f.game,
+		web.ViewsRemoveInput{Key: "route"}); err == nil {
+		t.Fatal("removing a view twice was accepted the second time")
+	}
+}

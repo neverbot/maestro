@@ -1032,7 +1032,7 @@ own elapsed milliseconds when it ran (Task 6 supplies it). Two numbers,
 because "the query is slow" and "the picture is slow" must be
 distinguishable without a profiler.
 
-- [ ] Tests (`internal/web/jstest/frame_test.mjs`, driven by
+- [x] Tests (`internal/web/jstest/frame_test.mjs`, driven by
   `TestTheViewFrame`): `threeTruncationFlagsAreThreeSentences`;
   `oneTruncationFlagIsOneSentence`;
   `TestACleanEnvelopeProducesNoCompletenessClaim` — a clean envelope,
@@ -1060,7 +1060,7 @@ distinguishable without a profiler.
   `parametersRoundTripThroughTheURL` — bind two, serialise, re-parse,
   assert equality, including a value containing `&` and a UTF-8 name.
 
-- [ ] See red: delete the `truncated.depth` arm and watch
+- [x] See red: delete the `truncated.depth` arm and watch
   `threeTruncationFlagsAreThreeSentences` report two; make the empty
   state reuse the error class and watch `anEmptyAnswerIsASuccess` name
   the class; move `*_renamed` into `bannersFor` and watch two tests fail
@@ -1069,7 +1069,7 @@ distinguishable without a profiler.
   picture" to the footer and watch
   `TestACleanEnvelopeProducesNoCompletenessClaim` fail.
 
-- [ ] Hand check: open a stale view and read the panel. The question is
+- [x] Hand check: open a stale view and read the panel. The question is
   whether a designer who did not write the query can tell **which step**
   broke from the pointer alone.
 
@@ -1079,6 +1079,135 @@ git add internal/web/static/render/scene.js \
         internal/web/jstest/frame_test.mjs internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the view frame, and the negative states designed once for all six renderers"
 ```
+
+#### Corrections made during implementation
+
+1. **A `Diagnostic` on the wire carries no sentence, and the panel is
+   built from `details.fields` instead.** The task says "one row per
+   `Diagnostic` with the server's sentence"; `internal/views/stale.go`'s
+   `Diagnostic.message()` is **unexported**, and `internal/web`'s
+   `staleDetails` publishes `details.stale[]` as `{code, pointer, was,
+   now}` and nothing else. The sentences are in `details.fields[]`, as
+   `{path, message}`, addressed by the same pointer — `staleQuery` fills
+   both lists from one source precisely so the two can be joined.
+   `diagnosticsFor` therefore walks `fields`, which is also the **wider**
+   list: a stored query can be broken at a position no diagnostic covers,
+   and walking the diagnostics would have dropped that reason silently.
+   The code and the was/now pair are read off `details.stale` by pointer.
+
+2. **A *successful* best-effort envelope carries no sentence either**, so
+   the stale band shows pointers rather than prose. `Result.Stale` is the
+   same `Diagnostic` list with no message on it, and composing one here
+   is exactly what Task 3's rule forbids. The **dropped** band is the one
+   that has sentences, because they come from the refusal the designer
+   overrode, carried across the re-run in `droppedRefs`.
+
+3. **The stale slot and the dropped slot never both speak.** They are one
+   fact — a non-rename diagnostic can only reach a *successful* envelope
+   through best effort, since every one of them is raised beside a
+   resolution problem that makes `fail` refuse — so banding both would
+   tell a designer the same thing twice under two headings. The dropped
+   band wins when the caller has the refusal's own sentences; the stale
+   band answers alone when it does not (a page loaded straight into a
+   best-effort link has the envelope and not the refusal).
+   `theStaleBandAndTheDroppedBandAreNeverBothSaid` pins both directions.
+
+4. **The band is `--dropped`, not amber.** The spec's §4.2 says amber and
+   its own §2.3 declares no amber: Task 1's central rule is that the
+   chrome is achromatic with exactly two chromatic exemptions
+   (`--danger`, `--focus`), and a third one for this band would spend a
+   channel the product has already given away to `color_by`.
+   `--dropped: #b0a89a` is what §2.3 declares for "what best_effort
+   removed" and is what the band and its rows wear.
+
+5. **`--dropped` is declared in this task, which is where Task 1 left
+   it.** Task 1's correction 2 deferred it here with the argument that a
+   token nothing reads is a lie; carrying that one step along is this
+   task's job, and it now has two readers — `scene.js` names it on the
+   band and its rows, and the component's swatch paints with it. It is
+   deliberately not held to 3:1: it is never the only carrier, since the
+   band counts the dropped references in a sentence and lists every one
+   of them as text.
+
+6. **The truncation sentences cannot name the cap.** The spec writes
+   *"This picture is capped at 1000 nodes"*; the envelope carries no cap
+   — `limit` lives in the query document, which the frame does not read —
+   so the number would have been invented or plumbed through a second
+   surface for one word. The three sentences say that a cap was hit and
+   that the answer had more, which is exactly what `truncated` knows.
+
+7. **`param_unbound` gets its own frame kind rather than a flag.** The
+   four kinds (`picture`, `empty`, `diagnostics`, `unbound`) are mutually
+   exclusive answers to "what is under the title strip", and each is
+   produced by a condition no other can meet — which is what lets
+   `everyThingHasItsOwnState` assert that nine fixtures have nine
+   distinct signatures, rather than each negative test standing alone on
+   a fixture that might also satisfy its neighbour.
+
+8. **A refused run's footer counts nothing rather than counting zero.**
+   Found by the hand check: the panel read `0 nodes, 0 edges · depth 0 ·
+   query 0 ms` under a refusal, which is the *empty answer's* footer,
+   word for word, on a run that measured nothing at all. The strip is
+   still always present and is now silent, for the same reason
+   `execute.go` refuses to return an unplaced node at the origin.
+   `aRefusalCountsNothingBecauseItMeasuredNothing` holds it with the
+   empty answer as its control.
+
+9. **Run anyway is offered for `query_stale` and for nothing else.** Best
+   effort prunes what the *game* moved; offering it on a `query_invalid`
+   refusal would be a button that fails the same way twice.
+   `anInvalidRefusalOffersNoBestEffortAction` is also what tells the two
+   refusal fixtures apart in the signature test above.
+
+10. **`placedAutomatically` and `droppedRefs` are the caller's, because
+    the envelope cannot supply either.** A successful envelope does not
+    echo the `on_stale` it ran under (`runOutput` sends nodes, edges,
+    stats, truncated, stale and positions), and "which node the engine
+    had to place" is knowable only where the saved positions and the
+    layout meet. Both default to nothing, so a caller that knows neither
+    gets no band rather than a guessed one.
+
+11. **The component's silence is held by a source-shape guard in a fifth
+    file the task did not name**, `internal/web/static_frame_test.go`.
+    Every sentence lives in `scene.js`, which a harness reads and a
+    mutation turns red; a component that hard-coded one would render
+    perfectly and pass every check in `frame_test.mjs`, which never loads
+    it — and the next five renderers would each grow their own copy,
+    which is the exact drift this task exists to prevent.
+    `TestTheViewFrameSpeaksOnlyTheModelsWords` holds that every text node
+    in the templates is whitespace or an interpolation, and
+    `TestTheTemplateTextScanReadsWhatItClaimsTo` is the guard on the
+    guard, in both directions: it catches a planted sentence, it does not
+    read an interpolation, a comparison, an arrow function or a comment
+    as prose, and it proves the `css` skip did not eat the templates
+    after it.
+
+12. **The task's own control for the rename mutation does not fire, and
+    was replaced.** Moving `*_renamed` into `bannersFor` was to fail
+    `bannersKeepTheirFixedOrder` "whose expected list grows"; it does
+    not, because that fixture's dropped band suppresses the stale slot
+    and its diagnostic is a missing rather than a rename — a rename would
+    ride into the stale band's *rows* without changing a single code.
+    `theStaleSlotSitsAheadOfEverythingElse` now carries a rename beside a
+    missing field and asserts the rows, so the mutation turns two checks
+    red as the task intended.
+
+13. **Names normalised, as Task 3 did.** The plan's
+    `TestACleanEnvelopeProducesNoCompletenessClaim` is the JavaScript
+    check `aCleanEnvelopeProducesNoCompletenessClaim`: it is a property
+    of the module and not of any route, and the whole harness is driven
+    from Go by `TestTheViewFrame`.
+
+14. **The hand check was made against the model, not a browser, and that
+    is recorded rather than claimed otherwise.** No route mounts the
+    frame until Task 15, so the panel was rendered for a three-step
+    query — `/traverse/2/via/0`, `/from/0/where/value`,
+    `/project/color_by` — and read. A designer who did not write the
+    query can tell which step broke from the pointer alone: the first
+    names the third traversal step and its first `via`. What they cannot
+    do yet is *see* that step, because the read-only query view (spec
+    §7.4) is Task 15's; until then the pointer is an address into a
+    document they have to open elsewhere.
 
 ---
 

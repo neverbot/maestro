@@ -52,7 +52,7 @@ func (q *Queries) CountOwnersForUpdate(ctx context.Context, projectID uuid.UUID)
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (slug, name)
 VALUES ($1::text, $2::text)
-RETURNING id, slug, name, created_at, updated_at
+RETURNING id, slug, name, created_at, updated_at, design_version
 `
 
 type CreateProjectParams struct {
@@ -69,6 +69,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DesignVersion,
 	)
 	return i, err
 }
@@ -126,7 +127,7 @@ func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRolePa
 }
 
 const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, slug, name, created_at, updated_at FROM projects WHERE id = $1::uuid
+SELECT id, slug, name, created_at, updated_at, design_version FROM projects WHERE id = $1::uuid
 `
 
 func (q *Queries) GetProjectByID(ctx context.Context, id uuid.UUID) (Project, error) {
@@ -138,12 +139,13 @@ func (q *Queries) GetProjectByID(ctx context.Context, id uuid.UUID) (Project, er
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DesignVersion,
 	)
 	return i, err
 }
 
 const getProjectBySlug = `-- name: GetProjectBySlug :one
-SELECT id, slug, name, created_at, updated_at FROM projects WHERE lower(slug) = lower($1::text)
+SELECT id, slug, name, created_at, updated_at, design_version FROM projects WHERE lower(slug) = lower($1::text)
 `
 
 func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, error) {
@@ -155,6 +157,7 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DesignVersion,
 	)
 	return i, err
 }
@@ -256,7 +259,7 @@ func (q *Queries) ListMembers(ctx context.Context, projectID uuid.UUID) ([]ListM
 }
 
 const listProjectsForUser = `-- name: ListProjectsForUser :many
-SELECT p.id, p.slug, p.name, p.created_at, p.updated_at FROM projects p
+SELECT p.id, p.slug, p.name, p.created_at, p.updated_at, p.design_version FROM projects p
 JOIN memberships m ON m.project_id = p.id
 WHERE m.user_id = $1::uuid
 ORDER BY p.name, p.id
@@ -282,6 +285,7 @@ func (q *Queries) ListProjectsForUser(ctx context.Context, userID uuid.UUID) ([]
 			&i.Name,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DesignVersion,
 		); err != nil {
 			return nil, err
 		}

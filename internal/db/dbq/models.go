@@ -121,11 +121,12 @@ type Membership struct {
 }
 
 type Project struct {
-	ID        uuid.UUID
-	Slug      string
-	Name      string
-	CreatedAt pgtype.Timestamptz
-	UpdatedAt pgtype.Timestamptz
+	ID            uuid.UUID
+	Slug          string
+	Name          string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	DesignVersion int64
 }
 
 type Relation struct {
@@ -158,6 +159,34 @@ type RelationType struct {
 	UpdatedAt        pgtype.Timestamptz
 	UpdatedByUserID  *uuid.UUID
 	UpdatedByTokenID *uuid.UUID
+	AnalysisTraits   []string
+}
+
+type Route struct {
+	ID                       uuid.UUID
+	ProjectID                uuid.UUID
+	Key                      string
+	Name                     string
+	Description              string
+	Params                   []byte
+	Version                  int32
+	LastCheckedAt            pgtype.Timestamptz
+	LastCheckedDesignVersion *int64
+	LastCheck                []byte
+	CreatedAt                pgtype.Timestamptz
+	UpdatedAt                pgtype.Timestamptz
+	UpdatedByUserID          *uuid.UUID
+	UpdatedByTokenID         *uuid.UUID
+}
+
+type RouteStep struct {
+	RouteID       uuid.UUID
+	ProjectID     uuid.UUID
+	Position      int32
+	EntityID      *uuid.UUID
+	EntityTypeKey string
+	EntityKey     string
+	Note          string
 }
 
 type Session struct {

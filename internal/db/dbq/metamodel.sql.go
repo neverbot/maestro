@@ -696,7 +696,7 @@ func (q *Queries) GetRelationByID(ctx context.Context, arg GetRelationByIDParams
 }
 
 const getRelationTypeByID = `-- name: GetRelationTypeByID :one
-SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits FROM relation_types
 WHERE project_id = $1::uuid AND id = $2::uuid
 `
 
@@ -723,12 +723,13 @@ func (q *Queries) GetRelationTypeByID(ctx context.Context, arg GetRelationTypeBy
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.AnalysisTraits,
 	)
 	return i, err
 }
 
 const getRelationTypeByKey = `-- name: GetRelationTypeByKey :one
-SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits FROM relation_types
 WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
 `
 
@@ -755,12 +756,13 @@ func (q *Queries) GetRelationTypeByKey(ctx context.Context, arg GetRelationTypeB
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.AnalysisTraits,
 	)
 	return i, err
 }
 
 const getRelationTypeByKeyForUpdate = `-- name: GetRelationTypeByKeyForUpdate :one
-SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits FROM relation_types
 WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
 FOR UPDATE
 `
@@ -792,6 +794,7 @@ func (q *Queries) GetRelationTypeByKeyForUpdate(ctx context.Context, arg GetRela
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.AnalysisTraits,
 	)
 	return i, err
 }
@@ -1324,7 +1327,7 @@ func (q *Queries) ListRelationFieldsOfType(ctx context.Context, arg ListRelation
 }
 
 const listRelationTypes = `-- name: ListRelationTypes :many
-SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
+SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits FROM relation_types
 WHERE project_id = $1::uuid ORDER BY label, id
 `
 
@@ -1354,6 +1357,7 @@ func (q *Queries) ListRelationTypes(ctx context.Context, projectID uuid.UUID) ([
 			&i.UpdatedAt,
 			&i.UpdatedByUserID,
 			&i.UpdatedByTokenID,
+			&i.AnalysisTraits,
 		); err != nil {
 			return nil, err
 		}
@@ -1748,7 +1752,7 @@ SET key                 = $1::text,
 WHERE project_id = $4::uuid
   AND lower(key) = lower($5::text)
   AND version = $6::integer
-RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
+RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits
 `
 
 type RenameRelationTypeParams struct {
@@ -1789,6 +1793,7 @@ func (q *Queries) RenameRelationType(ctx context.Context, arg RenameRelationType
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.AnalysisTraits,
 	)
 	return i, err
 }
@@ -2370,7 +2375,7 @@ SET label               = excluded.label,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
 WHERE relation_types.version = $11::integer
-RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
+RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits
 `
 
 type UpsertRelationTypeParams struct {
@@ -2424,6 +2429,7 @@ func (q *Queries) UpsertRelationType(ctx context.Context, arg UpsertRelationType
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.AnalysisTraits,
 	)
 	return i, err
 }

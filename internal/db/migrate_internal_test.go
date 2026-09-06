@@ -166,3 +166,103 @@ func TestMigrateRefusesToServeAgainstANewerSchema(t *testing.T) {
 		t.Fatalf("err = %v, want it to explain the schema is ahead of this binary", err)
 	}
 }
+
+// TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt is the sharper
+// half of TestMigrateUpDownUp, for the one migration in this repository
+// whose Down arm has to undo four different *kinds* of object: a column
+// with a check constraint, a column on a Core table, a plpgsql function
+// with twelve triggers hanging off it, and two tables.
+//
+// TestMigrateUpDownUp asserts that every Down arm *runs* and that a
+// re-up lands; it asserts nothing about what any single arm removed,
+// because it only checks that `users` is gone at the bottom. A Down arm
+// that dropped the tables and left the triggers behind would pass it and
+// would leave a database that fails on the next write with "function
+// bump_design_version() does not exist". A migration is the one thing in
+// this repository that is hard to take back, so its reversal is asserted
+// object by object.
+func TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt(t *testing.T) {
+	t.Parallel()
+	pool := newTestDatabase(t)
+	ctx := context.Background()
+
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Each probe is (what it is, the statement that counts it). A count
+	// of zero after the rollback and non-zero before it is the whole
+	// assertion, and the "before" half is what stops a probe that is
+	// simply spelled wrong from reading as a clean reversal.
+	probes := []struct {
+		what  string
+		count string
+	}{
+		{"relation_types.analysis_traits", `SELECT count(*) FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'relation_types' AND column_name = 'analysis_traits'`},
+		{"the trait vocabulary constraint", `SELECT count(*) FROM pg_constraint
+			WHERE conname = 'relation_types_traits_vocab'`},
+		{"projects.design_version", `SELECT count(*) FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'design_version'`},
+		{"the bump_design_version function", `SELECT count(*) FROM pg_proc p
+			JOIN pg_namespace n ON n.oid = p.pronamespace
+			WHERE n.nspname = 'public' AND p.proname = 'bump_design_version'`},
+		{"the design-version triggers", `SELECT count(*) FROM pg_trigger
+			WHERE NOT tgisinternal AND tgname LIKE '%_design_version_%'`},
+		{"the routes and route_steps tables", `SELECT count(*) FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name IN ('routes', 'route_steps')`},
+	}
+
+	before := make([]int, len(probes))
+	for i, p := range probes {
+		if err := pool.QueryRow(ctx, p.count).Scan(&before[i]); err != nil {
+			t.Fatalf("count %s: %v", p.what, err)
+		}
+		if before[i] == 0 {
+			t.Fatalf("%s is absent before the rollback; this probe would assert nothing", p.what)
+		}
+	}
+
+	if err := migrateDown(ctx, pool); err != nil {
+		t.Fatalf("migrateDown: %v", err)
+	}
+
+	for i, p := range probes {
+		var got int
+		if err := pool.QueryRow(ctx, p.count).Scan(&got); err != nil {
+			t.Fatalf("count %s after rollback: %v", p.what, err)
+		}
+		if got != 0 {
+			t.Fatalf("%s survived the rollback: %d left of %d", p.what, got, before[i])
+		}
+	}
+
+	// The rolled-back schema is a working one, not merely an emptier
+	// one: a write to the four tables the triggers watched must still
+	// land with the function they called gone.
+	var projectID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (slug, name) VALUES ('azeroth', 'Azeroth') RETURNING id`).Scan(&projectID); err != nil {
+		t.Fatalf("insert project after rollback: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO relation_types (project_id, key, label) VALUES ($1, 'requires', 'Requires')`,
+		projectID); err != nil {
+		t.Fatalf("insert relation type after rollback: %v", err)
+	}
+
+	// And the re-up restores every object, so the arm is reversible in
+	// both directions rather than merely destructive.
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("Migrate after rollback: %v", err)
+	}
+	for i, p := range probes {
+		var got int
+		if err := pool.QueryRow(ctx, p.count).Scan(&got); err != nil {
+			t.Fatalf("count %s after re-up: %v", p.what, err)
+		}
+		if got != before[i] {
+			t.Fatalf("%s came back as %d after the re-up, want %d", p.what, got, before[i])
+		}
+	}
+}

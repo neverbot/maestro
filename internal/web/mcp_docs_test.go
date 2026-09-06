@@ -540,7 +540,7 @@ func TestAHeadOnlyReadSaysHowMuchItLeftOut(t *testing.T) {
 // TestEveryDocsToolRefusesAnotherGamesToken is the isolation test for
 // this whole surface, driven from the *registered* tool list rather than
 // a hand-written one: a docs tool with no entry in the table below fails
-// this test, so a twelfth tool added tomorrow is covered without anybody
+// this test, so a thirteenth tool added tomorrow is covered without anybody
 // remembering to edit it.
 //
 // The game it calls at is one the caller's own *user* owns and the
@@ -554,6 +554,14 @@ func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 		"docs.write": func() error {
 			_, err := web.MCPDocsWrite(ctx, f.deps, f.caller, f.other, web.DocsWriteInput{
 				Path: "lore/x.md", Content: "body", ExpectedVersion: int32Ptr(0),
+			})
+			return err
+		},
+		"docs.write_many": func() error {
+			_, err := web.MCPDocsWriteMany(ctx, f.deps, f.caller, f.other, web.DocsWriteManyInput{
+				Items: []web.DocsWriteItemInput{{
+					Path: "lore/x.md", Content: "body", ExpectedVersion: int32Ptr(0),
+				}},
 			})
 			return err
 		},
@@ -640,7 +648,7 @@ func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 
 // TestTheDocsToolsAreAbsentWithoutAMarkdownService pins the optional
 // half of MCPDeps.Markdown: a server built without one still starts, and
-// tools/list simply does not carry the eleven.
+// tools/list simply does not carry the twelve.
 func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
@@ -691,9 +699,270 @@ func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 	}
 }
 
+// TestTheLinkListingPagesOnBothSides drives docs.links.list over the
+// real transport with a limit and a cursor, from each end of the join.
+//
+// It exists because a paging cursor no test replays is not shipped: the
+// wire names — next_cursor, truncated — and the refusal of a cursor
+// carried to the other side are what a client actually depends on, and
+// none of them is visible from the domain's own test.
+func TestTheLinkListingPagesOnBothSides(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+	ctx := context.Background()
+	session := connectMCP(t, httpSrv.URL, f.token)
+
+	if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+	}); err != nil {
+		t.Fatalf("MCPTypesUpsert: %v", err)
+	}
+	keys := []string{"alpha", "bravo", "charlie"}
+	items := make([]web.EntityItemInput, 0, len(keys))
+	for _, key := range keys {
+		items = append(items, web.EntityItemInput{TypeKey: "quest", Key: key, Name: key})
+	}
+	if _, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game,
+		web.EntitiesUpsertInput{Items: items}); err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+	links := make([]any, 0, len(keys))
+	for _, key := range keys {
+		links = append(links, map[string]any{"entity_type": "quest", "entity_key": key})
+	}
+	callOK(t, session, "docs.write", map[string]any{
+		"path": "lore/westfall.md", "content": "# Westfall\n",
+		"expected_version": 0, "links": links,
+	})
+
+	type linksAnswer struct {
+		Entities []struct {
+			EntityKey string `json:"entity_key"`
+		} `json:"entities"`
+		Documents []struct {
+			Path string `json:"path"`
+		} `json:"documents"`
+		NextCursor string `json:"next_cursor"`
+		Truncated  bool   `json:"truncated"`
+	}
+
+	var (
+		seen   []string
+		cursor string
+	)
+	for {
+		args := map[string]any{"path": "lore/westfall.md", "limit": 2}
+		if cursor != "" {
+			args["cursor"] = cursor
+		}
+		// A fresh value per page, deliberately: next_cursor is omitempty,
+		// so decoding a cursorless final page onto a reused struct would
+		// leave the previous page's cursor standing and the two fields
+		// would appear to disagree when they do not.
+		var answer linksAnswer
+		decodeStructured(t, callOK(t, session, "docs.links.list", args), &answer)
+		for _, e := range answer.Entities {
+			seen = append(seen, e.EntityKey)
+		}
+		if !answer.Truncated {
+			if answer.NextCursor != "" {
+				t.Fatalf("truncated false beside a cursor %q: the pair must agree",
+					answer.NextCursor)
+			}
+			break
+		}
+		if answer.NextCursor == "" {
+			t.Fatal("truncated true with no cursor to continue from")
+		}
+		cursor = answer.NextCursor
+		if len(seen) > 6 {
+			t.Fatal("the walk did not terminate")
+		}
+	}
+	if strings.Join(seen, " ") != strings.Join(keys, " ") {
+		t.Fatalf("walked %v, want %v exactly once each", seen, keys)
+	}
+
+	// The entity side pages too, and a document-side cursor is refused
+	// there: the two sides sort on different columns.
+	var entitySide linksAnswer
+	decodeStructured(t, callOK(t, session, "docs.links.list", map[string]any{
+		"entity_type": "quest", "entity_key": "alpha", "limit": 1,
+	}), &entitySide)
+	if len(entitySide.Documents) != 1 || entitySide.Documents[0].Path != "lore/westfall.md" {
+		t.Fatalf("entity side = %+v, want the one document", entitySide.Documents)
+	}
+	if !entitySide.Truncated || entitySide.NextCursor == "" {
+		t.Fatalf("one document at a limit of one is a full page and carries a cursor: %+v",
+			entitySide)
+	}
+
+	crossed, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "docs.links.list",
+		Arguments: map[string]any{
+			"entity_type": "quest", "entity_key": "alpha", "cursor": firstLinkCursor(t, session),
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(docs.links.list): %v", err)
+	}
+	if !crossed.IsError {
+		t.Fatal("a document-side cursor must be refused on the entity side")
+	}
+
+	// A document's own answer says whether its attachments are all of
+	// them, and for three of them they are.
+	var doc struct {
+		LinksTruncated bool `json:"links_truncated"`
+		Links          []struct {
+			EntityKey string `json:"entity_key"`
+		} `json:"links"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.read",
+		map[string]any{"path": "lore/westfall.md"}), &doc)
+	if len(doc.Links) != 3 || doc.LinksTruncated {
+		t.Fatalf("read = %+v, want all three attachments and links_truncated false", doc)
+	}
+}
+
+// firstLinkCursor is the cursor of a document-side page of one, for the
+// cross-side refusal above.
+func firstLinkCursor(t *testing.T, session *mcp.ClientSession) string {
+	t.Helper()
+	var page struct {
+		NextCursor string `json:"next_cursor"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.links.list",
+		map[string]any{"path": "lore/westfall.md", "limit": 1}), &page)
+	if page.NextCursor == "" {
+		t.Fatal("a full page of one must carry a cursor")
+	}
+	return page.NextCursor
+}
+
+// TestTheBatchToolSeedsSeveralDocumentsInOneCall drives docs.write_many
+// the way a seeding agent does — over the real transport, out of the
+// JSON a client parses — and reads every field of its answer back.
+//
+// The fixture is four items with one bad one in the middle, for the
+// reason markdown's own batch test gives: a smaller one cannot tell
+// partial from atomic. What this test adds over that one is the wire —
+// that count, written and failed arrive as an agent sees them, that
+// written's path/id/version are true of the stored document, and that
+// the batch's own answer is what a follow-up edit can be built from
+// without a read.
+func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+	session := connectMCP(t, httpSrv.URL, f.token)
+
+	item := func(path, body string) map[string]any {
+		return map[string]any{"path": path, "content": body, "expected_version": 0}
+	}
+	var batch struct {
+		Count   int `json:"count"`
+		Written []struct {
+			Path    string `json:"path"`
+			ID      string `json:"id"`
+			Version int32  `json:"version"`
+		} `json:"written"`
+		Failed []struct {
+			Index   int    `json:"index"`
+			Key     string `json:"key"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"failed"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.write_many", map[string]any{
+		"items": []any{
+			item("lore/duskwood.md", "# Duskwood\n"),
+			item("lore/elwynn.md", "# Elwynn\n"),
+			item("lore//westfall.md", "# Westfall\n"),
+			item("lore/redridge.md", "# Redridge\n"),
+		},
+	}), &batch)
+
+	if batch.Count != 3 || len(batch.Written) != 3 {
+		t.Fatalf("count = %d over %d written, want 3 and 3", batch.Count, len(batch.Written))
+	}
+	if len(batch.Failed) != 1 {
+		t.Fatalf("failed = %+v, want exactly the malformed path", batch.Failed)
+	}
+	if batch.Failed[0].Index != 2 || batch.Failed[0].Key != "lore//westfall.md" ||
+		batch.Failed[0].Code != "invalid_input" {
+		t.Fatalf("failure = %+v, want index 2 at that path coded invalid_input", batch.Failed[0])
+	}
+	if batch.Failed[0].Message == "" {
+		t.Fatal("a failure with no message is a failure a caller cannot act on")
+	}
+
+	// Every written entry has to be true of the stored document, and the
+	// version it names has to be the one a follow-up edit passes.
+	for _, w := range batch.Written {
+		var doc struct {
+			ID      string `json:"id"`
+			Path    string `json:"path"`
+			Version int32  `json:"version"`
+		}
+		decodeStructured(t, callOK(t, session, "docs.read",
+			map[string]any{"path": w.Path}), &doc)
+		if doc.ID != w.ID || doc.Version != w.Version || doc.Path != w.Path {
+			t.Fatalf("written %+v does not describe the stored document %+v", w, doc)
+		}
+	}
+	edit := batch.Written[0]
+	var edited struct {
+		Version int32 `json:"version"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.write", map[string]any{
+		"path": edit.Path, "content": "rewritten\n", "expected_version": edit.Version,
+	}), &edited)
+	if edited.Version != edit.Version+1 {
+		t.Fatalf("the batch's own version was not the one to edit from: %d then %d",
+			edit.Version, edited.Version)
+	}
+
+	// The item that failed left nothing behind, under either spelling of
+	// the path it named.
+	missing, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "docs.read", Arguments: map[string]any{"path": "lore/westfall.md"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(docs.read): %v", err)
+	}
+	if !missing.IsError {
+		t.Fatal("the refused item must not have landed")
+	}
+
+	// A second run of the same batch is a re-seed with stale claims: each
+	// item still says expected_version 0 and each document now exists, so
+	// every one of them comes back as its own version_conflict rather
+	// than as one refusal of the call.
+	decodeStructured(t, callOK(t, session, "docs.write_many", map[string]any{
+		"items": []any{
+			item("lore/duskwood.md", "# Duskwood\n"),
+			item("lore/elwynn.md", "# Elwynn\n"),
+		},
+	}), &batch)
+	if batch.Count != 0 || len(batch.Failed) != 2 {
+		t.Fatalf("re-seed = %+v, want two conflicts and nothing written", batch)
+	}
+	for _, failure := range batch.Failed {
+		if failure.Code != "version_conflict" {
+			t.Fatalf("failure = %+v, want version_conflict for a claim that moved", failure)
+		}
+		if strings.Contains(failure.Message, "Duskwood") ||
+			strings.Contains(failure.Message, "Elwynn") {
+			t.Fatalf("failure %+v echoes a body; a batch never does", failure)
+		}
+	}
+}
+
 // TestTheDocsToolsAreServedOverTheRealTransport is the read-back this
 // task owes through the wire rather than through the Go functions:
-// eleven tool names in tools/list, and a write, a conflict, a revert, a
+// twelve tool names in tools/list, and a write, a conflict, a revert, a
 // diff and a delete driven as an agent drives them, with every answer
 // read out of the JSON a client actually parses.
 func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
@@ -712,7 +981,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 		names[tool.Name] = true
 	}
 	for _, want := range []string{
-		"docs.write", "docs.read", "docs.list", "docs.delete", "docs.history",
+		"docs.write", "docs.write_many", "docs.read", "docs.list", "docs.delete", "docs.history",
 		"docs.read_version", "docs.revert", "docs.diff", "docs.links.list",
 		"docs.links.add", "docs.links.remove",
 	} {

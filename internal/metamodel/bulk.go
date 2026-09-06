@@ -10,8 +10,8 @@ import (
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
 
-// This file holds the batch machinery every bulk write in this package
-// shares: the two modes and what each promises, the per-item loop and
+// This file holds the batch machinery every bulk write in this
+// repository shares: the two modes and what each promises, the per-item loop and
 // its cancellation contract, the up-front duplicate check, and the
 // mapping from a domain error to a wire code.
 //
@@ -22,8 +22,30 @@ import (
 // relations carrying its own duplicate detector, its own context guard
 // and its own copy of every finding those rounds closed, to be reviewed
 // and fixed twice from then on. What actually differs between the two is
-// small and named in bulkSpec: what identifies a row, what a repetition
+// small and named in BulkSpec: what identifies a row, what a repetition
 // of it should say, and how one item is written.
+//
+// **It is exported for the third kind.** internal/markdown's docs.write
+// batch is a document-shaped BulkSpec and nothing else: it inherits the
+// two modes, the cancellation contract, the repeated-identity refusal
+// and the wire-code mapping rather than restating any of them. That is
+// also why failureFor's arms are the *shared* vocabulary — markdown's
+// sentinels are aliases of this package's (internal/markdown/errors.go),
+// so a document's version conflict is coded version_conflict by the same
+// switch that codes an entity's.
+
+// WithTx is the one thing the batch driver needs from a domain service:
+// a way to run a function inside a transaction, rolling back unless it
+// returns nil.
+//
+// It is a function and not a *Service because the driver is shared by
+// two packages now rather than by two files of one. internal/markdown
+// declares a withTx of exactly this shape (its own, over its own pool),
+// and internal/projects and internal/identity each declare a third and a
+// fourth; passing the method value is what lets a second domain reuse
+// this loop instead of growing a copy of it, which is what happened to
+// the keyset cursor before internal/paging existed.
+type WithTx = func(context.Context, func(*dbq.Queries) error) error
 
 // BulkMode decides how a batch behaves when one item fails.
 type BulkMode string
@@ -59,37 +81,38 @@ type BulkFailure struct {
 	Message string `json:"message"`
 }
 
-// bulkSpec is everything the shared batch driver cannot know about one
+// BulkSpec is everything the shared batch driver cannot know about one
 // kind of row: what a row of this kind is, how two items of a batch are
 // recognised as the same row, what to say when they are, how one is
 // written, and what to announce once it has landed.
 //
-// The three identity-shaped fields are separate on purpose. identity is
+// The three identity-shaped fields are separate on purpose. Identity is
 // what the *database's* unique index folds on, and it differs per kind —
 // (type key, key) for entities, (relation type, source, target) for
-// relations — while key is only what a failure report names, so that a
-// caller can find the item it sent. repeated writes the message, because
+// relations, the path for a document — while Key is only what a failure
+// report names, so that a caller can find the item it sent. Repeated
+// writes the message, because
 // the advice a caller needs differs with what identity means: "give one
 // of the two a different key" says nothing useful about a pair of edges
 // that share their endpoints.
-type bulkSpec[In, Out any] struct {
-	// identity folds one item to the value the unique index would fold
+type BulkSpec[In, Out any] struct {
+	// Identity folds one item to the value the unique index would fold
 	// it to. Two items sharing it are one row.
-	identity func(In) string
-	// key names the item in a failure report.
-	key func(In) string
-	// repeated is the problem to report for the item at index i, whose
+	Identity func(In) string
+	// Key names the item in a failure report.
+	Key func(In) string
+	// Repeated is the problem to report for the item at index i, whose
 	// row was already addressed by the item at index first.
-	repeated func(i, first int, in In) FieldError
-	// write performs one item against a queries handle that is already
+	Repeated func(i, first int, in In) FieldError
+	// Write performs one item against a queries handle that is already
 	// inside a transaction, and publishes nothing.
-	write func(ctx context.Context, q *dbq.Queries, in In) (Out, error)
-	// publish announces one row that has landed. Called only after the
+	Write func(ctx context.Context, q *dbq.Queries, in In) (Out, error)
+	// Publish announces one row that has landed. Called only after the
 	// transaction that wrote it has committed.
-	publish func(Out)
+	Publish func(Out)
 }
 
-// bulkUpsert runs a batch in the requested mode.
+// BulkUpsert runs a batch in the requested mode.
 //
 // **The partial-failure contract, which is the whole point of the two
 // modes.** In BulkPartial every item is its own transaction: item 200
@@ -117,17 +140,17 @@ type bulkSpec[In, Out any] struct {
 // carrying a count: a count is a value, not an identity, and a
 // subscriber's only correct reaction to one of these events is to
 // re-read the rows it names.
-func bulkUpsert[In, Out any](
-	ctx context.Context, s *Service, items []In, mode BulkMode, spec bulkSpec[In, Out],
+func BulkUpsert[In, Out any](
+	ctx context.Context, withTx WithTx, items []In, mode BulkMode, spec BulkSpec[In, Out],
 ) ([]Out, []BulkFailure, error) {
 	switch mode {
 	case BulkAtomic:
-		rows, err := bulkAtomic(ctx, s, items, spec)
+		rows, err := bulkAtomic(ctx, withTx, items, spec)
 		return rows, nil, err
 	case BulkPartial, "":
 		// The empty mode is the documented default. An omitted argument is
 		// not a typo, and the spec names partial as the default.
-		return bulkPartial(ctx, s, items, spec)
+		return bulkPartial(ctx, withTx, items, spec)
 	default:
 		// Anything else is refused rather than read as partial. Task 7
 		// builds this value straight from an agent-supplied string, so a
@@ -144,9 +167,9 @@ func bulkUpsert[In, Out any](
 // bulkPartial writes each item in its own transaction and reports the
 // ones that failed.
 func bulkPartial[In, Out any](
-	ctx context.Context, s *Service, items []In, spec bulkSpec[In, Out],
+	ctx context.Context, withTx WithTx, items []In, spec BulkSpec[In, Out],
 ) ([]Out, []BulkFailure, error) {
-	repeats := repeatedIdentities(items, spec.identity, spec.repeated)
+	repeats := repeatedIdentities(items, spec.Identity, spec.Repeated)
 	var (
 		rows   []Out
 		failed []BulkFailure
@@ -176,15 +199,15 @@ func bulkPartial[In, Out any](
 		// over it would throw away the other three hundred rows, which
 		// is the failure this mode exists to prevent.
 		if problem, ok := repeats[i]; ok {
-			failed = append(failed, failureFor(ctx, i, spec.key(in),
+			failed = append(failed, failureFor(ctx, i, spec.Key(in),
 				&ValidationError{Code: codeInvalidInput, Fields: []FieldError{problem}}))
 			continue
 		}
 
 		var written Out
-		err := s.withTx(ctx, func(q *dbq.Queries) error {
+		err := withTx(ctx, func(q *dbq.Queries) error {
 			var err error
-			written, err = spec.write(ctx, q, in)
+			written, err = spec.Write(ctx, q, in)
 			return err
 		})
 		if err != nil {
@@ -202,18 +225,18 @@ func bulkPartial[In, Out any](
 			if stopped := ctx.Err(); stopped != nil {
 				return rows, failed, fmt.Errorf("bulk upsert stopped at item %d: %w", i, stopped)
 			}
-			failed = append(failed, failureFor(ctx, i, spec.key(in), err))
+			failed = append(failed, failureFor(ctx, i, spec.Key(in), err))
 			continue
 		}
 		rows = append(rows, written)
-		spec.publish(written)
+		spec.Publish(written)
 	}
 	return rows, failed, nil
 }
 
 // bulkAtomic writes the whole batch in one transaction, or none of it.
 func bulkAtomic[In, Out any](
-	ctx context.Context, s *Service, items []In, spec bulkSpec[In, Out],
+	ctx context.Context, withTx WithTx, items []In, spec BulkSpec[In, Out],
 ) ([]Out, error) {
 	// Refused before anything is written, and refused whole. An atomic
 	// batch that names one row twice cannot be satisfied as submitted —
@@ -225,7 +248,7 @@ func bulkAtomic[In, Out any](
 	// the versions the other will leave behind both commit, so the
 	// result comes back carrying the same row id twice and the caller
 	// is told two rows landed where one exists.
-	if repeats := repeatedIdentities(items, spec.identity, spec.repeated); len(repeats) > 0 {
+	if repeats := repeatedIdentities(items, spec.Identity, spec.Repeated); len(repeats) > 0 {
 		fields := make([]FieldError, 0, len(repeats))
 		for i := range items {
 			if problem, ok := repeats[i]; ok {
@@ -236,15 +259,15 @@ func bulkAtomic[In, Out any](
 	}
 
 	var rows []Out
-	err := s.withTx(ctx, func(q *dbq.Queries) error {
+	err := withTx(ctx, func(q *dbq.Queries) error {
 		rows = nil
 		for i, in := range items {
-			written, err := spec.write(ctx, q, in)
+			written, err := spec.Write(ctx, q, in)
 			if err != nil {
 				// The index and the key name the item to fix, and %w keeps
 				// the code — schema_violation, invalid_input, whichever —
 				// matchable through the wrapping.
-				return fmt.Errorf("item %d (%q): %w", i, spec.key(in), err)
+				return fmt.Errorf("item %d (%q): %w", i, spec.Key(in), err)
 			}
 			rows = append(rows, written)
 		}
@@ -254,12 +277,12 @@ func bulkAtomic[In, Out any](
 		return nil, err
 	}
 	for _, written := range rows {
-		spec.publish(written)
+		spec.Publish(written)
 	}
 	return rows, nil
 }
 
-// foldedIdentity builds the string a bulkSpec.identity returns from the
+// FoldedIdentity builds the string a BulkSpec.Identity returns from the
 // parts of a row's identity, folding case as the unique indexes over
 // these keys do (all of them are UNIQUE (…, lower(key)), and
 // strings.ToLower is exact for them because rowKeyPattern admits ASCII
@@ -271,7 +294,7 @@ func bulkAtomic[In, Out any](
 // not by a pattern, and an edge's five parts are all lookups. Without the
 // prefixes ("ab", "c") and ("a", "bc") meet in the middle, and one is
 // refused as a repetition of the other.
-func foldedIdentity(parts ...string) string {
+func FoldedIdentity(parts ...string) string {
 	var b strings.Builder
 	for _, part := range parts {
 		part = strings.ToLower(part)

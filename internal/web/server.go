@@ -338,7 +338,7 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)
 	s.registerContentRoute("GET /api/games/{game}/summary", s.handleGameSummary)
 
-	// The prose surface (api_docs.go), mirroring the eleven docs.* MCP
+	// The prose surface (api_docs.go), mirroring the twelve docs.* MCP
 	// tools plus the two things an agent never needs: a rendered reading
 	// view and a rendered comparison. A document path travels as a query
 	// parameter and never as a URL segment — see api_docs.go's header
@@ -390,6 +390,7 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/background", s.handleSetViewBackground)
 	s.registerContentRoute("GET /api/games/{game}/docs", s.handleListDocs)
 	s.registerContentRoute("POST /api/games/{game}/docs", s.handleWriteDoc)
+	s.registerContentRoute("POST /api/games/{game}/docs/batch", s.handleWriteDocs)
 	s.registerContentRoute("GET /api/games/{game}/docs/one", s.handleReadDoc)
 	s.registerContentRoute("DELETE /api/games/{game}/docs/one", s.handleDeleteDoc)
 	s.registerContentRoute("GET /api/games/{game}/docs/history", s.handleDocHistory)

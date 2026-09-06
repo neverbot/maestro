@@ -13,6 +13,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/markdown"
+	"github.com/neverbot/maestro/internal/metamodel"
 )
 
 // This file is the prose half of the game-content surface: the tools an
@@ -101,6 +102,42 @@ type DocsLinkInput struct {
 	Role       string `json:"role,omitempty"`
 }
 
+// DocsWriteManyInput is the argument shape of docs.write_many: a mode
+// and a list of writes.
+//
+// **It is a second tool rather than a mode of docs.write**, which is the
+// opposite of the choice entities.upsert made ("one entity is a batch of
+// one, which is why there is no separate single-row tool"). The reason
+// is what the two answer with. docs.write answers with the whole
+// document — body, frontmatter, attachments — and a version conflict on
+// it carries the current body to merge onto; neither survives being
+// multiplied by four hundred, so a batch answers with a report of paths,
+// ids and versions instead. Two answers that different are two tools,
+// and collapsing them would have meant one tool whose answer shape
+// depended on how many items it was handed.
+type DocsWriteManyInput struct {
+	ScopedArgs
+	Mode  string               `json:"mode,omitempty"`
+	Items []DocsWriteItemInput `json:"items"`
+}
+
+// DocsWriteItemInput is one write of a batch: DocsWriteInput without the
+// two things that cannot mean anything in a batch.
+//
+// It carries no project_id, because the batch states the game once, and
+// no include_current, because a batch failure is an index, a key, a code
+// and a message with nowhere for a body to travel — see
+// markdown.WriteMany. Every other argument, including expected_version,
+// is per item and means exactly what it means on docs.write.
+type DocsWriteItemInput struct {
+	Path            string           `json:"path"`
+	Content         string           `json:"content"`
+	Kind            *string          `json:"kind,omitempty"`
+	Message         string           `json:"message,omitempty"`
+	ExpectedVersion *int32           `json:"expected_version"`
+	Links           *[]DocsLinkInput `json:"links,omitempty"`
+}
+
 // DocsReadInput addresses one document. HeadOnly asks for the
 // frontmatter and a short preview instead of the whole body, for a
 // caller deciding whether it wants the document at all.
@@ -174,6 +211,8 @@ type DocsLinksListInput struct {
 	Path       string `json:"path,omitempty"`
 	EntityType string `json:"entity_type,omitempty"`
 	EntityKey  string `json:"entity_key,omitempty"`
+	Cursor     string `json:"cursor,omitempty"`
+	Limit      int32  `json:"limit,omitempty"`
 }
 
 // DocsLinkAddInput attaches one document to one entity, in a role.
@@ -236,6 +275,19 @@ type DocumentOutput struct {
 	BodyLength  int             `json:"body_length"`
 	Deleted     bool            `json:"deleted"`
 	Links       []LinkedRef     `json:"links"`
+
+	// LinksTruncated says the attachments above are one page and not the
+	// whole set: ask docs.links.list, which pages.
+	//
+	// It is not omitempty, because false is a statement — "these are all
+	// of them" is the fact a caller acts on, and an absent key would read
+	// the same as a client that forgot to look. Reaching it takes more
+	// than markdown.MaxLinkPage attachments on one document, which is a
+	// taxonomy rather than a document (MaxLinksPerWrite says so at a
+	// lower number); the field is here because a listing that silently
+	// stops at a bound is the defect this pair exists to prevent, not
+	// because the case is common.
+	LinksTruncated bool `json:"links_truncated"`
 }
 
 // DocumentSummaryOutput is one row of a listing: no body, no
@@ -249,6 +301,19 @@ type DocumentSummaryOutput struct {
 	Summary string    `json:"summary,omitempty"`
 	Version int32     `json:"version"`
 	Deleted bool      `json:"deleted"`
+}
+
+// DocsWriteManyOutput is what a batch of writes answers with: what
+// landed and what did not.
+//
+// Count is len(Written) and is built where both are assembled so the two
+// cannot disagree, exactly as EntitiesUpsertOutput's is. Both slices are
+// emitted as arrays even when empty — "the batch reported no failures"
+// and "the batch reported nothing" must not look the same.
+type DocsWriteManyOutput struct {
+	Count   int                      `json:"count"`
+	Written []markdown.DocumentWrite `json:"written"`
+	Failed  []metamodel.BulkFailure  `json:"failed"`
 }
 
 // DocsListOutput is one page of summaries. NextCursor and Truncated are
@@ -350,9 +415,18 @@ type LinkedDocumentRef struct {
 // The two arrays are never both populated: Documents is set for an
 // entity-side question and Entities for a document-side one. Both are
 // non-nil, so an empty answer marshals as [] rather than null.
+//
+// NextCursor and Truncated are set together, from one condition, so they
+// cannot disagree — the pair DocsListOutput carries, and here for the
+// same reason: this answer is a page, and a page nobody knows is a page
+// is a wrong answer that reads as a right one. The cursor belongs to the
+// side it was issued for, and the two sides refuse each other's
+// (markdown.documentLinksFingerprint).
 type DocsLinksOutput struct {
-	Entities  []LinkedRef         `json:"entities"`
-	Documents []LinkedDocumentRef `json:"documents"`
+	Entities   []LinkedRef         `json:"entities"`
+	Documents  []LinkedDocumentRef `json:"documents"`
+	NextCursor *string             `json:"next_cursor,omitempty"`
+	Truncated  bool                `json:"truncated"`
 }
 
 // --- Tools ---
@@ -385,6 +459,51 @@ func docsWrite(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.
 		return DocumentOutput{}, err
 	}
 	return documentWithLinks(ctx, deps, projectID, row, false)
+}
+
+// MCPDocsWriteMany implements docs.write_many.
+//
+// The mode string is passed through as the agent wrote it rather than
+// folded onto the default when it is not recognised, for the reason
+// MCPEntitiesUpsert gives: reading a typo as "partial" would silently
+// land rows a caller asked to have rolled back.
+func MCPDocsWriteMany(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	in DocsWriteManyInput) (DocsWriteManyOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return DocsWriteManyOutput{}, err
+	}
+	return docsWriteMany(ctx, deps, caller, projectID, in)
+}
+
+func docsWriteMany(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	in DocsWriteManyInput) (DocsWriteManyOutput, error) {
+	actor := actorOf(caller)
+	items := make([]markdown.WriteInput, 0, len(in.Items))
+	for _, item := range in.Items {
+		items = append(items, markdown.WriteInput{
+			Path:            item.Path,
+			Content:         item.Content,
+			Kind:            item.Kind,
+			Message:         item.Message,
+			ExpectedVersion: item.ExpectedVersion,
+			Links:           linkTargetsOf(item.Links),
+			Actor:           actor,
+		})
+	}
+	result, err := deps.Markdown.WriteMany(ctx, projectID, items, metamodel.BulkMode(in.Mode))
+	if err != nil {
+		return DocsWriteManyOutput{}, err
+	}
+	out := DocsWriteManyOutput{
+		Count: len(result.Written), Written: result.Written, Failed: result.Failed,
+	}
+	if out.Written == nil {
+		out.Written = []markdown.DocumentWrite{}
+	}
+	if out.Failed == nil {
+		out.Failed = []metamodel.BulkFailure{}
+	}
+	return out, nil
 }
 
 // MCPDocsRead implements docs.read.
@@ -614,13 +733,19 @@ func docsLinksList(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 			"is required unless entity_type and entity_key are given: "+
 				"ask the join from one side or the other")
 	case byPath:
-		return documentSideLinks(ctx, deps, projectID, in.Path)
-	default:
-		links, err := deps.Markdown.LinksByEntity(ctx, projectID, in.EntityType, in.EntityKey)
+		page, err := deps.Markdown.LinksByDocument(ctx, projectID, in.Path,
+			markdown.LinksFilter{Cursor: in.Cursor, Limit: in.Limit})
 		if err != nil {
 			return DocsLinksOutput{}, err
 		}
-		return linksOutput(nil, links), nil
+		return linksOutput(page.Links, nil, page.NextCursor), nil
+	default:
+		page, err := deps.Markdown.LinksByEntity(ctx, projectID, in.EntityType, in.EntityKey,
+			markdown.LinksFilter{Cursor: in.Cursor, Limit: in.Limit})
+		if err != nil {
+			return DocsLinksOutput{}, err
+		}
+		return linksOutput(nil, page.Links, page.NextCursor), nil
 	}
 }
 
@@ -716,7 +841,13 @@ func linkTargetsOf(in *[]DocsLinkInput) *[]markdown.LinkTarget {
 // back off a write.
 func documentWithLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	row dbq.Document, headOnly bool) (DocumentOutput, error) {
-	links, err := deps.Markdown.LinksByDocument(ctx, projectID, row.Path)
+	// The cap rather than the default: a document's own answer carries
+	// its attachments inline and has no cursor to hand out, so asking
+	// for the largest page there is makes LinksTruncated the rarest
+	// possible answer. It is still an answer this type has to be able to
+	// give — see LinksTruncated.
+	page, err := deps.Markdown.LinksByDocument(ctx, projectID, row.Path,
+		markdown.LinksFilter{Limit: markdown.MaxLinkPage})
 	if err != nil {
 		return DocumentOutput{}, err
 	}
@@ -725,18 +856,19 @@ func documentWithLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 		body, truncated, length = headOf(row.BodyMd)
 	}
 	return DocumentOutput{
-		ID:          row.ID,
-		Path:        row.Path,
-		Kind:        row.Kind,
-		Title:       row.Title,
-		Summary:     row.Summary,
-		Version:     row.CurrentVersion,
-		Frontmatter: frontmatterOf(row.Frontmatter),
-		Body:        body,
-		Truncated:   truncated,
-		BodyLength:  length,
-		Deleted:     row.DeletedAt.Valid,
-		Links:       linkedRefsOf(links),
+		ID:             row.ID,
+		Path:           row.Path,
+		Kind:           row.Kind,
+		Title:          row.Title,
+		Summary:        row.Summary,
+		Version:        row.CurrentVersion,
+		Frontmatter:    frontmatterOf(row.Frontmatter),
+		Body:           body,
+		Truncated:      truncated,
+		BodyLength:     length,
+		Deleted:        row.DeletedAt.Valid,
+		Links:          linkedRefsOf(page.Links),
+		LinksTruncated: page.NextCursor != "",
 	}, nil
 }
 
@@ -744,16 +876,19 @@ func documentWithLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 // what the two write tools answer with as well as docs.links.list.
 func documentSideLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	path string) (DocsLinksOutput, error) {
-	links, err := deps.Markdown.LinksByDocument(ctx, projectID, path)
+	page, err := deps.Markdown.LinksByDocument(ctx, projectID, path, markdown.LinksFilter{})
 	if err != nil {
 		return DocsLinksOutput{}, err
 	}
-	return linksOutput(links, nil), nil
+	return linksOutput(page.Links, nil, page.NextCursor), nil
 }
 
 // linksOutput builds the join answer with both arrays non-nil, so an
-// empty side marshals as [] and never as null.
-func linksOutput(entities []markdown.EntityLink, documents []markdown.DocumentLink) DocsLinksOutput {
+// empty side marshals as [] and never as null, and publishes the page's
+// cursor whichever side produced it.
+func linksOutput(entities []markdown.EntityLink, documents []markdown.DocumentLink,
+	next string,
+) DocsLinksOutput {
 	out := DocsLinksOutput{
 		Entities:  linkedRefsOf(entities),
 		Documents: make([]LinkedDocumentRef, 0, len(documents)),
@@ -763,6 +898,11 @@ func linksOutput(entities []markdown.EntityLink, documents []markdown.DocumentLi
 			ID: link.DocumentID, Path: link.Path, Title: link.Title,
 			Kind: link.Kind, Role: link.Role,
 		})
+	}
+	if next != "" {
+		cursor := next
+		out.NextCursor = &cursor
+		out.Truncated = true
 	}
 	return out
 }
@@ -906,6 +1046,44 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteInput) (DocumentOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPDocsWrite(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "docs.write_many",
+		Description: fmt.Sprintf(
+			"Write several documents in one call. Seeding a game bible is a page per zone "+
+				"and a script per quest, and one round trip per document is the difference "+
+				"between one call and hundreds. Every item is a docs.write: the same path "+
+				"rules, the same content, kind, message and links arguments, and the same "+
+				"meaning for each. "+
+				"**expected_version is required on every item, because a batch is a list of "+
+				"claims about versions rather than a list of rows.** Pass 0 for a document "+
+				"that must not exist yet and the version you read for one that does; there is "+
+				"no batch-wide version, and an item that omits it fails alone at its own "+
+				"index while the rest land. "+
+				"mode is \"partial\" (the default: every item is its own transaction, the "+
+				"good documents land and the rest come back in failed with their index, their "+
+				"path and a code saying how to fix them) or \"atomic\" (one transaction; one "+
+				"bad item rolls the whole batch back and nothing is reported as done). "+
+				"Anything else is refused rather than read as partial. "+
+				"**A stale expected_version is that item's failure, coded version_conflict, "+
+				"and not the batch's** — re-read that document, merge, and send that item "+
+				"again. It carries the version to merge onto and **not** the current body: "+
+				"there is no include_current here, because four hundred conflicts would "+
+				"answer with four hundred bodies. Use docs.write when you are merging prose. "+
+				"Two items addressing one path are refused as such — paths are matched "+
+				"without regard to case, so the second would otherwise overwrite the first "+
+				"and both would be reported as landed. "+
+				"written names every document that landed with its path, its id and its new "+
+				"version, which is the expected_version of your next edit to it; count is how "+
+				"many. A failure coded \"retryable\" means the database refused that item "+
+				"over contention — send it again, and send fewer items at a time if a batch "+
+				"keeps producing them. Bodies are at most %d bytes each, as on docs.write. %s",
+			markdown.MaxBodyBytes, retryAdvice),
+		OutputSchema: docsWriteManyOutputSchema,
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteManyInput) (DocsWriteManyOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPDocsWriteMany(ctx, deps, caller, projectID, in)
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
@@ -1067,16 +1245,24 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "docs.links.list",
-		Description: "Read the document-to-entity join from either side: give path for " +
-			"everything one document is attached to, or entity_type and entity_key for " +
-			"every document attached to one entity. **Exactly one of the two addresses** — " +
-			"naming both, or neither, is invalid_input, because they are two different " +
-			"questions. The answer's entities array is filled for a document-side question " +
-			"and its documents array for an entity-side one; the other is empty. " +
-			"An entity lists no document that has been soft-deleted, and a soft-deleted " +
-			"document is not an address either: asking by its path answers not_found rather " +
-			"than an empty set. Its links are not gone — they come back with the document " +
-			"when a write to the same path brings it back. " + retryAdvice,
+		Description: fmt.Sprintf(
+			"Read the document-to-entity join from either side: give path for "+
+				"everything one document is attached to, or entity_type and entity_key for "+
+				"every document attached to one entity. **Exactly one of the two addresses** — "+
+				"naming both, or neither, is invalid_input, because they are two different "+
+				"questions. The answer's entities array is filled for a document-side question "+
+				"and its documents array for an entity-side one; the other is empty. "+
+				"**Both sides page.** limit defaults to %d and is capped at %d — asking for "+
+				"more gets the cap, asking for less than one gets the default — and truncated "+
+				"true means there is more: pass the answer's next_cursor for the next page. A "+
+				"cursor belongs to the game, the side and the address it was issued for, and "+
+				"is refused against any other, the document side and the entity side "+
+				"included. "+
+				"An entity lists no document that has been soft-deleted, and a soft-deleted "+
+				"document is not an address either: asking by its path answers not_found rather "+
+				"than an empty set. Its links are not gone — they come back with the document "+
+				"when a write to the same path brings it back. %s",
+			markdown.DefaultLinkPage, markdown.MaxLinkPage, retryAdvice),
 		OutputSchema: docsLinksOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsLinksListInput) (DocsLinksOutput, error) {
@@ -1133,20 +1319,21 @@ func integerSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "integ
 var documentOutputSchema = &jsonschema.Schema{
 	Type: "object",
 	Required: []string{"id", "path", "title", "version", "frontmatter", "body",
-		"truncated", "body_length", "deleted", "links"},
+		"truncated", "body_length", "deleted", "links", "links_truncated"},
 	Properties: map[string]*jsonschema.Schema{
-		"id":          stringSchema(),
-		"path":        stringSchema(),
-		"kind":        stringSchema(),
-		"title":       stringSchema(),
-		"summary":     stringSchema(),
-		"version":     integerSchema(),
-		"frontmatter": objectSchema(),
-		"body":        stringSchema(),
-		"truncated":   boolSchema(),
-		"body_length": integerSchema(),
-		"deleted":     boolSchema(),
-		"links":       arrayOf(linkedRefOutputSchema),
+		"id":              stringSchema(),
+		"path":            stringSchema(),
+		"kind":            stringSchema(),
+		"title":           stringSchema(),
+		"summary":         stringSchema(),
+		"version":         integerSchema(),
+		"frontmatter":     objectSchema(),
+		"body":            stringSchema(),
+		"truncated":       boolSchema(),
+		"body_length":     integerSchema(),
+		"deleted":         boolSchema(),
+		"links":           arrayOf(linkedRefOutputSchema),
+		"links_truncated": boolSchema(),
 	},
 }
 
@@ -1165,6 +1352,31 @@ var documentSummaryOutputSchema = &jsonschema.Schema{
 }
 
 var docsListOutputSchema = listEnvelopeSchema(documentSummaryOutputSchema)
+
+// documentWriteOutputSchema is markdown.DocumentWrite's wire shape: one
+// document a batch landed. bulkFailureSchema (mcp_metamodel.go) is the
+// other half and is shared with the two metamodel batches rather than
+// copied, because a batch failure means the same thing whatever kind of
+// row produced it.
+var documentWriteOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"path", "id", "version"},
+	Properties: map[string]*jsonschema.Schema{
+		"path":    stringSchema(),
+		"id":      stringSchema(),
+		"version": integerSchema(),
+	},
+}
+
+var docsWriteManyOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"count", "written", "failed"},
+	Properties: map[string]*jsonschema.Schema{
+		"count":   integerSchema(),
+		"written": arrayOf(documentWriteOutputSchema),
+		"failed":  arrayOf(bulkFailureSchema),
+	},
+}
 
 var versionOutputSchema = &jsonschema.Schema{
 	Type:     "object",
@@ -1229,9 +1441,11 @@ var linkedDocumentRefSchema = &jsonschema.Schema{
 
 var docsLinksOutputSchema = &jsonschema.Schema{
 	Type:     "object",
-	Required: []string{"entities", "documents"},
+	Required: []string{"entities", "documents", "truncated"},
 	Properties: map[string]*jsonschema.Schema{
-		"entities":  arrayOf(linkedRefOutputSchema),
-		"documents": arrayOf(linkedDocumentRefSchema),
+		"entities":    arrayOf(linkedRefOutputSchema),
+		"documents":   arrayOf(linkedDocumentRefSchema),
+		"next_cursor": stringSchema(),
+		"truncated":   boolSchema(),
 	},
 }

@@ -390,9 +390,22 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND NOT (entity_id = ANY(sqlc.arg('keep')::uuid[]));
 
 -- name: ListDocumentLinksByDocument :many
--- Ordered by the entity's type key then its key then its id: none of the
--- first two is unique on its own, and an order that can tie reshuffles
--- its ties between two identical calls.
+-- One page of a document's attachments, keyset-ordered by (entity key,
+-- entity id).
+--
+-- **The order was (type key, entity key, entity id) before this listing
+-- paged, and the type key came out of it when the cursor went in.** A
+-- keyset cursor carries one sort column and an id (paging.Cursor), and
+-- carrying the *value* rather than re-deriving it from the row is what
+-- makes a cursor a position rather than a snapshot — a position that
+-- looked its own sort value up by id would silently end the walk the
+-- moment that attachment was removed. Two sort columns would need two
+-- values in a cursor that has room for one. What the type key was
+-- buying was grouping, not determinism: neither the entity key nor the
+-- type key is unique on its own, and the entity id is what actually
+-- stops an order from reshuffling its ties between two identical calls.
+-- Every row still carries its type key, so a caller that wants a
+-- document's attachments grouped by type groups them.
 --
 -- The project filter here separates nothing that markdown.LinksByDocument
 -- can reach, and this is stated rather than credited to a test that
@@ -411,7 +424,10 @@ JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
 JOIN entity_types t ON t.id = e.entity_type_id AND t.project_id = e.project_id
 WHERE l.project_id = sqlc.arg('project_id')::uuid
   AND l.document_id = sqlc.arg('document_id')::uuid
-ORDER BY t.key, e.key, e.id;
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (e.key, e.id) > (sqlc.narg('after_key')::text, sqlc.narg('after_id')::uuid))
+ORDER BY e.key, e.id
+LIMIT sqlc.arg('limit')::int;
 
 -- name: ListDocumentLinksByEntity :many
 -- The reverse direction, which is how the UI builds an entity page and
@@ -424,13 +440,21 @@ ORDER BY t.key, e.key, e.id;
 -- the other half of the same rule in its second act: nothing cascades on
 -- a soft delete, so the link row survives and comes back with its role
 -- when the document is written to again.
+--
+-- One page, keyset-ordered by (path, id), which is the documents
+-- listing's own order: an entity that a hundred scripts hang off is an
+-- ordinary entity, and an unbounded answer here is the same defect a
+-- listing without a limit is.
 SELECT l.role, d.id AS document_id, d.path, d.title, d.kind
 FROM document_links l
 JOIN documents d ON d.id = l.document_id AND d.project_id = l.project_id
 WHERE l.project_id = sqlc.arg('project_id')::uuid
   AND l.entity_id = sqlc.arg('entity_id')::uuid
   AND d.deleted_at IS NULL
-ORDER BY d.path, d.id;
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (d.path, d.id) > (sqlc.narg('after_path')::text, sqlc.narg('after_id')::uuid))
+ORDER BY d.path, d.id
+LIMIT sqlc.arg('limit')::int;
 
 -- name: ListDocumentsPage :many
 -- One page of a game's documents, keyset-ordered by (path, id).

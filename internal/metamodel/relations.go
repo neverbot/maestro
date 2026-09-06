@@ -541,7 +541,7 @@ func endpointEntity(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, ro
 // and the mapping to a wire code — is bulk.go's, shared with entities.
 // What is edge-shaped and stays here is relationBulkSpec.
 func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, items []RelationInput, mode BulkMode) (RelationBulkResult, error) {
-	written, failed, err := bulkUpsert(ctx, s, items, mode, s.relationBulkSpec(projectID))
+	written, failed, err := BulkUpsert(ctx, s.withTx, items, mode, s.relationBulkSpec(projectID))
 	var (
 		rows    []dbq.Relation
 		reports []RelationWrite
@@ -565,7 +565,7 @@ func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, item
 // endpoints' (type key, key). All five parts are folded, because every
 // one of them is resolved through a lower(key) lookup, so two items
 // spelling a key differently address one edge. They are joined
-// length-prefixed by foldedIdentity for the reason it records — the
+// length-prefixed by FoldedIdentity for the reason it records — the
 // driver folds an item to one string and none of these parts is
 // pattern-validated here.
 //
@@ -574,17 +574,17 @@ func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, item
 // about a field that does not exist; what a caller needs to hear is that
 // its two items are one edge, and what to do about it. The path is the
 // item rather than a field of it, for the same reason.
-func (s *Service) relationBulkSpec(projectID uuid.UUID) bulkSpec[RelationInput, upsertedRelation] {
-	return bulkSpec[RelationInput, upsertedRelation]{
-		identity: func(in RelationInput) string {
-			return foldedIdentity(in.TypeKey,
+func (s *Service) relationBulkSpec(projectID uuid.UUID) BulkSpec[RelationInput, upsertedRelation] {
+	return BulkSpec[RelationInput, upsertedRelation]{
+		Identity: func(in RelationInput) string {
+			return FoldedIdentity(in.TypeKey,
 				in.Source.TypeKey, in.Source.Key, in.Target.TypeKey, in.Target.Key)
 		},
-		key: func(in RelationInput) string {
+		Key: func(in RelationInput) string {
 			return fmt.Sprintf("%s: %s/%s -> %s/%s", in.TypeKey,
 				in.Source.TypeKey, in.Source.Key, in.Target.TypeKey, in.Target.Key)
 		},
-		repeated: func(i, first int, in RelationInput) FieldError {
+		Repeated: func(i, first int, in RelationInput) FieldError {
 			return FieldError{
 				Path: fmt.Sprintf("items[%d]", i),
 				Message: fmt.Sprintf(
@@ -597,10 +597,10 @@ func (s *Service) relationBulkSpec(projectID uuid.UUID) bulkSpec[RelationInput, 
 					in.Target.TypeKey, in.Target.Key, first),
 			}
 		},
-		write: func(ctx context.Context, q *dbq.Queries, in RelationInput) (upsertedRelation, error) {
+		Write: func(ctx context.Context, q *dbq.Queries, in RelationInput) (upsertedRelation, error) {
 			return s.upsertRelationWith(ctx, q, projectID, in)
 		},
-		publish: func(written upsertedRelation) {
+		Publish: func(written upsertedRelation) {
 			s.publish(projectID, eventRelationUpserted, relationEventMinRole, relationEventHumanOnly,
 				written.event())
 		},

@@ -693,7 +693,7 @@ func TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks(t *testing.T) {
 // unchanged; only an explicit request for documents that cannot be
 // served is refused. cmd/maestro always builds both services, so this
 // shape is unreachable in the shipped binary today — it is pinned ahead
-// of Task 10, which registers eleven more tools behind the same
+// of Task 10, which registers twelve more tools behind the same
 // optional field, and Task 11, which mirrors them over REST.
 func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T) {
 	f := newMetamodelFixture(t)

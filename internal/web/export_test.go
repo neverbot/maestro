@@ -19,7 +19,7 @@ func (s *Server) ContentWritePatternsForTest() []string {
 // through addScopedTool on this server. It exists for
 // TestEveryDocsToolRefusesAnotherGamesToken (mcp_docs_test.go), which
 // drives every docs.* tool at another game's id rather than a
-// hand-written list — a per-tool test is eleven chances to forget the
+// hand-written list — a per-tool test is twelve chances to forget the
 // twelfth, and this is what makes a tool added tomorrow fail that test
 // until somebody covers it.
 func (s *Server) ScopedToolNamesForTest() []string {

@@ -406,16 +406,42 @@ stable and machine-readable.
 | `docs.list` | `path_prefix`, `kind`, `entity_key`+`entity_type`, `include_deleted`, cursor, limit — summaries only, no bodies |
 | `docs.read` | `path`, optional `head_only` (frontmatter plus a short preview, with `{truncated, body_length}`) |
 | `docs.write` | `path`, `content`, `kind`, `message`, `expected_version` (0 for a new document — see below), optional `links` |
+| `docs.write_many` | `mode` (`partial` \| `atomic`), `items` — each item is a `docs.write` and carries its own `expected_version` |
 | `docs.delete` | `path`, `expected_version` — soft |
 | `docs.history` | `path`, cursor — version metadata only, newest first |
 | `docs.read_version` | `path`, `version` |
 | `docs.revert` | `path`, `to_version`, `expected_version`, `message` |
 | `docs.diff` | `path`, `from_version`, `to_version` — unified diff, computed on read |
-| `docs.links.list` | `path` **or** `entity_key`+`entity_type` — the join, from either side |
+| `docs.links.list` | `path` **or** `entity_key`+`entity_type` — the join, from either side; both sides page (cursor, limit) |
 | `docs.links.add` | `path`, `entity_key`, `entity_type`, `role` |
 | `docs.links.remove` | `path`, `entity_key`, `entity_type` |
 
-Four deliberate choices in that table:
+Five deliberate choices in that table:
+
+- **`docs.write_many` is a second tool rather than a mode of
+  `docs.write`**, which is the opposite of the call the metamodel made
+  for `entities.upsert` ("one entity is a batch of one, so there is no
+  separate single-row tool"). The reason is what the two answer with.
+  `docs.write` answers with the whole document — body, frontmatter,
+  attachments — and a `version_conflict` on it carries the current body
+  to merge onto; neither survives being multiplied by four hundred, so
+  a batch answers with a report of paths, ids and versions and its
+  failures carry a version and no prose. Two answers that different are
+  two tools. The batch machinery itself is *shared*, not copied:
+  `internal/metamodel/bulk.go` holds the two modes, the per-item loop,
+  the cancellation contract, the repeated-identity refusal and the
+  mapping from a domain error to a wire code, and the document half is
+  a `BulkSpec` of five functions.
+  **`expected_version` is required per item**, because a batch is a
+  list of claims about versions rather than a list of rows: sixteen
+  documents are at sixteen versions, so there is nothing a batch-wide
+  version could mean but "whatever is there", which is the silent
+  overwrite the single-document rule exists to prevent. **A stale claim
+  is reported by index in `partial` mode**, coded `version_conflict`,
+  like a schema violation and for the same reason — it is per item and
+  per item fixable, the caller re-sends that one item, and the other
+  items' claims were true and their rows are stored. A caller who wants
+  "all my claims or none" asks for `atomic`.
 
 - **`expected_version: 0` spells a create.** This is a genuine
   difference from the metamodel surface, not a restatement of it, and it
@@ -466,8 +492,18 @@ the current body unless `include_current: false`), `scope_violation`,
 
 ### Pagination and size
 
-Same discipline as the core. `docs.list` and `docs.history` return
-summaries and paginate with an opaque cursor. **Bodies are only ever
+Same discipline as the core. `docs.list`, `docs.history` and
+**`docs.links.list`, on both sides of the join**, return summaries and
+paginate with an opaque cursor. Every one of them states its default
+page and its cap in its own description, built from the constants the
+server enforces, and answers `truncated` beside `next_cursor` so a page
+is never mistaken for a whole answer: an entity a hundred scripts hang
+off is an ordinary entity. A cursor belongs to the game, the listing and
+the exact address it was issued for — the two sides of the link join
+refuse each other's, because one sorts on a document path and the other
+on an entity key. `docs.read` carries a document's attachments inline
+and therefore carries `links_truncated` too, for the document that has
+more of them than one page holds. **Bodies are only ever
 returned by `read`, `read_version` and `diff`** — never by a list, never
 by search. Prose is the largest payload in the system and agents are
 its main consumer; a `list` that returned bodies would blow a context

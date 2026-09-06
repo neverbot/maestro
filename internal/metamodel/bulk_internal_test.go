@@ -11,7 +11,7 @@ import (
 )
 
 // TestFoldedIdentityKeepsThePartsOfARowApart pins both halves of what
-// foldedIdentity claims: the case fold, and the length prefix.
+// FoldedIdentity claims: the case fold, and the length prefix.
 //
 // Only the fold was pinned before, by the batch tests that repeat a key
 // in a different case. Changing the format string from "%d:%s" to ":%s"
@@ -52,7 +52,7 @@ func TestFoldedIdentityKeepsThePartsOfARowApart(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, other := foldedIdentity(tc.a...), foldedIdentity(tc.b...); got == other {
+			if got, other := FoldedIdentity(tc.a...), FoldedIdentity(tc.b...); got == other {
 				t.Fatalf("%v and %v fold to the same identity %q", tc.a, tc.b, got)
 			}
 		})
@@ -73,7 +73,7 @@ func TestFoldedIdentityKeepsThePartsOfARowApart(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name+" is one row however it is spelled", func(t *testing.T) {
-			if got, other := foldedIdentity(tc.a...), foldedIdentity(tc.b...); got != other {
+			if got, other := FoldedIdentity(tc.a...), FoldedIdentity(tc.b...); got != other {
 				t.Fatalf("%v folds to %q and %v to %q; they are one row", tc.a, got, tc.b, other)
 			}
 		})

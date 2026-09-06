@@ -8,7 +8,7 @@ import (
 
 // This file is the human half of the prose surface: the REST routes a
 // browser reads and writes a game's documents through. It mirrors the
-// eleven `docs.*` MCP tools (mcp_docs.go), and "mirrors" is meant
+// twelve `docs.*` MCP tools (mcp_docs.go), and "mirrors" is meant
 // literally — every handler here builds that file's own input struct,
 // calls that file's own unexported core, and answers with that file's
 // own output struct. There is one implementation of each operation and
@@ -63,7 +63,7 @@ import (
 // from stubOptions, which passes no Markdown, so a registration gated on
 // `opts.Markdown != nil` would make every route in this file invisible
 // to both — which is precisely what happened to
-// TestEveryMCPToolGoesThroughAddScopedTool, blind to all eleven docs
+// TestEveryMCPToolGoesThroughAddScopedTool, blind to all twelve docs
 // tools until Task 10's review handed its server a markdown service.
 // TestTheProseRoutesAreVisibleToTheConventionTests pins the visibility
 // itself, from a stubOptions server, so re-introducing the gate fails a
@@ -102,6 +102,12 @@ type DocRenderedOutput struct {
 	Version int32       `json:"version"`
 	HTML    string      `json:"html"`
 	Links   []LinkedRef `json:"links"`
+
+	// LinksTruncated is DocumentOutput's field, carried here because
+	// this view is built from that answer and shows the same list. A
+	// reading page that quietly showed two hundred of a document's
+	// attachments would be the same wrong answer through a second route.
+	LinksTruncated bool `json:"links_truncated"`
 }
 
 // DocComparisonOutput is the comparison view: the diff docs.diff would
@@ -187,6 +193,29 @@ func (s *Server) handleWriteDoc(w http.ResponseWriter, r *http.Request, caller C
 		return
 	}
 	out, err := docsWrite(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleWriteDocs is the REST mirror of docs.write_many. It answers 200
+// with a report even when some items failed, for the reason
+// handleUpsertEntities gives: in partial mode a batch that lands
+// nineteen of twenty documents is not a failed request, and the failures
+// are in the body with their index, their path and their code. Only a
+// refusal of the *call* — an unknown mode, an atomic batch rolled back,
+// a path repeated inside the batch — comes back as a status.
+func (s *Server) handleWriteDocs(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireProseService(w) {
+		return
+	}
+	var in DocsWriteManyInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := docsWriteMany(r.Context(), s.deps(), caller, scope.ProjectID, in)
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
@@ -347,11 +376,23 @@ func (s *Server) handleListDocLinks(w http.ResponseWriter, r *http.Request, _ Ca
 	if !ok {
 		return
 	}
+	cursor, ok := queryString(w, r, "cursor")
+	if !ok {
+		return
+	}
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
 	// Neither the both-sides refusal nor the neither-side one is decided
 	// here: docsLinksList makes both, so the two surfaces cannot drift
 	// into disagreeing about what "the join, from either side" means.
+	// The paging arguments are read the same way the listing route reads
+	// its own, so a browser walking an entity's hundred scripts spells it
+	// exactly as it spells walking a game's documents.
 	out, err := docsLinksList(r.Context(), s.deps(), scope.ProjectID, DocsLinksListInput{
 		Path: path, EntityType: entityType, EntityKey: entityKey,
+		Cursor: cursor, Limit: limit,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -436,13 +477,14 @@ func (s *Server) handleRenderDoc(w http.ResponseWriter, r *http.Request, _ Calle
 		return
 	}
 	writeJSON(w, http.StatusOK, DocRenderedOutput{
-		Path:    doc.Path,
-		Kind:    doc.Kind,
-		Title:   doc.Title,
-		Summary: doc.Summary,
-		Version: doc.Version,
-		HTML:    rendered,
-		Links:   doc.Links,
+		Path:           doc.Path,
+		Kind:           doc.Kind,
+		Title:          doc.Title,
+		Summary:        doc.Summary,
+		Version:        doc.Version,
+		HTML:           rendered,
+		Links:          doc.Links,
+		LinksTruncated: doc.LinksTruncated,
 	})
 }
 

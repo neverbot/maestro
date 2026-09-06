@@ -101,10 +101,107 @@ type WriteInput struct {
 // buys, and what no test here distinguishes, is stated at
 // GetDocumentByPathForUpdate.
 func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput) (dbq.Document, error) {
+	content, err := checkWrite(in)
+	if err != nil {
+		return dbq.Document{}, err
+	}
+
+	var written writtenDocument
+	err = s.withTx(ctx, func(q *dbq.Queries) error {
+		var err error
+		written, err = s.writeOneWith(ctx, q, projectID, in, content)
+		return err
+	})
+	if err != nil {
+		return dbq.Document{}, err
+	}
+	s.publishWrite(projectID, written)
+	return written.row, nil
+}
+
+// writtenDocument is one landed write travelling from the transaction
+// that wrote it to the announcement that follows the commit.
+//
+// **The links flag travels with the row rather than being re-read from
+// the caller's input**, for the reason metamodel.upsertedEntity carries
+// its type key: a batch publishes after its transaction, over a slice,
+// and pairing a row with the wrong item's answer to "did this write say
+// anything about links" is one index slip away. eventDocumentLinked's
+// own comment argues why a write silent about links must not announce a
+// link change; this is what keeps that true for an item of a batch.
+type writtenDocument struct {
+	row   dbq.Document
+	links bool
+}
+
+// publishWrite announces one landed write: the document, and — only when
+// the caller said something about the links — the attachment set too.
+//
+// **Called after the transaction has committed and never from inside
+// it**, which is Service.publish's standing rule. Both callers obey it:
+// Write publishes after withTx returns, and WriteMany hands this to
+// BulkSpec.Publish, which metamodel.BulkUpsert calls only once the
+// transaction that wrote the row has committed.
+func (s *Service) publishWrite(projectID uuid.UUID, written writtenDocument) {
+	row := written.row
+	s.publish(projectID, eventDocumentWritten, documentEventMinRole, documentEventHumanOnly,
+		DocumentEvent{ID: row.ID, Path: row.Path, Version: row.CurrentVersion})
+	// A second event, and only when the caller said something about the
+	// links: eventDocumentLinked's comment argues why both are published
+	// rather than one, and why a write that says nothing about links
+	// must not announce a link change.
+	if written.links {
+		s.publish(projectID, eventDocumentLinked, documentEventMinRole, documentEventHumanOnly,
+			DocumentEvent{ID: row.ID, Path: row.Path, Version: row.CurrentVersion})
+	}
+}
+
+// writeOneWith is one whole write against a queries handle that is
+// already inside a transaction: the document, its version row, and the
+// attachments when the caller named any. It publishes nothing.
+//
+// **This is the unit a batch item is**, which is why it exists at all:
+// bulk.go hands one of these to metamodel.BulkSpec.Write, and Write
+// calls it through its own withTx. One implementation, so a batched
+// write and a single one cannot drift into meaning different things —
+// the links replacement inside the same transaction as the body most of
+// all, since a link naming an entity that does not exist has to take the
+// body down with it either way.
+func (s *Service) writeOneWith(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
+	in WriteInput, content Content,
+) (writtenDocument, error) {
+	row, err := s.writeWith(ctx, q, projectID, in, content)
+	if err != nil {
+		return writtenDocument{}, err
+	}
+	// Inside the same transaction, so a link naming an entity that
+	// does not exist takes the body down with it: a document and
+	// what it is about are one change.
+	if in.Links != nil {
+		if err := s.replaceLinks(ctx, q, projectID, row.ID, *in.Links); err != nil {
+			return writtenDocument{}, err
+		}
+	}
+	return writtenDocument{row: row, links: in.Links != nil}, nil
+}
+
+// checkWrite judges everything about one write that can be judged before
+// the database is touched, and returns the split content the write will
+// store.
+//
+// It is separate from Write for one reason: a batch has to run it per
+// item, *inside* the item's own attempt, so that an item with a bad path
+// is reported at its own index and the rest of the batch still lands.
+// Left in Write's body it would have been copied into the batch — the
+// defect this repository has shipped most often — and the copy would
+// have been the one to drift, since only one of the two has a test for
+// every refusal.
+// TestEveryProblemWithOneWriteIsReportedInOnePass pins the single-write
+// pass and TestABatchLandsTheGoodDocumentsAndReportsTheRest the batch's.
+func checkWrite(in WriteInput) (Content, error) {
 	// Every problem in one pass: a caller whose path and whose kind are
 	// both wrong hears about both, rather than fixing one, calling again
 	// and learning about the other.
-	// TestEveryProblemWithOneWriteIsReportedInOnePass pins it.
 	problems := pathProblems(in.Path)
 	if in.Kind != nil {
 		problems = append(problems, checkShortText("kind", *in.Kind, MaxKindLen)...)
@@ -130,7 +227,7 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 		})
 	}
 	if len(problems) > 0 {
-		return dbq.Document{}, invalidInputProblems(problems)
+		return Content{}, invalidInputProblems(problems)
 	}
 
 	// The content is checked after the arguments above and reported on
@@ -139,40 +236,7 @@ func (s *Service) Write(ctx context.Context, projectID uuid.UUID, in WriteInput)
 	// frontmatter block) and reporting one of those beside a bad path
 	// would claim a completeness this function does not have — a
 	// document with two frontmatter problems still hears about one.
-	content, err := SplitContent(in.Path, in.Content)
-	if err != nil {
-		return dbq.Document{}, err
-	}
-
-	var written dbq.Document
-	err = s.withTx(ctx, func(q *dbq.Queries) error {
-		var err error
-		written, err = s.writeWith(ctx, q, projectID, in, content)
-		if err != nil {
-			return err
-		}
-		// Inside the same transaction, so a link naming an entity that
-		// does not exist takes the body down with it: a document and
-		// what it is about are one change.
-		if in.Links != nil {
-			return s.replaceLinks(ctx, q, projectID, written.ID, *in.Links)
-		}
-		return nil
-	})
-	if err != nil {
-		return dbq.Document{}, err
-	}
-	s.publish(projectID, eventDocumentWritten, documentEventMinRole, documentEventHumanOnly,
-		DocumentEvent{ID: written.ID, Path: written.Path, Version: written.CurrentVersion})
-	// A second event, and only when the caller said something about the
-	// links: eventDocumentLinked's comment argues why both are published
-	// rather than one, and why a write that says nothing about links
-	// must not announce a link change.
-	if in.Links != nil {
-		s.publish(projectID, eventDocumentLinked, documentEventMinRole, documentEventHumanOnly,
-			DocumentEvent{ID: written.ID, Path: written.Path, Version: written.CurrentVersion})
-	}
-	return written, nil
+	return SplitContent(in.Path, in.Content)
 }
 
 // writeWith does the work against any queries handle, so Revert shares

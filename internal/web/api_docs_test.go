@@ -54,6 +54,78 @@ func writeDocREST(t *testing.T, f restFixture, path, content string, expected in
 	return out
 }
 
+// TestTheBatchRouteMirrorsTheBatchTool drives POST /docs/batch as the SPA
+// would and reads the same report the MCP tool answers with.
+//
+// **The status is 200 even though an item failed**, which is the one
+// thing this route decides that its MCP twin does not have to: in
+// partial mode a batch that lands two of three documents is not a failed
+// request, and the failure is in the body with its index, its path and
+// its code. Only a refusal of the call itself carries a status.
+func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
+	f := newRESTFixture(t)
+
+	rec := f.as(t, http.MethodPost, "/docs/batch", map[string]any{
+		"items": []any{
+			map[string]any{"path": "lore/duskwood", "content": "# Duskwood\n", "expected_version": 0},
+			map[string]any{"path": "lore//westfall", "content": "# Westfall\n", "expected_version": 0},
+			map[string]any{"path": "lore/elwynn", "content": "# Elwynn\n", "expected_version": 0},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Count   int `json:"count"`
+		Written []struct {
+			Path    string `json:"path"`
+			Version int32  `json:"version"`
+		} `json:"written"`
+		Failed []struct {
+			Index int    `json:"index"`
+			Key   string `json:"key"`
+			Code  string `json:"code"`
+		} `json:"failed"`
+	}
+	decodeBody(t, rec, &out)
+	if out.Count != 2 || len(out.Written) != 2 {
+		t.Fatalf("count = %d over %d written, want 2 and 2", out.Count, len(out.Written))
+	}
+	if len(out.Failed) != 1 || out.Failed[0].Index != 1 ||
+		out.Failed[0].Key != "lore//westfall" || out.Failed[0].Code != "invalid_input" {
+		t.Fatalf("failed = %+v, want the middle item named and coded", out.Failed)
+	}
+	for _, w := range out.Written {
+		got := f.as(t, http.MethodGet, docsPath("/docs/one", map[string]string{"path": w.Path}), nil)
+		if got.Code != http.StatusOK {
+			t.Fatalf("read %q = %d: %s", w.Path, got.Code, got.Body.String())
+		}
+		var doc struct {
+			Version int32 `json:"version"`
+		}
+		decodeBody(t, got, &doc)
+		if doc.Version != w.Version {
+			t.Fatalf("%q is at v%d and the batch reported v%d", w.Path, doc.Version, w.Version)
+		}
+	}
+
+	// An unknown mode is a refusal of the call, so it does carry a status
+	// — the other half of the rule this route's comment states.
+	bad := f.as(t, http.MethodPost, "/docs/batch", map[string]any{
+		"mode": "atomic ",
+		"items": []any{
+			map[string]any{"path": "lore/redridge", "content": "# R\n", "expected_version": 0},
+		},
+	})
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("an unknown mode = %d: %s", bad.Code, bad.Body.String())
+	}
+	if got := f.as(t, http.MethodGet,
+		docsPath("/docs/one", map[string]string{"path": "lore/redridge"}), nil); got.Code == http.StatusOK {
+		t.Fatal("a batch refused for its mode wrote a document")
+	}
+}
+
 // TestTheProseSurfaceWritesReadsAndListsThroughREST is the read-back the
 // plan's header asks of every feature: everything this file adds is
 // exercised through the routes a browser actually calls, never through
@@ -947,7 +1019,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 // them, and a docs route wired outside requireProject — or outside the
 // content set — would pass every test in this package. That is not a
 // prediction: it is what happened to TestEveryMCPToolGoesThroughAdd
-// ScopedTool, blind to all eleven docs tools until Task 10's review.
+// ScopedTool, blind to all twelve docs tools until Task 10's review.
 //
 // This test fails the moment a gate is introduced, from the same
 // stubOptions server those two use, naming the reason. It lives in the

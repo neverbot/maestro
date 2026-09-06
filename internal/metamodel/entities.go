@@ -163,7 +163,7 @@ func (s *Service) UpsertEntity(ctx context.Context, projectID uuid.UUID, in Enti
 // too, because it costs an agent a round trip it can avoid by folding
 // repeated keys before it sends.
 func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items []EntityInput, mode BulkMode) (BulkResult, error) {
-	written, failed, err := bulkUpsert(ctx, s, items, mode, s.entityBulkSpec(projectID))
+	written, failed, err := BulkUpsert(ctx, s.withTx, items, mode, s.entityBulkSpec(projectID))
 	// The rows travel through the batch paired with their type key —
 	// upsertedEntity's whole reason for existing, so that a caller
 	// assembling events after its transaction has committed cannot pair a
@@ -186,20 +186,20 @@ func (s *Service) UpsertEntities(ctx context.Context, projectID uuid.UUID, items
 // deliberately does not know.
 //
 // Identity is (type key, key), both folded, because that is what the
-// unique index folds: one key under two types is two rows. foldedIdentity
+// unique index folds: one key under two types is two rows. FoldedIdentity
 // does the folding and the length-prefixed join, and records why both are
 // what they are.
 //
 // The message names both indices and the case-folding rule, because the
 // caller cannot see either from what it sent: a batch built from a file
 // repeats a key by accident, and the two spellings need not match.
-func (s *Service) entityBulkSpec(projectID uuid.UUID) bulkSpec[EntityInput, upsertedEntity] {
-	return bulkSpec[EntityInput, upsertedEntity]{
-		identity: func(in EntityInput) string {
-			return foldedIdentity(in.TypeKey, in.Key)
+func (s *Service) entityBulkSpec(projectID uuid.UUID) BulkSpec[EntityInput, upsertedEntity] {
+	return BulkSpec[EntityInput, upsertedEntity]{
+		Identity: func(in EntityInput) string {
+			return FoldedIdentity(in.TypeKey, in.Key)
 		},
-		key: func(in EntityInput) string { return in.Key },
-		repeated: func(i, first int, in EntityInput) FieldError {
+		Key: func(in EntityInput) string { return in.Key },
+		Repeated: func(i, first int, in EntityInput) FieldError {
 			return FieldError{
 				Path: fmt.Sprintf("items[%d].key", i),
 				Message: fmt.Sprintf(
@@ -208,10 +208,10 @@ func (s *Service) entityBulkSpec(projectID uuid.UUID) bulkSpec[EntityInput, upse
 						"or merge them into one", in.Key, first),
 			}
 		},
-		write: func(ctx context.Context, q *dbq.Queries, in EntityInput) (upsertedEntity, error) {
+		Write: func(ctx context.Context, q *dbq.Queries, in EntityInput) (upsertedEntity, error) {
 			return s.upsertEntityWith(ctx, q, projectID, in)
 		},
-		publish: func(written upsertedEntity) {
+		Publish: func(written upsertedEntity) {
 			s.publish(projectID, eventEntityUpserted, entityEventMinRole, entityEventHumanOnly,
 				written.event())
 		},

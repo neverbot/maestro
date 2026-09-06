@@ -51,7 +51,7 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 		Projects:  projSvc,
 		Metamodel: metamodel.New(pool, nil),
 		// And a markdown service, because this is the build with the
-		// most tools on it and the docs.* eleven must be inside the
+		// most tools on it and the docs.* twelve must be inside the
 		// comparison: a docs tool registered with mcp.AddTool directly
 		// would otherwise never be seen here.
 		Markdown: markdown.New(pool, nil),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/metamodel"
+	"github.com/neverbot/maestro/internal/paging"
 )
 
 // MaxRoleLen bounds a link's free-text role ("script", "lore",
@@ -210,38 +211,152 @@ func (s *Service) LinkRemove(ctx context.Context, projectID uuid.UUID, in Unlink
 	return nil
 }
 
-// LinksByDocument lists everything one document is attached to.
+// The bounds on one page of attachments, on either side of the join.
+//
+// Exported for the rule the metamodel established for MaxSearchQuery and
+// this package restates for DefaultDocumentPage: a bound a caller cannot
+// read is a bound a caller trips over, and docs.links.list's description
+// is built with these values interpolated rather than typed out. The
+// clamp policy — a limit above the cap is clamped to the cap and not
+// folded onto the default — is paging.Size's, pinned there.
+//
+// They are one pair rather than two because the two sides of one join
+// are one question asked twice, and a caller that learned the bound from
+// one side has learned it for the other.
+const (
+	// DefaultLinkPage and MaxLinkPage bound one page of LinksByDocument
+	// and of LinksByEntity.
+	DefaultLinkPage int32 = 50
+	MaxLinkPage     int32 = 200
+)
+
+// LinksFilter is the paging half of a link listing: where to continue
+// from, and how much to ask for. It is one type for both directions
+// because the two answer the same question from two ends.
+//
+// Cursor is the NextCursor of a previous call. It belongs to the game
+// and to the exact side and address it was issued for and to no other;
+// EntityLinkPage and DocumentLinkPage carry the contract.
+type LinksFilter struct {
+	Cursor string
+	Limit  int32
+}
+
+// EntityLinkPage is one page of a document's attachments plus the cursor
+// for the next.
+//
+// **NextCursor is set when the page came back full**, and empty
+// otherwise, so a caller looping until it is empty is correct and must
+// expect a final empty page rather than treating one as an error — the
+// same contract DocumentPage and HistoryPage state, and the rest of it
+// is paging.Cursor's.
+//
+// Cursor.Sort, for this listing, is the attached entity's key; the
+// listing's order and why the type key is not part of it are in
+// ListDocumentLinksByDocument's own comment.
+//
+// Links is never nil: "this document is attached to nothing" must not
+// reach a client as null.
+type EntityLinkPage struct {
+	Links      []EntityLink
+	NextCursor string
+}
+
+// DocumentLinkPage is one page of an entity's documents plus the cursor
+// for the next. Cursor.Sort, for this listing, is the document's path,
+// the same key the documents listing walks.
+type DocumentLinkPage struct {
+	Links      []DocumentLink
+	NextCursor string
+}
+
+// LinksByDocument lists one page of everything a document is attached
+// to.
 //
 // TestALinkAttachesADocumentToAnEntityAndReadsBackFromBothSides reads
-// every column back through it, and
+// every column back through it,
 // TestADocumentIsAttachedToSeveralEntitiesAndListedInAStableOrder pins
-// the order.
-func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path string) ([]EntityLink, error) {
+// the order, and
+// TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide pins the
+// paging.
+func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path string,
+	f LinksFilter,
+) (EntityLinkPage, error) {
 	if err := CheckPath(path); err != nil {
-		return nil, err
+		return EntityLinkPage{}, err
 	}
 	doc, err := s.documentForLinks(ctx, s.q, projectID, path)
 	if err != nil {
-		return nil, err
+		return EntityLinkPage{}, err
 	}
-	rows, err := s.q.ListDocumentLinksByDocument(ctx, dbq.ListDocumentLinksByDocumentParams{
-		ProjectID: projectID, DocumentID: doc.ID,
-	})
+	limit := paging.Size(f.Limit, DefaultLinkPage, MaxLinkPage)
+	fingerprint := documentLinksFingerprint(projectID, doc.ID)
+	after, err := paging.Decode(f.Cursor, fingerprint, refuseCursor)
 	if err != nil {
-		return nil, fmt.Errorf("list links by document: %w", err)
+		return EntityLinkPage{}, err
+	}
+	params := dbq.ListDocumentLinksByDocumentParams{
+		ProjectID: projectID, DocumentID: doc.ID, Limit: limit,
+	}
+	if after.ID != uuid.Nil {
+		id := after.ID
+		sort := after.Sort
+		params.AfterID = &id
+		params.AfterKey = &sort
+	}
+	rows, err := s.q.ListDocumentLinksByDocument(ctx, params)
+	if err != nil {
+		return EntityLinkPage{}, fmt.Errorf("list links by document: %w", err)
 	}
 	// Never nil: an empty slice marshals as [], and "this document is
 	// attached to nothing" must not reach a client as null.
 	// TestADocumentWithNoAttachmentsIsAnOrdinaryDocument pins it,
 	// through encoding/json rather than by asserting non-nilness alone.
-	links := make([]EntityLink, 0, len(rows))
+	page := EntityLinkPage{Links: make([]EntityLink, 0, len(rows))}
 	for _, row := range rows {
-		links = append(links, EntityLink{
+		page.Links = append(page.Links, EntityLink{
 			EntityID: row.EntityID, EntityTypeKey: row.EntityTypeKey,
 			EntityKey: row.EntityKey, EntityName: row.EntityName, Role: row.Role,
 		})
 	}
-	return links, nil
+
+	if len(rows) == int(limit) {
+		last := rows[len(rows)-1]
+		page.NextCursor = paging.Encode(paging.Cursor{
+			Sort: last.EntityKey, ID: last.EntityID, Fingerprint: fingerprint,
+		})
+	}
+	return page, nil
+}
+
+// documentLinksFingerprint is the resolved listing one attachment cursor
+// belongs to: the game, this side of this domain's join, then the
+// document.
+//
+// **The project id is first, always**, which is paging.Fingerprint's
+// standing rule; here it is redundant in the same way historyFingerprint
+// records its own to be — the document id already tells two games apart,
+// since two games' documents at one path are two different rows — and it
+// is present for the same reason, that the redundancy is a property of
+// today's parts rather than of the rule.
+//
+// **"document_links_by_document" is what keeps a cursor from crossing to
+// the other side of the join**, which is this listing's own hazard
+// rather than an inherited one: the two directions answer the same
+// question from two ends, take the same LinksFilter, and sort on two
+// different columns, so a cursor carried across would be a path compared
+// against an entity key.
+//
+// **No behaviour test goes red when the two names are collapsed into
+// one**, and that is said here rather than left for someone to discover:
+// TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide refuses
+// the crossing today because a document id and an entity id are
+// different uuids, which is arithmetic and not the rule. The composition
+// is pinned instead, by TestTheTwoSidesOfTheJoinDoNotShareAFingerprint,
+// which builds both sides from one id.
+func documentLinksFingerprint(projectID, documentID uuid.UUID) string {
+	return paging.Fingerprint(projectID.String(), "document_links_by_document",
+		documentID.String())
 }
 
 // LinksByEntity lists every document attached to one entity. This is how
@@ -253,32 +368,64 @@ func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path
 // link row itself survives the deletion and comes back with the document
 // (TestAnEntityStopsListingADocumentThatWasDeleted, which pins both
 // halves).
-func (s *Service) LinksByEntity(ctx context.Context, projectID uuid.UUID, entityType, entityKey string) ([]DocumentLink, error) {
+func (s *Service) LinksByEntity(ctx context.Context, projectID uuid.UUID,
+	entityType, entityKey string, f LinksFilter,
+) (DocumentLinkPage, error) {
 	if problems := entityAddressProblems("", LinkTarget{
 		EntityType: entityType, EntityKey: entityKey,
 	}); len(problems) > 0 {
-		return nil, invalidInputProblems(problems)
+		return DocumentLinkPage{}, invalidInputProblems(problems)
 	}
 	entityID, err := s.resolveEntity(ctx, s.q, projectID, "", LinkTarget{
 		EntityType: entityType, EntityKey: entityKey,
 	})
 	if err != nil {
-		return nil, err
+		return DocumentLinkPage{}, err
 	}
-	rows, err := s.q.ListDocumentLinksByEntity(ctx, dbq.ListDocumentLinksByEntityParams{
-		ProjectID: projectID, EntityID: entityID,
-	})
+	limit := paging.Size(f.Limit, DefaultLinkPage, MaxLinkPage)
+	// The *resolved* entity id, not the caller's two keys, so two
+	// spellings of one key give one fingerprint and a cursor survives a
+	// respelling of its own address — the decision documentListing
+	// Fingerprint makes for the entity filter, applied here.
+	fingerprint := entityLinksFingerprint(projectID, entityID)
+	after, err := paging.Decode(f.Cursor, fingerprint, refuseCursor)
 	if err != nil {
-		return nil, fmt.Errorf("list links by entity: %w", err)
+		return DocumentLinkPage{}, err
 	}
-	links := make([]DocumentLink, 0, len(rows))
+	params := dbq.ListDocumentLinksByEntityParams{
+		ProjectID: projectID, EntityID: entityID, Limit: limit,
+	}
+	if after.ID != uuid.Nil {
+		id := after.ID
+		sort := after.Sort
+		params.AfterID = &id
+		params.AfterPath = &sort
+	}
+	rows, err := s.q.ListDocumentLinksByEntity(ctx, params)
+	if err != nil {
+		return DocumentLinkPage{}, fmt.Errorf("list links by entity: %w", err)
+	}
+	page := DocumentLinkPage{Links: make([]DocumentLink, 0, len(rows))}
 	for _, row := range rows {
-		links = append(links, DocumentLink{
+		page.Links = append(page.Links, DocumentLink{
 			DocumentID: row.DocumentID, Path: row.Path,
 			Title: row.Title, Kind: row.Kind, Role: row.Role,
 		})
 	}
-	return links, nil
+	if len(rows) == int(limit) {
+		last := rows[len(rows)-1]
+		page.NextCursor = paging.Encode(paging.Cursor{
+			Sort: last.Path, ID: last.DocumentID, Fingerprint: fingerprint,
+		})
+	}
+	return page, nil
+}
+
+// entityLinksFingerprint is documentLinksFingerprint for the other
+// direction, and the two names differ deliberately: see that function.
+func entityLinksFingerprint(projectID, entityID uuid.UUID) string {
+	return paging.Fingerprint(projectID.String(), "document_links_by_entity",
+		entityID.String())
 }
 
 // documentForLinks resolves a path to the document links hang from. A

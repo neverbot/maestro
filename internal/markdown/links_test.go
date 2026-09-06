@@ -81,7 +81,7 @@ func TestALinkAttachesADocumentToAnEntityAndReadsBackFromBothSides(t *testing.T)
 	}
 
 	// From the document.
-	fromDoc, err := svc.LinksByDocument(ctx, game, "scripts/wanted-hogger")
+	fromDoc, err := docLinks(svc, ctx, game, "scripts/wanted-hogger")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestALinkAttachesADocumentToAnEntityAndReadsBackFromBothSides(t *testing.T)
 	// From the entity. This is the read-back that matters most: it is
 	// how the UI builds a quest page and how an agent finds the script
 	// from the quest instead of guessing a path.
-	fromEntity, err := svc.LinksByEntity(ctx, game, "quest", "wanted-hogger")
+	fromEntity, err := entityLinks(svc, ctx, game, "quest", "wanted-hogger")
 	if err != nil {
 		t.Fatalf("LinksByEntity: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestADocumentIsAttachedToSeveralEntitiesAndListedInAStableOrder(t *testing.
 		}
 	}
 
-	links, err := svc.LinksByDocument(ctx, game, "lore/westfall")
+	links, err := docLinks(svc, ctx, game, "lore/westfall")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestADocumentWithNoAttachmentsIsAnOrdinaryDocument(t *testing.T) {
 	game := newGame(t, pool, "azeroth")
 	seedDoc(t, svc, game, "bible")
 
-	links, err := svc.LinksByDocument(ctx, game, "bible")
+	links, err := docLinks(svc, ctx, game, "bible")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestReAddingALinkUpdatesItsRoleRatherThanDuplicatingIt(t *testing.T) {
 			t.Fatalf("LinkAdd %s: %v", role, err)
 		}
 	}
-	links, err := svc.LinksByDocument(ctx, game, "s")
+	links, err := docLinks(svc, ctx, game, "s")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestALinkIsAddressedByItsOwnDocument(t *testing.T) {
 		t.Fatalf("LinkAdd: %v", err)
 	}
 
-	links, err := svc.LinksByDocument(ctx, game, "one")
+	links, err := docLinks(svc, ctx, game, "one")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestALinkIsAddressedByItsOwnDocument(t *testing.T) {
 
 	// The reverse direction is addressed by its own entity for the same
 	// reason: the other document's quest must not appear here.
-	fromEntity, err := svc.LinksByEntity(ctx, game, "quest", "wanted-hogger")
+	fromEntity, err := entityLinks(svc, ctx, game, "quest", "wanted-hogger")
 	if err != nil {
 		t.Fatalf("LinksByEntity: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestRemovingALinkLeavesTheDocumentAndTheEntity(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("LinkRemove: %v", err)
 	}
-	links, err := svc.LinksByDocument(ctx, game, "s")
+	links, err := docLinks(svc, ctx, game, "s")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestDeletingAnEntityDropsItsLinksAndLeavesTheDocument(t *testing.T) {
 	if _, err := svc.Read(ctx, game, "s"); err != nil {
 		t.Fatalf("the document must survive the entity: %v", err)
 	}
-	links, err := svc.LinksByDocument(ctx, game, "s")
+	links, err := docLinks(svc, ctx, game, "s")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestAnEntityStopsListingADocumentThatWasDeleted(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	links, err := svc.LinksByEntity(ctx, game, "quest", "wanted-hogger")
+	links, err := entityLinks(svc, ctx, game, "quest", "wanted-hogger")
 	if err != nil {
 		t.Fatalf("LinksByEntity: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestAnEntityStopsListingADocumentThatWasDeleted(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("resurrect: %v", err)
 	}
-	links, err = svc.LinksByEntity(ctx, game, "quest", "wanted-hogger")
+	links, err = entityLinks(svc, ctx, game, "quest", "wanted-hogger")
 	if err != nil {
 		t.Fatalf("LinksByEntity: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestADeletedDocumentIsNotAnAddressForLinks(t *testing.T) {
 	})
 	requireMissing(t, err, "path", `no document at "s"`)
 
-	_, err = svc.LinksByDocument(ctx, game, "s")
+	_, err = docLinks(svc, ctx, game, "s")
 	requireMissing(t, err, "path", `no document at "s"`)
 }
 
@@ -502,7 +502,7 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 	}); err != nil {
 		t.Fatalf("write with links: %v", err)
 	}
-	if links, _ := svc.LinksByDocument(ctx, game, "s"); len(links) != 1 {
+	if links, _ := docLinks(svc, ctx, game, "s"); len(links) != 1 {
 		t.Fatalf("links = %+v, want one", links)
 	}
 
@@ -514,7 +514,7 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 	}); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
-	links, _ := svc.LinksByDocument(ctx, game, "s")
+	links, _ := docLinks(svc, ctx, game, "s")
 	if len(links) != 1 || links[0].EntityKey != "wanted-hogger" || links[0].Role != "script" {
 		t.Fatalf("links = %+v after an edit with no links array, want the set preserved with its role", links)
 	}
@@ -526,7 +526,7 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 	}); err != nil {
 		t.Fatalf("write replacing links: %v", err)
 	}
-	links, _ = svc.LinksByDocument(ctx, game, "s")
+	links, _ = docLinks(svc, ctx, game, "s")
 	if len(links) != 1 || links[0].EntityKey != "the-defias" {
 		t.Fatalf("links = %+v, want only the-defias", links)
 	}
@@ -538,7 +538,7 @@ func TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt(t *testing.T)
 	}); err != nil {
 		t.Fatalf("write detaching links: %v", err)
 	}
-	if links, _ := svc.LinksByDocument(ctx, game, "s"); len(links) != 0 {
+	if links, _ := docLinks(svc, ctx, game, "s"); len(links) != 0 {
 		t.Fatalf("links = %+v, want none", links)
 	}
 }
@@ -662,7 +662,7 @@ func TestABadLinkInAWriteRollsTheWholeWriteBack(t *testing.T) {
 		t.Fatalf("document = (%q, v%d), want the write rolled back", doc.BodyMd, doc.CurrentVersion)
 	}
 	// Nor did the good half of the array land.
-	links, err := svc.LinksByDocument(ctx, game, "s")
+	links, err := docLinks(svc, ctx, game, "s")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestALinksArrayNamingOneEntityTwiceIsRefused(t *testing.T) {
 
 	// Refused whole: nothing landed, not even the first, unambiguous
 	// element.
-	links, lerr := svc.LinksByDocument(ctx, game, "s")
+	links, lerr := docLinks(svc, ctx, game, "s")
 	if lerr != nil {
 		t.Fatalf("LinksByDocument: %v", lerr)
 	}
@@ -742,7 +742,7 @@ func TestALinkRoleIsBoundedAsTheCallersOwnArgument(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("a role of exactly MaxRoleLen must be accepted: %v", err)
 	}
-	links, err := svc.LinksByDocument(ctx, game, "s")
+	links, err := docLinks(svc, ctx, game, "s")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -803,7 +803,7 @@ func TestALinkRowCannotClaimAGameItsDocumentDoesNotBelongTo(t *testing.T) {
 			t.Fatalf("a link row across two games must be refused (project %s)", game)
 		}
 	}
-	links, err := svc.LinksByDocument(ctx, azeroth, "s")
+	links, err := docLinks(svc, ctx, azeroth, "s")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -1030,7 +1030,7 @@ func TestUpsertDocumentLinksConflictPathCannotWriteAnotherGamesLink(t *testing.T
 
 	// The positive control, both ways: the role is what its own game
 	// wrote, and that game can still rewrite it.
-	links, err := svc.LinksByDocument(ctx, mine, "scripts/wanted-hogger")
+	links, err := docLinks(svc, ctx, mine, "scripts/wanted-hogger")
 	if err != nil {
 		t.Fatalf("LinksByDocument: %v", err)
 	}
@@ -1042,5 +1042,200 @@ func TestUpsertDocumentLinksConflictPathCannotWriteAnotherGamesLink(t *testing.T
 		ProjectID: mine, DocumentID: documentID, EntityID: entityID, Role: "notes",
 	}); err != nil {
 		t.Fatalf("the owning game cannot rewrite its own link: %v", err)
+	}
+}
+
+// docLinks and entityLinks are the first page of each side of the join,
+// for the many tests here that are about *what* a document is attached
+// to rather than about paging. The paging tests below call the service
+// directly, with a filter, and are the only ones that need to.
+func docLinks(svc *markdown.Service, ctx context.Context, game uuid.UUID,
+	path string,
+) ([]markdown.EntityLink, error) {
+	page, err := svc.LinksByDocument(ctx, game, path, markdown.LinksFilter{})
+	return page.Links, err
+}
+
+func entityLinks(svc *markdown.Service, ctx context.Context, game uuid.UUID,
+	entityType, entityKey string,
+) ([]markdown.DocumentLink, error) {
+	page, err := svc.LinksByEntity(ctx, game, entityType, entityKey, markdown.LinksFilter{})
+	return page.Links, err
+}
+
+// TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide walks one
+// document's attachments two at a time and pins the three things a page
+// has to get right: every row is seen exactly once and in the listing's
+// order, a full final page carries a cursor to an empty one, and the
+// cursor cannot be carried anywhere else.
+//
+// **The last part is this listing's own hazard rather than an inherited
+// one.** The two sides of the join answer the same question from two
+// ends, take the same LinksFilter, and sort on two different columns —
+// an entity key one way, a document path the other — so a cursor carried
+// across would compare a path against a key and answer nonsense. Nothing
+// but the fingerprint stops it.
+func TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide(t *testing.T) {
+	svc, entities, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	keys := []string{"alpha", "bravo", "charlie", "delta", "echo"}
+	for _, key := range keys {
+		newQuest(t, entities, game, key, strings.ToUpper(key))
+	}
+	seedDoc(t, svc, game, "lore/westfall")
+	for _, key := range keys {
+		if err := svc.LinkAdd(ctx, game, markdown.LinkInput{
+			Path: "lore/westfall", EntityType: "quest", EntityKey: key,
+		}); err != nil {
+			t.Fatalf("LinkAdd %s: %v", key, err)
+		}
+	}
+
+	var (
+		seen   []string
+		cursor string
+		pages  int
+	)
+	for {
+		page, err := svc.LinksByDocument(ctx, game, "lore/westfall",
+			markdown.LinksFilter{Cursor: cursor, Limit: 2})
+		if err != nil {
+			t.Fatalf("LinksByDocument page %d: %v", pages, err)
+		}
+		pages++
+		for _, link := range page.Links {
+			seen = append(seen, link.EntityKey)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pages > 10 {
+			t.Fatal("the walk did not terminate")
+		}
+	}
+	if strings.Join(seen, " ") != strings.Join(keys, " ") {
+		t.Fatalf("walked %v, want %v exactly once each in order", seen, keys)
+	}
+	// Five rows two at a time is three pages of 2, 2, 1: the last one is
+	// short, so it carries no cursor and the walk ends on it.
+	if pages != 3 {
+		t.Fatalf("%d pages over five rows at two a page, want 3", pages)
+	}
+
+	// A cursor from the document side, offered to the entity side.
+	first, err := svc.LinksByDocument(ctx, game, "lore/westfall", markdown.LinksFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("LinksByDocument: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page must carry a cursor, or the rest of this test proves nothing")
+	}
+	_, err = svc.LinksByEntity(ctx, game, "quest", "alpha",
+		markdown.LinksFilter{Cursor: first.NextCursor})
+	requireFieldError(t, err, "cursor", "was issued for a different listing")
+}
+
+// TestAnEntitysDocumentsPageAndItsCursorBelongsToItsOwnEntity is the
+// other direction: an entity that a dozen scripts hang off is ordinary,
+// and its listing is a page like any other.
+func TestAnEntitysDocumentsPageAndItsCursorBelongsToItsOwnEntity(t *testing.T) {
+	svc, entities, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	newQuest(t, entities, game, "wanted-hogger", "Wanted: Hogger")
+	newQuest(t, entities, game, "the-defias", "The Defias Brotherhood")
+	paths := []string{"scripts/a", "scripts/b", "scripts/c", "scripts/d", "scripts/e"}
+	for _, path := range paths {
+		seedDoc(t, svc, game, path)
+		if err := svc.LinkAdd(ctx, game, markdown.LinkInput{
+			Path: path, EntityType: "quest", EntityKey: "wanted-hogger",
+		}); err != nil {
+			t.Fatalf("LinkAdd %s: %v", path, err)
+		}
+	}
+
+	var (
+		seen   []string
+		cursor string
+	)
+	for {
+		page, err := svc.LinksByEntity(ctx, game, "quest", "wanted-hogger",
+			markdown.LinksFilter{Cursor: cursor, Limit: 2})
+		if err != nil {
+			t.Fatalf("LinksByEntity: %v", err)
+		}
+		for _, link := range page.Links {
+			seen = append(seen, link.Path)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if len(seen) > 10 {
+			t.Fatal("the walk did not terminate")
+		}
+	}
+	if strings.Join(seen, " ") != strings.Join(paths, " ") {
+		t.Fatalf("walked %v, want %v in path order", seen, paths)
+	}
+
+	// The cursor names its own entity: a page of one quest's scripts
+	// cannot be continued against another quest's.
+	first, err := svc.LinksByEntity(ctx, game, "quest", "wanted-hogger",
+		markdown.LinksFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("LinksByEntity: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page must carry a cursor")
+	}
+	_, err = svc.LinksByEntity(ctx, game, "quest", "the-defias",
+		markdown.LinksFilter{Cursor: first.NextCursor})
+	requireFieldError(t, err, "cursor", "was issued for a different listing")
+	// And it survives a respelling of its own address, because the
+	// fingerprint is built from the resolved entity id and not from the
+	// keys as the caller typed them.
+	if _, err := svc.LinksByEntity(ctx, game, "QUEST", "Wanted-Hogger",
+		markdown.LinksFilter{Cursor: first.NextCursor}); err != nil {
+		t.Fatalf("a cursor must survive a respelling of its own filter: %v", err)
+	}
+}
+
+// TestAFullFinalPageOfAttachmentsCarriesACursorToAnEmptyOne pins the
+// contract EntityLinkPage states: a listing whose length is an exact
+// multiple of the limit ends on an empty page rather than on a short
+// one, and a caller looping until the cursor is empty must expect that
+// rather than treat it as an error.
+func TestAFullFinalPageOfAttachmentsCarriesACursorToAnEmptyOne(t *testing.T) {
+	svc, entities, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	for _, key := range []string{"alpha", "bravo"} {
+		newQuest(t, entities, game, key, key)
+	}
+	seedDoc(t, svc, game, "s")
+	for _, key := range []string{"alpha", "bravo"} {
+		if err := svc.LinkAdd(ctx, game, markdown.LinkInput{
+			Path: "s", EntityType: "quest", EntityKey: key,
+		}); err != nil {
+			t.Fatalf("LinkAdd: %v", err)
+		}
+	}
+	page, err := svc.LinksByDocument(ctx, game, "s", markdown.LinksFilter{Limit: 2})
+	if err != nil {
+		t.Fatalf("LinksByDocument: %v", err)
+	}
+	if len(page.Links) != 2 || page.NextCursor == "" {
+		t.Fatalf("page = %+v, want two rows and a cursor", page)
+	}
+	last, err := svc.LinksByDocument(ctx, game, "s",
+		markdown.LinksFilter{Limit: 2, Cursor: page.NextCursor})
+	if err != nil {
+		t.Fatalf("LinksByDocument: %v", err)
+	}
+	if len(last.Links) != 0 || last.NextCursor != "" {
+		t.Fatalf("final page = %+v, want an empty one with no cursor", last)
 	}
 }

@@ -376,12 +376,18 @@ JOIN entities e ON e.id = l.entity_id AND e.project_id = l.project_id
 JOIN entity_types t ON t.id = e.entity_type_id AND t.project_id = e.project_id
 WHERE l.project_id = $1::uuid
   AND l.document_id = $2::uuid
-ORDER BY t.key, e.key, e.id
+  AND ($3::uuid IS NULL
+       OR (e.key, e.id) > ($4::text, $3::uuid))
+ORDER BY e.key, e.id
+LIMIT $5::int
 `
 
 type ListDocumentLinksByDocumentParams struct {
 	ProjectID  uuid.UUID
 	DocumentID uuid.UUID
+	AfterID    *uuid.UUID
+	AfterKey   *string
+	Limit      int32
 }
 
 type ListDocumentLinksByDocumentRow struct {
@@ -392,9 +398,22 @@ type ListDocumentLinksByDocumentRow struct {
 	EntityID      uuid.UUID
 }
 
-// Ordered by the entity's type key then its key then its id: none of the
-// first two is unique on its own, and an order that can tie reshuffles
-// its ties between two identical calls.
+// One page of a document's attachments, keyset-ordered by (entity key,
+// entity id).
+//
+// **The order was (type key, entity key, entity id) before this listing
+// paged, and the type key came out of it when the cursor went in.** A
+// keyset cursor carries one sort column and an id (paging.Cursor), and
+// carrying the *value* rather than re-deriving it from the row is what
+// makes a cursor a position rather than a snapshot — a position that
+// looked its own sort value up by id would silently end the walk the
+// moment that attachment was removed. Two sort columns would need two
+// values in a cursor that has room for one. What the type key was
+// buying was grouping, not determinism: neither the entity key nor the
+// type key is unique on its own, and the entity id is what actually
+// stops an order from reshuffling its ties between two identical calls.
+// Every row still carries its type key, so a caller that wants a
+// document's attachments grouped by type groups them.
 //
 // The project filter here separates nothing that markdown.LinksByDocument
 // can reach, and this is stated rather than credited to a test that
@@ -407,7 +426,13 @@ type ListDocumentLinksByDocumentRow struct {
 // document_id filter: TestALinkIsAddressedByItsOwnDocument uses two
 // documents in one game, where the project filter separates nothing.
 func (q *Queries) ListDocumentLinksByDocument(ctx context.Context, arg ListDocumentLinksByDocumentParams) ([]ListDocumentLinksByDocumentRow, error) {
-	rows, err := q.db.Query(ctx, listDocumentLinksByDocument, arg.ProjectID, arg.DocumentID)
+	rows, err := q.db.Query(ctx, listDocumentLinksByDocument,
+		arg.ProjectID,
+		arg.DocumentID,
+		arg.AfterID,
+		arg.AfterKey,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -439,12 +464,18 @@ JOIN documents d ON d.id = l.document_id AND d.project_id = l.project_id
 WHERE l.project_id = $1::uuid
   AND l.entity_id = $2::uuid
   AND d.deleted_at IS NULL
+  AND ($3::uuid IS NULL
+       OR (d.path, d.id) > ($4::text, $3::uuid))
 ORDER BY d.path, d.id
+LIMIT $5::int
 `
 
 type ListDocumentLinksByEntityParams struct {
 	ProjectID uuid.UUID
 	EntityID  uuid.UUID
+	AfterID   *uuid.UUID
+	AfterPath *string
+	Limit     int32
 }
 
 type ListDocumentLinksByEntityRow struct {
@@ -465,8 +496,19 @@ type ListDocumentLinksByEntityRow struct {
 // the other half of the same rule in its second act: nothing cascades on
 // a soft delete, so the link row survives and comes back with its role
 // when the document is written to again.
+//
+// One page, keyset-ordered by (path, id), which is the documents
+// listing's own order: an entity that a hundred scripts hang off is an
+// ordinary entity, and an unbounded answer here is the same defect a
+// listing without a limit is.
 func (q *Queries) ListDocumentLinksByEntity(ctx context.Context, arg ListDocumentLinksByEntityParams) ([]ListDocumentLinksByEntityRow, error) {
-	rows, err := q.db.Query(ctx, listDocumentLinksByEntity, arg.ProjectID, arg.EntityID)
+	rows, err := q.db.Query(ctx, listDocumentLinksByEntity,
+		arg.ProjectID,
+		arg.EntityID,
+		arg.AfterID,
+		arg.AfterPath,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}

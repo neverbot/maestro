@@ -18,7 +18,27 @@ var (
 	ErrSchemaViolation      = errors.New("schema_violation")
 	ErrInvalidSchema        = errors.New("invalid_schema")
 	ErrInvalidInput         = errors.New("invalid_input")
+	// ErrLimitExceeded is here rather than in the package that first
+	// needed it. internal/views declared it, and internal/analysis needs
+	// exactly the same value: "a declared limit is above its hard cap;
+	// lower it, the cap is in the error" is word for word both domains'
+	// refusal, and a second value spelling the same code would not match
+	// under errors.Is — so internal/web's one existing arm would miss it
+	// and it would reach an agent as internal_error, which is the trap
+	// ValidationError.Is's own comment describes.
+	//
+	// Neither domain package may import the other, so the value moved
+	// down to the one they both already depend on. internal/views
+	// aliases it and keeps answering with it unchanged;
+	// TestLimitExceededIsOneValueAcrossBothDomains asserts the identity
+	// rather than the spelling.
+	ErrLimitExceeded = errors.New(CodeLimitExceeded)
 )
+
+// CodeLimitExceeded is the wire code ErrLimitExceeded names. It is a
+// const rather than a literal for the reason CodeInvalidInput is one: a
+// sibling domain building the error must not spell the string.
+const CodeLimitExceeded = "limit_exceeded"
 
 // ErrActorNotInGame is what the database's own backstop against a
 // cross-game actor is reported as.
@@ -79,6 +99,12 @@ func (e FieldError) Error() string { return e.Path + ": " + e.Message }
 //     well be types.upsert, where "schema_violation" would send an agent
 //     following the skill bundle off to inspect entity values that have
 //     nothing to do with it.
+//   - limit_exceeded is a declared limit above its hard cap. The fix is
+//     to lower it, and the cap is in the message. It is a narrower
+//     recovery than invalid_input's "change that argument" — the
+//     argument is not malformed, it is too large, and the error says by
+//     how much — which is why internal/views gave it a code and why
+//     internal/analysis reuses that exact value rather than a second one.
 //
 // This is deliberately not a third *type*. SchemaError is a separate type
 // because a declaration failing is a different fault (the schema, not the
@@ -160,6 +186,19 @@ func (e *ValidationError) Is(target error) bool {
 		return target == ErrSchemaViolation
 	case codeInvalidInput:
 		return target == ErrInvalidInput
+	case CodeLimitExceeded:
+		// The third code a ValidationError may carry, and it arrived with
+		// ErrLimitExceeded when internal/analysis needed the same value
+		// internal/views already had. **A code exported here that no
+		// error here can carry would be a sentinel nothing matches**: a
+		// caller building &ValidationError{Code: CodeLimitExceeded} — the
+		// natural thing to do, since this file offers both halves — would
+		// produce an error errors.Is answers false for, which reaches an
+		// agent as internal_error. That is exactly the trap the default
+		// arm below describes, sprung by this package's own vocabulary,
+		// and carrying the code one step further than the sentinel is
+		// what closes it.
+		return target == ErrLimitExceeded
 	default:
 		return false
 	}

@@ -45,14 +45,12 @@ import (
 const (
 	CodeQueryInvalid         = "query_invalid"
 	CodeRendererRequirements = "renderer_requirements"
-	CodeLimitExceeded        = "limit_exceeded"
 	CodeQueryStale           = "query_stale"
 )
 
 var (
 	ErrQueryInvalid         = errors.New(CodeQueryInvalid)
 	ErrRendererRequirements = errors.New(CodeRendererRequirements)
-	ErrLimitExceeded        = errors.New(CodeLimitExceeded)
 	ErrQueryStale           = errors.New(CodeQueryStale)
 )
 
@@ -69,7 +67,18 @@ func Sentinels() []error {
 // The sentinels this package reuses rather than redeclaring. They are
 // aliases of the metamodel's, not new values, so internal/web's existing
 // mcpErrorFor and writeDomainError arms catch them with no change.
+// CodeLimitExceeded and ErrLimitExceeded are the metamodel's, aliased
+// rather than redeclared, and they moved there when internal/analysis
+// needed the same value: two domain packages may not import each other,
+// and two `errors.New("limit_exceeded")` values do not match under
+// errors.Is — so the second one would have reached an agent as
+// internal_error through internal/web's single arm. Nothing about this
+// package's use of them changed; QueryError.Is still answers for the
+// code and predicate.go still builds the error.
+const CodeLimitExceeded = metamodel.CodeLimitExceeded
+
 var (
+	ErrLimitExceeded   = metamodel.ErrLimitExceeded
 	ErrNotFound        = metamodel.ErrNotFound
 	ErrVersionConflict = metamodel.ErrVersionConflict
 	ErrInvalidInput    = metamodel.ErrInvalidInput

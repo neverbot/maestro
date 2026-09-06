@@ -407,33 +407,29 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 	}
 }
 
-// notYetTaughtOutsideTheIndex is the ratchet this task leaves behind,
-// and it is a deviation from the plan recorded in the plan's own
-// corrections.
+// notYetTaughtOutsideTheIndex is the ratchet Task 3 left behind, and it
+// is a deviation from the plan recorded in the plan's own corrections.
 //
 // The plan's step 3 asks that every tool outside a small administrative
 // set appear in some page other than the generated index, so no tool is
 // reachable only from a list. That rule is a property of the *finished*
-// bundle: today the bundle is `skill.md` and the generated index, and
-// the prose pages that would teach these tools are Tasks 5 to 10. Writing
-// the rule as an aspiration for those tasks to remember is exactly the
-// failure this plan's own preamble names, so it is written as a set
-// equality instead: this list is exactly the tools no page but the index
-// mentions. A task that teaches a tool and does not shorten this list
-// fails, and a tool that quietly stops being taught fails too. Task 12
-// asserts the list is empty.
+// bundle: when it was written the bundle was `skill.md` and the
+// generated index, and the prose pages that teach these tools were
+// Tasks 5 to 10. Writing the rule as an aspiration for those tasks to
+// remember is exactly the failure this plan's own preamble names, so it
+// was written as a set equality instead: this list is exactly the tools
+// no page but the index mentions.
 //
-// Task 10 emptied the metamodel and views half of it: the fifteen
-// listings, readers and view-arrangement tools that were reachable only
-// from the index are taught by recipes/joining-a-game.md,
-// recipes/seeding-a-game.md and recipes/composing-a-view.md. What is
-// left is the analysis engine's own surface, which landed after this
-// plan was written and ships its own pages.
-var notYetTaughtOutsideTheIndex = []string{
-	"analysis.cycles", "analysis.orphans", "analysis.unreachable",
-	"routes.check", "routes.get", "routes.list",
-	"routes.remove", "routes.upsert",
-}
+// **It is empty, which is the finished state Task 12 asserts.** The last
+// eight entries were the analysis engine's own surface, which landed
+// after this plan was written and shipped no pages of its own;
+// reference/analysis.md and recipes/auditing-a-design.md teach them.
+//
+// It stays here, empty, rather than being deleted with the comparison
+// below: emptied and kept, a tool that stops being taught fails the
+// build naming itself. Deleted, the same tool would fail nothing, and
+// the guard would have been switched off by the commit that finished it.
+var notYetTaughtOutsideTheIndex []string
 
 // TestEveryRegisteredToolIsRoutedFromTheBundle asserts every registered
 // tool is reachable from the bundle at all (through the index), and pins

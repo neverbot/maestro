@@ -153,6 +153,7 @@ changed under you unless you changed it.
 | fill an empty game, or re-run a seed | `recipes/seeding-a-game.md` |
 | open a game somebody else designed | `recipes/joining-a-game.md` |
 | turn a question about the game into a picture | `recipes/composing-a-view.md` |
+| audit a design, or prove a progression still holds | `reference/analysis.md`, `recipes/auditing-a-design.md` |
 
 Nothing in this bundle is required, and a game none of its examples
 matches is the normal case.

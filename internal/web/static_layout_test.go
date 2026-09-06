@@ -202,18 +202,28 @@ func everyOwnModule(t *testing.T) map[string]string {
 // TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites is the
 // seam between Go and JavaScript that nothing else joins.
 //
-// internal/views.Position carries **no struct tags**, so a run marshals
-// a stored position as its Go field names — `EntityType`, `EntityKey`,
-// `X`, `Y`, `Pinned` — while views.set_positions *takes* the snake_case
-// spelling that internal/web/static/client.js sends. The asymmetry is
-// real, shipped, and load-bearing: a composer reading only the
-// snake_case names would find no stored position in any envelope and
-// would quietly re-arrange every saved view on every load, with no error
-// anywhere.
+// A stored position must be spelled the same way in the answer as in the
+// call. `internal/views.Position` now carries json tags, so a run
+// marshals `entity_type`, `entity_key`, `x`, `y`, `pinned` — the
+// spelling views.set_positions takes and internal/web/static/client.js
+// sends — and compose.js reads exactly that, once.
 //
-// The names are taken from the struct rather than quoted, so adding json
-// tags to Position fails here — loudly, in the same commit — instead of
+// It shipped otherwise. Position carried no tags, a run answered in Go
+// field names, and a composer reading only the documented spelling found
+// no stored position in any envelope: not an error, not an empty list
+// with a reason, but a view that looks as though nobody ever arranged
+// it — so every saved arrangement would have been silently re-laid out
+// on every load.
+//
+// The names are taken from the struct rather than quoted, so removing or
+// renaming a tag fails here — loudly, in the same commit — instead of
 // silently unreading every arrangement in the product.
+//
+// **Comments are stripped before the module is searched.** The previous
+// version of this guard searched the raw source, and compose.js's own
+// doc comment named every member it was looking for: the assertion would
+// have held over a `storedFrom` that read nothing at all. A guard that a
+// comment can satisfy is not a guard.
 func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.T) {
 	encoded, err := json.Marshal(views.Position{})
 	if err != nil {
@@ -228,17 +238,18 @@ func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.
 	if !ok {
 		t.Fatal("static/layout/compose.js is missing")
 	}
+	code := withoutComments(compose)
 
 	// UpdatedAt is the one field nothing renders — internal/views'
 	// positions.go says so — and the composer has no business reading it.
 	read := 0
 	for name := range fields {
-		if name == "UpdatedAt" {
+		if name == "updated_at" {
 			continue
 		}
-		if !strings.Contains(compose, `"`+name+`"`) {
-			t.Errorf("a run marshals a stored position with a %q member and compose.js never names it: "+
-				"every saved arrangement would be silently ignored", name)
+		if !reads(code, name) {
+			t.Errorf("a run marshals a stored position with a %q member and compose.js never "+
+				"reads it: every saved arrangement would be silently ignored", name)
 			continue
 		}
 		read++
@@ -246,13 +257,55 @@ func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.
 	if read == 0 {
 		t.Fatal("compose.js reads none of the members a stored position marshals to")
 	}
-	// The write's spelling is read too, because both really do occur on
-	// the wire, and because a fixture in the harness spelling only one of
-	// them would prove nothing about the other.
-	for _, name := range []string{"entity_type", "entity_key", "pinned"} {
-		if !strings.Contains(compose, `"`+name+`"`) {
-			t.Errorf("compose.js does not read %q, which is the spelling views.set_positions takes "+
-				"and internal/web/static/client.js sends", name)
+	// The Go field names are the spelling the envelope used before
+	// Position was tagged, and reading them was compose.js's workaround
+	// for it. One spelling crosses the wire now, so a second reader is
+	// not a belt and braces — it is the thing that would let the tags be
+	// lost again without this file noticing.
+	for _, gone := range []string{"EntityType", "EntityKey", "Pinned"} {
+		if reads(code, gone) {
+			t.Errorf("compose.js still reads %q: the envelope speaks one spelling now, and a "+
+				"reader of the old one hides the day it stops", gone)
 		}
+	}
+}
+
+// reads says whether the module names a wire member as a member: either
+// dotted (`row.entity_key`) or subscripted with a quoted string.
+func reads(code, name string) bool {
+	return regexp.MustCompile(`(?:\.` + regexp.QuoteMeta(name) + `\b|["']` + regexp.QuoteMeta(name) + `["'])`).
+		MatchString(code)
+}
+
+// withoutComments removes `//` line comments and `/* */` blocks, so a
+// source-shape guard asserts over code rather than over prose that
+// happens to name what it is looking for.
+//
+// It is deliberately naive about a `//` inside a string or a regular
+// expression literal: over-removal can only make a guard fail loudly,
+// never pass quietly, which is the direction a source-shape guard should
+// err in. What it must not do is quietly stop stripping, which would
+// weaken every caller at once, so
+// TestTheCommentStripperRemovesCommentsAndKeepsCode pins both halves of
+// what it does.
+func withoutComments(code string) string {
+	blocks := regexp.MustCompile(`(?s)/\*.*?\*/`)
+	lines := regexp.MustCompile(`(?m)//.*$`)
+	return lines.ReplaceAllString(blocks.ReplaceAllString(code, " "), " ")
+}
+
+// TestTheCommentStripperRemovesCommentsAndKeepsCode pins the helper the
+// guard above leans on: a stripper that returned its input unchanged
+// would make that assertion pass over a comment, which is the failure it
+// was rewritten to close.
+func TestTheCommentStripperRemovesCommentsAndKeepsCode(t *testing.T) {
+	const src = "// row.entity_key in a comment\nconst a = row.entity_key;\n/* row.pinned */\nconst b = 1;"
+	stripped := withoutComments(src)
+	if strings.Contains(stripped, "comment") || strings.Contains(stripped, "row.pinned") {
+		t.Errorf("comments survived stripping: %q", stripped)
+	}
+	if !strings.Contains(stripped, "const a = row.entity_key;") ||
+		!strings.Contains(stripped, "const b = 1;") {
+		t.Errorf("code did not survive stripping: %q", stripped)
 	}
 }

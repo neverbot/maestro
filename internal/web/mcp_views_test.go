@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -245,14 +247,35 @@ func TestPositionsAreWrittenAndReadBackThroughTheTools(t *testing.T) {
 	if len(positions) != 2 {
 		t.Fatalf("positions = %v, want the two that were dragged", positions)
 	}
+	// **Read back in the spelling the call was written in.** The members
+	// are named here as literal strings, deliberately: this is the one
+	// assertion in the package that would have failed while Position
+	// carried no json tags and a run answered `EntityKey`/`Pinned`, which
+	// is a difference no round-trip through Go types can see. The keys
+	// are checked whole rather than one at a time, because a member that
+	// went missing and a member that came back under another name are the
+	// same defect to a client and only the whole set tells them apart.
+	want := []string{"entity_key", "entity_type", "pinned", "updated_at", "x", "y"}
+	for _, p := range positions {
+		got := make([]string, 0, len(p))
+		for name := range p {
+			got = append(got, name)
+		}
+		sort.Strings(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("a stored position came back as %v, want the spelling "+
+				"views.set_positions takes, %v", got, want)
+		}
+	}
+
 	byKey := map[string]map[string]any{}
 	for _, p := range positions {
-		byKey[p["EntityKey"].(string)] = p
+		byKey[p["entity_key"].(string)] = p
 	}
-	if byKey["hogger"]["Pinned"] != true {
+	if byKey["hogger"]["pinned"] != true {
 		t.Errorf("hogger came back %v, want pinned by default", byKey["hogger"])
 	}
-	if byKey["defias"]["Pinned"] != false {
+	if byKey["defias"]["pinned"] != false {
 		t.Errorf("defias came back %v, want the false it was written with", byKey["defias"])
 	}
 

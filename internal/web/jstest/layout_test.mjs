@@ -631,41 +631,48 @@ check("mixedIsDeterministicOnShuffledInput", () => {
 // --- Reading the wire ------------------------------------------------
 
 check("aStoredPositionIsReadInTheSpellingTheServerWrites", () => {
-  // internal/views.Position carries no struct tags, so a run marshals
-  // Go field names. internal/web/static/client.js *sends* the snake_case
-  // spelling views.set_positions takes. Both are read, and
-  // internal/web/static_layout_test.go pins the first against the real
-  // struct rather than against this fixture.
+  // One spelling crosses the wire: internal/views.Position carries json
+  // tags, so a run marshals what views.set_positions takes and
+  // internal/web/static/client.js sends. This fixture is the write's
+  // spelling and the run's because they are the same spelling;
+  // internal/web/static_layout_test.go pins that against the real struct
+  // rather than against this fixture, which cannot know what Go emits.
   const fromRun = storedFrom([
-    { EntityType: "quest", EntityKey: "hogger", X: 12.5, Y: -40.25, Pinned: true, UpdatedAt: "2026-09-06T00:00:00Z" },
+    { entity_type: "quest", entity_key: "hogger", x: 12.5, y: -40.25, pinned: true, updated_at: "2026-09-06T00:00:00Z" },
   ]);
   assertDeepEqual(
     fromRun,
     [{ key: addressOf({ type: "quest", key: "hogger" }), x: 12.5, y: -40.25, pinned: true }],
     "the envelope's spelling",
   );
-  const fromWrite = storedFrom([{ entity_type: "quest", entity_key: "hogger", x: 12.5, y: -40.25, pinned: true }]);
-  assertDeepEqual(fromWrite, fromRun, "and the write's spelling reads the same");
+  // And the Go field names the envelope used before the tags landed are
+  // read by nothing now: a row in the old spelling is not half-read into
+  // a position at the origin, it is not a position at all.
+  assertEqual(
+    storedFrom([{ EntityType: "quest", EntityKey: "hogger", X: 12.5, Y: -40.25, Pinned: true }]).length,
+    0,
+    "and the spelling that is gone reads as nothing",
+  );
 
   // The default that matters: 0008_views.sql defaults `pinned` to true,
   // so a row that omits it is a node a human put somewhere and must not
   // become a node the engine may move.
   assertEqual(
-    storedFrom([{ EntityType: "q", EntityKey: "k", X: 0, Y: 0 }])[0].pinned,
+    storedFrom([{ entity_type: "q", entity_key: "k", x: 0, y: 0 }])[0].pinned,
     true,
     "a row with no flag is pinned",
   );
   assertEqual(
-    storedFrom([{ EntityType: "q", EntityKey: "k", X: 0, Y: 0, Pinned: false }])[0].pinned,
+    storedFrom([{ entity_type: "q", entity_key: "k", x: 0, y: 0, pinned: false }])[0].pinned,
     false,
     "and one written false is not",
   );
   // (0, 0) is a coordinate a designer may deliberately have chosen —
   // execute.go refuses to return unplaced as the origin for that exact
   // reason — so a row at the origin is a row.
-  assertEqual(storedFrom([{ EntityType: "q", EntityKey: "k", X: 0, Y: 0 }]).length, 1, "the origin is a place");
+  assertEqual(storedFrom([{ entity_type: "q", entity_key: "k", x: 0, y: 0 }]).length, 1, "the origin is a place");
   assertEqual(
-    storedFrom([{ EntityType: "q", EntityKey: "k", X: null, Y: 0 }]).length,
+    storedFrom([{ entity_type: "q", entity_key: "k", x: null, y: 0 }]).length,
     0,
     "and a non-finite coordinate is not",
   );
@@ -678,8 +685,8 @@ check("aStoredRowForAnEntityOutsideThePictureIsNotDrawn", () => {
     nodes,
     edges,
     positions: [
-      { EntityType: "quest", EntityKey: "hogger", X: 400, Y: 10 },
-      { EntityType: "quest", EntityKey: "deleted-last-week", X: 1, Y: 1 },
+      { entity_type: "quest", entity_key: "hogger", x: 400, y: 10 },
+      { entity_type: "quest", entity_key: "deleted-last-week", x: 1, y: 1 },
     ],
   });
   assertEqual(result.placements.length, nodes.length, "one placement per node in the answer");
@@ -966,7 +973,7 @@ check("aRerunHonoursAStoredPositionForANodeThatIsNewToThePicture", () => {
     nodes: [...nodes, node("quest", "returning")],
     edges: [],
     previous,
-    positions: [{ EntityType: "quest", EntityKey: "returning", X: -900, Y: 250 }],
+    positions: [{ entity_type: "quest", entity_key: "returning", x: -900, y: 250 }],
   });
   assertEqual(at(result, "quest", "returning").x, -900, "its stored x");
   assertEqual(at(result, "quest", "returning").y, 250, "its stored y");
@@ -980,7 +987,7 @@ check("layoutViewIsDeterministicEndToEnd", () => {
     mode: MODE_MIXED,
     nodes,
     edges,
-    positions: [{ EntityType: "quest", EntityKey: "hogger", X: 400, Y: 10 }],
+    positions: [{ entity_type: "quest", entity_key: "hogger", x: 400, y: 10 }],
   };
   const first = layoutView(request);
   assertEqual(coordinatesOf(layoutView(request)), coordinatesOf(first), "twice");

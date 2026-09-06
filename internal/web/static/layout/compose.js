@@ -71,18 +71,17 @@ const GRID_GAP = 24;
 // storedFrom normalises the envelope's `positions[]` into the rows
 // `compose` takes.
 //
-// **The envelope and the write speak different spellings, and this is
-// the shipped server rather than a guess.** `internal/views.Position`
-// carries no struct tags, so a run marshals a stored position as
-// `{"EntityType","EntityKey","X","Y","Pinned","UpdatedAt"}` — Go field
-// names, which internal/web/mcp_views_test.go reads back by those exact
-// strings. `views.set_positions` takes the snake_case spelling, which is
-// what internal/web/static/client.js sends. Both are accepted here, the
-// Go one first, because both really do occur; internal/web/
-// static_layout_test.go pins the one the server writes by marshalling
-// the struct rather than by quoting it, so a future set of json tags
-// fails here loudly instead of leaving every saved arrangement silently
-// unread.
+// **One spelling, and it is the documented one.** `internal/views.Position`
+// carries json tags, so a run marshals a stored position as
+// `{"entity_type","entity_key","x","y","pinned","updated_at"}` — the same
+// snake_case `views.set_positions` takes and internal/web/static/client.js
+// sends, so a position is spelled the same way in the answer as in the
+// call. It was not always: the type shipped untagged, a run answered in
+// Go field names, and this function read both spellings because a reader
+// of the documented one found no stored position in any envelope and
+// silently re-arranged every saved view. internal/web/static_layout_test.go
+// pins the spelling by marshalling the struct rather than by quoting it,
+// so removing the tags fails there loudly instead of here silently.
 //
 // `pinned` defaults to **true**, which is 0008_views.sql's own default
 // and views.set_positions': a row written without the flag is a node a
@@ -91,27 +90,20 @@ export function storedFrom(positions) {
   const rows = [];
   for (const row of Array.isArray(positions) ? positions : []) {
     if (!row || typeof row !== "object") continue;
-    const type = pick(row, "EntityType", "entity_type");
-    const key = pick(row, "EntityKey", "entity_key");
+    const key = row.entity_key;
     if (typeof key !== "string" || key === "") continue;
-    const x = pick(row, "X", "x");
-    const y = pick(row, "Y", "y");
+    const x = row.x;
+    const y = row.y;
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const pinned = pick(row, "Pinned", "pinned");
+    const pinned = row.pinned;
     rows.push({
-      key: addressOf({ type, key }),
+      key: addressOf({ type: row.entity_type, key }),
       x,
       y,
       pinned: pinned === undefined ? true : pinned === true,
     });
   }
   return rows;
-}
-
-function pick(row, first, second) {
-  if (Object.prototype.hasOwnProperty.call(row, first)) return row[first];
-  if (Object.prototype.hasOwnProperty.call(row, second)) return row[second];
-  return undefined;
 }
 
 // --- What the engine is asked to lay out -----------------------------

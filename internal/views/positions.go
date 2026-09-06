@@ -116,12 +116,12 @@ type EntityAddress struct {
 // the property that lets a query be edited without losing an afternoon
 // of map work.
 type Position struct {
-	EntityType string
-	EntityKey  string
-	X          float64
-	Y          float64
-	Pinned     bool
-	UpdatedAt  time.Time
+	EntityType string    `json:"entity_type"`
+	EntityKey  string    `json:"entity_key"`
+	X          float64   `json:"x"`
+	Y          float64   `json:"y"`
+	Pinned     bool      `json:"pinned"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // SetPositions writes the coordinates of one or more nodes of one view.

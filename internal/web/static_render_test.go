@@ -183,8 +183,12 @@ func renderModule(t *testing.T, name string) string {
 // join is one rule: six copies of it would be five places for it to be
 // weakened, which is the same argument render/marks.js is built on.
 //
-// A renderer whose module does not exist yet is simply not in this
-// table; the plan adds a row with the file.
+// **The six are all here now**, and TestEveryRendererInTheCatalogueHasA
+// Module holds it: a renderer the catalogue offers and this interface
+// cannot draw is a view an agent can save and a designer can only meet
+// as a blank canvas. While the modules were being written a missing row
+// was simply a task not yet done; now that they are all written, the
+// table's completeness is itself the contract.
 var rendererModules = []struct {
 	module   string
 	renderer string
@@ -194,6 +198,39 @@ var rendererModules = []struct {
 	{"nested.js", views.RendererNested},
 	{"map.js", views.RendererMap},
 	{"table.js", views.RendererTable},
+	{"timeline.js", views.RendererTimeline},
+}
+
+// TestEveryRendererInTheCatalogueHasAModule closes the table above.
+//
+// The join in this file runs over the modules that exist, so a renderer
+// with no module is a renderer nothing here checks — and, worse, one an
+// agent can name in views.upsert and a designer can only meet as a blank
+// canvas. Both directions, because a module for a renderer the catalogue
+// does not have is the other half of the same mistake and would be a
+// picture nobody can save.
+func TestEveryRendererInTheCatalogueHasAModule(t *testing.T) {
+	withModule := map[string]bool{}
+	for _, entry := range rendererModules {
+		withModule[entry.renderer] = true
+	}
+	for _, name := range views.RendererNames() {
+		if !withModule[name] {
+			t.Errorf("the catalogue offers %q and no module in this table draws it: an agent can save that view and a designer meets a blank canvas", name)
+		}
+	}
+	inCatalogue := map[string]bool{}
+	for _, name := range views.RendererNames() {
+		inCatalogue[name] = true
+	}
+	for _, entry := range rendererModules {
+		if !inCatalogue[entry.renderer] {
+			t.Errorf("render/%s claims to draw %q and the catalogue has no such renderer", entry.module, entry.renderer)
+		}
+	}
+	if len(rendererModules) != len(views.RendererNames()) {
+		t.Errorf("%d modules and %d renderers: the two lists have to be the same list", len(rendererModules), len(views.RendererNames()))
+	}
 }
 
 // TestARenderersControlsAreTheCataloguesParameters is the join.
@@ -347,9 +384,10 @@ func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 			checked++
 		}
 	}
-	// The guard on the guard, for TestAnEnumControlOffersTheSpellings'
-	// reason: a reader that resolved nothing would pass over every
-	// module ever written.
+	// The guard on the guard, for the reason
+	// TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits has one: a
+	// reader that resolved nothing would pass over every module ever
+	// written.
 	if checked < len(rendererModules) {
 		t.Fatalf("read %d control kinds out of %d renderer modules; the modules' shape moved and this guard did not", checked, len(rendererModules))
 	}

@@ -899,11 +899,19 @@ export function cycleGlyphMarks(box, key) {
 
 // A node on a map is a 7px disc and not a labelled box: a map with two
 // hundred boxes on it is not a map (§4.6). The label sits beside it.
-export const CLASS_PIN = "pin";
-export const CLASS_PIN_UNPLACED = "pin unplaced";
-export const CLASS_PIN_LABEL = "pin-label";
-export const PIN_RADIUS = 3.5;
-export const PIN_LABEL_GAP = 5;
+//
+// **It is a `point` and not a `pin`, because `timeline` draws the same
+// mark.** A node at a place and a node at a value on an axis are both a
+// small disc with its name beside it, and this vocabulary would rather
+// be renamed once than carry two spellings of one shape — which is what
+// a second renderer copying the first out of this file would have
+// produced. The hollow variant stays `map`'s: nothing on a timeline sits
+// at a coordinate the client chose.
+export const CLASS_POINT = "point";
+export const CLASS_POINT_UNPLACED = "point unplaced";
+export const CLASS_POINT_LABEL = "point-label";
+export const POINT_RADIUS = 3.5;
+export const POINT_LABEL_GAP = 5;
 
 // What a pin is painted with, and it is **chrome rather than data**.
 //
@@ -916,7 +924,7 @@ export const PIN_LABEL_GAP = 5;
 // either, so nothing is being withheld: the hue on a map belongs to the
 // designer's own image, which is §2's rule about where colour comes from
 // read in the one picture that has a ground.
-export const PIN_FILL = "var(--ink)";
+export const POINT_FILL = "var(--ink)";
 
 // The halo that lets an 11px label survive over a designer's own image.
 // It is the ground colour, painted as a stroke *under* the glyphs, which
@@ -926,7 +934,7 @@ export const PIN_FILL = "var(--ink)";
 export const LABEL_HALO = "var(--ground)";
 export const LABEL_HALO_WIDTH = 2;
 
-// pinMarks is one node on the map: its disc, its label up and to the
+// pointMarks is one node on the map: its disc, its label up and to the
 // right, and the ambiguity mark when the envelope flagged the node.
 //
 // **A hollow disc is a coordinate nobody chose.** §4.2 asks for a hollow
@@ -936,24 +944,24 @@ export const LABEL_HALO_WIDTH = 2;
 // one spelling of "there is less here than there looks". A designer who
 // has dragged nothing sees a map of rings and knows the arrangement is
 // not theirs yet.
-export function pinMarks(pin) {
+export function pointMarks(pin) {
   const { key, label, x, y, fill, placed, ambiguous } = pin;
   const marks = [
     {
       kind: MARK_DISC,
       key,
-      class: placed ? CLASS_PIN : CLASS_PIN_UNPLACED,
+      class: placed ? CLASS_POINT : CLASS_POINT_UNPLACED,
       cx: x,
       cy: y,
-      r: PIN_RADIUS,
-      fill: placed ? (typeof fill === "string" && fill !== "" ? fill : PIN_FILL) : UNFILLED,
+      r: POINT_RADIUS,
+      fill: placed ? (typeof fill === "string" && fill !== "" ? fill : POINT_FILL) : UNFILLED,
       stroke: placed ? NODE_STROKE : "var(--line-strong)",
       strokeWidth: NODE_STROKE_WIDTH,
     },
     ...haloLabelMarks(
-      { x: x + PIN_RADIUS + PIN_LABEL_GAP, y: y - PIN_RADIUS - PIN_LABEL_GAP },
+      { x: x + POINT_RADIUS + POINT_LABEL_GAP, y: y - POINT_RADIUS - POINT_LABEL_GAP },
       label,
-      { key, class: CLASS_PIN_LABEL, anchor: "start", baseline: "auto" },
+      { key, class: CLASS_POINT_LABEL, anchor: "start", baseline: "auto" },
     ),
   ];
   if (ambiguous) {
@@ -961,8 +969,8 @@ export function pinMarks(pin) {
       kind: MARK_DISC,
       key,
       class: CLASS_AMBIGUOUS,
-      cx: x + PIN_RADIUS,
-      cy: y - PIN_RADIUS,
+      cx: x + POINT_RADIUS,
+      cy: y - POINT_RADIUS,
       r: AMBIGUOUS_RADIUS,
       fill: AMBIGUOUS_FILL,
     });
@@ -1081,6 +1089,76 @@ export function backgroundMarks(background) {
       // read would be this interface editing the designer's own file.
       opacity: 1,
       fit: "none",
+    },
+  ];
+}
+
+// --- A mark that occupies a range ------------------------------------
+//
+// `timeline` draws a node at one value of an axis or across two of them
+// (§4.8). The point is `pointMarks` above, unchanged and shared with
+// `map`; what is new here is the bar, and the caret that says a span
+// this vocabulary cannot draw.
+
+export const CLASS_SPAN = "span";
+export const CLASS_SPAN_LABEL = "span-label";
+export const SPAN_HEIGHT = 2 * POINT_RADIUS;
+export const SPAN_LABEL_GAP = 5;
+
+// spanMarks is one bar, from `x1` to `x2`, centred on `y`.
+//
+// The label sits to the **right of the bar's end** rather than inside
+// it: a bar is as long as its values say, which for two adjacent levels
+// is a few pixels, and a name inside it would be clipped by the data.
+export function spanMarks(span) {
+  const { key, label, x1, x2, y, fill } = span;
+  const left = Math.min(x1, x2);
+  const width = Math.abs(x2 - x1);
+  return [
+    {
+      kind: MARK_RECT,
+      key,
+      class: CLASS_SPAN,
+      x: left,
+      y: y - SPAN_HEIGHT / 2,
+      w: width,
+      h: SPAN_HEIGHT,
+      radius: 1,
+      fill: typeof fill === "string" && fill !== "" ? fill : POINT_FILL,
+    },
+    ...haloLabelMarks(
+      { x: left + width + SPAN_LABEL_GAP, y },
+      label,
+      { key, class: CLASS_SPAN_LABEL, anchor: "start", baseline: "middle" },
+    ),
+  ];
+}
+
+// The caret a span whose end is before its start wears.
+//
+// **The two ends are not swapped**, which is the whole of this mark: a
+// quest declared from level 40 to level 10 is a content defect a
+// designer wants to know about, and a renderer that silently sorted the
+// pair would draw a perfectly plausible bar over it (§4.8). So the mark
+// has no length — there is no honest length to draw — and it carries a
+// glyph that says the drawing stopped, exactly as `nested`'s cycle glyph
+// does for the recursion that stopped.
+export const CLASS_CARET = "caret";
+export const CARET_GLYPH = "><";
+
+export function caretMarks(at, key) {
+  return [
+    {
+      kind: MARK_LABEL,
+      key,
+      class: CLASS_CARET,
+      x: at.x,
+      y: at.y,
+      text: CARET_GLYPH,
+      fill: "var(--line-strong)",
+      size: LABEL_SIZE,
+      anchor: "middle",
+      baseline: "middle",
     },
   ];
 }

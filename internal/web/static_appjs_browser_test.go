@@ -573,3 +573,46 @@ func TestTheTableRenderer(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_table_test.mjs")
 }
+
+// TestTheTimelineRenderer drives
+// internal/web/jstest/render_timeline_test.mjs, the last of the six.
+//
+// What it holds that no Go test can, and what is this renderer's alone.
+//
+// That **an enum axis is its option sequence and not its set**. A
+// championship declaring [heat, semi, final] has an axis in that order,
+// and the same three words sorted are a different axis over the same
+// data — a picture wrong in a way nothing in it shows. The fixture's
+// declaration order is deliberately not its alphabetical order, or the
+// test would prove nothing, and the mutation that sorts them turns four
+// checks red. The options reach the renderer from the **field
+// declaration** and are never derived from the answer, which is the only
+// way a declared option no node carries can still get a tick — the half
+// no envelope can supply, and the reason internal/views refuses to save
+// a span whose two ends are enums over different options.
+//
+// That **a span whose end is before its start is drawn and named**. It
+// is data rather than a drawing fault, so the mark has no length, it
+// carries a caret, and the frame reports the two values **unswapped**: a
+// renderer that sorted the pair would draw a perfectly plausible bar
+// over a content defect a designer wants to know about.
+//
+// That **a node with no place on the axis is never at the origin**. The
+// origin is a value — the axis minimum, or the first declared option —
+// and the fixture has a node sitting on it, so "before the axis begins"
+// is asserted against a picture where the origin means something. A
+// value that is not among an enum's declared options is the same answer
+// and the same count: an enum axis *is* its options, so a value outside
+// them is not a value of this axis, and no fourth tick is invented from
+// the answer.
+//
+// And that **the fourth overlapping mark in a lane collapses without a
+// re-run**, over a stubbed global fetch that counts, exactly as
+// `nested`'s depth chip does: a drawing density is not a fetch boundary
+// any more than a drawing depth is. Marks that do not overlap do not
+// stack, which is the control that keeps the first assertion from
+// passing over a renderer that stacked by arrival order.
+func TestTheTimelineRenderer(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/render_timeline_test.mjs")
+}

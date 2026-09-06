@@ -64,11 +64,26 @@ export const BANNER_AMBIGUOUS = "ambiguous";
 // nobody ran; here the repeat is the two boxes the drawing itself just
 // stopped between.
 export const BANNER_CONTAINMENT_CYCLE = "containment_cycle";
+// A span whose end is before its start. It is **data and not a drawing
+// fault** — a quest declared from level 40 to level 10 is a content
+// defect a designer wants to know about — so the picture draws a
+// zero-length mark with a caret rather than sorting the two ends, and
+// this band names the entities. The second band whose rows name things,
+// for BANNER_CONTAINMENT_CYCLE's reason: the drawing stopped at two
+// specific values of one specific node, and a band that said only "this
+// view has an inverted span" would leave a designer to find it.
+export const BANNER_INVERTED_SPAN = "inverted_span";
 // The shelf: `map`'s nodes with no coordinate at all. It is a band and
 // not only a strip of chips because a node that is not on the map is a
 // node a designer scanning the map cannot see is missing — spec §4.2
 // asks for the count in words, and the shelf is the same refusal drawn.
 export const BANNER_SHELVED = "shelved";
+// `timeline`'s own version of the same refusal: a node whose axis field
+// found nothing, or whose value is not on the axis this view declares.
+// It is a second band rather than a clause on the shelf's because the
+// two say different things about different pictures, and it names the
+// field, which is the one thing a designer can act on.
+export const BANNER_OFF_AXIS = "off_axis";
 // A `map` whose background asset is gone. `background_asset_id` is
 // ON DELETE SET NULL, so this is an ordinary transition between two runs
 // rather than a fault, and §4.6 asks for exactly one line about it —
@@ -92,9 +107,11 @@ export const BANNER_ORDER = [
   BANNER_TRUNCATED_DEPTH,
   BANNER_PLACED,
   BANNER_SHELVED,
+  BANNER_OFF_AXIS,
   BANNER_BACKGROUND_MISSING,
   BANNER_AMBIGUOUS,
   BANNER_CONTAINMENT_CYCLE,
+  BANNER_INVERTED_SPAN,
 ];
 
 // The four kinds of thing the frame can be showing. They are four and
@@ -259,6 +276,25 @@ export function bannersFor(envelope, options = {}) {
       rows: [],
     });
   }
+  // `timeline`'s unplaceable nodes. The field is named because it is the
+  // recovery: a designer told that three nodes have no value can look at
+  // three nodes, and a designer told *which field* can go and fill it
+  // in. It is the caller's, for the shelf's reason — whether a node has
+  // a value for this view's axis is a question about a drawing.
+  const offAxis = options.offAxis && typeof options.offAxis === "object" ? options.offAxis : null;
+  const offAxisCount = offAxis ? countOf(offAxis.count) : 0;
+  if (offAxisCount > 0) {
+    banners.push({
+      code: BANNER_OFF_AXIS,
+      css: "var(--muted)",
+      text:
+        `${count(offAxisCount, "node has", "nodes have")} no value on this view's axis` +
+        (text(offAxis.field) === "" ? "" : ` (${text(offAxis.field)})`) +
+        `, and ${offAxisCount === 1 ? "is" : "are"} drawn before the axis begins.`,
+      rows: [],
+    });
+  }
+
   if (options.backgroundMissing === true) {
     banners.push({
       code: BANNER_BACKGROUND_MISSING,
@@ -311,6 +347,28 @@ export function bannersFor(envelope, options = {}) {
         inner: text(cycle && cycle.inner),
         outer: text(cycle && cycle.outer),
         message: `${text(cycle && cycle.outer)} contains ${text(cycle && cycle.inner)}, which contains it again`,
+        css: "var(--muted)",
+      })),
+    });
+  }
+
+  // The inverted spans, last, beside the containment cycle for the same
+  // reason: they are the two bands whose rows name entities, and a
+  // reader who has met one has learned where to look for the other.
+  const inverted = Array.isArray(options.invertedSpans) ? options.invertedSpans : [];
+  if (inverted.length > 0) {
+    banners.push({
+      code: BANNER_INVERTED_SPAN,
+      css: "var(--muted)",
+      text:
+        `${count(inverted.length, "span ends", "spans end")} before it starts; ` +
+        "the two values are drawn as they are and were not swapped.",
+      rows: inverted.map((span) => ({
+        code: BANNER_INVERTED_SPAN,
+        name: text(span && span.name),
+        from: text(span && span.from),
+        to: text(span && span.to),
+        message: `${text(span && span.name)} runs from ${text(span && span.from)} to ${text(span && span.to)}`,
         css: "var(--muted)",
       })),
     });

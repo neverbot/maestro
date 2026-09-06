@@ -3031,7 +3031,7 @@ gets numeric ticks; an **enum axis gets one tick per declared option, in
 declaration order** — that order is the axis, which is why the catalogue
 refuses two enums whose options differ.
 
-- [ ] Tests: `anEnumAxisFollowsDeclarationOrderNotSortOrder` — declare
+- [x] Tests: `anEnumAxisFollowsDeclarationOrderNotSortOrder` — declare
   options in a non-alphabetical order and assert the tick order matches
   the declaration, with a fixture whose alphabetical order differs, or
   the test proves nothing; `everyDeclaredOptionGetsATickEvenWithNoNodes`;
@@ -3046,7 +3046,7 @@ refuses two enums whose options differ.
   `laneCaptionsCarryTheirValue`; `aNumberAxisPicksTicksDeterministically`
   — the same data twice, identical ticks.
 
-- [ ] See red: sort the two ends of an inverted span and watch its test
+- [x] See red: sort the two ends of an inverted span and watch its test
   fail; sort the enum options alphabetically and watch the axis-order
   test fail; place a valueless node at the axis origin and watch the
   unplaced-lane test find the mark.
@@ -3056,6 +3056,131 @@ git add internal/web/static/render/timeline.js internal/web/jstest/render_timeli
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the timeline renderer, whose axis is a declaration order and not a sort"
 ```
+
+#### Corrections made during implementation
+
+1. **The axis arrives from the caller, because it is not in the
+   envelope and cannot be.** An answer carries the values a query found;
+   an enum axis is the sequence the *type* declares, and
+   `everyDeclaredOptionGetsATickEvenWithNoNodes` is exactly the half no
+   answer can supply — a championship with no race in the final still has
+   a final. So `options.axis` is the field's declaration
+   (`{type, options}`), the way `map`'s background descriptor is the
+   view's, and `axisFor` is the one function that turns it into
+   positions. With **no** declaration there is only a number axis: a
+   value that is not a number has no position without one, and inferring
+   an order from the values in the answer is precisely the sort this
+   renderer exists to refuse.
+
+2. **A value the axis does not have is answered the way an absent one
+   is, and that is a reading rather than a shortcut.** The catalogue
+   refuses at save time a view whose axis field is declared differently
+   across the types in scope, so a saved view cannot produce a stray
+   value; an inline run can. An enum axis **is** its options, so a value
+   outside them is not a value *of this axis* — literally the same
+   statement as having none — and it goes to the same region with the
+   same count and the same caption. No second sentence, and no fourth
+   tick invented from the answer.
+   `aValueOutsideTheDeclaredOptionsIsNotOnTheAxis` pins it, and the
+   mutation that derives the ticks from the answer turns three checks
+   red.
+
+3. **A span whose end is not on the axis is a point and a count, never a
+   bar back to the origin.** This is the shape the catalogue's
+   two-unrelated-enums refusal takes when an inline run meets it, and a
+   bar from the start to zero would claim a range the answer does not
+   have. `openSpans` counts them; the mutation that draws the bar is
+   *"and draws no bar: got 1, want 0"*.
+
+4. **The map's pin and the timeline's point are one mark, so the mark
+   was renamed rather than copied.** A node at a place and a node at a
+   value are both a small disc with its name beside it;
+   `render/marks.js`'s `pinMarks` is now `pointMarks` with the classes
+   to match, and `map.js` and its harness moved with it. Copying it out
+   of this file into a sixth renderer is what the file exists to
+   prevent, and keeping a `pin` class on a timeline would have been the
+   same drift wearing the right shape. The **hollow** variant stays
+   `map`'s: nothing on a timeline sits at a coordinate the client chose.
+
+5. **Two marks are new and both are decisions rather than geometry.**
+   `spanMarks` puts the label outside the bar's end, because a bar is as
+   long as its values say and two adjacent levels is a few pixels — a
+   name inside it would be clipped by the data. `caretMarks` is the
+   glyph for a span with no honest length, beside `nested`'s cycle glyph
+   and for the same reason: a mark that says the drawing stopped, where
+   a dash would have said something was missing. Everything else this
+   renderer draws is `bandMarks` — the axis, every tick, every lane
+   hairline and the region before the axis are one rule with one caption,
+   which Task 9 wrote for the ranks and Task 10 said was waiting here —
+   and `chipMarks`, which Task 10 wrote for exactly this collapse.
+
+6. **The frame gained two bands.** `BANNER_OFF_AXIS` names the *field*,
+   because the field is the recovery: a designer told that three nodes
+   have no value can look at three nodes, and one told which field can go
+   and fill it in. `BANNER_INVERTED_SPAN` names the entities and reports
+   the two values **in the order the game wrote them** — the second band
+   in this interface whose rows name things, beside the containment
+   cycle and for its reason: the drawing stopped at two specific values
+   of one specific node, and a band that said only "this view has an
+   inverted span" would leave a designer to find it.
+
+7. **The unlaned lane is last**, which is `layered`'s trailing unranked
+   band and `table`'s trailing group, carried one more step. A lane of
+   "the ones we know nothing about" at the top reads as the first lane of
+   the answer.
+
+8. **Marks that do not overlap do not stack**, and that control is what
+   makes the collapse test mean something. The stack is a greedy
+   colouring of the overlap intervals in x order — each mark takes the
+   first row whose last mark ends before this one starts — so five races
+   across five levels are five marks on one row. An implementation that
+   stacked by arrival order would collapse a perfectly readable picture
+   and would pass a test that only counted three marks and a chip.
+
+9. **A mutation that does not apply is a mutation that proves
+   nothing.** The alphabetical-sort mutation was written against a line
+   that did not exist and the harness stayed green, which for one minute
+   read as "the axis order is unasserted". Every mutation after it
+   asserts its own patch applied before running the tests. The rewritten
+   one is red in four places.
+
+10. **The Go guard is now closed over the catalogue.**
+    `TestEveryRendererInTheCatalogueHasAModule` requires the module table
+    and `views.RendererNames()` to be the same list, in both directions:
+    while the modules were being written a missing row was a task not yet
+    done, and now that all six exist, a renderer the catalogue offers and
+    this interface cannot draw is a view an agent can save and a designer
+    can only meet as a blank canvas. Mutation: dropping the `timeline`
+    row gives *"the catalogue offers "timeline" and no module in this
+    table draws it"* and *"5 modules and 6 renderers"*.
+
+**Mutations run, all red.** The two ends of an inverted span sorted
+(*"only the well-formed span is a bar: got 2, want 1"*); the enum options
+sorted alphabetically (*"the ticks are the declared options, in the order
+the type declares them: got ["final","heat","semi"]"*, and the node at
+the first option no longer at the origin, *"got 360, want 0"*); a
+valueless node placed at the axis origin (*"every mark of the valueless
+node is before the axis begins: a disc is at 0"*); the ticks derived from
+the answer instead of the declaration (*"one node carrying one option
+still draws all three ticks: got ["heat"]"*) and from the values' order
+(*"got ["semi","final","heat"]"*); the stack four deep before it
+collapses (*"three marks stack: got 4, want 3"*); the chip counting one
+(*"one chip, counting two: got [{… "count":1}]"*); the unlaned lane put
+first (*"got [["not set",1],["gt3",2],…]"*); a span with no end on the
+axis drawn back to the origin (*"and draws no bar: got 1, want 0"*); a
+collapsed node left out of the count (*"every row the twin has is a mark
+in the picture or a node a chip is holding: got 6, want 7"*); and the
+`timeline` row removed from the module table.
+
+**The hand check this task leaves**, to be performed at Task 15: **a
+championship with four lanes and a stage axis, at least one of them
+dense enough to collapse.** Does a `+2` chip read as *"there are more
+marks here"* rather than as a mark of its own, and does the region
+before the axis read as "these have no value" rather than as the axis's
+first stop? Nothing automated can answer either — the harness asserts
+every mark of a valueless node is left of the origin and that a node at
+the first declared option is on it, and says nothing about whether a
+reader sees a boundary there.
 
 ---
 

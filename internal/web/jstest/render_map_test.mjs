@@ -61,13 +61,13 @@ import {
   CLASS_CHIP_LABEL,
   CLASS_EDGE,
   CLASS_GRID,
-  CLASS_PIN,
-  CLASS_PIN_LABEL,
-  CLASS_PIN_UNPLACED,
+  CLASS_POINT,
+  CLASS_POINT_LABEL,
+  CLASS_POINT_UNPLACED,
   CLASS_STUB_RING,
   LABEL_HALO,
   LABEL_HALO_WIDTH,
-  PIN_FILL,
+  POINT_FILL,
   UNFILLED,
 } from "../static/render/marks.js";
 import {
@@ -267,7 +267,7 @@ check("declaredCoordinatesAreDrawnAsTheGameWroteThem", () => {
     x_field: "east",
     y_field: "north",
   });
-  const pin = (key) => marksOfClass(result, CLASS_PIN).find((mark) => mark.key === address(key));
+  const pin = (key) => marksOfClass(result, CLASS_POINT).find((mark) => mark.key === address(key));
   assertEqual(pin("far").cx, 100000, "the game's own x, exactly");
   assertEqual(pin("far").cy, -50, "and its y, negative and untouched");
   assertEqual(pin("near").cx, 12.5, "and a fractional one is not rounded to a grid");
@@ -362,12 +362,12 @@ check("aNewEntityInASavedArrangementIsPlacedUnpinnedAndCounted", () => {
   assertEqual(result.automatic, 12, "twelve of them are at a coordinate nobody chose");
   assertEqual(result.firstRun, null, "and this is not a fresh map");
 
-  const hollow = marksOfClass(result, CLASS_PIN_UNPLACED);
+  const hollow = marksOfClass(result, CLASS_POINT_UNPLACED);
   assertEqual(hollow.length, 12, "twelve hollow anchors");
   assertEqual(hollow[0].fill, UNFILLED, "a hollow anchor has nothing in it");
-  const solid = marksOfClass(result, CLASS_PIN);
+  const solid = marksOfClass(result, CLASS_POINT);
   assertEqual(solid.length, 2, "and two solid ones, for the coordinates a designer chose");
-  assertEqual(solid[0].fill, PIN_FILL, "which are filled");
+  assertEqual(solid[0].fill, POINT_FILL, "which are filled");
 
   // The band §4.2 asks for, in the frame's own words.
   const banners = bannersFor(envelope, { placedAutomatically: result.automatic });
@@ -402,7 +402,7 @@ check("aRemovedBackgroundKeepsEveryCoordinate", () => {
   // view and were never anchored to the image.
   const pinAt = (result, key) => {
     const mark = result.marks.find(
-      (m) => m.key === address(key) && (m.class === CLASS_PIN || m.class === CLASS_PIN_UNPLACED),
+      (m) => m.key === address(key) && (m.class === CLASS_POINT || m.class === CLASS_POINT_UNPLACED),
     );
     return [mark.cx, mark.cy];
   };
@@ -536,7 +536,7 @@ check("labelHalosAreEmittedForEveryLabel", () => {
     positions: nodes.map((n, i) => position(n.key, i * 30, i * 20)),
   });
   const result = mapScene(envelope, {}, { background: GROUND });
-  const labels = marksOfClass(result, CLASS_PIN_LABEL);
+  const labels = marksOfClass(result, CLASS_POINT_LABEL);
   assertEqual(labels.length, 6, "one label per pin");
   for (const label of labels) {
     assertEqual(label.halo, LABEL_HALO, `${label.text} carries the halo`);
@@ -545,7 +545,7 @@ check("labelHalosAreEmittedForEveryLabel", () => {
   }
   // Offset up and to the right of the disc, so it never sits on the mark
   // it names.
-  const pin = marksOfClass(result, CLASS_PIN)[0];
+  const pin = marksOfClass(result, CLASS_POINT)[0];
   const label = labels.find((mark) => mark.key === pin.key);
   assert(label.x > pin.cx, "the label is to the right of its pin");
   assert(label.y < pin.cy, "and above it");
@@ -600,7 +600,7 @@ check("thePictureAndTheTwinDescribeTheSameAnswer", () => {
     {},
   );
   assertEqual(
-    marksOfClass(scene, CLASS_PIN_LABEL)[0].text,
+    marksOfClass(scene, CLASS_POINT_LABEL)[0].text,
     named.nodes.rows[0].cells.find((cell) => cell.column === "label").text,
     "a pin's label and its twin row's cell are one string",
   );

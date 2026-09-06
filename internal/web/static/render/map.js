@@ -73,7 +73,7 @@ import { joinEdges } from "./scene.js";
 import {
   BAND_CAPTION_GAP,
   CHIP_HEIGHT,
-  PIN_RADIUS,
+  POINT_RADIUS,
   backgroundMarks,
   bandMarks,
   boundsOf,
@@ -81,7 +81,7 @@ import {
   chipWidth,
   edgeMarks,
   gridMarks,
-  pinMarks,
+  pointMarks,
   stubMarks,
 } from "./marks.js";
 import { CONTROL_ENUM, CONTROL_NUMBER, CONTROL_NUMBER_FIELD, control } from "./controls.js";
@@ -196,7 +196,7 @@ export const CONTROLS = [
 // Returns:
 //   marks     — the scene.
 //   legend    — null, always: this renderer paints no data. See
-//               render/marks.js's PIN_FILL for the argument.
+//               render/marks.js's POINT_FILL for the argument.
 //   placed    — the addresses that got a pin.
 //   shelf     — `{key, label}` per node with no coordinate, in address
 //               order, which is also the order the chips are drawn in.
@@ -246,8 +246,8 @@ export function mapScene(envelope, params = {}, options = {}) {
       // approximation is exact at the four compass points and a
       // half-pixel out at the diagonals, which is a line that starts
       // half a pixel inside a 7px disc.
-      width: 2 * PIN_RADIUS,
-      height: 2 * PIN_RADIUS,
+      width: 2 * POINT_RADIUS,
+      height: 2 * POINT_RADIUS,
     });
   }
 
@@ -305,7 +305,7 @@ export function mapScene(envelope, params = {}, options = {}) {
 
   for (const pin of pins.values()) {
     marks.push(
-      ...pinMarks({
+      ...pointMarks({
         key: pin.key,
         label: pin.label,
         x: pin.x,

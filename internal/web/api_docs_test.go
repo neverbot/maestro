@@ -509,13 +509,24 @@ func TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("rendered = %d: %s", rec.Code, rec.Body.String())
 	}
-	for header, want := range map[string]string{
-		"Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
-		"X-Content-Type-Options":  "nosniff",
-		"Referrer-Policy":         "no-referrer",
+	// Asserted against a *plain page's* headers rather than against a
+	// literal, which is the property the name claims: not "the policy is
+	// this string" — a string that has to be re-typed every time the
+	// policy grows a source, and that teaches a reader nothing — but
+	// "this response carries what every other response carries". A
+	// handler that wrote its own headers would differ from the page and
+	// fail here whatever the policy happens to say.
+	page := httptest.NewRecorder()
+	f.srv.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	for _, header := range []string{
+		"Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy",
 	} {
+		want := page.Header().Get(header)
+		if want == "" {
+			t.Fatalf("a plain page carries no %s: this test would pass on a server with no policy at all", header)
+		}
 		if got := rec.Header().Get(header); got != want {
-			t.Errorf("%s = %q, want %q", header, got, want)
+			t.Errorf("%s = %q, want %q — the same value every page carries", header, got, want)
 		}
 	}
 	if got := rec.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {

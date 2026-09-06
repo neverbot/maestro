@@ -1,10 +1,14 @@
 package web
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -78,3 +82,75 @@ func (s *Server) staticFileServer() http.Handler {
 		fileServer.ServeHTTP(w, r)
 	}))
 }
+
+// --- The import map and the policy that would otherwise block it ------
+
+// importMapScript finds an inline `<script type="importmap">` and
+// captures exactly the bytes between its tags, which is what a
+// Content-Security-Policy hash source is computed over.
+var importMapScript = regexp.MustCompile(`(?s)<script type="importmap">(.*?)</script>`)
+
+// importMapHashes is one `'sha256-…'` source per distinct import map in
+// the shipped shells, sorted, ready to be joined into a script-src.
+//
+// **This exists because `default-src 'self'` silently switches the
+// import map off.** The map is an *inline* script, so a policy with no
+// hash, nonce or 'unsafe-inline' makes a browser refuse to apply it —
+// and refusing to apply an import map is not a visible failure: the
+// element is still in the DOM, `document.querySelector` still finds it,
+// and the only symptom is that every bare specifier fails to resolve the
+// moment some page imports one. Task 2 shipped the map, Task 15 is the
+// first page that imports `lit`, and this is what opening that page in a
+// browser found. Nothing before it could have: no test in this package
+// enforces a CSP by parsing it, and the map's own tests read the file
+// rather than the policy.
+//
+// A **hash** rather than a nonce or 'unsafe-inline'. 'unsafe-inline'
+// would re-admit every injected script this policy exists to refuse. A
+// nonce would have to be generated per response and threaded into the
+// shell, which means the shells stop being static files. The map is
+// shipped in the binary and changes only with a deploy, so its hash is
+// computable once, at startup, from the bytes that are actually served
+// — which is the property that matters: a map edited without this being
+// updated cannot happen, because there is nothing to update.
+var importMapHashes = func() []string {
+	seen := map[string]bool{}
+	entries, err := fs.ReadDir(assets, ".")
+	if err != nil {
+		panic(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			continue
+		}
+		body, err := fs.ReadFile(assets, entry.Name())
+		if err != nil {
+			panic(err)
+		}
+		for _, found := range importMapScript.FindAllSubmatch(body, -1) {
+			sum := sha256.Sum256(found[1])
+			seen["'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'"] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for hash := range seen {
+		out = append(out, hash)
+	}
+	sort.Strings(out)
+	return out
+}()
+
+// ImportMapHashesForTest is importMapHashes for the external test
+// package, which asserts the served policy really admits the map every
+// shell ships.
+func ImportMapHashesForTest() []string {
+	return append([]string(nil), importMapHashes...)
+}
+
+// contentSecurityPolicy is the policy every response carries.
+//
+// script-src repeats 'self' because naming the directive at all replaces
+// default-src for scripts: a script-src of hashes alone would refuse
+// every module this front end loads.
+var contentSecurityPolicy = "default-src 'self'; script-src 'self' " +
+	strings.Join(importMapHashes, " ") + "; frame-ancestors 'none'"

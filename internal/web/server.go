@@ -624,12 +624,14 @@ func (s *Server) Close() {
 }
 
 // securityHeaders sets the three response headers every response in this
-// product can carry for free, because nothing it serves needs an
-// exception to any of them: there is no inline script or inline style
-// anywhere in internal/web/static, so Content-Security-Policy: default-src
-// 'self' costs this product nothing while ruling out every injected-script
-// or injected-stylesheet exfiltration path a future XSS bug could reach
-// for; X-Content-Type-Options: nosniff stops a browser from guessing a
+// product can carry, and the policy is built from the assets rather than
+// written out here: `default-src 'self'` rules out every injected-script
+// and injected-stylesheet exfiltration path a future XSS bug could reach
+// for, and it also — silently — switches off the one inline script this
+// product does ship, the import map. static.go's importMapHashes is the
+// exemption, one SHA-256 source per distinct map, computed from the bytes
+// that are served; see its doc comment for why a hash and not a nonce or
+// 'unsafe-inline', and for what opening a page in a browser found. X-Content-Type-Options: nosniff stops a browser from guessing a
 // different content type than the one this package already sets on every
 // response it writes (serveAsset, static.go, and writeJSON, this file);
 // and Referrer-Policy: no-referrer is the same protection login.html's own
@@ -653,7 +655,7 @@ func (s *Server) Close() {
 // happen to reach a specific handler.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)

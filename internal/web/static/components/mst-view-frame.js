@@ -124,6 +124,17 @@ export class MstViewFrame extends LitElement {
        representation and one that says it is decoration. */
     .canvas {
       display: block;
+      /* The drawing's enclosure, and the reason it is here rather than
+         on any page: mst-canvas is position:absolute inset:0, so
+         it needs a positioned box with a real height to fill, and a
+         frame that slotted a canvas into a zero-height block would
+         render six hundred kilobytes of correct SVG that nobody can
+         see. Found by mounting the first view (Task 15). The height is
+         viewport-relative because a diagram is a thing you look *at*,
+         and the floor is what keeps it usable in a short window. */
+      position: relative;
+      height: 70vh;
+      min-height: 22rem;
     }
     .footer {
       padding: 0.4rem 0.75rem;

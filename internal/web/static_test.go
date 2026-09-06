@@ -1,9 +1,14 @@
 package web_test
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -166,15 +171,79 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 
 	want := map[string]string{
-		"Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'",
-		"X-Content-Type-Options":  "nosniff",
-		"Referrer-Policy":         "no-referrer",
+		"X-Content-Type-Options": "nosniff",
+		"Referrer-Policy":        "no-referrer",
 	}
 	for header, value := range want {
 		if got := rec.Header().Get(header); got != value {
 			t.Errorf("%s = %q, want %q", header, got, value)
 		}
 	}
+
+	// The policy is built from the shipped assets (static.go's
+	// importMapHashes), so it is asserted by its parts rather than by a
+	// literal that would have to be re-typed on every vendored change.
+	policy := rec.Header().Get("Content-Security-Policy")
+	for _, directive := range []string{"default-src 'self'", "frame-ancestors 'none'", "script-src 'self' "} {
+		if !strings.Contains(policy, directive) {
+			t.Errorf("Content-Security-Policy = %q, which does not carry %q", policy, directive)
+		}
+	}
+	if strings.Contains(policy, "unsafe-inline") {
+		t.Errorf("Content-Security-Policy = %q: 'unsafe-inline' re-admits every injected script this policy exists to refuse", policy)
+	}
+}
+
+// TestThePolicyAdmitsEveryShellsImportMap is the check that would have
+// caught the defect Task 15 found by opening a page in a browser.
+//
+// An import map is an **inline** script. Under `default-src 'self'` with
+// no hash, a browser refuses to apply it — and refusing to apply an
+// import map produces no error anybody looks at: the element is still in
+// the DOM, every existing test still passes, and the only symptom is
+// that the first page to import a bare specifier loads nothing at all.
+// Task 2 shipped the map, Task 15 mounted the first page that needs it,
+// and four tasks' worth of components were unreachable in a browser in
+// between.
+//
+// It hashes the map out of each shell **on disk** rather than asking
+// static.go for the hashes it computed, because a test that asked the
+// code under test for its own answer would agree with any answer.
+func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	policy := rec.Header().Get("Content-Security-Policy")
+
+	shells, err := filepath.Glob(filepath.Join("static", "*.html"))
+	if err != nil {
+		t.Fatalf("glob shells: %v", err)
+	}
+	if len(shells) == 0 {
+		t.Fatal("found no shell: this test would pass on an empty tree")
+	}
+	found := 0
+	inline := regexp.MustCompile(`(?s)<script type="importmap">(.*?)</script>`)
+	for _, shell := range shells {
+		body, err := os.ReadFile(shell)
+		if err != nil {
+			t.Fatalf("read %s: %v", shell, err)
+		}
+		for _, match := range inline.FindAllSubmatch(body, -1) {
+			found++
+			sum := sha256.Sum256(match[1])
+			source := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+			if !strings.Contains(policy, source) {
+				t.Errorf("%s ships an import map the policy does not admit (%s); a browser silently "+
+					"ignores it and every bare specifier on that page fails to resolve",
+					filepath.Base(shell), source)
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatal("no shell declares an import map: this test would pass whatever the policy said")
+	}
+	t.Logf("the policy admits the import map of %d shell(s)", found)
 }
 
 // TestConfigEndpointIsPublicAndMinimal pins GET /api/config: reachable

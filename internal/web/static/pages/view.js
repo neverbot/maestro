@@ -385,6 +385,14 @@ async function draw(state, envelope, error, options) {
   state.canvas.hidden = false;
   state.canvas.draw({ marks: scene.marks });
 
+  // Fitted once, on the first drawing of this view.
+  if (!state.fitted) {
+    const box = state.canvas.getBoundingClientRect ? state.canvas.getBoundingClientRect() : null;
+    const fitted = fitView(boundsOf(scene.marks), box ? box.width : 0, box ? box.height : 0);
+    if (fitted) state.canvas.setView(fitted);
+    state.fitted = true;
+  }
+
   // The arrangement is rebuilt on every draw, from the coordinates the
   // composition actually used: an arrangement holding the previous
   // picture's nodes would move things that are no longer on screen.
@@ -400,6 +408,63 @@ async function draw(state, envelope, error, options) {
   });
   state.canvas.showArrangement(state.arrangement);
   return state;
+}
+
+// FIT_MARGIN is the space left around a picture that has just been fitted
+// to the window, as a fraction of the drawing's own size. A picture drawn
+// hard against the edges reads as a picture that has been cut off.
+export const FIT_MARGIN = 0.04;
+
+// The zoom a fit will not exceed. Fitting a two-node answer to a
+// thousand-pixel window would draw two enormous boxes and say nothing
+// about the game.
+export const FIT_MAX_ZOOM = 1;
+
+// boundsOf is the extent of a scene, in the game's own coordinates. It
+// reads the marks rather than the layout, because a scene carries marks
+// the layout never placed — a shelf chip, an axis tick, a background —
+// and a fit that ignored them would cut them off.
+export function boundsOf(marks) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  const span = (x, y, w, h) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + (Number.isFinite(w) ? w : 0));
+    maxY = Math.max(maxY, y + (Number.isFinite(h) ? h : 0));
+  };
+  for (const mark of Array.isArray(marks) ? marks : []) {
+    if (Number.isFinite(mark.cx)) span(mark.cx - (mark.r || 0), mark.cy - (mark.r || 0), 2 * (mark.r || 0), 2 * (mark.r || 0));
+    else if (Number.isFinite(mark.x1)) {
+      span(Math.min(mark.x1, mark.x2), Math.min(mark.y1, mark.y2), Math.abs(mark.x2 - mark.x1), Math.abs(mark.y2 - mark.y1));
+    } else span(mark.x, mark.y, mark.w, mark.h);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+}
+
+// fitView is the pan and zoom that puts a whole answer on the screen.
+//
+// **A first view opens fitted, and that is a mounting decision this page
+// owns.** A scene's coordinates are the game's, the canvas's view starts
+// at the origin at 1x, and a five-hundred-node graph laid out from (0,0)
+// to (12000, 9000) would open showing its top-left corner — a designer's
+// first sight of their own game would be four boxes and a lot of ground.
+// It is applied once, on the first draw of a view: every later draw keeps
+// whatever the designer panned to, because moving a picture somebody is
+// reading is the thing this whole sub-project refuses to do.
+export function fitView(bounds, width, height) {
+  if (!bounds || !(width > 0) || !(height > 0)) return null;
+  const margin = 1 + 2 * FIT_MARGIN;
+  const k = Math.min(FIT_MAX_ZOOM, width / (bounds.width * margin), height / (bounds.height * margin));
+  return {
+    k,
+    x: width / 2 - k * (bounds.x + bounds.width / 2),
+    y: height / 2 - k * (bounds.y + bounds.height / 2),
+  };
 }
 
 // nodesOfScene is the model the arrangement moves: one record per node,

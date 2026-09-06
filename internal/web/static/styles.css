@@ -153,6 +153,27 @@
   color: var(--focus-ink);
 }
 
+/* Links wear the ink, not the browser's blue.
+ *
+ * Task 1's central rule is that the chrome is achromatic with exactly
+ * two chromatic exemptions, --danger and --focus, because colour is a
+ * channel `color_by` has already been given. A default `#0000EE` on
+ * every link is a third one, arriving by omission rather than by
+ * decision — and on the three-lane home, where almost every row is a
+ * link, it is the loudest colour on the page. Found by opening it.
+ *
+ * The underline stays: with the hue gone it is the only thing left that
+ * says a word is a link, and "it is a link because it is blue" is the
+ * assumption this rule removes. --focus is the accent's third job (the
+ * current item), and hover is where a reader asks "is this one?".
+ */
+a {
+  color: var(--ink);
+}
+a:hover {
+  color: var(--focus);
+}
+
 body {
   margin: 0 auto;
   padding: 2rem;
@@ -265,16 +286,21 @@ h2 {
    the game's own label first, the key an agent addresses it by next, and
    the count last. A grid rather than a table so a narrow screen can let
    the label wrap without the counts drifting out of line. */
-ul.catalogue { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.25rem; }
+ul.catalogue { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.25rem; min-width: 0; }
 
 ul.catalogue li {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* minmax(0, …) on all three, so a long key or a wide count shrinks
+     rather than pushing the row past its column. A grid track's default
+     minimum is its content, which in a three-lane home is how one row
+     comes to overlap the lane beside it — found by opening the page. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto);
   align-items: baseline;
   gap: 0.75rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--line);
   border-radius: 4px;
+  min-width: 0;
 }
 
 .catalogue-label { font-weight: 600; font-family: var(--serif); }
@@ -283,6 +309,10 @@ ul.catalogue li {
   font-family: var(--mono);
   font-size: 0.85rem;
   color: var(--muted);
+  /* A key is the one cell that is arbitrarily long and has no spaces to
+     break at — a document path, a snake_case relation type — so it is
+     the cell that breaks. */
+  overflow-wrap: anywhere;
 }
 
 .catalogue-count { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -418,8 +448,29 @@ ul.history li {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+.lane {
+  /* A grid item's default minimum is its content, and a lane holding a
+     long key is content wider than a third of the window. */
+  min-width: 0;
+}
 .lane h2 {
   margin-top: 0;
+}
+/* A catalogue row in a lane wraps rather than holding three columns: a
+   third of the window is not enough for a name, a key and a count side
+   by side, and three columns squeezed into it is how a label came to be
+   set one character per line — found by opening the page. */
+.lane ul.catalogue li {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.75rem;
+  row-gap: 0.15rem;
+}
+.lane .catalogue-label {
+  flex: 1 1 8rem;
+}
+.lane .catalogue-invalid {
+  flex-basis: 100%;
 }
 .lane h2 a {
   color: inherit;

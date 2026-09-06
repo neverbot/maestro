@@ -41,17 +41,30 @@ import { addressOf, layoutGraph, DEFAULT_NODE_WIDTH, DEFAULT_NODE_HEIGHT } from 
 // engine at all (spec §5.1), so they moved to ../positions.js, which
 // costs a caller nothing, and are re-exported so every caller in this
 // layer keeps its one import. See that file's header.
-import { SOURCE_COMPUTED, SOURCE_GRID, SOURCE_STORED, storedFrom } from "../positions.js";
+import {
+  DEFAULT_MODE,
+  MODE_AUTO,
+  MODE_MANUAL,
+  MODE_MIXED,
+  SOURCE_COMPUTED,
+  SOURCE_GRID,
+  SOURCE_STORED,
+  normaliseMode,
+  storedFrom,
+} from "../positions.js";
 
-export { addressOf, SOURCE_COMPUTED, SOURCE_GRID, SOURCE_STORED, storedFrom };
-
-// The three modes 0008_views.sql accepts, and the default it applies.
-// Exported as constants so a mode is asked for by identity rather than
-// by matching a string at eleven call sites.
-export const MODE_AUTO = "auto";
-export const MODE_MANUAL = "manual";
-export const MODE_MIXED = "mixed";
-export const DEFAULT_MODE = MODE_MIXED;
+export {
+  addressOf,
+  DEFAULT_MODE,
+  MODE_AUTO,
+  MODE_MANUAL,
+  MODE_MIXED,
+  SOURCE_COMPUTED,
+  SOURCE_GRID,
+  SOURCE_STORED,
+  normaliseMode,
+  storedFrom,
+};
 
 // How the pinned nodes determined the fit. Three answers, because the
 // three are three different statements about the picture and a caller
@@ -590,13 +603,6 @@ export function layoutView(request = {}, { engine = layoutGraph } = {}) {
 }
 
 // --- Small shared things ---------------------------------------------
-
-// normaliseMode falls back to `mixed`, which is 0008_views.sql's own
-// default: a view row that somehow carries a mode this client does not
-// know still draws, in the mode the database would have given it.
-function normaliseMode(mode) {
-  return mode === MODE_AUTO || mode === MODE_MANUAL || mode === MODE_MIXED ? mode : DEFAULT_MODE;
-}
 
 function placementsOf(computed) {
   if (Array.isArray(computed)) return computed;

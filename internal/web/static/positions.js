@@ -25,6 +25,51 @@
 
 import { addressOf } from "./address.js";
 
+// The three modes 0008_views.sql accepts, and the default it applies.
+//
+// They lived in layout/compose.js while the layout was their only
+// reader, and they moved here for exactly the reason `storedFrom` did:
+// the canvas has to know whether a drag may be written *before* it knows
+// whether there is anything to lay out, and compose.js imports
+// layout/engine.js, which imports 48 kB of vendored dagre. A drag layer
+// that had to load a graph algorithm to learn that this view lays itself
+// out automatically would be paying for a mechanism it never calls.
+// compose.js re-exports them, so every caller in the layout layer keeps
+// its one import.
+export const MODE_AUTO = "auto";
+export const MODE_MANUAL = "manual";
+export const MODE_MIXED = "mixed";
+export const DEFAULT_MODE = MODE_MIXED;
+
+// normaliseMode is the one place an unknown or absent spelling becomes
+// the column's own default. It was compose.js's private helper and is
+// exported here because the canvas asks the same question of the same
+// value and a second normalisation is a second answer.
+export function normaliseMode(mode) {
+  return mode === MODE_AUTO || mode === MODE_MANUAL || mode === MODE_MIXED ? mode : DEFAULT_MODE;
+}
+
+// readsPositions answers whether a saved arrangement is read back in
+// this mode, which is the whole of "may a drag be written here".
+//
+// `auto` ignores stored rows entirely (compose.js's own first branch),
+// so a drag there would write a row nothing would ever read — this
+// project's oldest recurring defect wearing a mouse. `manual` and
+// `mixed` both read them.
+export function readsPositions(mode) {
+  return normaliseMode(mode) !== MODE_AUTO;
+}
+
+// snapsPositions is narrower than readsPositions and deliberately so.
+// The grid is `map`'s `snap` knob, whose own tooltip says it is read in
+// `manual` mode only — `mixed` re-fits the whole picture through a
+// similarity transform, so a coordinate landed on the grid at write time
+// is not on the grid when it is drawn back, and a grid that lies about
+// where a node will sit is worse than no grid.
+export function snapsPositions(mode) {
+  return normaliseMode(mode) === MODE_MANUAL;
+}
+
 // Where a coordinate came from. Read by the canvas (an unpinned node is
 // drawn with a hollow anchor rather than a solid one, spec §4.2), by
 // `compose`'s automatic-placement count, and by render/map.js, which

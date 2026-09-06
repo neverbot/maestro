@@ -492,9 +492,100 @@ export function client({
       positions.push(placement);
     }
     const path = base + "/views/by-key/" + encodeURIComponent(key) + "/positions";
+    return counted(() => send(path, { positions }));
+  }
+
+  // writeBackground points this view at an uploaded image, or clears it.
+  //
+  // **`asset_id: null` is the only spelling for a clear**, which is
+  // internal/web/mcp_views.go's ViewsSetBackgroundInput contract, so this
+  // function distinguishes `null` from absent rather than treating both
+  // as "leave it": a caller that omitted the member wants the previous
+  // image, a caller that sent null wants none, and a body that dropped
+  // the null would silently be the first of those.
+  //
+  // The scale and the offset are sent only when the caller named them,
+  // for the same reason and the same contract: nil there means "the
+  // defaults", never "keep what is there", and a browser that always
+  // sent its current knobs would inherit the previous image's arithmetic
+  // onto a new one.
+  async function writeBackground(key, background) {
+    const input = background && typeof background === "object" ? background : {};
+    const body = {};
+    if (input.assetId !== undefined) {
+      body.asset_id = input.assetId === null ? null : String(input.assetId);
+    }
+    if (Number.isFinite(input.scale)) body.scale = input.scale;
+    const offset = input.offset;
+    if (offset && Number.isFinite(offset.x) && Number.isFinite(offset.y)) {
+      body.offset = { x: offset.x, y: offset.y };
+    }
+    const path = base + "/views/by-key/" + encodeURIComponent(key) + "/background";
+    return counted(() => send(path, body));
+  }
+
+  // upsertView writes a saved view row back.
+  //
+  // The whole row goes, because internal/web/api_views.go's upsert takes
+  // a whole row: there is no partial update on this surface, and a
+  // client that sent only the field it changed would blank the query.
+  // **It carries the version it read**, which is what makes the one
+  // structural write in this sub-project — switching a view out of
+  // `auto` so it can be dragged — refuse rather than overwrite a change
+  // somebody else made in between. That is the opposite trade from
+  // writePositions above, and both are deliberate.
+  async function upsertView(row, changes) {
+    const from = row && typeof row === "object" ? row : {};
+    const patch = changes && typeof changes === "object" ? changes : {};
+    const body = {
+      key: String(from.key || ""),
+      name: String(from.name || ""),
+      query: from.query,
+      renderer: String(from.renderer || ""),
+      renderer_params: from.renderer_params || {},
+      layout_mode: String(patch.layoutMode || from.layout_mode || ""),
+      expected_version: Number.isFinite(from.version) ? from.version : null,
+    };
+    if (typeof from.description === "string" && from.description !== "") {
+      body.description = from.description;
+    }
+    return counted(() => send(base + "/views", body));
+  }
+
+  // uploadAsset sends the image's bytes.
+  //
+  // The body is the file itself and the filename rides in the query
+  // string, which is internal/web/api_view_assets.go's contract and its
+  // header says why: one file per request needs no second parser over
+  // hostile bytes, and the name is prose that is stored and never
+  // consulted for the format. No content-type is set — the server sniffs
+  // the mime out of the bytes and refuses anything it was told.
+  async function uploadAsset(file, filename) {
+    const path = base + "/view-assets?filename=" + encodeURIComponent(String(filename || ""));
+    return counted(() => request(path, { method: "POST", body: file }));
+  }
+
+  // listAssets pages this game's uploaded images, the way every other
+  // listing in this product is paged.
+  async function listAssets(options) {
+    const opts = options && typeof options === "object" ? options : {};
+    const search = new URLSearchParams();
+    if (typeof opts.cursor === "string" && opts.cursor !== "") search.set("cursor", opts.cursor);
+    if (Number.isFinite(opts.limit)) search.set("limit", String(opts.limit));
+    const query = search.toString();
+    return get(base + "/view-assets" + (query === "" ? "" : "?" + query));
+  }
+
+  // counted is the bookkeeping every write shares: while one is in
+  // flight a re-read is deferred, because a re-read that raced a write
+  // would read back the state the write is about to change. It is a
+  // wrapper rather than four copies for the reason writePositions'
+  // `finally` exists at all — a write that threw and left the counter
+  // raised would defer every re-read for the life of the page.
+  async function counted(call) {
     state.pendingWrites += 1;
     try {
-      return await send(path, { positions });
+      return await call();
     } finally {
       state.pendingWrites -= 1;
       release();
@@ -647,6 +738,10 @@ export function client({
     runView,
     readView,
     writePositions,
+    writeBackground,
+    upsertView,
+    uploadAsset,
+    listAssets,
     connect,
     disconnect,
     setDragging,

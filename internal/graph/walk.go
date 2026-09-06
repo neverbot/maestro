@@ -13,13 +13,25 @@
 // of a cursor is a copy of its bugs, and a copy of a walk is a copy of a
 // missing project filter.
 //
-// **It has one caller as of this commit**, internal/views, whose compiler
-// routes every traversal step deeper than one hop through WalkCTE and
-// splices the result into its own statement (see builder.adopt there).
-// internal/analysis does not exist yet. That is stated rather than
-// implied, because a package comment claiming callers it cannot point at
-// is the "documentation claiming more than the code does" defect this
-// repository has produced nineteen times.
+// **Callers as of this commit:** internal/views -- whose compiler routes
+// every traversal step deeper than one hop through WalkCTE and splices
+// the result into its own statement (see builder.adopt there).
+//
+// **Not a caller yet:** internal/analysis -- the package exists, and its
+// reachability closure compiles into this walk in the commit after the
+// one that added CarryRelationPath for it.
+//
+// Those two lines are stated rather than implied, because a package
+// comment claiming callers it cannot point at is the "documentation
+// claiming more than the code does" defect this repository has produced
+// nineteen times. They are also *checked*:
+// TestThePackageCommentNamesItsCallersAndOnlyItsCallers reads the
+// module's real import graph -- not any package's prose -- and fails on a
+// name in the first line that does not import this package, on an
+// importer missing from it, and on a name in the second line that does
+// import it. A guard a comment can satisfy is not a guard, so the
+// sentence cannot be left one step behind the code: the commit that adds
+// the second importer is red until this line names it.
 //
 // What lives here is the SQL primitive. Policy -- which relation types
 // gate what, whether a container propagates reachability, what a step's
@@ -162,6 +174,34 @@ type Walk struct {
 	// dropped. Order within one depth is unspecified.
 	// TestATruncatedWalkIsOrderedByDepth pins the ordering.
 	MaxRows int
+
+	// CarryRelationPath adds a rel_path uuid[] column: the relation ids
+	// walked to reach this row, in order, so a caller holding a closed
+	// row can name every edge of the cycle it closed and not only the
+	// closing one. path carries node ids, and a cycle's edges cannot be
+	// reconstructed from consecutive node pairs where it matters most --
+	// two relation types between the same pair is exactly the case an
+	// analysis has to tell apart.
+	//
+	// **Opt-in, and the reason is a golden file.** internal/views does
+	// not need it, and adding a column unconditionally would change the
+	// SQL text that package's golden tests assert -- which are, per its
+	// own plan, the *only* defence for several invariants that have no
+	// behavioural signature in today's build. So a walk that does not ask
+	// for it emits byte-identical SQL to what shipped, and
+	// TestAWalkWithoutTheRelationPathEmitsTheSameStatementItAlwaysDid
+	// pins that as text.
+	//
+	// It is here rather than in internal/analysis because it is a
+	// property of the recursion -- the ids accumulate in the recursive
+	// term or they are not available at all -- and this package owns the
+	// recursion. What a caller does with them is policy and stays out.
+	//
+	// The seed's rel_path is a zero-length array and never NULL: `||`
+	// against NULL is NULL, so a NULL seed would make every path
+	// downstream NULL, which is an empty answer with no error.
+	// TestTheRelationPathIsEmptyAtTheSeedAndNotNull pins it.
+	CarryRelationPath bool
 }
 
 // isIdentifier reports whether s is a bare lower-case SQL identifier, the
@@ -203,6 +243,10 @@ func ReadFrom(w Walk) string { return w.Name + "_out" }
 // directions, and a renderer cannot draw an edge it was never handed.
 // TestDirectionAnyTraversesEachEdgeOnceFromEachNode pins the counts on
 // exactly that pair.
+//
+// A seventh column, rel_path, is present only when the caller set
+// CarryRelationPath, and it sits between path and via_relation. See that
+// field for why it is opt-in.
 //
 // **What a walk returns for a cycle, which eleven tasks need to read.**
 // A cycle is legal content -- the core spec allows prerequisite cycles
@@ -373,12 +417,23 @@ func WalkCTE(w Walk) (string, []any) {
 	// what closed means -- and it is never expanded from, so every path
 	// the recursion carries forward is simple and the recursion is finite
 	// for that reason as well as for the depth bound.
-	body := fmt.Sprintf(`%[1]s (id, depth, path, via_relation, from_id, closed) AS (
-    SELECT seed.id, 0, ARRAY[seed.id], NULL::uuid, NULL::uuid, false
+	// The three fragments CarryRelationPath adds, and the empty strings
+	// it does not: a walk that did not ask for the column emits the
+	// statement byte for byte as it shipped, which is what keeps
+	// internal/views' golden files still.
+	relPathCol, relPathSeed, relPathStep := "", "", ""
+	if w.CarryRelationPath {
+		relPathCol = ", rel_path"
+		relPathSeed = ", ARRAY[]::uuid[]"
+		relPathStep = ", w.rel_path || r.id"
+	}
+
+	body := fmt.Sprintf(`%[1]s (id, depth, path%[8]s, via_relation, from_id, closed) AS (
+    SELECT seed.id, 0, ARRAY[seed.id]%[9]s, NULL::uuid, NULL::uuid, false
     FROM (%[2]s) AS seed
     JOIN entities anchor ON anchor.id = seed.id AND anchor.project_id = $1
   UNION ALL
-    SELECT %[3]s, w.depth + 1, w.path || (%[3]s), r.id, w.id, (%[3]s) = ANY(w.path)
+    SELECT %[3]s, w.depth + 1, w.path || (%[3]s)%[10]s, r.id, w.id, (%[3]s) = ANY(w.path)
     FROM %[1]s w
     JOIN relations r
       ON r.project_id = $1
@@ -390,7 +445,7 @@ func WalkCTE(w Walk) (string, []any) {
      AND far.project_id = $1
     WHERE w.depth < %[6]s
       AND NOT w.closed
-)`, w.Name, seed, far, types, near, maxDepth, edge)
+)`, w.Name, seed, far, types, near, maxDepth, edge, relPathCol, relPathSeed, relPathStep)
 
 	// The wrapper is where MinDepth, the ordering and the row cap live,
 	// because none of them may prune the recursion: a walk with min 2 has

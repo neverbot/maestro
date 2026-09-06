@@ -362,10 +362,23 @@ export function runAction(action, client, options = {}) {
 //
 // `max_depth_reached` is measured and not declared (execute.go), so it
 // is reported as what was reached and never as what was asked for.
+//
+// `outside` is the third number and the renderers' own: how many of the
+// answer's edges lead out of the picture (spec §4.2's *"8 edges lead
+// outside this picture"*). It is not in the envelope — an edge whose
+// endpoint the query chose not to draw is only discovered by joining the
+// two lists, which is what render/scene.js's joinEdges does and what
+// every one of the six renderers reports — so it arrives the way
+// `layoutMs` does, from the caller, and is absent when nobody counted.
+// A count of zero says nothing, for this module's first rule: there is
+// no band, and no clause, for the absence of a thing.
 export function footerFor(envelope, options = {}) {
   const layoutMs = options.layoutMs === undefined || options.layoutMs === null
     ? null
     : countOf(options.layoutMs);
+  const outside = options.outside === undefined || options.outside === null
+    ? null
+    : countOf(options.outside);
   // A refused run measured nothing. The strip stays — it is always
   // present — and it says nothing, because "0 nodes, 0 edges" beside a
   // refusal reads exactly like an answer that matched nothing, which is
@@ -379,6 +392,7 @@ export function footerFor(envelope, options = {}) {
       maxDepth: null,
       durationMs: null,
       layoutMs,
+      outside,
       css: "var(--muted)",
       text: "",
     };
@@ -394,12 +408,16 @@ export function footerFor(envelope, options = {}) {
     `query ${durationMs} ms`,
   ];
   if (layoutMs !== null) parts.push(`layout ${layoutMs} ms`);
+  if (outside !== null && outside > 0) {
+    parts.push(`${count(outside, "edge", "edges")} lead outside this picture`);
+  }
   return {
     nodes,
     edges,
     maxDepth,
     durationMs,
     layoutMs,
+    outside,
     css: "var(--muted)",
     text: parts.join(" · "),
   };

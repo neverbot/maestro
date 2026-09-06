@@ -418,6 +418,31 @@ check("theFooterKeepsTheQueryAndTheLayoutApart", () => {
   assertEqual(withLayout.maxDepth, 1, "and reports the depth that was reached, not one that was asked for");
 });
 
+check("theFooterCountsWhatLeavesThePictureAndSaysNothingWhenNothingDoes", () => {
+  // The third number in the strip, and the renderers' own: an edge whose
+  // endpoint the query did not draw is discovered by joining the two
+  // lists, so the envelope cannot report it and the caller that drew the
+  // picture does (spec §4.2's *"8 edges lead outside this picture"*).
+  const counted = frameFor({ view, envelope: clean, outside: 8 }).footer;
+  assertEqual(counted.outside, 8, "the count is carried");
+  assert(
+    counted.text.includes("8 edges lead outside this picture"),
+    `and spoken: ${counted.text}`,
+  );
+  assert(
+    frameFor({ view, envelope: clean, outside: 1 }).footer.text.includes("1 edge lead"),
+    "one edge is not 1 edges",
+  );
+
+  // Zero says nothing, and not-counted says nothing, and the two are
+  // still different values — this module has no clause for the absence
+  // of a thing, which is the same refusal the banner stack makes.
+  const none = frameFor({ view, envelope: clean, outside: 0 }).footer;
+  assertEqual(none.outside, 0, "a caller that counted zero reported zero");
+  assert(!none.text.includes("outside"), `and the strip is silent: ${none.text}`);
+  assertEqual(frameFor({ view, envelope: clean }).footer.outside, null, "and an uncounted picture reports nothing");
+});
+
 check("aRefusalCountsNothingBecauseItMeasuredNothing", () => {
   const refused = frameFor({ view, error: staleRefusal, declarations });
   assertEqual(refused.footer.nodes, null, "a refused run counted no nodes; it did not count zero");

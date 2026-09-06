@@ -349,3 +349,49 @@ func TestTheCanvas(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/canvas_test.mjs")
 }
+
+// TestTheGraphRenderer drives internal/web/jstest/render_graph_test.mjs,
+// which is the first of the six renderers and the shape the other five
+// copy: a pure function from an envelope and a layout to a scene, with
+// no DOM anywhere in it.
+//
+// What it holds that no Go test can.
+//
+// That **the picture and the text twin describe the same answer**. Task
+// 5 built the twin before any renderer so that each renderer task could
+// assert exactly this, and it is asserted in both halves — every node the
+// twin has a row for is a box in the scene or a node the layout placed
+// nowhere, and every edge row is a line or an edge that leaves the
+// picture — plus that a box's label and its row's cell carry the same
+// characters, since both call the palette's own labelFor.
+//
+// That **two absences are two marks**. A node whose colour slot found
+// nothing is unfilled *and* dashed; a node whose size slot found nothing
+// takes the range's minimum; a node missing both gets both, independently,
+// which is what a single "unknown" treatment would collapse.
+//
+// That **a size is an area and it is bounded**. A value four times
+// another is twice the width, asserted numerically because getting it
+// wrong is invisible in a picture and wrong everywhere in it; and a slot
+// value of a million is three times the smallest box rather than a
+// million times it.
+//
+// That **grouping draws an enclosure and clustering draws nothing**,
+// which is the distinction a designer trips over. "Draws nothing" is
+// asserted as no mark attributable to it and — in
+// TestLayoutComposition, over the real engine — as an arrangement that
+// moved, so it cannot decay into "does nothing". The tooltip on each
+// control is the only place that difference is taught, so both sentences
+// are asserted rather than admired.
+//
+// And the negative half the frame does not own: a truncated answer draws
+// exactly what an untruncated one draws (the envelope does not say which
+// node lost a neighbour, so a mark claiming to know would invent it), an
+// empty answer is an empty scene, a node with no position is named
+// rather than drawn at the origin, and an edge that leaves the picture
+// is a stub whose terminus is outside its group's enclosure — which is
+// why an enclosure is a hairline and not a filled panel.
+func TestTheGraphRenderer(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/render_graph_test.mjs")
+}

@@ -152,6 +152,9 @@ changed under you unless you changed it.
 | write a query or a saved view | `reference/queries.md` |
 | attach prose to an entity | `reference/documents.md` |
 | see a whole game modelled, in a genre near yours | `genres/mmorpg.md`, `genres/racing.md`, `genres/metroidvania.md` |
+| fill an empty game, or re-run a seed | `recipes/seeding-a-game.md` |
+| open a game somebody else designed | `recipes/joining-a-game.md` |
+| turn a question about the game into a picture | `recipes/composing-a-view.md` |
 
 Nothing in this bundle is required, and a game none of its examples
 matches is the normal case.

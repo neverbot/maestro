@@ -414,12 +414,17 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 // mentions. A task that teaches a tool and does not shorten this list
 // fails, and a tool that quietly stops being taught fails too. Task 12
 // asserts the list is empty.
+//
+// Task 10 emptied the metamodel and views half of it: the fifteen
+// listings, readers and view-arrangement tools that were reachable only
+// from the index are taught by recipes/joining-a-game.md,
+// recipes/seeding-a-game.md and recipes/composing-a-view.md. What is
+// left is the analysis engine's own surface, which landed after this
+// plan was written and ships its own pages.
 var notYetTaughtOutsideTheIndex = []string{
-	"entities.get", "games.get", "games.list",
-	"relation_types.get", "relation_types.list", "relations.get",
-	"types.get", "types.list", "views.clear_positions",
-	"views.get", "views.list", "views.list_assets",
-	"views.remove", "views.set_background", "views.set_positions",
+	"analysis.cycles", "analysis.orphans", "analysis.unreachable",
+	"routes.check", "routes.get", "routes.list",
+	"routes.remove", "routes.upsert",
 }
 
 // TestEveryRegisteredToolIsRoutedFromTheBundle asserts every registered

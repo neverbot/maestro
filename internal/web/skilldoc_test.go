@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -62,6 +63,7 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 		Metamodel: metamodel.New(nil, nil),
 		Markdown:  markdown.New(nil, nil),
 		Views:     views.New(nil, nil),
+		Analysis:  analysis.New(nil, nil),
 	})
 	registered := srv.ToolDescriptionsForTest()
 	if len(registered) < 40 {
@@ -71,7 +73,8 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 	// Every domain this bundle routes through, asserted by hand. A
 	// service silently dropped from the Options above would otherwise
 	// take its whole domain out of *both* sides of the comparison.
-	for _, prefix := range []string{"docs.", "entities.", "games.", "relation_types.", "relations.", "types.", "views."} {
+	for _, prefix := range []string{"analysis.", "docs.", "entities.", "games.",
+		"relation_types.", "relations.", "routes.", "types.", "views."} {
 		if !anyToolHasPrefix(registered, prefix) {
 			t.Fatalf("no registered tool starts with %q: this test's own server is missing a domain, "+
 				"so the comparison below cannot see whether the file is", prefix)
@@ -266,4 +269,107 @@ func lineDiff(want, got string) string {
 	b.WriteString("\n\nlines the file has and the generator does not produce:\n")
 	b.WriteString(strings.Join(extra, "\n"))
 	return b.String()
+}
+
+// conflictModeSpelling is the argument name the batch upserts will grow
+// when the metamodel plan's Task 10 lands. It is one string because two
+// copies of it would be the defect this whole sub-project is about.
+const conflictModeSpelling = "on_conflict"
+
+// conflictModeMention matches the argument as a whole token, with `_`
+// counted as part of a word.
+//
+// **A plain substring search is wrong here and was wrong on its first
+// run**, which is why this is a pattern: `version_conflict` — the code
+// both batch upserts already answer a stale write with, and a word in
+// both of their descriptions today — ends in `on_conflict`. A tripwire
+// built on strings.Contains fired on the shipped surface, reported that
+// a conflict mode had landed, and would have had this page rewritten
+// around an argument that does not exist. It is the `request`/`quest`
+// mistake in a second place, and the fixture below pins it.
+var conflictModeMention = regexp.MustCompile(`(^|[^A-Za-z0-9_])` + conflictModeSpelling + `([^A-Za-z0-9_]|$)`)
+
+// batchUpsertsTaughtByTheSeedingRecipe are the tools whose read-then-write
+// loop `recipes/seeding-a-game.md` teaches.
+//
+// Both of them, not one. The recipe's re-seed section ends with "the same
+// three steps work for edges", so a conflict mode arriving on the entity
+// tool alone would still make half that page bad advice, and a tripwire
+// watching only the tool the plan happened to name is the rule not
+// carried one step along.
+var batchUpsertsTaughtByTheSeedingRecipe = []string{"entities.upsert", "relations.upsert"}
+
+// conflictModeOnTheBatchUpserts reports every batch upsert whose
+// description has grown a conflict mode.
+//
+// It is a function taking the table rather than a test body reading the
+// server, so its own precision can be asserted against a fixture in the
+// same test — a scanner that looked at nothing would otherwise report
+// nothing and read exactly like a surface that has not changed.
+func conflictModeOnTheBatchUpserts(descriptions map[string]string) []string {
+	var grown []string
+	for _, name := range batchUpsertsTaughtByTheSeedingRecipe {
+		description, ok := descriptions[name]
+		if !ok {
+			// A tool the recipe teaches that this server does not
+			// register is a louder failure than the one this tripwire
+			// watches for, and reporting it here is better than
+			// silently checking nothing.
+			grown = append(grown, name+" is not registered at all")
+			continue
+		}
+		if conflictModeMention.MatchString(description) {
+			grown = append(grown, name)
+		}
+	}
+	return grown
+}
+
+// TestTheSeedingRecipeIsStillNeeded fails when a batch upsert grows an
+// on_conflict argument.
+//
+// **This is not a drift guard. It is its mirror image.** The four guards
+// around it catch a bundle that has become *false*: a page restating a
+// contract, a vocabulary that lost a word, an example that stopped
+// running. This one catches a bundle that has become *bad advice*.
+//
+// `recipes/seeding-a-game.md` teaches a three-call re-seed — list the
+// type, read each row's version, send the payload back with each version
+// claimed — and that loop is correct today only because there is no
+// conflict mode on the surface. The day one lands, that page starts
+// teaching three calls where one would do, while remaining true in every
+// sentence and while every other test in this package stays green.
+//
+// When this goes red: rewrite the recipe's "Re-running a seed" section
+// around the new argument, delete the loop and its "what this recipe
+// will look like when the surface changes" section, and delete this
+// test.
+func TestTheSeedingRecipeIsStillNeeded(t *testing.T) {
+	// The precision fixture first. Without it, a matcher that read the
+	// wrong key — or a tool list that had gone empty — would report
+	// nothing and be indistinguishable from a surface that has not
+	// changed, which is exactly the state this test claims to detect.
+	fixture := map[string]string{
+		"entities.upsert": "Create or update entities. on_conflict is \"skip\" or \"replace\".",
+		// The false positive that fired on the real surface the first
+		// time this test ran, kept as a fixture so it cannot come back.
+		"relations.upsert": "Sending the wrong version is version_conflict reporting the " +
+			"version to merge onto.",
+	}
+	if got := conflictModeOnTheBatchUpserts(fixture); len(got) != 1 || got[0] != "entities.upsert" {
+		t.Fatalf("the tripwire read %v over a fixture where exactly entities.upsert has "+
+			"grown a conflict mode: it is watching the wrong thing", got)
+	}
+	if got := conflictModeOnTheBatchUpserts(map[string]string{}); len(got) != 2 {
+		t.Fatalf("the tripwire reported %v over an empty tool table: a tripwire that "+
+			"passes when it can see nothing is a tripwire that has been switched off", got)
+	}
+
+	descriptions := web.NewToolReferenceServer().ToolDescriptionsForTest()
+	if grown := conflictModeOnTheBatchUpserts(descriptions); len(grown) != 0 {
+		t.Fatalf("%s now documents %s: recipes/seeding-a-game.md teaches a read-then-write "+
+			"re-seed loop that exists only because there was no conflict mode. Rewrite that "+
+			"page around the new argument and delete this test.",
+			strings.Join(grown, " and "), conflictModeSpelling)
+	}
 }

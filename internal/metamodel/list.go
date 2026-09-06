@@ -60,6 +60,19 @@ const (
 // with two clauses, and a filter that only worked on one path would
 // answer the other question without saying so.
 //
+// **Invalid is the row's own flag, and on a traversal it stays the row's
+// own flag**: it narrows the entities the hop reached, and it says
+// nothing about the edge each hop crossed. Since 0009 an edge carries the
+// same flag, so the question is worth answering rather than leaving
+// implicit — a traversal follows every edge of its relation type,
+// flagged or not, exactly as this listing returns every entity unless
+// asked otherwise. That is deliberately *not* what internal/views does,
+// and the two are not inconsistent: a view is a picture a designer will
+// trust, so it excludes flagged rows and flagged edges by default and
+// takes `include_invalid` to opt back in; a listing is a query, and its
+// default is "no opinion" on both tables. An agent that wants the edges
+// a schema edit broke asks ListRelations for them by name.
+//
 // Cursor is the NextCursor of a previous call. It belongs to the game
 // and the filter it was issued for and to no other, and it is a position
 // rather than a snapshot; EntityPage carries the whole contract, and it

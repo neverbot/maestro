@@ -590,7 +590,7 @@ size, and its licence file's path. It exists so the budget and the
 provenance are data rather than a claim in a comment — a vendored file in
 a public repository is a file this project answers for.
 
-- [ ] Tests: `TestVendoredFilesMatchTheirManifest` — for every file under
+- [x] Tests: `TestVendoredFilesMatchTheirManifest` — for every file under
   `static/vendor/` that is not the manifest or a licence, assert it is
   listed, and assert its SHA-256 and byte size match (a re-vendored file
   that skipped the manifest fails here, which is the only way anyone
@@ -606,7 +606,7 @@ a public repository is a file this project answers for.
   `importmap` block out of each shell and compare, because a shell with a
   stale map is a page that 404s one module and renders three quarters of
   itself.
-- [ ] Modify `static_sinks_test.go`'s perimeter: it walks
+- [x] Modify `static_sinks_test.go`'s perimeter: it walks
   `static/` recursively already; make it **skip `static/vendor/`
   explicitly, with the reason in a comment** (minified upstream code
   contains sink spellings and is not ours to edit) and assert in
@@ -614,7 +614,7 @@ a public repository is a file this project answers for.
   file was actually scanned — the shipped comment already warns that the
   perimeter used to name two files literally and miss a third.
 
-- [ ] See red: bump one manifest size by a byte and watch
+- [x] See red: bump one manifest size by a byte and watch
   `TestVendoredFilesMatchTheirManifest` fail on that file; drop the
   `lit` entry from `game.html`'s map and watch
   `TestTheImportMapIsIdenticalInEveryShell` fail; add
@@ -626,6 +626,93 @@ git add internal/web/static/vendor internal/web/static/game.html \
         internal/web/static_vendor_test.go internal/web/static_sinks_test.go
 git commit -m "build(web): vendor lit and dagre behind an import map, with a manifest and a budget"
 ```
+
+#### Corrections made during implementation
+
+1. **The import map went into all four shells, not only `game.html`.**
+   The task's file list names `game.html` alone ("the first shell to
+   carry one"), but its own prose says the map "goes in every shell" and
+   the guard it asks for compares the map *across* shells — which, with
+   one shell carrying a map, is a comparison of one thing with itself and
+   passes on an empty repository. `index.html`, `login.html`,
+   `game.html` and `document.html` carry the same map, byte for byte,
+   and `TestTheImportMapIsIdenticalInEveryShell` refuses a shell that has
+   none rather than skipping it. This is the standing failure pattern of
+   this project — a rule established and not carried one step along —
+   and it was landing *inside* the task that establishes the rule.
+
+2. **`lit-core.min.js` is not on npm; it comes from the Lit team's own
+   distribution repository.** The `lit` package ships entry points that
+   re-export three other packages by bare specifier, so it cannot be
+   vendored as one file. The single-file bundle lives at
+   `github.com/lit/dist`, whose tags track Lit's releases; the manifest
+   records the raw URL at tag `v3.3.3` rather than a CDN's
+   semver-resolving alias, because an alias is a URL whose bytes can
+   change. Its licence is the `lit` package's own `LICENSE`
+   (BSD-3-Clause), recorded with its own URL in the manifest.
+
+3. **The network scan reads `.js` *and* `.mjs`.** The task says "scan
+   every `.js` under `static/` (vendor included)", and two of the three
+   vendored files are `.mjs` — so the sentence as written would have
+   exempted two thirds of the code this project did not write, and the
+   scan would have reported "no module reaches the network" while never
+   opening dagre. `TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes`
+   exists to make that specific narrowing fail, and it spells the two
+   extensions out itself rather than sharing the scanner's list: the
+   first version shared it, and narrowing the shared list narrowed the
+   scan and its own expectation together, so the mutation that was meant
+   to turn it red left it green. Two spellings of one list is the price
+   of either being able to judge the other.
+
+4. **The two manifest walks were split by direction rather than by the
+   task's wording.** The task gives `TestVendoredFilesMatchTheirManifest`
+   both the "assert it is listed" and the hash/size duties and then asks
+   `TestNoVendoredFileIsUnlisted` for "the other direction", which is the
+   same duty twice. As shipped: the first walks the *manifest* and checks
+   each entry against the bytes on disk; the second walks the *tree* and
+   fails on any file — module or licence — that nothing lists. A file
+   with no provenance and a manifest entry with no file are two different
+   accidents and now have two different failures.
+
+5. **Two assertions the task did not name, both because a guard that
+   only reads files can be satisfied by files that do not work.**
+   `TestEveryImportMapTargetIsServedAsJavaScript` asks the real server
+   for every mapped path: `.mjs` is the first extension this repository
+   ships that no earlier test made the file server name, and a browser
+   refuses a module served as anything but a JavaScript MIME type.
+   `TestTheImportMapPrecedesEveryModuleScript` pins the HTML rule that a
+   map arriving after the first module script is ignored with an error —
+   true today by the habit of putting scripts at the bottom, and habit is
+   not a guard.
+
+6. **A Node harness loads the three modules through the shipped map**
+   (`internal/web/jstest/vendor_modules_test.mjs`, driven by
+   `TestTheVendoredRuntimeLoads`). Hash, size, budget, map and MIME type
+   are all satisfiable by three files that do not parse. The harness
+   reads the map out of `game.html`, resolves each specifier the way a
+   browser would, imports the file and asserts the exports the coming
+   tasks import by name. It also pins the thing the third vendored file
+   exists for: `@dagrejs/dagre`'s ESM build bundles *its own* copy of
+   graphlib and re-exports it, so the `Graph` in `graphlib.mjs` is a
+   different constructor, and `dagre.layout` accepts it only because
+   dagre reads a graph structurally. Task 6 depends on that entirely and
+   a minor version could withdraw it without a word, so it is asserted
+   against the real pair — including a check that fails the day dagre
+   stops bundling its own copy, since on that day `graphlib.mjs` is
+   redundant weight in the budget and a human should decide.
+
+7. **The payload budget lives in the test, not in `manifest.json`.** A
+   budget a contributor can raise by editing the same file it is checked
+   against is not a budget. The manifest says what each file is; the
+   ceiling is a constant in `static_vendor_test.go`, so raising it is a
+   diff to a test.
+
+**What was vendored.** `lit` 3.3.3 (15,734 B, BSD-3-Clause),
+`@dagrejs/dagre` 3.1.1 (48,559 B, MIT) and `@dagrejs/graphlib` 4.0.5
+(13,113 B, MIT): 77,406 B of the 153,600 B budget, 50.4% used. All three
+licences permit redistribution provided the notice travels with the code,
+which is what `vendor/licenses/` is and what
+`TestEveryVendoredPackageHasItsLicence` holds in both directions.
 
 ---
 

@@ -1202,9 +1202,16 @@ func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
 	// The order matters — a view has to exist before it can be run — so
 	// the map is driven through a list and the map is what the registry
 	// is compared against.
+	//
+	// **views.run comes after views.set_positions**, so the run whose
+	// answer the output schema judges actually carries a stored position.
+	// Run first, the `positions` array is empty and an array of nothing
+	// satisfies any item schema at all — which is how a misspelled
+	// position member would have gone on passing this test the day the
+	// schema started naming them.
 	order := []string{
-		"views.upsert", "views.list", "views.get", "views.run", "views.validate",
-		"views.set_positions", "views.clear_positions", "views.list_assets",
+		"views.upsert", "views.list", "views.get", "views.validate",
+		"views.set_positions", "views.run", "views.clear_positions", "views.list_assets",
 		"views.set_background", "views.remove",
 	}
 	if len(order) != len(calls) {

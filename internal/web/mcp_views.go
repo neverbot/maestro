@@ -105,6 +105,11 @@ var viewsEnvelopeDoc = "The answer is one envelope: `nodes`, `edges`, `stats` an
 	"`truncated`, plus `stale` when a saved view names something the game has moved, and " +
 	"`positions` when a saved view was run by key.\n\n" +
 
+	"**A stored position reads back in the spelling views.set_positions takes**: " +
+	"`entity_type`, `entity_key`, `x`, `y`, `pinned`, plus `updated_at` saying when the " +
+	"node was last moved. Round-trip an arrangement without translating it, and tell an " +
+	"untouched arrangement from one re-dragged to the same spot by that timestamp.\n\n" +
+
 	"**`attrs` is keyed by the projection *slot*, never by the field key the slot reads.** " +
 	"A document that colours by a zone one hop away still answers under `attrs.color_by`, " +
 	"so a renderer reads the slot it asked for whatever the query put there. `ambiguous` is " +
@@ -1143,16 +1148,43 @@ var viewsRemovedOutputSchema = &jsonschema.Schema{
 	Properties: map[string]*jsonschema.Schema{"removed": boolSchema()},
 }
 
-// viewsRunOutputSchema leaves `nodes`, `edges` and `positions` as arrays
-// of open objects rather than enumerating a node's members.
+// viewsPositionSchema is one stored position as a run answers it, and it
+// is spelled out rather than left as an open object.
+//
+// **A position has one shape for every view**, which is what separates
+// it from a node: nothing about it depends on the query that drew the
+// picture. So the schema can say what it is, and saying it is what makes
+// the SDK's output validation refuse an envelope whose members drifted
+// from the ones views.set_positions takes.
+//
+// That drift is not hypothetical. internal/views.Position shipped
+// untagged, so a run answered `EntityType`/`EntityKey`/`X`/`Y`/`Pinned`
+// while the write took `entity_type`/`entity_key`/`x`/`y`/`pinned`, and
+// this member was an open object — so the one mechanism in this file
+// that had already caught exactly that class of mistake (see `stats`
+// below, whose two misspelled members failed every run over the real
+// transport) was looking the other way. It is not any more.
+var viewsPositionSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"entity_type", "entity_key", "x", "y", "pinned", "updated_at"},
+	Properties: map[string]*jsonschema.Schema{
+		"entity_type": stringSchema(), "entity_key": stringSchema(),
+		"x": numberSchema(), "y": numberSchema(),
+		"pinned": boolSchema(), "updated_at": stringSchema(),
+	},
+}
+
+// viewsRunOutputSchema leaves `nodes` and `edges` as arrays of open
+// objects rather than enumerating a node's members.
 //
 // That is a deliberate limit and not an omission. A node's `attrs` is
 // keyed by the *projection slots this document declared*, and its
 // `fields` by the *game's own field keys*, so the shape of one node is a
 // property of the query that drew it — a schema pinning it here would be
-// a schema that is wrong for every document but one. The three members
-// that are the same for every run — `stats`, `truncated` and the
-// distinction between an absent and an empty `positions` — are pinned.
+// a schema that is wrong for every document but one. Everything that is
+// the same for every run — `stats`, `truncated`, a stored position, and
+// the distinction between an absent and an empty `positions` — is
+// pinned.
 var viewsRunOutputSchema = &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"nodes", "edges", "stats", "truncated"},
@@ -1182,7 +1214,7 @@ var viewsRunOutputSchema = &jsonschema.Schema{
 			},
 		},
 		"stale":     {Type: "array", Items: objectSchema()},
-		"positions": {Type: "array", Items: objectSchema()},
+		"positions": {Type: "array", Items: viewsPositionSchema},
 	},
 }
 

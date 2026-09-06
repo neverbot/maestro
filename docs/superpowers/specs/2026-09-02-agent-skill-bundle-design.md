@@ -842,6 +842,17 @@ There is no `on_conflict: skip`, no `if_not_exists`, and no bulk
 read that returns key → version cheaply enough to precede a 500-row
 write without a page walk.
 
+**Since migration 0009 this is true of `relations.upsert` too.** Edges
+carry a `version` and their upsert is a compare-and-set, exactly as an
+entity's is, so a re-seed of a game's graph conflicts on every existing
+edge as well as on every existing row. That closes a real hole — an
+edge's fields were the one place in the metamodel with no protection
+against a concurrent write, and `relations_edge_key` is precisely what
+pushes a game's multiplicity into those fields — and it widens this
+finding rather than changing it. The `written` entries of a
+`relations.upsert` now carry the version to send next, so the workaround
+below has an edge half with the same shape.
+
 Without a conflict mode, the bundle would have to teach a workaround:
 seed with `atomic`, **keep the versions the response returns**, and on
 any re-run first `entities.list` the type with a large limit and build a

@@ -38,16 +38,22 @@
 -- now does on the next edit of the type.
 --
 -- **No new index.** The sweep reads `relations WHERE project_id = $1 AND
--- relation_type_id = $2`, and `relations_edge_key` -- the UNIQUE index on
--- (relation_type_id, source_id, target_id) that 0004 created to make a
--- re-seed idempotent -- leads with exactly that column, so the sweep
--- seeks it. Verified on this project's own Postgres rather than reasoned
--- about: with 5,000 edges of one type among 20,000, the sweep's statement
--- plans as `Index Scan using relations_edge_key`, not a sequential scan.
--- entities needed `entities_type_idx` for its own sweep because
--- `entities_key_key` leads with project_id and only then entity_type_id;
--- relations' unique index happens to lead the other way, so the index
--- this migration would otherwise add already exists under another name.
+-- relation_type_id = $2`, and relations already carries two indexes
+-- leading with that column: `relations_edge_key`, the UNIQUE
+-- (relation_type_id, source_id, target_id) 0004 created to make a re-seed
+-- idempotent, and `relations_type_target_idx` from 0008. entities needed
+-- `entities_type_idx` for its own sweep because `entities_key_key` leads
+-- with project_id and only then entity_type_id; relations' indexes happen
+-- to lead the other way, so the index this migration would otherwise add
+-- already exists twice over.
+--
+-- Verified rather than reasoned about, and by a test rather than by this
+-- comment: `TestTheEdgeSweepSeeksAnIndexRatherThanScanning`
+-- (internal/db/metamodel_schema_test.go) runs EXPLAIN on the sweep's own
+-- statement over a game of twenty relation types and asserts the plan is
+-- not a sequential scan. It measured a Bitmap Index Scan on
+-- `relations_type_target_idx`; which of the two the planner picks is its
+-- business, so the test pins the shape and not the name.
 --
 -- The invalid *listing* likewise gets no partial index, and that is
 -- symmetry rather than an omission: `ListEntitiesPage`'s own invalid

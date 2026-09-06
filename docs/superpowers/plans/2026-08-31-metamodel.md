@@ -5805,7 +5805,10 @@ domain; one adjacent hole recorded and deliberately not closed here.)**
     is not the place for; `Ref`'s own doc comment now says the hole is
     there rather than implying it is closed.
 
-**Does this change the case for Metamodel 10?** Metamodel 10 records
+**Does this change the case for Metamodel 10?** *(Metamodel 10 has since
+landed; see its own section below. This paragraph is left as written,
+because it is the argument that decided the shape of that task.)*
+Metamodel 10 records
 that relations have no `invalid` flag and no re-validation path, so
 editing a relation type's field schema leaves existing edges unchecked
 where entities get flagged. **It strengthens it, and changes its
@@ -8899,6 +8902,195 @@ alike:
   `2026-09-02-agent-skill-bundle-design.md` §6 and §10.1 drop the
   pending-implementation marking and delete the interim read-then-write
   loop from `recipes/seeding-a-game.md`.
+
+---
+
+### Metamodel 10: relations have no invalid flag and no re-validation path
+
+**Status: done.** Migration `0009_relation_invalid_and_version.sql` plus
+the write path, the sweep, the read surfaces, the views compiler and both
+API surfaces.
+
+**The gap.** A relation type carries a `field_schema` exactly as an
+entity type does, and `upsertRelationWith` had always validated an edge's
+values against it. What it could not do was *re-judge* them: the core
+spec's schema-evolution rule — flag the rows rather than reject the edit
+or back-fill the data — was implementable for entities only, because
+`relations` had no column to record a verdict in. Editing a relation
+type's field schema therefore left every existing edge silently
+unchecked: no sweep could mark them, no listing could find them, no count
+could report them, and a validated edge was indistinguishable from one
+that had never been judged. Task 5's own self-review had already recorded
+that Metamodel 12 strengthened the case for closing this from cosmetic to
+substantive: once `relations.get` and a verbose `relations.list` could
+hand a caller an edge's values, they could hand back values that no
+longer satisfied the schema they claim to answer to, with nothing in the
+answer saying so.
+
+**The decision, taken before the work started: relations get the same
+treatment as entities, `invalid` *and* `version`.** Three reasons. The
+asymmetry is not defensible when both tables carry a field schema judged
+by the same `Schema.Validate`. Edge writes had no optimistic concurrency
+at all, and a version gives them the compare-and-set every other write in
+this repository has. And retrofitting either column after a real game is
+seeded means a migration plus a sweep over every edge, so the two travel
+together rather than in two passes over the same table.
+
+**Sharing rather than copying was a requirement, not a preference.** This
+repository's most repeated defect is a rule written once, copied, and
+then fixed in one copy. What is shared:
+
+- `internal/metamodel/revalidate.go` holds the schema-evolution rule
+  itself — parse the schema, list the stored values, partition on
+  `CheckValues`, write *both* verdicts through an `invalid <> flag`
+  guard. `revalidateEntitiesOfType` and `revalidateRelationsOfType` are
+  now four lines each: which two statements their table runs. The
+  mutation that proves the sharing is real: deleting the `{valid, false}`
+  batch turns **both** tables' "clears the flag when the row fits again"
+  tests red from one edit.
+- `TypeCounts` replaces the entity-only `EntityCounts` struct;
+  `EntityCounts` and `RelationCounts` are aliases of it, so a caller
+  holding one holds the other.
+- `invalidFilterPart` (the cursor-fingerprint spelling of a tri-state
+  filter) and `queryTriState` (the REST query-parameter parse) were
+  already shared and are now called by the relation listing too, rather
+  than re-spelled.
+
+**The bound question the task asked about: the entity sweep has none, so
+the edge sweep has none.** `ListEntityFieldsOfType` carries no `LIMIT`,
+and `ListRelationFieldsOfType` does not either. It is stated in
+`revalidate`'s doc comment rather than left implicit, with the note that
+whoever bounds one bounds both — which is the point of there being one
+function to bound.
+
+**What changed, by surface.**
+
+- **Migration.** `invalid boolean NOT NULL DEFAULT false` and `version
+  integer NOT NULL DEFAULT 1`. No back-fill: both defaults are what a
+  fresh write produces, and "presumed valid, never edited" is exactly the
+  state every pre-existing edge was in, since the write path had always
+  validated. **No new index**, and the claim is tested rather than
+  asserted: `TestTheEdgeSweepSeeksAnIndexRatherThanScanning` runs EXPLAIN
+  on the sweep's own statement over a game of twenty relation types.
+  *The migration comment was wrong on its first draft* — it named
+  `relations_edge_key` as the index the sweep would seek, and the
+  measurement showed the planner picking `relations_type_target_idx`
+  (0008) instead. Both lead with `relation_type_id`; the comment and the
+  test now say so, and the test pins the *shape* of the plan (not a
+  sequential scan) rather than a name the planner is free to choose
+  between.
+- **Write path.** `UpsertRelation` takes `ExpectedVersion`, reads under
+  the row lock, and the DO UPDATE carries `relations.version =
+  expected_version` beside its existing project guard. `invalid` resets
+  to false on write, because a row that is being written is a row that
+  has been judged. `conflictOnRelationEdge` re-reads a failed guard and
+  reports the version to merge onto — it is `conflictOnEntityKey` minus
+  the respelling arm, since an edge has no key of its own.
+- **Sweep.** `UpsertRelationType` calls `revalidateRelationsOfType`
+  inside its transaction, where `UpsertEntityType` calls its twin.
+  `MarkRelationsOfTypeInvalid` deliberately does **not** move `version`:
+  a sweep is a verdict about a row, not a new revision of it, and
+  bumping it would refuse the next `expected_version` an agent is
+  holding for a row whose values it never touched, over a schema edit
+  somebody else made. `MarkEntitiesOfTypeInvalid` has always left the
+  version alone, and the two must stay the same on this point.
+- **Reads.** `RelationFilter.Invalid` (tri-state, in the cursor
+  fingerprint), `RelationCountsByType` gains its invalid tally, the game
+  summary's `RelationTypeSummary.invalid_count` and `totals.invalid`
+  count edges as well as entities, and the game home page's relation-type
+  catalogue shows the flag where it used to render a hard-coded zero.
+- **MCP and REST.** `relations.upsert` takes `expected_version` and its
+  description no longer promises last-writer-wins; `relations.list` takes
+  `invalid` and `GET /relations?invalid=` mirrors it; `RelationOutput`
+  carries `version` and `invalid` unconditionally on both the listing and
+  `relations.get`, and the hand-written output schema advertises both;
+  `relation_types.upsert`'s description now says that editing
+  `field_schema` re-checks the type's edges.
+- **Views.** Every arm of the compiler that names the `relations` table
+  now excludes flagged edges unless `include_invalid` is set: a one-hop
+  step's JOIN, a multi-hop walk, both `edges[]` collection points, and
+  `project`'s one-hop related attribute.
+
+**Two judgement calls inside the views change.**
+
+1. **The walk's exclusion prunes the recursion rather than filtering its
+   output**, which is the opposite of where the *node* exclusion goes.
+   `walk`'s own doc comment already argued the distinction for
+   `edge_where` against `to_type`: a condition on the entity a hop
+   reached is applied outside, so a walk can pass *through* a node of the
+   wrong type; a condition on the relation each hop walks is applied
+   inside, because an edge the document excluded is an edge the walk must
+   not follow. Filtering invalid edges on the way out would leave the
+   nodes reached only through one of them drawn with nothing joining them
+   to the picture — a floating node, which is a worse answer than either
+   their presence or their absence.
+2. **`@invalid` moved from the refused list to the admitted one on an
+   edge scope**, in predicates and in `label_from` alike. A relation now
+   has the column, so refusing it would have made the flag visible on
+   half the graph — a designer could draw "the quests that no longer fit"
+   and not "the edges that no longer fit". `@name` and `@key` are still
+   refused; a relation still has neither, and the three messages that
+   used to say "has no key, name or invalid flag of its own" now say "has
+   no key or name of its own".
+
+**One clause is redundant and says so.** `edges[].from_step` reads a
+step's `via_relation`, and the step has already pruned; the filter there
+changes no result and is caught by no test. It is kept, and its comment
+records that, for the reason the metamodel's own redundant project
+filters are kept: a statement that is safe only because of how today's
+producer happens to fill its input is a trap for tomorrow's.
+
+**Behaviour that changed for callers, deliberately.** A re-seed of an
+existing edge with no `expected_version` is now a `version_conflict`
+rather than a silent overwrite — exactly what a re-seed of an existing
+entity has always been, and exactly what Task 10's `on_conflict: "skip"`
+is being added to make ergonomic. When Task 10 lands it must cover
+`relations.upsert` too, which the task's own file list already says.
+
+**The test that was inverted.** Task 7 shipped
+`TestConcurrentEditsToOneEdgesFieldsAreLostSilently`, which pinned the
+loss deliberately and said in as many words that adding `version` to
+`relations` would turn it red and that the correct response would be to
+rewrite it. This task is that rewrite:
+`TestConcurrentEditsToOneEdgesFieldsAreRefused` asserts the refusal, the
+version reported, that the stored row still holds the first writer's
+value (the error alone does not prove the write was refused *before* it
+landed), that nothing was published, and that the merge the caller is
+told to make lands on the same row.
+
+**Mutations run, each restored afterwards.**
+
+| Mutation | Test that went red |
+|---|---|
+| `invalid = false` dropped from `UpsertRelation`'s SET | `TestRewritingAFlaggedEdgeClearsItsFlag`: "the returned row still carries the flag after a validated write" |
+| The SQL version guard made trivially true | `TestTheEdgeUpsertStatementRefusesAStaleVersion`: "UpsertRelation returned {…Version:2} (err = <nil>) for a version that does not match, want no rows" |
+| The same, *plus* the Go locked-read check removed | `TestConcurrentEditsToOneEdgesFieldsAreRefused`: "second write: err = <nil>, want a VersionConflictError" |
+| `ListRelations`' invalid clause made trivially true | `TestInvalidEdgesAreFindableThroughTheListing`: "listed 2 edges, want 1" on both filtered subtests |
+| `invalidFilterPart` dropped from the relations fingerprint | `TestARelationsCursorCannotCrossTheInvalidFilter`: "err = <nil>, want invalid_input" |
+| The sweep call removed from `UpsertRelationType` | six tests, including `TestAnEdgeSweepDoesNotReachAnotherGamesEdges`: "the edited game's own edge was not flagged" |
+| `revalidate` writes only the invalid batch | `TestAnEdgeSchemaChangeClearsTheFlagWhenTheEdgeFitsAgain` **and** `TestSchemaChangeClearsTheFlagWhenTheRowFitsAgain` — one edit, both tables |
+| The invalid FILTER dropped from `CountRelationsPerType` | `TestRelationCountsCarryTheInvalidTally`: "{Total:2 Invalid:0}, want {Total:2 Invalid:1}" |
+| `hop` loses its edge filter | `TestNoArmOfAPictureDrawsAnEdgeThatNoLongerValidates`: "a step followed an edge that no longer validates: elwynn,westfall" |
+| `walk` loses its edge-predicate exclusion | the same test: "a walk crossed an edge that no longer validates and drew elwynn,westfall" |
+| `edges[].between` loses its filter | the same test: "a between entry drew 2 edges, want only the one that still validates" |
+| `project`'s related hop loses its edge filter | the same test: "a node was coloured across an edge that no longer validates: elwynn" |
+| both `relation_type_id`-leading indexes dropped | `TestTheEdgeSweepSeeksAnIndexRatherThanScanning`: "the sweep scans the whole table" |
+
+The one mutation that did **not** go red is recorded above as such:
+removing `edges[].from_step`'s filter leaves the suite green, because the
+step feeding it has already pruned.
+
+**Two tests were also corrected for the "passes for the wrong reason"
+pattern.** `TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge`
+drives `dbq.UpsertRelation` directly to observe the project guard on the
+conflict path; with a version this caller did not know, the *version*
+guard would refuse the statement on its own and leave the project filter
+untested. It now sends the edge's true version, so the project filter is
+the only thing left standing. `TestTheEdgeUpsertStatementRefusesAStaleVersion`
+exists because the Go locked read answers every sequential
+caller before the SQL guard runs — measured: making the guard trivially
+true left the service-level concurrency test green — so the guard needed
+a test that drives the statement.
 
 ---
 

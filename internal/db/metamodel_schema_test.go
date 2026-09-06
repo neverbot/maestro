@@ -633,3 +633,187 @@ func gooseArm(t *testing.T, file, arm string) string {
 	}
 	return sql
 }
+
+// TestRelationsCarryAnInvalidFlagAndAVersion pins 0009's two columns at
+// the level the migration made the claim: their existence, their types,
+// their NOT NULL, and the defaults an existing edge is read back under.
+//
+// The defaults are the load-bearing half. 0009 back-fills nothing — it is
+// a pure DDL change — so a row written before it must read as "presumed
+// valid, never edited": `invalid false` because the write path had always
+// validated an edge against its type's schema, and `version 1` because
+// that is what an INSERT lands on and therefore what the first
+// compare-and-set against such a row has to expect. A default of `true`,
+// or a nullable column, would have made every pre-existing edge in every
+// deployed game unwritable or wrongly flagged on the day of the upgrade.
+func TestRelationsCarryAnInvalidFlagAndAVersion(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+
+	for _, want := range []struct {
+		column, dataType, def string
+	}{
+		{"invalid", "boolean", "false"},
+		{"version", "integer", "1"},
+	} {
+		var dataType, nullable string
+		var def *string
+		if err := pool.QueryRow(ctx,
+			`SELECT data_type, is_nullable, column_default
+			   FROM information_schema.columns
+			  WHERE table_schema = 'public' AND table_name = 'relations' AND column_name = $1`,
+			want.column).Scan(&dataType, &nullable, &def); err != nil {
+			t.Fatalf("relations has no %s column: %v", want.column, err)
+		}
+		if dataType != want.dataType {
+			t.Fatalf("relations.%s is %s, want %s", want.column, dataType, want.dataType)
+		}
+		if nullable != "NO" {
+			t.Fatalf("relations.%s is nullable: an edge with no verdict and no revision "+
+				"is a row nothing can compare against", want.column)
+		}
+		if def == nil || *def != want.def {
+			t.Fatalf("relations.%s defaults to %v, want %s — 0009 back-fills nothing, so "+
+				"the default is what every existing edge reads back as",
+				want.column, def, want.def)
+		}
+	}
+
+	// An edge inserted with neither column named reads back under both
+	// defaults, which is the state 0009 leaves every pre-existing row in.
+	projectID, _, sourceID, targetID, relTypeID := seedEdgeParents(t, pool)
+	var invalid bool
+	var version int32
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO relations (project_id, relation_type_id, source_id, target_id)
+		 VALUES ($1, $2, $3, $4) RETURNING invalid, version`,
+		projectID, relTypeID, sourceID, targetID).Scan(&invalid, &version); err != nil {
+		t.Fatalf("insert edge: %v", err)
+	}
+	if invalid || version != 1 {
+		t.Fatalf("a fresh edge reads back invalid=%v version=%d, want false and 1",
+			invalid, version)
+	}
+}
+
+// TestTheEdgeSweepSeeksAnIndexRatherThanScanning is the measurement
+// 0009's "no new index" claim rests on, run rather than quoted.
+//
+// The re-validation sweep reads `relations WHERE project_id = $1 AND
+// relation_type_id = $2`. entities needed `entities_type_idx` for its own
+// sweep because `entities_key_key` leads with project_id and only then
+// entity_type_id; relations already has *two* indexes leading with
+// relation_type_id — `relations_edge_key` (0004, the unique triple) and
+// `relations_type_target_idx` (0008) — so the index 0009 would otherwise
+// have added already exists twice over, and which of the two the planner
+// picks is its business.
+//
+// **So the assertion is on the shape of the plan, not on an index
+// name.** Naming one would pin a choice this test has no opinion about
+// and would go red on a planner that made the other, equally good, one.
+// What it must catch is the sequential scan a sweep would fall back to
+// if both indexes were dropped or reshaped away from that leading
+// column, which is the outcome 0009 says cannot happen.
+func TestTheEdgeSweepSeeksAnIndexRatherThanScanning(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+
+	projectID, entityTypeID, sourceID, _, relTypeID := seedEdgeParents(t, pool)
+	// **The fixture has to be a game, not one type's worth of rows.** A
+	// sweep is selective — it reads the edges of *one* relation type out
+	// of a game that has several — and on a table where every row matches
+	// the filter, Postgres reads sequentially whatever indexes exist and
+	// is right to. Twenty types of five hundred edges each is what makes
+	// the plan below about the index rather than about the fixture.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO entities (project_id, entity_type_id, key, name)
+		 SELECT $1, $2, 'filler-' || i, 'Filler' FROM generate_series(1, 500) AS i`,
+		projectID, entityTypeID); err != nil {
+		t.Fatalf("seed entities: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO relation_types (project_id, key, label)
+		 SELECT $1, 'other-' || i, 'Other' FROM generate_series(1, 19) AS i`,
+		projectID); err != nil {
+		t.Fatalf("seed relation types: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO relations (project_id, relation_type_id, source_id, target_id)
+		 SELECT $1, rt.id, $2, e.id
+		   FROM relation_types rt, entities e
+		  WHERE rt.project_id = $1 AND e.project_id = $1 AND e.key LIKE 'filler-%'`,
+		projectID, sourceID); err != nil {
+		t.Fatalf("seed edges: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE relations`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+
+	rows, err := pool.Query(ctx,
+		`EXPLAIN SELECT id, fields FROM relations
+		  WHERE project_id = $1 AND relation_type_id = $2 ORDER BY id`,
+		projectID, relTypeID)
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	defer rows.Close()
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		plan.WriteString(line)
+		plan.WriteString("\n")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if strings.Contains(plan.String(), "Seq Scan on relations") {
+		t.Fatalf("the sweep scans the whole table, so 0009's \"no new index\" claim is "+
+			"wrong and the sweep needs one of its own:\n%s", plan.String())
+	}
+	if !strings.Contains(plan.String(), "Index Scan") {
+		t.Fatalf("the sweep's plan reads no index at all:\n%s", plan.String())
+	}
+}
+
+// seedEdgeParents makes the three parents an edge needs plus two entities
+// to join, and hands back everything a caller needs to insert one.
+func seedEdgeParents(t *testing.T, pool *pgxpool.Pool) (
+	projectID, entityTypeID, sourceID, targetID, relTypeID uuid.UUID,
+) {
+	t.Helper()
+	ctx := context.Background()
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (slug, name) VALUES ('azeroth', 'Azeroth') RETURNING id`).
+		Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO entity_types (project_id, key, label, label_plural)
+		 VALUES ($1, 'quest', 'Quest', 'Quests') RETURNING id`, projectID).
+		Scan(&entityTypeID); err != nil {
+		t.Fatalf("insert entity type: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO relation_types (project_id, key, label)
+		 VALUES ($1, 'requires', 'requires') RETURNING id`, projectID).
+		Scan(&relTypeID); err != nil {
+		t.Fatalf("insert relation type: %v", err)
+	}
+	for _, spec := range []struct {
+		key string
+		out *uuid.UUID
+	}{{"hogger", &sourceID}, {"kobolds", &targetID}} {
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO entities (project_id, entity_type_id, key, name)
+			 VALUES ($1, $2, $3, $3) RETURNING id`, projectID, entityTypeID, spec.key).
+			Scan(spec.out); err != nil {
+			t.Fatalf("insert entity %s: %v", spec.key, err)
+		}
+	}
+	return projectID, entityTypeID, sourceID, targetID, relTypeID
+}

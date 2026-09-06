@@ -604,6 +604,36 @@ func (s *seeded) rewriteRaces(t *testing.T, extra map[string]any) {
 	s.races = out.Written
 }
 
+// repairRaces runs the repair loop the tool description teaches: call,
+// and call again while it is still repairing rows.
+//
+// There is no cursor and none is needed — a repaired row leaves the
+// selection — so the loop's termination is the property under test, and
+// the pass count is returned so a caller can assert it did not take one
+// call per row after all. The default limit is deliberately not
+// overridden: two hundred races over a hundred-row pass is three calls,
+// which is the shape a real repair has.
+func (s *seeded) repairRaces(t *testing.T, in web.EntitiesRepairInput) (passes, repaired int) {
+	t.Helper()
+	ctx := context.Background()
+	for {
+		if passes > 10 {
+			t.Fatalf("the repair loop did not converge after %d passes", passes)
+		}
+		out, err := web.MCPEntitiesRepair(ctx, s.deps, s.caller, s.game, in)
+		if err != nil {
+			t.Fatalf("entities.repair: %v", err)
+		}
+		if len(out.Failed) != 0 {
+			t.Fatalf("the repair failed rows: %+v", out.Failed)
+		}
+		passes, repaired = passes+1, repaired+len(out.Repaired)
+		if len(out.Repaired) == 0 {
+			return passes, repaired
+		}
+	}
+}
+
 // listAll walks a listing to exhaustion the way an agent must: pass the
 // cursor back to the call that issued it, and stop when it is empty.
 func (s *seeded) listAll(t *testing.T, in web.EntitiesListInput) []web.EntityOutput {
@@ -777,10 +807,11 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("flagging moved race-000 to version %d, want %d", one.Version, want)
 		}
 
-		// 2. There is no bulk repair. A required field cannot also
-		// declare a default — the schema checker refuses the pair as a
-		// self-contradiction — so nothing a designer can write into the
-		// *type* makes those two hundred rows fit again.
+		// 2. Nothing writable into the *type* makes those two hundred
+		// rows fit again: a required field cannot also declare a
+		// default, and the schema checker refuses the pair as the
+		// self-contradiction it is. That refusal is right and is not
+		// what changed.
 		withDefault := append(append([]web.FieldInput{}, raceSchema...),
 			web.FieldInput{Key: "tyre_rules", Type: "text", Required: true, Default: "open"})
 		if _, err := web.MCPTypesUpsert(ctx, s.deps, s.caller, s.game, web.TypesUpsertInput{
@@ -790,15 +821,36 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("a required field with a default was accepted or misreported: %v", err)
 		}
 
-		// 3. So the repair is a rewrite of every flagged row, each
-		// carrying the version the flagging did not move. This is the
-		// loop an agent actually has to run after a schema edit, and it
-		// is why the sweep leaving versions alone matters.
-		s.rewriteRaces(t, map[string]any{"tyre_rules": "open"})
+		// 3. What changed is the other half. Until Metamodel 15 the only
+		// recovery was rewriting all two hundred rows one at a time,
+		// each carrying the version the flagging did not move — the loop
+		// s.rewriteRaces still spells out, and the reason the sweep
+		// leaving versions alone matters. It is now one decision, run as
+		// a bounded pass that a caller repeats until it stops repairing.
+		passes, repaired := s.repairRaces(t, web.EntitiesRepairInput{
+			TypeKey: "race", Set: map[string]any{"tyre_rules": "open"},
+		})
+		if repaired != seedRaces {
+			t.Fatalf("the repair fixed %d races over %d passes, want all %d",
+				repaired, passes, seedRaces)
+		}
 		if flagged := s.listAll(t, web.EntitiesListInput{
 			TypeKey: "race", Invalid: boolp(true), Limit: 500,
 		}); len(flagged) != 0 {
-			t.Fatalf("%d races are still flagged after every one was rewritten", len(flagged))
+			t.Fatalf("%d races are still flagged after the repair", len(flagged))
+		}
+		// The value the designer chose is on every row, beside the ones
+		// they did not name.
+		fixed, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
+			web.EntitiesGetInput{TypeKey: "race", Key: "race-100"})
+		if err != nil {
+			t.Fatalf("entities.get: %v", err)
+		}
+		if fixed.Fields["tyre_rules"] != "open" || fixed.Fields["laps"] == nil {
+			t.Fatalf("repaired fields = %+v", fixed.Fields)
+		}
+		if body, ok := fixed.Fields["briefing"].(string); !ok || len(body) < 1000 {
+			t.Fatalf("the repair dropped a value it was not asked about: %+v", fixed.Fields)
 		}
 
 		// 4. Taking the field back out flags all two hundred again, for
@@ -816,12 +868,42 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("removing a field flagged %d races, want all %d", len(flagged), seedRaces)
 		}
 
-		// 5. And the same rewrite, without the field, puts the game back.
-		s.rewriteRaces(t, nil)
+		// 5. And the other operation puts the game back. There is no way
+		// to spell "forget this value" through an upsert for a field the
+		// schema no longer has a name for — an item carrying it is an
+		// unknown field and an item omitting it leaves the stored one
+		// alone, because an upsert replaces a row's values whole from
+		// what it was sent. drop_unknown is that spelling.
+		passes, repaired = s.repairRaces(t, web.EntitiesRepairInput{
+			TypeKey: "race", DropUnknown: true,
+		})
+		if repaired != seedRaces {
+			t.Fatalf("the drop pass fixed %d races over %d passes, want all %d",
+				repaired, passes, seedRaces)
+		}
 		if flagged := s.listAll(t, web.EntitiesListInput{
 			TypeKey: "race", Invalid: boolp(true), Limit: 500,
 		}); len(flagged) != 0 {
-			t.Fatalf("%d races stayed flagged after the second rewrite", len(flagged))
+			t.Fatalf("%d races stayed flagged after the drop pass", len(flagged))
+		}
+		back, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
+			web.EntitiesGetInput{TypeKey: "race", Key: "race-100"})
+		if err != nil {
+			t.Fatalf("entities.get: %v", err)
+		}
+		if _, present := back.Fields["tyre_rules"]; present {
+			t.Fatalf("the dropped value is still stored: %+v", back.Fields)
+		}
+		if body, ok := back.Fields["briefing"].(string); !ok || len(body) < 1000 {
+			t.Fatalf("dropping the unknown field took a declared one with it: %+v", back.Fields)
+		}
+
+		// 6. And a pass with neither operation is refused rather than
+		// run: it would rewrite every flagged row with the values it
+		// already holds, which is a back-fill wearing a repair's name.
+		if _, err := web.MCPEntitiesRepair(ctx, s.deps, s.caller, s.game,
+			web.EntitiesRepairInput{TypeKey: "race"}); err == nil {
+			t.Fatalf("a repair stating no operation was accepted")
 		}
 	})
 

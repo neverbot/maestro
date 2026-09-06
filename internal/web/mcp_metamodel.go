@@ -510,6 +510,63 @@ type RelationsUpsertOutput struct {
 	Failed  []metamodel.BulkFailure   `json:"failed"`
 }
 
+// EntitiesRepairInput is the argument shape of entities.repair, and
+// RelationsRepairInput is the same shape for edges.
+//
+// **A repair is not an editor**, and the arguments are what make that
+// true rather than a promise in prose. There is no per-row list: one
+// `set` and one `drop_unknown` cover every row the type's current schema
+// rejects, because a repair is one decision about what a newly required
+// field means. There is no key, no name, no endpoint and no
+// expected_version, because a repair writes the row it read with its
+// values changed and nothing else. Per-row values, with the version
+// claim that belongs to editing content, are entities.upsert.
+//
+// metamodel/repair.go's header carries the whole of what a repair may
+// and may not do, and why each restriction is enforced by a mechanism
+// rather than by intention.
+type EntitiesRepairInput struct {
+	ScopedArgs
+	TypeKey     string         `json:"type_key"`
+	Set         map[string]any `json:"set,omitempty"`
+	DropUnknown bool           `json:"drop_unknown,omitempty"`
+	Limit       int32          `json:"limit,omitempty"`
+}
+
+// RelationsRepairInput is EntitiesRepairInput for edges. It is a second
+// type rather than a shared one because the SDK infers each tool's input
+// schema by reflection from its own struct, and type_key means an entity
+// type in one and a relation type in the other.
+type RelationsRepairInput struct {
+	ScopedArgs
+	TypeKey     string         `json:"type_key"`
+	Set         map[string]any `json:"set,omitempty"`
+	DropUnknown bool           `json:"drop_unknown,omitempty"`
+	Limit       int32          `json:"limit,omitempty"`
+}
+
+// EntitiesRepairOutput reports one repair pass.
+//
+// Scanned is how many flagged rows the pass read, and is what tells a
+// caller whether the limit was the binding constraint — the same job
+// search's `truncated` does, stated as a number because a repair loop
+// wants one. Repaired and Failed are the batch's own report, so a row
+// that still does not fit comes back with the code entities.upsert
+// would have given it.
+type EntitiesRepairOutput struct {
+	Scanned  int                     `json:"scanned"`
+	Repaired []metamodel.BulkWrite   `json:"repaired"`
+	Failed   []metamodel.BulkFailure `json:"failed"`
+}
+
+// RelationsRepairOutput is EntitiesRepairOutput for edges; an edge has
+// no key, so it names what it repaired the way relations.upsert does.
+type RelationsRepairOutput struct {
+	Scanned  int                       `json:"scanned"`
+	Repaired []metamodel.RelationWrite `json:"repaired"`
+	Failed   []metamodel.BulkFailure   `json:"failed"`
+}
+
 // RemovedOutput is what every removal answers with. A removal has
 // nothing to return but the fact that it happened, and a tool that
 // returned nothing at all would have no structured content for a client
@@ -843,6 +900,70 @@ func entitiesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 	}
 	if out.Written == nil {
 		out.Written = []metamodel.BulkWrite{}
+	}
+	if out.Failed == nil {
+		out.Failed = []metamodel.BulkFailure{}
+	}
+	return out, nil
+}
+
+// MCPEntitiesRepair implements entities.repair.
+func MCPEntitiesRepair(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesRepairInput) (EntitiesRepairOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return EntitiesRepairOutput{}, err
+	}
+	return entitiesRepair(ctx, deps, caller, projectID, in)
+}
+
+// entitiesRepair is MCPEntitiesRepair without the token-binding check,
+// for the REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func entitiesRepair(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesRepairInput) (EntitiesRepairOutput, error) {
+	result, err := deps.Metamodel.RepairEntities(ctx, projectID, metamodel.RepairInput{
+		TypeKey: in.TypeKey, Set: in.Set, DropUnknown: in.DropUnknown,
+		Limit: in.Limit, Actor: actorOf(caller),
+	})
+	if err != nil {
+		return EntitiesRepairOutput{}, err
+	}
+	// Both slices are arrays even when empty, the rule entitiesUpsert
+	// states: "the pass reported no failures" and "the pass reported
+	// nothing" must not look the same to a client walking either one.
+	out := EntitiesRepairOutput{
+		Scanned: result.Scanned, Repaired: result.Repaired, Failed: result.Failed,
+	}
+	if out.Repaired == nil {
+		out.Repaired = []metamodel.BulkWrite{}
+	}
+	if out.Failed == nil {
+		out.Failed = []metamodel.BulkFailure{}
+	}
+	return out, nil
+}
+
+// MCPRelationsRepair implements relations.repair.
+func MCPRelationsRepair(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsRepairInput) (RelationsRepairOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return RelationsRepairOutput{}, err
+	}
+	return relationsRepair(ctx, deps, caller, projectID, in)
+}
+
+// relationsRepair is MCPRelationsRepair without the token-binding check;
+// see entitiesRepair.
+func relationsRepair(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsRepairInput) (RelationsRepairOutput, error) {
+	result, err := deps.Metamodel.RepairRelations(ctx, projectID, metamodel.RepairInput{
+		TypeKey: in.TypeKey, Set: in.Set, DropUnknown: in.DropUnknown,
+		Limit: in.Limit, Actor: actorOf(caller),
+	})
+	if err != nil {
+		return RelationsRepairOutput{}, err
+	}
+	out := RelationsRepairOutput{
+		Scanned: result.Scanned, Repaired: result.Repaired, Failed: result.Failed,
+	}
+	if out.Repaired == nil {
+		out.Repaired = []metamodel.RelationWrite{}
 	}
 	if out.Failed == nil {
 		out.Failed = []metamodel.BulkFailure{}
@@ -1388,6 +1509,41 @@ func relationTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (m
 // of them: metamodel exports MaxSearchQuery, MaxIndexedText and the page
 // bounds precisely so this file can quote them rather than repeat them.
 func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
+	// The two halves of the repair tools' descriptions, written once and
+	// used by both, because a rule stated twice is a rule that drifts:
+	// entities.repair and relations.repair are one design over two
+	// tables, exactly as revalidate is one sweep over two tables.
+	repairAdvice := "**A repair is not a bulk editor.** It reads only the rows the type's " +
+		"current schema *rejects* — the ones a schema edit flagged — writes only their " +
+		"fields, and clears a row's invalid flag only by re-validating it, never by " +
+		"assertion. It cannot create a row, rename one, move an edge's endpoints, or " +
+		"touch a row that already fits. Per-row values are what the upsert tools are " +
+		"for, with the expected_version that belongs to editing content.\n\n" +
+		"**Why it exists.** Adding a required field to a type under two hundred rows " +
+		"flags all two hundred, correctly and by design: a schema edit re-checks " +
+		"content and never back-fills it. But a field cannot be both required and " +
+		"defaulted, so nothing writable into the *type* then makes those rows fit, and " +
+		"taking the field back out flags them a second time because the value they " +
+		"carry has become an unknown field. This is the other half: you say once what " +
+		"the new field should hold, or that the old one should be forgotten.\n\n" +
+		"**The two operations.** `set` writes the values you name into every flagged " +
+		"row; its keys must be fields the type declares, and one that is not is " +
+		"invalid_input at `set.<key>` rather than the same failure repeated on every " +
+		"row. `drop_unknown` removes the values the type no longer declares, which is " +
+		"the only way to spell \"forget this\" for a field the schema has no name for. " +
+		"Give at least one of them: a pass stating neither is refused, because " +
+		"rewriting every flagged row with the values it already holds would either do " +
+		"nothing or quietly back-fill a default nobody asked for."
+
+	repairLoop := fmt.Sprintf("**Loop until it stops repairing.** limit defaults to %d and is "+
+		"capped at %d. There is no cursor and none is needed: a repaired row leaves "+
+		"the selection, so calling again works on what the last call did not fix. "+
+		"scanned is how many flagged rows this pass read — equal to the limit means "+
+		"there may be more behind it. Stop when repaired is empty; failed then "+
+		"names every row your values could not fix, at its own key, with the schema's "+
+		"own complaint.",
+		metamodel.DefaultRepairBatch, metamodel.MaxRepairBatch)
+
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "types.upsert",
 		Description: "Declare or update an entity type: a kind of thing this game contains " +
@@ -1510,22 +1666,34 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "entities.upsert",
-		Description: "Create or update entities. Always a batch — one entity is a batch of " +
-			"one — because seeding a game is hundreds of rows. mode is \"partial\" (the " +
-			"default: every item is its own transaction, the good rows land and the rest come " +
-			"back in failed with their index, key and a code saying how to fix them) or " +
-			"\"atomic\" (one transaction; one bad row rolls the whole batch back and nothing " +
-			"is reported as done). Anything else is refused rather than read as partial. " +
-			"Rows are idempotent by (type_key, key), so re-running a seed updates in place; " +
-			"updating an existing entity requires expected_version, which the written entries " +
-			"of a previous call carry. written names every row that landed with its id and " +
-			"its new version; count is how many. A failure coded \"retryable\" means the " +
-			"database refused that item over contention — send it again; if a batch keeps " +
-			"producing them, send fewer rows at a time.",
+		Description: fmt.Sprintf("Create or update entities. Always a batch — one entity is a batch of "+
+			"one — because seeding a game is hundreds of rows, and **at most %d items in "+
+			"one call**: over that is invalid_input at path `items` naming both numbers, "+
+			"not a slow success, so split a longer seed. mode is \"partial\" (the "+
+			"default: every item is its own transaction, the good rows land and the rest come "+
+			"back in failed with their index, key and a code saying how to fix them) or "+
+			"\"atomic\" (one transaction; one bad row rolls the whole batch back and nothing "+
+			"is reported as done). Anything else is refused rather than read as partial. "+
+			"Rows are idempotent by (type_key, key), so re-running a seed updates in place; "+
+			"updating an existing entity requires expected_version, which the written entries "+
+			"of a previous call carry. written names every row that landed with its id and "+
+			"its new version; count is how many. A failure coded \"retryable\" means the "+
+			"database refused that item over contention — send it again; if a batch keeps "+
+			"producing them, send fewer rows at a time.", metamodel.MaxBulkItems),
 		OutputSchema: entitiesUpsertOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in EntitiesUpsertInput) (EntitiesUpsertOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPEntitiesUpsert(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "entities.repair",
+		Description: fmt.Sprintf("Make the entities of one type fit its schema again, in one call.\n\n"+
+			"%s\n\n%s", repairAdvice, repairLoop),
+		OutputSchema: entitiesRepairOutputSchema,
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in EntitiesRepairInput) (EntitiesRepairOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPEntitiesRepair(ctx, deps, caller, projectID, in)
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
@@ -1581,25 +1749,39 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "relations.upsert",
-		Description: "Create or update edges between entities. A batch, with the same two " +
-			"modes and the same failure report entities.upsert has. Each item names its " +
-			"relation type by key and both endpoints by (type_key, key); both ends are " +
-			"checked against the relation type's declared endpoint lists, and a violation is " +
-			"endpoint_type_mismatch naming the end that is wrong. " +
-			"**An edge is identified by (relation type, source, target) and carries a " +
-			"version**: writing one that already exists replaces its fields whole and " +
-			"requires expected_version, which the written entries of a previous call carry, " +
-			"exactly as entities.upsert does. Sending the wrong one, or none, is " +
-			"version_conflict reporting the version to merge onto — nothing is overwritten. " +
-			"An edge's fields are validated against the relation type's field_schema, and a " +
-			"successful write clears any invalid flag a schema edit had put on it. " +
-			"A game cannot hold two edges of one " +
-			"relation type between the same ordered pair — say the second meaning as its own " +
-			"relation type, or as a field on the one edge.",
+		Description: fmt.Sprintf("Create or update edges between entities. A batch, with the same two "+
+			"modes, the same **%d-item** ceiling and the same failure report "+
+			"entities.upsert has. Each item names its "+
+			"relation type by key and both endpoints by (type_key, key); both ends are "+
+			"checked against the relation type's declared endpoint lists, and a violation is "+
+			"endpoint_type_mismatch naming the end that is wrong. "+
+			"**An edge is identified by (relation type, source, target) and carries a "+
+			"version**: writing one that already exists replaces its fields whole and "+
+			"requires expected_version, which the written entries of a previous call carry, "+
+			"exactly as entities.upsert does. Sending the wrong one, or none, is "+
+			"version_conflict reporting the version to merge onto — nothing is overwritten. "+
+			"An edge's fields are validated against the relation type's field_schema, and a "+
+			"successful write clears any invalid flag a schema edit had put on it. "+
+			"A game cannot hold two edges of one "+
+			"relation type between the same ordered pair — say the second meaning as its own "+
+			"relation type, or as a field on the one edge.", metamodel.MaxBulkItems),
 		OutputSchema: relationsUpsertOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsUpsertInput) (RelationsUpsertOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPRelationsUpsert(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "relations.repair",
+		Description: fmt.Sprintf("Make the edges of one relation type fit its field schema again, "+
+			"in one call. Everything entities.repair says holds here, over the edges a "+
+			"relation type's schema edit flagged: relation types carry a field_schema and "+
+			"an invalid flag exactly as entity types do, so they get the same repair.\n\n"+
+			"%s\n\n%s", repairAdvice, repairLoop),
+		OutputSchema: relationsRepairOutputSchema,
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsRepairInput) (RelationsRepairOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPRelationsRepair(ctx, deps, caller, projectID, in)
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
@@ -2041,6 +2223,49 @@ var relationsUpsertOutputSchema = &jsonschema.Schema{
 	Properties: map[string]*jsonschema.Schema{
 		"count": {Type: "integer"},
 		"written": arrayOf(&jsonschema.Schema{
+			Type:     "object",
+			Required: []string{"type_key", "id", "source_id", "target_id", "version"},
+			Properties: map[string]*jsonschema.Schema{
+				"type_key":  stringSchema(),
+				"id":        stringSchema(),
+				"source_id": stringSchema(),
+				"target_id": stringSchema(),
+				"version":   {Type: "integer"},
+			},
+		}),
+		"failed": arrayOf(bulkFailureSchema),
+	},
+}
+
+// The two repair answers. They are the two batch schemas with `count`
+// replaced by `scanned` and `written` by `repaired`: a pass reports how
+// many flagged rows it read rather than how many items it was sent,
+// because nobody sent it a list.
+var entitiesRepairOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"scanned", "repaired", "failed"},
+	Properties: map[string]*jsonschema.Schema{
+		"scanned": {Type: "integer"},
+		"repaired": arrayOf(&jsonschema.Schema{
+			Type:     "object",
+			Required: []string{"type_key", "key", "id", "version"},
+			Properties: map[string]*jsonschema.Schema{
+				"type_key": stringSchema(),
+				"key":      stringSchema(),
+				"id":       stringSchema(),
+				"version":  {Type: "integer"},
+			},
+		}),
+		"failed": arrayOf(bulkFailureSchema),
+	},
+}
+
+var relationsRepairOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"scanned", "repaired", "failed"},
+	Properties: map[string]*jsonschema.Schema{
+		"scanned": {Type: "integer"},
+		"repaired": arrayOf(&jsonschema.Schema{
 			Type:     "object",
 			Required: []string{"type_key", "id", "source_id", "target_id", "version"},
 			Properties: map[string]*jsonschema.Schema{

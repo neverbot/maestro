@@ -3,6 +3,7 @@ package markdown_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -325,6 +326,54 @@ func TestABatchRefusesAnUnknownMode(t *testing.T) {
 	requireFieldError(t, err, "mode", `must be "partial" or "atomic"`)
 	if _, err := svc.Read(ctx, game, "lore/duskwood"); !errors.Is(err, markdown.ErrNotFound) {
 		t.Fatalf("a batch refused for its mode writes nothing: %v", err)
+	}
+}
+
+// TestADocumentBatchIsBoundedByTheSameCeiling is the third kind's half
+// of metamodel.MaxBulkItems.
+//
+// The bound lives in metamodel.BulkUpsert, which this domain's batch
+// reaches from outside that package, so nothing in internal/metamodel's
+// own tests can prove documents are bounded — and documents are the
+// batch writer that shipped most recently, on the same shared machinery,
+// in the same sub-project the missing bound was found in. That is
+// precisely the shape of defect this repository keeps producing: a rule
+// established correctly at two of its three call sites. Here is the
+// third.
+//
+// The items are valid, unlike the metamodel-side fixture's: a document
+// needs no declared parent, so the cheapest way to make the assertion
+// mean something is to check that a batch which would otherwise have
+// landed 501 documents landed none.
+func TestADocumentBatchIsBoundedByTheSameCeiling(t *testing.T) {
+	svc, _, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+
+	items := make([]markdown.WriteInput, 0, metamodel.MaxBulkItems+1)
+	for i := range metamodel.MaxBulkItems + 1 {
+		items = append(items, batchItem(fmt.Sprintf("lore/zone-%04d", i), "alpha"))
+	}
+	wantMessage := fmt.Sprintf("a batch carries at most %d items; this one carries %d — split it",
+		metamodel.MaxBulkItems, metamodel.MaxBulkItems+1)
+
+	for _, mode := range []metamodel.BulkMode{metamodel.BulkPartial, metamodel.BulkAtomic, ""} {
+		_, err := svc.WriteMany(ctx, game, items, mode)
+		requireFieldError(t, err, "items", wantMessage)
+	}
+	if _, err := svc.Read(ctx, game, "lore/zone-0000"); !errors.Is(err, markdown.ErrNotFound) {
+		t.Fatalf("an over-large batch landed its first document: %v", err)
+	}
+
+	// The ceiling itself is allowed. Without this, a bound written with
+	// the wrong comparison would refuse the batch it was sized for and
+	// every assertion above would still pass.
+	result, err := svc.WriteMany(ctx, game, items[:metamodel.MaxBulkItems], metamodel.BulkAtomic)
+	if err != nil {
+		t.Fatalf("a batch of exactly %d documents was refused: %v", metamodel.MaxBulkItems, err)
+	}
+	if len(result.Written) != metamodel.MaxBulkItems {
+		t.Fatalf("a batch of exactly %d documents wrote %d", metamodel.MaxBulkItems, len(result.Written))
 	}
 }
 

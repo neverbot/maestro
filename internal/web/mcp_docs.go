@@ -1198,8 +1198,11 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"version, which is the expected_version of your next edit to it; count is how "+
 				"many. A failure coded \"retryable\" means the database refused that item "+
 				"over contention — send it again, and send fewer items at a time if a batch "+
-				"keeps producing them. Bodies are at most %d bytes each, as on docs.write. %s",
-			markdown.MaxBodyBytes, retryAdvice),
+				"keeps producing them. Bodies are at most %d bytes each, as on docs.write, and "+
+				"a batch carries **at most %d items** — over that is invalid_input at path "+
+				"`items` naming both numbers, the same ceiling entities.upsert and "+
+				"relations.upsert answer to. %s",
+			markdown.MaxBodyBytes, metamodel.MaxBulkItems, retryAdvice),
 		OutputSchema: docsWriteManyOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsWriteManyInput) (DocsWriteManyOutput, error) {
 		caller, _ := CallerFrom(ctx)

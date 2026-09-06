@@ -517,6 +517,56 @@ func (s *Server) handleUpsertEntities(w http.ResponseWriter, r *http.Request, ca
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleRepairEntities and handleRepairRelations mirror the two repair
+// tools.
+//
+// **POST, not PATCH**, and the route is a verb — `/entities/repair` —
+// rather than a resource. Both are deliberate: a pass names no row, so
+// there is no resource to PATCH, and it is not idempotent in the sense
+// PUT would promise — running it twice moves a second batch of flagged
+// rows, which is the point of the loop the tool description teaches. It
+// takes a body rather than query parameters because `set` is a map of
+// arbitrary declared values and a query string is the wrong shape for
+// one.
+//
+// The answer is 200 with the report even when rows failed, for the
+// reason handleUpsertEntities gives: a pass that repairs nineteen of
+// twenty rows is not a failed request, and the twentieth is in the body
+// with its key and its code. Only a refusal of the *call* — an unknown
+// type, a `set` key the type does not declare, a pass stating no
+// operation — is a status.
+func (s *Server) handleRepairEntities(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	var in EntitiesRepairInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := entitiesRepair(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRepairRelations(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	var in RelationsRepairInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := relationsRepair(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !s.requireContentService(w) {
 		return

@@ -315,8 +315,8 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("GET /api/games/{game}/invites", s.handleListProjectInvites)
 	s.registerProjectRoute("DELETE /api/games/{game}/invites/{invite}", s.handleRevokeProjectInvite)
 
-	// The game-content surface (api_metamodel.go), mirroring the sixteen
-	// MCP tools. Every row addressed by key or id sits behind a fixed
+	// The game-content surface (api_metamodel.go), mirroring the metamodel
+	// MCP tools one for one. Every row addressed by key or id sits behind a fixed
 	// by-key/by-id segment; see that file's header for why the obvious
 	// /types/{key} shape was rejected.
 	s.registerContentRoute("GET /api/games/{game}/types", s.handleListTypes)
@@ -331,10 +331,12 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("POST /api/games/{game}/entities", s.handleUpsertEntities)
 	s.registerContentRoute("GET /api/games/{game}/entities/by-key/{type}/{key}", s.handleGetEntity)
 	s.registerContentRoute("DELETE /api/games/{game}/entities/by-id/{id}", s.handleRemoveEntity)
+	s.registerContentRoute("POST /api/games/{game}/entities/repair", s.handleRepairEntities)
 	s.registerContentRoute("GET /api/games/{game}/relations", s.handleListRelations)
 	s.registerContentRoute("GET /api/games/{game}/relations/one", s.handleGetRelation)
 	s.registerContentRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
 	s.registerContentRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
+	s.registerContentRoute("POST /api/games/{game}/relations/repair", s.handleRepairRelations)
 	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)
 	s.registerContentRoute("GET /api/games/{game}/summary", s.handleGameSummary)
 

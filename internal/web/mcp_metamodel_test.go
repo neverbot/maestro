@@ -157,8 +157,10 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 // bound to, and every one must refuse before touching the database.
 //
 // One table rather than one test per tool, because the invariant is the
-// same one seventeen times and a per-tool test is seventeen chances
-// to forget the eighteenth.
+// same one for every tool and a per-tool test is one chance per tool to
+// forget the next one. entities.repair and relations.repair are the
+// most recent additions and were added here in the same change that
+// added them to the surface, which is what this table is for.
 func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
@@ -239,6 +241,18 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 		},
 		"relations.remove": func() error {
 			_, err := web.MCPRelationsRemove(ctx, f.deps, f.caller, f.other, web.RelationsRemoveInput{ID: id})
+			return err
+		},
+		"entities.repair": func() error {
+			_, err := web.MCPEntitiesRepair(ctx, f.deps, f.caller, f.other, web.EntitiesRepairInput{
+				TypeKey: "circuit", DropUnknown: true,
+			})
+			return err
+		},
+		"relations.repair": func() error {
+			_, err := web.MCPRelationsRepair(ctx, f.deps, f.caller, f.other, web.RelationsRepairInput{
+				TypeKey: "races_on", DropUnknown: true,
+			})
 			return err
 		},
 		"search": func() error {
@@ -410,7 +424,9 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 		"types.upsert", "types.list", "types.get", "types.remove",
 		"relation_types.upsert", "relation_types.list", "relation_types.get", "relation_types.remove",
 		"entities.upsert", "entities.list", "entities.get", "entities.remove",
-		"relations.upsert", "relations.list", "relations.remove", "search",
+		"entities.repair",
+		"relations.upsert", "relations.list", "relations.remove", "relations.repair",
+		"search",
 	} {
 		if !names[want] {
 			t.Fatalf("the served tool list is missing %q", want)

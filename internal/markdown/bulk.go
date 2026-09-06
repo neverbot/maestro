@@ -103,8 +103,13 @@ type WriteBulkResult struct {
 // one-document job.
 //
 // The rest — partial versus atomic, the cancellation contract, a path
-// repeated inside one batch — is metamodel.BulkUpsert's and is not
-// restated here.
+// repeated inside one batch, and the metamodel.MaxBulkItems ceiling on
+// how many items one call may carry — is metamodel.BulkUpsert's and is
+// not restated here. **That ceiling is inherited rather than declared**,
+// which is the whole reason this domain's batch goes through that driver:
+// it shipped on the same shared machinery in the same sub-project the
+// bound was found missing in, and a second copy of the loop would have
+// been a second place to forget it.
 func (s *Service) WriteMany(ctx context.Context, projectID uuid.UUID,
 	items []WriteInput, mode metamodel.BulkMode,
 ) (WriteBulkResult, error) {

@@ -229,6 +229,32 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND id = ANY(sqlc.arg('ids')::uuid[])
   AND invalid <> sqlc.arg('invalid')::boolean;
 
+-- name: ListInvalidEntitiesOfType :many
+-- The rows a repair pass works on: the entities of one type that the
+-- type's current schema rejects.
+--
+-- **`invalid` is the whole selection, and that is what keeps a repair a
+-- repair.** A pass reads only rows a schema edit has already flagged, so
+-- it cannot be used to rewrite content that fits — that would be a bulk
+-- editor, and this surface already has one (UpsertEntity, with a version
+-- claim per row). RepairEntities' comment carries the argument.
+--
+-- It selects key, name and version as well as fields because the repair
+-- writes each row back through the ordinary entity write path, which
+-- addresses a row by (type key, key) and claims a version. The name is
+-- carried through unchanged; a repair edits values and nothing else.
+--
+-- ORDER BY name, id is ListEntitiesPage's order, so two passes over an
+-- unchanging set see the rows in the same order. There is no cursor:
+-- a repaired row leaves this selection, so the next call's first page is
+-- what the previous call did not fix.
+SELECT id, key, name, fields, version FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND entity_type_id = sqlc.arg('entity_type_id')::uuid
+  AND invalid
+ORDER BY name, id
+LIMIT sqlc.arg('limit')::int;
+
 -- name: GetEntityTypeByKeyForUpdate :one
 -- The upsert's own read, taken inside its transaction with the row lock
 -- held, so the spelling and version a caller is told about are the ones
@@ -674,6 +700,41 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND relation_type_id = sqlc.arg('relation_type_id')::uuid
   AND id = ANY(sqlc.arg('ids')::uuid[])
   AND invalid <> sqlc.arg('invalid')::boolean;
+
+-- name: ListInvalidRelationsOfType :many
+-- ListInvalidEntitiesOfType for edges, and the same rule: only the rows
+-- a schema edit has flagged.
+--
+-- The four joins are what an edge costs that an entity does not. A
+-- relation is written by (relation type key, source ref, target ref) —
+-- and a ref is (entity type key, entity key) — so repairing one through
+-- the ordinary edge write path means handing back the address it was
+-- written under, which the relations row itself holds only as uuids.
+-- Resolving them here is one statement; resolving them in Go would be
+-- four lookups per edge.
+--
+-- Every join is an inner join and none of them can drop a row: both
+-- endpoints are NOT NULL foreign keys into entities, and an entity's
+-- entity_type_id is a NOT NULL foreign key into entity_types. The
+-- project scope is on the relation alone for the same reason — every one
+-- of those keys is composite and carries project_id, so a row reached
+-- through them is in this game by construction (0004_metamodel.sql).
+--
+-- ORDER BY created_at, id is ListRelationsPage's order, for the reason
+-- the entity statement gives.
+SELECT r.id, r.fields, r.version,
+       st.key AS source_type_key, s.key AS source_key,
+       tt.key AS target_type_key, t.key AS target_key
+FROM relations r
+JOIN entities s ON s.id = r.source_id
+JOIN entity_types st ON st.id = s.entity_type_id
+JOIN entities t ON t.id = r.target_id
+JOIN entity_types tt ON tt.id = t.entity_type_id
+WHERE r.project_id = sqlc.arg('project_id')::uuid
+  AND r.relation_type_id = sqlc.arg('relation_type_id')::uuid
+  AND r.invalid
+ORDER BY r.created_at, r.id
+LIMIT sqlc.arg('limit')::int;
 
 -- name: DeleteRelation :execrows
 DELETE FROM relations

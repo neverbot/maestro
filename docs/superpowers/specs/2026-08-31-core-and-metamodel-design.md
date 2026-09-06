@@ -434,6 +434,44 @@ validation pass is a verdict about content, not an edit of it.
 *(Edges gained `invalid` in migration 0009; before it, editing a
 relation type's schema left every existing edge silently unjudged.)*
 
+**Repairing the flagged rows is one call, and it is the other half of
+this rule rather than a softening of it.** Metamodel 15 added
+`entities.repair` and `relations.repair`. Task 9 measured what was
+missing: adding a required field under two hundred rows flags all two
+hundred, correctly, and then nothing writable into the *type* makes them
+fit again — a field cannot be both `required` and defaulted, and the
+schema checker is right to refuse that pair — so the only recovery was
+rewriting two hundred rows one at a time, and taking the field back out
+flagged all two hundred a second time because the value they now carried
+had become an unknown field.
+
+A repair pass names a type and states one of two operations: `set`,
+which writes the values the caller names into every flagged row, and
+`drop_unknown`, which removes the values the type no longer declares.
+It is deliberately narrow, and each restriction is enforced by a
+mechanism rather than promised:
+
+- It reads **only rows the current schema rejects**, so it cannot be
+  used to rewrite content that fits.
+- It writes **only `fields`** — never a key, a name or an endpoint —
+  because it hands the stored row's own address back to the ordinary
+  write path.
+- It clears the flag **only by re-validating**. There is no "mark these
+  valid" argument and nowhere to put one.
+- It **never runs as a side effect of a schema edit**. A schema edit
+  still flags and never back-fills; a repair is a separate call a
+  designer makes afterwards, with values a designer chose.
+- A pass stating neither operation is **refused**, because rewriting
+  every flagged row with the values it already holds would either do
+  nothing or quietly back-fill a declared default.
+
+It is not a new power: it does exactly what a listing plus a batch of
+upserts could already do, with one decision instead of two hundred round
+trips. That is what keeps it from becoming a back-fill by the back door.
+A pass is bounded and has no cursor — a repaired row leaves the
+selection, so a caller loops until a pass repairs nothing, and `failed`
+then names every row its values could not fix.
+
 ### Concurrency
 
 Every row of all four tables — entity types, entities, relation types
@@ -470,8 +508,13 @@ Schema — `types.list`, `types.get`, `types.upsert`, `types.remove`,
 `relation_types.remove`.
 
 Content — `entities.list`, `entities.get`, `entities.upsert`,
-`entities.remove`, `relations.list`, `relations.get`,
-`relations.upsert`, `relations.remove`.
+`entities.remove`, `entities.repair`, `relations.list`,
+`relations.get`, `relations.upsert`, `relations.remove`,
+`relations.repair`.
+
+The two `repair` tools were not in this spec's own list and were added
+by Metamodel 15; §3's "Schema evolution" states what they may and may
+not do.
 
 `relations.get` was not in this spec's own list and was added by
 Metamodel 12: a relation type may declare a field schema and the values
@@ -590,6 +633,20 @@ which of the two the caller meant, so guessing "the one that happened to
 survive validation" would make the result depend on the other item's
 mistakes. An agent that builds a batch from a file should fold repeated
 keys itself before sending.
+
+**A batch carries at most 500 items**, on every batch tool of every kind
+— `entities.upsert`, `relations.upsert` and the markdown domain's
+`docs.write_many`, which all reach one shared driver — and over that is
+`invalid_input` at path `items` naming both numbers. It is *refused* and
+not clamped, unlike a page limit: a caller asking for more rows than a
+page may hold still has a correct answer, and a batch does not, because
+silently writing the first 500 of 5,000 leaves 4,500 rows unwritten with
+nothing in the report saying so. 500 is `MaxEntityPage` and
+`MaxRelationPage`, so the most rows one call moves is one number across
+reads and writes. Added by Metamodel 15, after Task 9 sent a 5,000-item
+atomic batch that was accepted, held one transaction open for 3.1
+seconds and answered with 515 KB — the one caller-supplied bound on this
+surface that Postgres was left to discover rather than Go.
 
 A `mode` that is neither word is **refused** as `invalid_input` at path
 `mode`, rather than read as the default. Reading a typo as `partial`

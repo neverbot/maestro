@@ -9353,6 +9353,182 @@ that produced the original 1.6 MB.
 
 ---
 
+### Metamodel 15: a schema edit that flags rows has no bulk repair, and batches have no size bound
+
+**Status: done.** Two new tools on each surface (`entities.repair`,
+`relations.repair`, and their two REST routes), two new statements, one
+bound in the shared batch driver, and thirteen new tests.
+
+Both halves come from Task 9's end-to-end seeding run, and both are the
+last step of a rule that was established correctly and not carried one
+step further.
+
+#### The repair
+
+**The decision that is *not* revisited.** A type's `field_schema` may be
+edited at any time and the rows stored against it are neither rejected
+nor back-filled: they are re-checked and the ones that no longer fit are
+flagged. Task 9 verified that it holds — the sweep writes the flag and
+nothing else, no values, no `version`, no `updated_at` on a row whose
+verdict has not changed — and it is right. A validation pass is a verdict
+about content, not an edit of it.
+
+**What was missing is the other half.** Adding a required field under two
+hundred rows flags all two hundred, and then nothing writable into the
+*type* makes them fit again: `Schema.Check` refuses `required` together
+with a `default`, correctly, because that pair is a self-contradiction.
+So the only recovery was rewriting two hundred rows one at a time, each
+carrying its own `expected_version` — and taking the field back out
+flagged all two hundred a *second* time, because the value they now
+carried had become an unknown field. Every schema experiment cost two
+full rewrites, and the agent skill bundle would have had to teach that
+loop as the recommended workflow.
+
+**What a repair may do**, and every one of these is enforced by a
+mechanism rather than promised in prose:
+
+- Read **only rows the current schema rejects** — `invalid = true` and of
+  the named type. The predicate is in both statements, and it is what
+  stops a repair from becoming a bulk content editor.
+- Write **only `fields`**. The pass hands the *stored* row's own key and
+  name (or an edge's own endpoints) back to the ordinary write path, so
+  there is no argument through which a key, a name or an endpoint could
+  change.
+- Apply exactly two operations, both stated by the caller in the same
+  call: `drop_unknown` removes the values the type no longer declares,
+  and `set` writes the values the caller names. Nothing is derived,
+  guessed or defaulted by the repair itself.
+- Clear the flag **by re-validating, never by fiat**. Every row goes back
+  through `UpsertEntity`/`UpsertRelation`, so the flag comes off for the
+  one reason it ever comes off.
+- Report every row it could not fix, at its own key, with the code
+  `entities.upsert` would have given it.
+
+**What it may not do, and how the back door is nailed shut:**
+
+- It may not run as a side effect of a schema edit. That is *the* way
+  this design could quietly undo the rule it exists to complete, and
+  `TestASchemaEditRepairsNothingByItself` is the standing check.
+- It may not touch a valid row.
+- It may not accept per-row values. One `set` covers the pass, because a
+  repair is one decision about what a newly required field means. Per-row
+  values, with the version claim that belongs to editing content, are
+  `entities.upsert`.
+- It may not create, rename or re-point a row.
+- A pass stating **neither** operation is refused, not run: rewriting
+  every flagged row with the values it already holds either does nothing
+  or quietly injects a declared default into two hundred rows nobody
+  asked about — a back-fill arrived at by a call that looks like a no-op.
+- A `set` key the type does not declare is refused up front, so a
+  caller's own mistake is not reported two hundred times as a property of
+  the game's content.
+
+**It is not a new power**, and that is the property that makes all of the
+above hold together: a repair does exactly what an agent could already do
+with a listing and a batch of upserts, with one decision instead of two
+hundred round trips. There is no value it can put in a row that
+`entities.upsert` could not, and no row it can reach that a designer has
+not already been told is broken.
+
+**Concurrency.** Each row is written with the `expected_version` the pass
+read, so a designer editing a row while a pass is running gets a
+`version_conflict` for that row and their work is not lost. A row someone
+fixes between the selection and the write leaves the selection on the
+next pass, and `TestARepairTouchesOnlyTheRowsTheSchemaRejects` drives the
+hand-fixed case.
+
+**Bounded, with no cursor, and the absence is the design.** A repaired row
+leaves the selection, so calling again works on what the last call did not
+fix; the loop terminates because `repaired` goes empty, and `failed` then
+names what is left.
+`TestARepairPassIsBoundedAndConverges` runs it over 250 rows at a
+hundred-row limit and asserts the pass count, which is what would break
+if a pass ever re-read rows it had already repaired.
+
+**Both kinds.** `relations.repair` exists because 0009 gave edges a field
+schema's flag and a version, so a relation type's schema edit flags edges
+exactly as an entity type's flags entities. `revalidate` is one function
+over two tables for that reason; a repair covering only entities would
+have been this repository's most repeated defect.
+
+#### The batch bound
+
+`metamodel.MaxBulkItems = 500`, checked in `BulkUpsert` **before the mode
+switch and before any transaction opens**, reported as `invalid_input` at
+path `items` naming both numbers.
+
+- **Why it was needed.** Task 9 sent a 5,000-item atomic batch over the
+  wire: accepted, one transaction held open for 3.1 seconds, 515 KB of
+  answer. An atomic batch is one transaction by construction, so its size
+  is directly how long every other writer waits — and this was the one
+  caller-supplied bound on the surface Postgres was left to discover.
+  Every other one is checked in Go first: the search query at 4 KiB, a
+  page limit clamped to its cap, the request body at 4 MiB.
+- **Why 500.** `MaxEntityPage` and `MaxRelationPage` are both 500, so
+  "the most rows one call moves" is one number across reads and writes.
+  It is also well above every batch this repository's own seeding sends.
+- **Why refused and not clamped.** A page limit clamps because a caller
+  asking for too many rows still has a correct answer — the cap's worth,
+  plus a cursor. A batch has none: silently writing the first 500 of
+  5,000 leaves 4,500 rows unwritten with nothing saying so, and writing
+  all of them is the behaviour the bound exists to stop.
+- **In the shared place, and all three kinds.** The check is in
+  `BulkUpsert`, which entities, relations and — since the markdown
+  sub-project — `docs.write_many` all reach. `internal/markdown` inherits
+  it rather than declaring it, and
+  `TestADocumentBatchIsBoundedByTheSameCeiling` is the third kind's own
+  pin, in its own package, because nothing in `internal/metamodel`'s tests
+  can see that call site. The three tool descriptions state the number,
+  asserted over the real transport by
+  `TestAnOverLargeBatchIsRefusedOnBothSurfaces`.
+
+The repair pass's own ceiling is `MaxBulkItems` too, because a pass *is*
+a batch: the rows it reads are the items it writes.
+
+#### Mutation, applied
+
+- **The bound disabled (`if false && len(items) > MaxBulkItems`).** Red in
+  all three packages: `TestABatchIsBoundedAndReportedAsTheCallersOwnArgument`
+  — `err = <nil>, want a *metamodel.ValidationError`;
+  `TestADocumentBatchIsBoundedByTheSameCeiling` — `want a refusal at
+  "items", got nil`; `TestAnOverLargeBatchIsRefusedOnBothSurfaces` —
+  `err = <nil>, want a *metamodel.ValidationError`.
+- **`AND invalid` dropped from `ListInvalidEntitiesOfType`**, so a pass
+  reads every row of the type. `TestARepairTouchesOnlyTheRowsTheSchemaRejects`
+  red: `the pass scanned 3 and repaired 3, want 2 and 2`.
+- **The no-operation refusal disabled.** Red on all four surfaces that
+  assert it: `TestARepairThatStatesNoOperationIsRefused` (`err = <nil>`),
+  `TestARepairPassAnswersOverTheToolSurface` (`a repair stating no
+  operation was accepted`), `TestTheRESTMirrorRepairsToo` (`an empty
+  repair over REST = 200 {"scanned":0,"repaired":[],"failed":[]}`), and
+  the seeded end-to-end run.
+- **The back door opened**: `UpsertEntityType` calling `RepairEntities`
+  after its sweep. `TestASchemaEditRepairsNothingByItself` red: `2 rows
+  flagged after removing a field, want 3`.
+
+**One mutation stayed green, and fixing that is part of this task.** The
+first attempt at the back door — a schema edit repairing with every
+declared default — left `TestASchemaEditRepairsNothingByItself` passing,
+because that test only walked the *narrowing* direction: the rows were
+flagged for a required field, a required field may not declare a default,
+so there was nothing the back door could invent and the repair failed
+every row. A fixture too small to distinguish any policy. The test now
+walks the widening direction too — removing a field, where dropping the
+now-unknown value fixes every row with no decision to make, which is the
+one case an automatic repair genuinely *could* succeed at — and the back
+door is red there.
+
+#### The seeded run
+
+Task 9's four-step loop is now walked through the repair on two hundred
+real rows: three passes at the default hundred-row limit for the `set`
+half, three for the `drop_unknown` half, and a sixth step asserting that a
+pass stating no operation is refused. The one-at-a-time rewrite it
+replaced stays in the file, still exercised by the read-then-write loop
+case, because it is what the repair costs when there is no repair.
+
+---
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:

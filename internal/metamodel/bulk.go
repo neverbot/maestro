@@ -112,6 +112,45 @@ type BulkSpec[In, Out any] struct {
 	Publish func(Out)
 }
 
+// MaxBulkItems bounds, in items, one batch on this surface — every
+// batch, of every kind, in either mode.
+//
+// It is exported because a bound a caller cannot read is a bound a
+// caller trips over, which is the same argument MaxSearchQuery makes:
+// the three tool descriptions built over this driver state the number,
+// so an agent composing a batch knows the edge before it hits it.
+//
+// **What made a bound necessary.** Task 9 sent a 5,000-item atomic
+// batch and it was accepted: one transaction held open for 3.1 seconds,
+// answering with 515 KB. Nothing refused it, nothing warned about it,
+// and the caller's only signal that it had asked for something the
+// server should not do was how long the answer took. An atomic batch is
+// one transaction by construction, so its size is directly how long
+// every other writer against those rows waits — and it is the one
+// caller-supplied bound on this surface that Postgres was left to
+// discover. Every other one is checked in Go before the database sees
+// it: the search query at 4 KiB (MaxSearchQuery), a page limit clamped
+// to its cap (paging.Size), the request body at 4 MiB (maxBodyBytes).
+// This is that rule carried to the last place it was missing.
+//
+// **500, because that is already this surface's answer to "the most
+// rows one call moves".** MaxEntityPage and MaxRelationPage are both
+// 500; an agent that can read 500 rows in a call can write 500 in a
+// call, and one number is one thing to learn. It is also comfortably
+// above every batch this repository's own end-to-end seeding sends
+// (200), so the bound refuses nothing a real seeding run does.
+//
+// **It is refused, not clamped**, which is the opposite of what a page
+// limit gets and deliberately so. paging.Size clamps because a caller
+// asking for more rows than it may have still has a correct answer —
+// the cap's worth of rows, plus a cursor for the rest. A batch has no
+// such answer: silently writing the first 500 items of 5,000 and
+// reporting success would leave 4,500 rows unwritten with nothing in
+// the result saying so, and silently writing all of them is the
+// behaviour this bound exists to stop. So it is invalid_input at path
+// `items`, naming both numbers, and the caller splits.
+const MaxBulkItems = 500
+
 // BulkUpsert runs a batch in the requested mode.
 //
 // **The partial-failure contract, which is the whole point of the two
@@ -143,6 +182,20 @@ type BulkSpec[In, Out any] struct {
 func BulkUpsert[In, Out any](
 	ctx context.Context, withTx WithTx, items []In, mode BulkMode, spec BulkSpec[In, Out],
 ) ([]Out, []BulkFailure, error) {
+	// Before the mode switch, so both modes and all three kinds — entities,
+	// relations and internal/markdown's documents, which reach this driver
+	// through the same call — are bounded by one check rather than by
+	// three that can drift. This is also before any transaction is opened:
+	// an over-large batch is the caller's own argument and is reported as
+	// one, not as a slow success.
+	if len(items) > MaxBulkItems {
+		return nil, nil, &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
+			Path: "items",
+			Message: fmt.Sprintf("a batch carries at most %d items; this one carries %d — "+
+				"split it", MaxBulkItems, len(items)),
+		}}}
+	}
+
 	switch mode {
 	case BulkAtomic:
 		rows, err := bulkAtomic(ctx, withTx, items, spec)

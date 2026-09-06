@@ -45,7 +45,7 @@ import { layeredLayoutRequest, layeredScene, RENDERER as RENDERER_LAYERED } from
 import { nestedScene, RENDERER as RENDERER_NESTED } from "../render/nested.js";
 import { mapScene, RENDERER as RENDERER_MAP } from "../render/map.js";
 import { tableScene, RENDERER as RENDERER_TABLE } from "../render/table.js";
-import { timelineScene, RENDERER as RENDERER_TIMELINE } from "../render/timeline.js";
+import { timelineScene, PARAM_AXIS_FIELD, RENDERER as RENDERER_TIMELINE } from "../render/timeline.js";
 import { gridFallback } from "../layout/compose.js";
 import { LAYOUT_BUDGET_MS, runWithBudget } from "../layout/budget.js";
 import { Arrangement, MstCanvas, worldDelta } from "../components/mst-canvas.js";
@@ -206,6 +206,69 @@ export async function backgroundAssetFor(client, row, previous) {
     }
     cursor = body && typeof body.next_cursor === "string" ? body.next_cursor : "";
     if (cursor === "") return null;
+  }
+  return null;
+}
+
+// typeKeysOf is every entity type a query puts in scope: the types it
+// selects from and the types it traverses to. It is what a page has to
+// walk to find a field's declaration, because a declaration belongs to a
+// type and an envelope carries values rather than types.
+export function typeKeysOf(row) {
+  const query = row && typeof row === "object" ? row.query : null;
+  if (!query || typeof query !== "object") return [];
+  const keys = [];
+  const add = (value) => {
+    if (typeof value === "string" && value !== "" && !keys.includes(value)) keys.push(value);
+  };
+  for (const selector of Array.isArray(query.from) ? query.from : []) {
+    if (selector && typeof selector === "object") add(selector.type);
+  }
+  for (const step of Array.isArray(query.traverse) ? query.traverse : []) {
+    if (step && typeof step === "object") add(step.to_type);
+  }
+  return keys;
+}
+
+// axisDeclarationFor is the `{type, options}` the `timeline` renderer
+// lays its axis out from.
+//
+// **Nothing supplied it, and an enum axis silently became a number
+// one.** render/timeline.js's axisFor is explicit that the declaration
+// "arrives from the caller because it is not in the envelope": the
+// answer carries the values a query found and an axis is what the *type*
+// says exists, which is how a declared option with no node still gets a
+// tick. With no declaration axisFor has only a number axis to fall back
+// on, and on a number axis every enum value is off-axis — so a
+// championship over six declared stages drew four lanes, one tick
+// reading "0", and all eighty-two of its events piled into the "no value
+// for stage" region to the left of the origin. Nothing said so, because
+// "this node has no value on this axis" is a picture the renderer draws
+// on purpose. Found by opening a timeline (Task 15).
+//
+// The declaration is looked for across every type the query puts in
+// scope and the first one found wins, which is sound because the
+// renderer catalogue refuses to save a timeline whose axis_field is not
+// declared identically by all of them (internal/views/renderers.go).
+export async function axisDeclarationFor(client, row, params, previous) {
+  const view = row && typeof row === "object" ? row : {};
+  if (String(view.renderer ?? "") !== RENDERER_TIMELINE) return null;
+  const field = params && typeof params === "object" ? params[PARAM_AXIS_FIELD] : null;
+  if (typeof field !== "string" || field === "") return null;
+  if (previous && previous.key === field) return previous;
+  if (!client || typeof client.getType !== "function") return null;
+  for (const typeKey of typeKeysOf(view)) {
+    const answer = await client.getType(typeKey);
+    const body = answer && answer.ok === false ? null : answer && answer.result ? answer.result : answer;
+    const schema = body && Array.isArray(body.field_schema) ? body.field_schema : [];
+    for (const declared of schema) {
+      if (!declared || declared.key !== field) continue;
+      return {
+        key: field,
+        type: String(declared.type ?? ""),
+        options: Array.isArray(declared.options) ? declared.options : [],
+      };
+    }
   }
   return null;
 }
@@ -395,9 +458,15 @@ async function draw(state, envelope, error, options) {
   // until Task 15 mounted a map nothing in this page joined the two.
   state.background = await backgroundAssetFor(state.client, state.row, state.background);
 
+  // The axis the `timeline` renderer draws, resolved the same way and
+  // for the same reason as the ground above: it is a *declaration* the
+  // game holds, not a value the answer carries. See axisDeclarationFor.
+  state.axis = await axisDeclarationFor(state.client, state.row, params, state.axis);
+
   const scene = envelope === null ? null : SCENES[renderer]
     ? SCENES[renderer](envelope, layout, params, {
         background: backgroundOf(state.row, state.background),
+        axis: state.axis,
         zoom: state.canvas.view.k,
       })
     : null;

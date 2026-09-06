@@ -384,6 +384,46 @@ func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 	t.Logf("every ground backgroundOf is given (%d call site(s)) is resolved first", sites)
 }
 
+// TestTheViewPageResolvesAnAxisBeforeItDrawsOne is the same guard as
+// the one above, over the second wire that had no reader.
+//
+// render/timeline.js's axisFor takes the field's *declaration* and says
+// in its own comment why: "it arrives from the caller because it is not
+// in the envelope". The page passed a scene options object with no
+// `axis` in it at all, so every timeline fell back to a number axis, and
+// on a number axis every enum value is off-axis — a championship over
+// six declared stages drew one tick reading "0" and put all eighty-two
+// of its events in the "no value" region, which is a picture this
+// renderer draws deliberately and therefore never complains about.
+//
+// A source guard for the same reason as the ground's: the resolver is
+// driven from four angles by internal/web/jstest/pages_test.mjs, and all
+// four passed while nothing called it.
+func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
+	if err != nil {
+		t.Fatalf("read view.js: %v", err)
+	}
+	code := withoutComments(string(body))
+
+	given := regexp.MustCompile(`(?m)^\s*axis:\s*([^,\n]+),`)
+	matches := given.FindAllStringSubmatch(code, -1)
+	if len(matches) == 0 {
+		t.Fatal("view.js hands no axis to any renderer: a timeline with no declaration " +
+			"falls back to a number axis and puts every enum value off it")
+	}
+	for _, match := range matches {
+		axis := strings.TrimSpace(match[1])
+		assigned := regexp.MustCompile(regexp.QuoteMeta(axis) + `\s*=\s*(await\s+)?axisDeclarationFor\(`)
+		if !assigned.MatchString(code) {
+			t.Errorf("a renderer is handed %q as its axis and nothing in view.js assigns %q from "+
+				"axisDeclarationFor: without the game's own declaration a timeline has only a number "+
+				"axis, and every enum value is off it", axis, axis)
+		}
+	}
+	t.Logf("every axis a renderer is handed (%d) is resolved from the type that declares it", len(matches))
+}
+
 // TestConfigEndpointIsPublicAndMinimal pins GET /api/config: reachable
 // with no credential at all (an unauthenticated visitor is exactly who it
 // exists for — see its own doc comment), and carrying nothing beyond the

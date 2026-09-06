@@ -1113,6 +1113,73 @@ check("aGroundThatIsGoneIsAnHrefTheRendererCanBand", async () => {
   assertEqual(ground.href, "", "and the empty href is what says the image is gone");
 });
 
+// --- The axis a timeline lays out against ------------------------------
+//
+// The same shape of hole as the ground above, in the other direction: an
+// axis is a *declaration* the game holds, the envelope carries values,
+// and render/timeline.js says so in its own comment — with no
+// declaration it has only a number axis, and on a number axis every enum
+// value is off-axis. So a championship over six declared stages drew one
+// tick reading "0" and piled all eighty-two of its events into the "no
+// value" region, which is a picture the renderer draws on purpose and
+// therefore says nothing about. Found by opening one.
+
+const TIMELINE_ROW = {
+  renderer: "timeline",
+  query: {
+    from: [{ type: "event", as: "all" }],
+    traverse: [{ to_type: "heat" }],
+  },
+};
+
+function typeClient(schemas) {
+  const asked = [];
+  return {
+    asked,
+    getType: async (key) => {
+      asked.push(key);
+      const schema = schemas[key];
+      if (!schema) return { ok: false, error: { error: "not_found" } };
+      return { ok: true, result: { key, field_schema: schema } };
+    },
+  };
+}
+
+const STAGES = ["Prologue", "Round 1", "Finale"];
+
+check("aTimelineIsGivenTheDeclaredOptionsItsAxisIsMadeOf", async () => {
+  const view = await load("view");
+  const client = typeClient({ event: [{ key: "stage", type: "enum", options: STAGES }] });
+  const axis = await view.axisDeclarationFor(client, TIMELINE_ROW, { axis_field: "stage" }, null);
+  assertEqual(axis && axis.type, "enum", "the axis knows it is an enum");
+  assertEqual(axis.options.join("|"), STAGES.join("|"), "in the order the type declares, not the answer's");
+});
+
+check("aDeclarationIsFoundOnATypeTheQueryTraversesTo", async () => {
+  const view = await load("view");
+  const client = typeClient({ heat: [{ key: "stage", type: "enum", options: STAGES }] });
+  const axis = await view.axisDeclarationFor(client, TIMELINE_ROW, { axis_field: "stage" }, null);
+  assertEqual(axis && axis.options.length, 3, "a traversed type is in scope too");
+  assertEqual(view.typeKeysOf(TIMELINE_ROW).join("|"), "event|heat", "and both types are what scope means");
+});
+
+check("aRedrawOfAnUnchangedAxisCostsNoCall", async () => {
+  const view = await load("view");
+  const client = typeClient({ event: [{ key: "stage", type: "enum", options: STAGES }] });
+  const held = { key: "stage", type: "enum", options: STAGES };
+  assertEqual(await view.axisDeclarationFor(client, TIMELINE_ROW, { axis_field: "stage" }, held), held, "the axis already held is the answer");
+  assertEqual(client.asked.length, 0, "and no type is read again");
+});
+
+check("onlyATimelineAsksForAnAxis", async () => {
+  const view = await load("view");
+  const client = typeClient({ event: [{ key: "stage", type: "enum", options: STAGES }] });
+  const graphRow = { ...TIMELINE_ROW, renderer: "graph" };
+  assertEqual(await view.axisDeclarationFor(client, graphRow, { axis_field: "stage" }, null), null, "a graph has no axis");
+  assertEqual(await view.axisDeclarationFor(client, TIMELINE_ROW, {}, null), null, "and neither has a timeline with no axis_field");
+  assertEqual(client.asked.length, 0, "neither costs a call");
+});
+
 // --- The addresses ----------------------------------------------------
 
 check("everyAddressIsBuiltFromASlugAndAKey", async () => {

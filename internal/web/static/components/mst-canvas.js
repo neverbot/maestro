@@ -153,7 +153,23 @@ export const CLASS_LAYER_PREFIX = "layer layer-";
 // to. It names tokens and never hex values, so both themes are the
 // stylesheet's business (Task 1).
 export const CANVAS_CSS = `
-:host { display: block; position: absolute; inset: 0; }
+:host {
+  display: block;
+  /* **The drawing's own enclosure.** Everything below is
+     position:absolute inset:0 and therefore needs a positioned box with
+     a real height to fill; a host with no height renders six hundred
+     kilobytes of correct SVG that nobody can see. It lives here, on the
+     component that needs it, and not on the frame that slots it in: the
+     frame slots the *table* renderer into the same place, and a table
+     forced into a 70vh box loses the sticky headers §4.7 asks it for and
+     spills a thousand rows past its own frame. Both halves found by
+     mounting a view and a table (Task 15). Viewport-relative because a
+     diagram is a thing you look *at*; the floor is what keeps it usable
+     in a short window. */
+  position: relative;
+  height: 70vh;
+  min-height: 22rem;
+}
 .canvas { position: absolute; inset: 0; overflow: hidden; background: var(--ground); }
 .canvas.full-bleed { max-width: none; width: 100%; height: 100%; margin: 0; }
 .surface-host { position: absolute; inset: 0; }

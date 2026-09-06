@@ -122,19 +122,12 @@ export class MstViewFrame extends LitElement {
        canvas decorated with ARIA roles would be a second, worse twin
        that nobody can read; the honest arrangement is one accessible
        representation and one that says it is decoration. */
+    /* No height here. The drawing needs an enclosure with one and gives
+       itself that enclosure (mst-canvas's own :host rule), because this
+       slot holds the *table* renderer too and a table in a 70vh box
+       loses its sticky headers and spills past the frame. */
     .canvas {
       display: block;
-      /* The drawing's enclosure, and the reason it is here rather than
-         on any page: mst-canvas is position:absolute inset:0, so
-         it needs a positioned box with a real height to fill, and a
-         frame that slotted a canvas into a zero-height block would
-         render six hundred kilobytes of correct SVG that nobody can
-         see. Found by mounting the first view (Task 15). The height is
-         viewport-relative because a diagram is a thing you look *at*,
-         and the floor is what keeps it usable in a short window. */
-      position: relative;
-      height: 70vh;
-      min-height: 22rem;
     }
     .footer {
       padding: 0.4rem 0.75rem;

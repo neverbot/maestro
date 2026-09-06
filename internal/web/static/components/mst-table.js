@@ -46,12 +46,26 @@ export class MstTable extends LitElement {
   };
 
   static styles = css`
+    /* **The scroll container the sticky headers stick to**, and the
+       reason it has a height. An overflow:auto box with no height
+       is a scroll container that never scrolls: it grows to its content,
+       the header's position:sticky sticks it to a box taller than the
+       document's visible area, and the whole thing scrolls out of the
+       window with the page. That is how a thousand rows shipped with a
+       column header and six group sub-headers that were sticky in the
+       stylesheet and stuck to nothing on the screen — found by opening
+       one (Task 15). The height matches the drawing's enclosure in
+       mst-canvas, because a table and a diagram are the same frame's two
+       bodies and a designer switching a view between them should not
+       watch the page resize. */
     :host {
       display: block;
       background: var(--paper);
       color: var(--ink);
       font-family: var(--sans);
       overflow: auto;
+      max-height: 70vh;
+      min-height: 22rem;
     }
     table {
       border-collapse: collapse;

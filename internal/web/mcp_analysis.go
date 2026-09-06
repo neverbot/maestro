@@ -297,7 +297,7 @@ func MCPAnalysisUnreachable(ctx context.Context, deps MCPDeps, caller Caller, pr
 func analysisUnreachable(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	in AnalysisUnreachableInput) (analysis.UnreachableResult, error) {
 	return deps.Analysis.Unreachable(ctx, projectID, analysis.UnreachableInput{
-		Reach:         in.AnalysisReachArgs.params(),
+		Reach:         in.params(),
 		RelationTypes: in.RelationTypes,
 		EntityTypes:   in.EntityTypes, IgnoreEntityTypes: in.IgnoreEntityTypes,
 		MaxResults: in.MaxResults, Limit: in.Limit, Cursor: in.Cursor,

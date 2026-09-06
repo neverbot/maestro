@@ -46,9 +46,8 @@ type analysisWorld struct {
 	// viewerSecret is a token minted for a member whose role in this game
 	// is viewer, which is what TestAViewerCanRunAnAnalysisAndCannotUpsertARoute
 	// drives both surfaces with.
-	viewerSecret  string
-	viewerSession string
-	hub           *realtime.Hub
+	viewerSecret string
+	hub          *realtime.Hub
 }
 
 func newAnalysisWorld(t *testing.T) *analysisWorld {

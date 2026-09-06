@@ -9,17 +9,18 @@ of a game together: characters, places, missions, progression, story.**
 Self-hosted. Open source. It holds the *design* of a game, never a
 running one: no live instances, no real players, no telemetry.
 
-> **Early days.** A game can declare its own types, be filled with
-> content, carry versioned prose, and be *queried* — a saved view names
-> what to draw, how to traverse it and what to colour it by, and answers
-> with nodes and edges. All of it by an agent over MCP or a person over
-> the HTTP API.
+> **Early days, but it draws now.** A game declares its own types, holds
+> content and versioned prose, and answers a saved view as a picture:
+> six renderers, a layout that keeps the positions you dragged, and a
+> text twin that describes the same answer for anyone who cannot see the
+> drawing. Agents work over MCP; people work in the browser.
 >
-> What is not built yet is the part that draws: no diagrams on screen, no
-> catalogues to browse, no analysis. The web interface is still one page
-> showing what a game contains, so today a view's answer is JSON rather
-> than a picture. See [Running it](#running-it) to start an instance, the
-> [Roadmap](#roadmap) for what is done, and
+> Two honest gaps. **A person cannot yet compose a view from nothing** —
+> the query language was written for agents, and a query builder is its
+> own piece of work; you can copy an existing view and change how it is
+> drawn. And there is **no analysis** yet: no cycle report, no
+> unreachable-content report. See [Running it](#running-it) to start an
+> instance, the [Roadmap](#roadmap) for what is done, and
 > [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design.
 
 ## Maestro knows nothing about games
@@ -236,7 +237,7 @@ as an unknown token.
 - [x] **Metamodel.** The four primitives, field schemas, validation.
 - [x] **Markdown.** Versioned prose, linked to entities.
 - [x] **Views.** The query language, saved views, layouts, coordinates.
-- [ ] **Interface.** Maestro's own look, and the renderer catalogue.
+- [x] **Interface.** Maestro's own look, and the renderer catalogue.
 - [ ] **Analysis.** Cycles, unreachable content, orphans, routes.
 - [ ] **Skills.** The agent bundle and genre templates.
 

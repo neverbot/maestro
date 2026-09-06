@@ -165,6 +165,15 @@ svg.surface { display: block; width: 100%; height: 100%; touch-action: none; }
   border-radius: 4px;
 }
 .layer-drag { pointer-events: none; }
+/* A haloed label — render/marks.js's haloLabelMarks, which is how a name
+   stays legible over a designer's own image on a \`map\` (spec §4.6) —
+   carries the halo as a stroke. Painted in the default order a stroke
+   goes *over* the glyphs and thickens them into a blur; \`paint-order\`
+   puts it under, which is the whole difference between a halo and a
+   smear. It is declared for every label rather than for the map's,
+   because a label with no stroke is unaffected by it and a second class
+   would be a second place for this to be forgotten. */
+svg.surface text { paint-order: stroke; }
 `;
 
 // --- The emitter -----------------------------------------------------

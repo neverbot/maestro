@@ -50,6 +50,9 @@ var (
 	// neither the parameter nor the kind.
 	moduleControlCall      = regexp.MustCompile(`(?s)\n  control\(\n    (PARAM_[A-Z_]+),\n(.*?)\n  \),`)
 	moduleControlValuesArg = regexp.MustCompile(`(?m)^    ([A-Z][A-Z_]*),$`)
+	// A control's kind: the second argument of the call, which is one of
+	// render/controls.js's own constants.
+	moduleControlKind = regexp.MustCompile(`(?m)^  control\(\n    (PARAM_[A-Z_]+),\n    (CONTROL_[A-Z_]+),`)
 )
 
 // rendererSectionOf is one renderer's block of the generated
@@ -149,6 +152,23 @@ func moduleParamValues(source string) map[string][]string {
 	return out
 }
 
+// controlKinds is render/controls.js's vocabulary, resolved: the
+// constant a module names against the wire spelling the server uses.
+func controlKinds(t *testing.T) map[string]string {
+	t.Helper()
+	source := renderModule(t, "controls.js")
+	out := map[string]string{}
+	for _, match := range moduleStringConst.FindAllStringSubmatch(source, -1) {
+		if strings.HasPrefix(match[1], "CONTROL_") {
+			out[match[1]] = match[2]
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("read no CONTROL_ constant out of render/controls.js; the module's shape moved and this guard did not")
+	}
+	return out
+}
+
 func renderModule(t *testing.T, name string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("static", "render", name))
@@ -172,6 +192,7 @@ var rendererModules = []struct {
 	{"graph.js", views.RendererGraph},
 	{"layered.js", views.RendererLayered},
 	{"nested.js", views.RendererNested},
+	{"map.js", views.RendererMap},
 }
 
 // TestARenderersControlsAreTheCataloguesParameters is the join.
@@ -275,6 +296,61 @@ func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
 	// over every module ever written.
 	if checked == 0 {
 		t.Fatal("read no enum control out of any renderer module; the modules' shape moved and this guard did not")
+	}
+}
+
+// TestAControlDeclaresTheKindTheCatalogueDeclares is the third arm of
+// the same seam, and it arrived with `map`, the first renderer whose
+// parameters are neither values nor slots.
+//
+// A name join and a values join still admit a control that offers the
+// wrong *editor*: `x_field` takes the key of a declared number field and
+// `snap` takes a number, and a dialog that drew a number spinner for the
+// first would compose a document views.upsert refuses — while a module
+// whose kinds were all internally consistent would pass every other
+// check in this file. The kind is as much of the contract as the name.
+//
+// It joins over views.RendererParamKind rather than over the generated
+// description, because the description prints a *phrase* written for an
+// agent and never the kind; retyping the phrases here would be a third
+// spelling of the same table.
+func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
+	kinds := controlKinds(t)
+	checked := 0
+	for _, entry := range rendererModules {
+		source := renderModule(t, entry.module)
+		byConstant := map[string]string{}
+		for _, match := range moduleParamConst.FindAllStringSubmatch(source, -1) {
+			byConstant[match[1]] = match[2]
+		}
+		for _, match := range moduleControlKind.FindAllStringSubmatch(source, -1) {
+			param, ok := byConstant[match[1]]
+			if !ok {
+				t.Errorf("render/%s declares a control for %s, which is not a parameter constant", entry.module, match[1])
+				continue
+			}
+			kind, ok := kinds[match[2]]
+			if !ok {
+				t.Errorf("render/%s's control for %q names %s, which render/controls.js does not declare", entry.module, param, match[2])
+				continue
+			}
+			want, ok := views.RendererParamKind(entry.renderer, param)
+			if !ok {
+				t.Errorf("render/%s offers %q and the catalogue's %s has no such parameter", entry.module, param, entry.renderer)
+				continue
+			}
+			if kind != want {
+				t.Errorf("render/%s's control for %q is a %q and the catalogue declares a %q: a control of the wrong kind offers a designer an editor that composes a document the server refuses",
+					entry.module, param, kind, want)
+			}
+			checked++
+		}
+	}
+	// The guard on the guard, for TestAnEnumControlOffersTheSpellings'
+	// reason: a reader that resolved nothing would pass over every
+	// module ever written.
+	if checked < len(rendererModules) {
+		t.Fatalf("read %d control kinds out of %d renderer modules; the modules' shape moved and this guard did not", checked, len(rendererModules))
 	}
 }
 

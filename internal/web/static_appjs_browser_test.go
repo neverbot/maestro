@@ -480,3 +480,49 @@ func TestTheNestedRenderer(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_nested_test.mjs")
 }
+
+// TestTheMapRenderer drives internal/web/jstest/render_map_test.mjs.
+//
+// What it holds that no Go test can, and what is this renderer's alone.
+//
+// That **a node with no coordinate is never at the origin**. `map` is
+// the one renderer whose coordinates are required, and both ways a node
+// can fail to have one — a declared field that is absent, a saved
+// arrangement with no row for it — end on the shelf. The assertion is
+// not that the node is shelved: it is that **no mark in the whole scene
+// sits at (0,0)**, scanned through the same MARK_ORIGINS the drag layer
+// translates by, and it is written first in its test because the
+// mutation it exists against fails the shelf comparison too and would
+// otherwise leave it correct and never run. `(0,0)` is a place a
+// designer may deliberately have used, which is why execute.go refuses
+// to return "unplaced" as a coordinate; a pin there is a position
+// nobody chose that a designer could then drag and save.
+//
+// That **a fresh manual map is not the empty state**. The query
+// matched, the answer is full, and the only thing missing is the
+// designer's own work, so the map draws its background, shelves
+// everything and says *"Nothing has been placed yet. Drag a node from
+// the shelf onto the map."* Both halves are asserted — that sentence is
+// present and the frame's generic one is absent — and the fixture hands
+// the renderer a composition that placed all three nodes, so a renderer
+// with no rule about it scatters the map and is caught.
+//
+// That **a background can go away without taking the map with it**.
+// `background_asset_id` is ON DELETE SET NULL, so a view losing its
+// ground is an ordinary transition between two runs: the ground goes
+// plain, the frame carries one line that says the coordinates survived,
+// and every coordinate is asserted equal across the two runs. An href
+// this instance would not fetch draws nothing and is reported the same
+// way, because a ground missing from a picture looks exactly like a view
+// that never had one.
+//
+// And the negative half this renderer shares: `snap` draws its grid in
+// manual mode only — the catalogue refuses the parameter in `fields`
+// mode, where nothing is dragged — and only at 1x zoom and above; an
+// edge with one end on the shelf is drawn as nothing and **counted**, so
+// that lines plus loops plus off-map plus stubs is exactly the twin's
+// edge count.
+func TestTheMapRenderer(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/render_map_test.mjs")
+}

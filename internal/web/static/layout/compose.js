@@ -35,8 +35,15 @@
 //    header for the measurement.
 
 import { addressOf, layoutGraph, DEFAULT_NODE_WIDTH, DEFAULT_NODE_HEIGHT } from "./engine.js";
+// The wire spelling of a saved arrangement, and the vocabulary for where
+// a coordinate came from. They were declared here while the layout was
+// their only reader; `map` reads a saved arrangement without running an
+// engine at all (spec §5.1), so they moved to ../positions.js, which
+// costs a caller nothing, and are re-exported so every caller in this
+// layer keeps its one import. See that file's header.
+import { SOURCE_COMPUTED, SOURCE_GRID, SOURCE_STORED, storedFrom } from "../positions.js";
 
-export { addressOf };
+export { addressOf, SOURCE_COMPUTED, SOURCE_GRID, SOURCE_STORED, storedFrom };
 
 // The three modes 0008_views.sql accepts, and the default it applies.
 // Exported as constants so a mode is asked for by identity rather than
@@ -45,13 +52,6 @@ export const MODE_AUTO = "auto";
 export const MODE_MANUAL = "manual";
 export const MODE_MIXED = "mixed";
 export const DEFAULT_MODE = MODE_MIXED;
-
-// Where a coordinate came from. Read by the canvas (an unpinned node is
-// drawn with a hollow anchor dot rather than a solid one, spec §4.2) and
-// by the count below.
-export const SOURCE_STORED = "stored";
-export const SOURCE_COMPUTED = "computed";
-export const SOURCE_GRID = "grid";
 
 // How the pinned nodes determined the fit. Three answers, because the
 // three are three different statements about the picture and a caller
@@ -65,46 +65,6 @@ export const FIT_SIMILARITY = "similarity";
 // grid is an admission of failure, not a drawing, and the only thing
 // asked of it is that two boxes do not touch.
 const GRID_GAP = 24;
-
-// --- Reading the wire ------------------------------------------------
-
-// storedFrom normalises the envelope's `positions[]` into the rows
-// `compose` takes.
-//
-// **One spelling, and it is the documented one.** `internal/views.Position`
-// carries json tags, so a run marshals a stored position as
-// `{"entity_type","entity_key","x","y","pinned","updated_at"}` — the same
-// snake_case `views.set_positions` takes and internal/web/static/client.js
-// sends, so a position is spelled the same way in the answer as in the
-// call. It was not always: the type shipped untagged, a run answered in
-// Go field names, and this function read both spellings because a reader
-// of the documented one found no stored position in any envelope and
-// silently re-arranged every saved view. internal/web/static_layout_test.go
-// pins the spelling by marshalling the struct rather than by quoting it,
-// so removing the tags fails there loudly instead of here silently.
-//
-// `pinned` defaults to **true**, which is 0008_views.sql's own default
-// and views.set_positions': a row written without the flag is a node a
-// human put somewhere.
-export function storedFrom(positions) {
-  const rows = [];
-  for (const row of Array.isArray(positions) ? positions : []) {
-    if (!row || typeof row !== "object") continue;
-    const key = row.entity_key;
-    if (typeof key !== "string" || key === "") continue;
-    const x = row.x;
-    const y = row.y;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const pinned = row.pinned;
-    rows.push({
-      key: addressOf({ type: row.entity_type, key }),
-      x,
-      y,
-      pinned: pinned === undefined ? true : pinned === true,
-    });
-  }
-  return rows;
-}
 
 // --- What the engine is asked to lay out -----------------------------
 

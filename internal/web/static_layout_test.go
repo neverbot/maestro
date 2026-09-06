@@ -220,10 +220,18 @@ func everyOwnModule(t *testing.T) map[string]string {
 // silently unreading every arrangement in the product.
 //
 // **Comments are stripped before the module is searched.** The previous
-// version of this guard searched the raw source, and compose.js's own
+// version of this guard searched the raw source, and the module's own
 // doc comment named every member it was looking for: the assertion would
 // have held over a `storedFrom` that read nothing at all. A guard that a
 // comment can satisfy is not a guard.
+//
+// **It follows the reader.** `storedFrom` was compose.js's while the
+// layout was the only thing that read a saved arrangement; `map` reads
+// one without running an engine at all (spec §5.1), so the function
+// moved to static/positions.js and this guard moved with it. A guard
+// left pointing at the module a rule used to live in is a rule that
+// stops being checked on the day it is carried one step along, which is
+// this sub-project's own most repeated defect.
 func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.T) {
 	encoded, err := json.Marshal(views.Position{})
 	if err != nil {
@@ -234,11 +242,11 @@ func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.
 		t.Fatalf("unmarshal a position: %v", err)
 	}
 
-	compose, ok := layoutModules(t)["compose.js"]
-	if !ok {
-		t.Fatal("static/layout/compose.js is missing")
+	raw, err := os.ReadFile(filepath.Join("static", "positions.js"))
+	if err != nil {
+		t.Fatalf("read static/positions.js: %v", err)
 	}
-	code := withoutComments(compose)
+	code := withoutComments(string(raw))
 
 	// UpdatedAt is the one field nothing renders — internal/views'
 	// positions.go says so — and the composer has no business reading it.
@@ -248,14 +256,14 @@ func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.
 			continue
 		}
 		if !reads(code, name) {
-			t.Errorf("a run marshals a stored position with a %q member and compose.js never "+
+			t.Errorf("a run marshals a stored position with a %q member and positions.js never "+
 				"reads it: every saved arrangement would be silently ignored", name)
 			continue
 		}
 		read++
 	}
 	if read == 0 {
-		t.Fatal("compose.js reads none of the members a stored position marshals to")
+		t.Fatal("positions.js reads none of the members a stored position marshals to")
 	}
 	// The Go field names are the spelling the envelope used before
 	// Position was tagged, and reading them was compose.js's workaround
@@ -264,7 +272,7 @@ func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.
 	// lost again without this file noticing.
 	for _, gone := range []string{"EntityType", "EntityKey", "Pinned"} {
 		if reads(code, gone) {
-			t.Errorf("compose.js still reads %q: the envelope speaks one spelling now, and a "+
+			t.Errorf("positions.js still reads %q: the envelope speaks one spelling now, and a "+
 				"reader of the old one hides the day it stops", gone)
 		}
 	}

@@ -74,6 +74,7 @@ import {
   HEADER_HEIGHT,
   boxFor,
   chipMarks,
+  chipWidth,
   containerMarks,
   cycleGlyphMarks,
 } from "./marks.js";
@@ -308,7 +309,10 @@ function measure(key, depth, path, context) {
     const held = descendants(key, context.children, new Set());
     for (const hidden of held) context.hidden.push(hidden);
     context.chips.push({ key, count: held.length });
-    const width = Math.max(boxFor(label).width, boxFor("+" + held.length).width + 2 * CONTAINER_PADDING);
+    // The chip's width comes from the function that draws it, not from a
+    // second measurement of the same string: two estimates of one plate
+    // is boxFor's own argument, and it is why chipWidth exists.
+    const width = Math.max(boxFor(label).width, chipWidth(held.length) + 2 * CONTAINER_PADDING);
     return {
       key,
       label,

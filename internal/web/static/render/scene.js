@@ -64,6 +64,17 @@ export const BANNER_AMBIGUOUS = "ambiguous";
 // nobody ran; here the repeat is the two boxes the drawing itself just
 // stopped between.
 export const BANNER_CONTAINMENT_CYCLE = "containment_cycle";
+// The shelf: `map`'s nodes with no coordinate at all. It is a band and
+// not only a strip of chips because a node that is not on the map is a
+// node a designer scanning the map cannot see is missing — spec §4.2
+// asks for the count in words, and the shelf is the same refusal drawn.
+export const BANNER_SHELVED = "shelved";
+// A `map` whose background asset is gone. `background_asset_id` is
+// ON DELETE SET NULL, so this is an ordinary transition between two runs
+// rather than a fault, and §4.6 asks for exactly one line about it —
+// with the coordinates explicitly untouched, because positions are per
+// view and were never anchored to the image.
+export const BANNER_BACKGROUND_MISSING = "background_missing";
 
 // The order the stack is drawn in, fixed rather than incidental: a
 // designer learns positions, and two of these routinely co-occur — a
@@ -80,6 +91,8 @@ export const BANNER_ORDER = [
   BANNER_TRUNCATED_EDGES,
   BANNER_TRUNCATED_DEPTH,
   BANNER_PLACED,
+  BANNER_SHELVED,
+  BANNER_BACKGROUND_MISSING,
   BANNER_AMBIGUOUS,
   BANNER_CONTAINMENT_CYCLE,
 ];
@@ -224,6 +237,38 @@ export function bannersFor(envelope, options = {}) {
       code: BANNER_PLACED,
       css: "var(--muted)",
       text: `${count(placed, "new node was", "new nodes were")} placed automatically.`,
+      rows: [],
+    });
+  }
+
+  // The shelf, and the ground under it. Both are `map`'s and both are
+  // the caller's to report, for `outside`'s reason: whether a node has a
+  // coordinate is a question about a *drawing* — a declared field this
+  // renderer reads, or a saved arrangement — and the envelope answers
+  // neither. A count of zero says nothing, and `background` absent from
+  // the options is not the same as a background that was removed: a
+  // renderer that never had one has nothing to report.
+  const shelved = countOf(options.shelved);
+  if (shelved > 0) {
+    banners.push({
+      code: BANNER_SHELVED,
+      css: "var(--muted)",
+      text:
+        `${count(shelved, "node has", "nodes have")} no coordinate and ` +
+        `${shelved === 1 ? "is" : "are"} on the shelf rather than on the map.`,
+      rows: [],
+    });
+  }
+  if (options.backgroundMissing === true) {
+    banners.push({
+      code: BANNER_BACKGROUND_MISSING,
+      css: "var(--muted)",
+      // Two sentences, because the second is the one a designer needs:
+      // an image that vanished looks exactly like an arrangement that
+      // vanished with it, and it did not.
+      text:
+        "This view's background image was removed. Every node keeps the " +
+        "coordinate it had.",
       rows: [],
     });
   }

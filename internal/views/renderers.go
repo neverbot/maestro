@@ -538,6 +538,29 @@ func RendererNames() []string {
 	return out
 }
 
+// RendererParamKind is one parameter's declared kind, as the wire spells
+// it, or false when this catalogue has no such parameter.
+//
+// It exists for a guard that lives outside this package:
+// internal/web/static_render_test.go joins a renderer module's controls
+// to the catalogue, and a control's *kind* is as much a part of that
+// contract as its name is. The kind never reaches the generated
+// description — that prints a phrase written for an agent — so the join
+// cannot be made over the prose, and retyping the kinds in the test
+// would be the third spelling this file exists to prevent.
+func RendererParamKind(renderer, param string) (string, bool) {
+	r, ok := rendererByName[renderer]
+	if !ok {
+		return "", false
+	}
+	for _, p := range r.Params {
+		if p.Name == param {
+			return string(p.Kind), true
+		}
+	}
+	return "", false
+}
+
 // RendererDescription is the catalogue as prose, **generated from the
 // table above and from nothing else**, so that views.upsert's tool
 // description cannot drift from what CheckRenderer enforces. A hand-written sentence

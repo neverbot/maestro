@@ -43,6 +43,21 @@ export const CONTROL_RELATION_TYPE = "relation_type";
 // key. Neither an enum nor a slot, and the server spells it as its own
 // kind for that reason.
 export const CONTROL_RANK_BY = "rank_by";
+// `map`'s `x_field` and `y_field`: a declared **number field** key the
+// query carries in `project.fields`. It is not `number` — that is a
+// value, this is the name of a field — and it is not `slot`, because a
+// slot is a thing the projection computed and this is a column of the
+// entity the game declared.
+export const CONTROL_NUMBER_FIELD = "number_field";
+// `timeline`'s `axis_field` and `axis_end_field`: a declared number
+// **or enum** field key. Its own kind and not number_field's, because an
+// enum axis is legal here and nowhere else.
+export const CONTROL_AXIS_FIELD = "axis_field";
+// `table`'s `sort` and `columns`: one column reference, and a list of
+// them in the order they are drawn. Two kinds because the server has
+// two: a list is not a value repeated.
+export const CONTROL_COLUMN = "column";
+export const CONTROL_COLUMNS = "columns";
 
 // control is one knob.
 //

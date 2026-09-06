@@ -2669,7 +2669,7 @@ the background.
 **The negative half** — and the first-run case here is the product's most
 impressive feature meeting a designer for the first time.
 
-- [ ] Tests: `aNodeWithNoCoordinateFieldGoesToTheShelfNotTheOrigin` —
+- [x] Tests: `aNodeWithNoCoordinateFieldGoesToTheShelfNotTheOrigin` —
   `coordinate_source: "fields"` with an absent `x`; assert the node is on
   the shelf, is counted in a banner, and that **no mark exists at (0,0)**,
   because `(0,0)` is a place a designer may have deliberately used and
@@ -2689,7 +2689,7 @@ impressive feature meeting a designer for the first time.
   banner, which is what tells a `manual`-mode designer there is arranging
   to do; `labelHalosAreEmittedForEveryLabel`.
 
-- [ ] See red: place an unplaceable node at the origin instead of
+- [x] See red: place an unplaceable node at the origin instead of
   shelving it and watch the first test find a mark at (0,0); route the
   fresh map through the generic empty state and watch its test find the
   wrong sentence; drop the halo and watch its test count zero.
@@ -2704,6 +2704,172 @@ git add internal/web/static/render/map.js internal/web/jstest/render_map_test.mj
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the map renderer, its shelf, and a first run that says what to do"
 ```
+
+#### Corrections made during implementation
+
+1. **The reader of a saved arrangement moved out of the layout layer,
+   because `map` reads one without running an engine.** §5.1 is explicit
+   — "map's unplaced nodes go to the shelf, not through the engine" —
+   and `storedFrom` plus the three `source` constants lived in
+   layout/compose.js, which imports layout/engine.js, which imports the
+   vendored dagre. A renderer that had to load 48 kB of graph algorithm
+   to learn that a designer dragged a node would be paying for a
+   mechanism it never calls. They are now `static/positions.js`, beside
+   `static/address.js` and for the same reason Task 8's correction 4
+   gives; compose.js re-exports them, so every caller in the layout layer
+   keeps its one import and Task 6's guards are untouched.
+
+2. **And the Go guard that pins the wire spelling moved with them**,
+   which is the half a rule carried one step along usually loses.
+   `TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites`
+   read compose.js by name; it now reads the module that holds the
+   reader. Left where it was it would have gone on passing over a
+   compose.js that no longer reads a position at all — a guard pointed
+   at the module a rule used to live in is a rule that stops being
+   checked on the day it moves. Mutation, on the module it now reads:
+   *"a run marshals a stored position with a "entity_key" member and
+   positions.js never reads it: every saved arrangement would be
+   silently ignored"*.
+
+3. **§4.2's second bullet and §5.1 come apart for `map`, and the line
+   between them is whether an arrangement exists.** §4.6 wants a fresh
+   manual map to shelve *every* node; §4.2 wants a new entity in a saved
+   arrangement placed automatically, drawn hollow and counted. Both are
+   in this task's test list and a composition that placed everything
+   satisfies only the second. The reading is the spec's own wording: "a
+   view where **no** node has a position" against "a new entity in **a
+   saved arrangement**". So a manual map with no stored row shelves
+   everything whatever a composition computed, and once one row exists
+   the client's coordinates are honoured for the nodes the arrangement
+   does not cover. `aFreshManualMapIsNotTheEmptyState` hands the
+   renderer a composition that placed all three of its nodes, because
+   without that the rule is correct and unasserted — the mutation that
+   deletes it stayed green until the fixture carried a layout.
+
+4. **`map` does not tint its pins, and the reason is that the hollow
+   ring is already spoken for.** §4.2 spends "an outline with nothing in
+   it" on *this coordinate is one nobody chose*, and Task 1 spends the
+   same treatment — unfilled, dashed — on *this node's colour slot found
+   nothing*. Two facts cannot share one mark. The catalogue gives `map`
+   no colour knob either, so nothing is withheld: `PIN_FILL` is chrome,
+   and the hue on a map belongs to the designer's own image, which is
+   §2's rule about where colour comes from read in the one picture with
+   a ground. `legend` is `null`, always.
+
+5. **The first-run sentence is not a mark.** A sentence drawn into the
+   picture would have a coordinate, and a coordinate pans away from the
+   reader on the first drag. It comes back in the scene as `firstRun`
+   and the frame places it, which is Task 4's own division. The test
+   asserts both halves — that sentence present, the generic *"This view
+   matched nothing"* absent — because a renderer that said both would
+   pass an assertion for either.
+
+6. **A background that cannot be drawn is banded, and a view with no
+   background says nothing.** Those are two statements and the database
+   cannot tell them apart: internal/views' `RemoveAsset` resets the scale
+   and the offset along with the id, precisely so no knob is left placing
+   an image that is gone. So the *descriptor's presence* is the caller's
+   statement that this view names a ground, and an href that
+   `isDrawableHref` refuses — the same judge the emitter uses, asked
+   rather than restated — is a ground that is missing. The band says two
+   sentences, and the second is the one a designer needs: an image that
+   vanished looks exactly like an arrangement that vanished with it, and
+   the coordinates are asserted equal across the two runs.
+
+7. **The origin scan is written first in its own test.** Written in the
+   plan's order it never runs: the mutation it exists against — a
+   missing coordinate defaulted to 0 — fails the shelf comparison as
+   well, so the scan would be correct and never executed. That is the
+   defect shape Task 8's ambiguity check found in itself, and it was
+   found again here by running the mutation rather than by reading. It
+   scans every mark through the same `MARK_ORIGINS` the drag layer
+   translates by, so a mark kind added later is covered without anybody
+   remembering.
+
+8. **Three marks and a plate went into the shared vocabulary, not into
+   this renderer.** `render/marks.js` gained `pinMarks` (the 7px disc,
+   hollow when the coordinate is the client's), `haloLabelMarks`,
+   `gridMarks` and `backgroundMarks`; `chipMarks` **widened** to carry a
+   name and a dash, which is what a shelf chip is — same height, same
+   ground, same hairline, so a designer meets one shape rather than two.
+   The shelf's own strip is `bandMarks`, which Task 9 wrote for the
+   ranks and Task 10 noted was waiting for a lane: a rule with a caption
+   at the end of it is a rule with a caption, and the shelf did not need
+   a fourth one.
+
+9. **A chip was measured twice and now is measured once.** `chipWidth`
+   is new, because a shelf spaced by one estimate and drawn by another
+   overlaps its own plates — `boxFor`'s argument, one step along.
+   `nested.js` was computing the same width its own chip mark computes,
+   which is that defect already shipped and unnoticed; it calls
+   `chipWidth` now.
+
+10. **The halo needed one line of stylesheet to be a halo.** An SVG
+    stroke paints *over* its glyphs by default, so a 2px `--ground`
+    stroke on an 11px label is a smear rather than a halo. `CANVAS_CSS`
+    gained `svg.surface text { paint-order: stroke; }`, for every label
+    rather than for the map's, because a label with no stroke is
+    unaffected and a second class would be a second place to forget it.
+    Without it the mark was a mechanism that read as working and did the
+    opposite of what §4.6 asks for.
+
+11. **A control's *kind* is now joined to the catalogue too**, which is
+    the third arm of Task 8's seam and arrived with the first renderer
+    whose parameters are neither values nor slots. A name join and a
+    values join both admit a control that offers the wrong editor:
+    `x_field` takes the key of a declared number field and `snap` takes a
+    number, and a dialog that drew a number spinner for the first would
+    compose a document `views.upsert` refuses. The kind never reaches the
+    generated description — that prints a phrase written for an agent —
+    so `views.RendererParamKind` was added and the guard joins over it
+    rather than retyping the phrases.
+    `render/controls.js` gained the four kinds the last three renderers
+    need (`number_field`, `axis_field`, `column`, `columns`).
+
+12. **An edge with one end on the shelf is counted.** It is not a stub —
+    the far end is in the answer — and it is not a line. `scene.offMap`
+    is the fourth number, so that lines plus loops plus off-map plus
+    stubs is exactly the twin's edge count, and a renderer that dropped
+    one is caught by arithmetic rather than by inspection.
+
+13. **The frame gained two bands and they are `map`'s**:
+    `BANNER_SHELVED` and `BANNER_BACKGROUND_MISSING`, in
+    render/scene.js with the other six, because Task 4 owns every
+    negative state once for all six and a band declared inside a
+    renderer is a band the frame cannot order. Both take their count or
+    their flag from the caller, for `outside`'s reason: whether a node
+    has a coordinate is a question about a drawing, and the envelope
+    answers it for neither mode.
+
+**Mutations run, all red.** An unplaceable node drawn at the origin
+(*"no mark sits at (0,0): a disc of class "pin" does"*); the fresh map
+routed through the generic empty state (*"in the sentence §4.6 names:
+got "This view matched nothing.""*); the fresh map honouring the
+coordinates the client computed (*"every node is on the shelf: got 0,
+want 3"*); the halo dropped (*"Place 0 carries the halo: got undefined,
+want "var(--ground)""*); the grid drawn at any zoom (*"below 1x there is
+no grid: got true, want false"*) and in `fields` mode (*"fields mode
+draws none: got 16, want 0"*); a new entity drawn solid like one somebody
+placed (*"twelve of them are at a coordinate nobody chose: got 0, want
+12"*); a background that cannot be drawn left silent (*"and reports the
+image is gone: got false, want true"*, and the `javascript:` href with
+it); an edge with one end on the shelf silently dropped (*"one has an end
+on the shelf: got 0, want 1"*); the declared coordinates fitted to the
+picture (*"the game's own x, exactly: got 1000, want 100000"*); and the
+stored position's spelling moved out from under the guard that pins it
+(*"a run marshals a stored position with a "entity_key" member and
+positions.js never reads it"*).
+
+**The hand check this task leaves**, to be performed at Task 15: **two
+hundred pins over a real image.** Are labels readable over both the
+darkest and the lightest regions of the picture? Nothing automated can
+answer it — the halo is asserted to be on every label at the width §4.6
+names, and says nothing about whether a 2px `--ground` stroke separates
+11px text from a photograph of a cliff. Two more things to look at while
+that picture is open, both of them this task's own: whether a hollow
+anchor reads as *"nobody put this here"* rather than as a smaller pin at
+that density, and whether the shelf reads as a place things are waiting
+rather than as a legend.
 
 ---
 

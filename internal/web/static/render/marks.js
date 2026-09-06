@@ -24,7 +24,16 @@
 // name is the *chrome's* — a hairline outline, a muted edge, the ground
 // under an edge label — because those are not data.
 
-import { LAYER_EDGES, LAYER_IMAGE, MARK_DISC, MARK_LABEL, MARK_LINE, MARK_RECT } from "./scene.js";
+import {
+  LAYER_EDGES,
+  LAYER_IMAGE,
+  MARK_DISC,
+  MARK_IMAGE,
+  MARK_LABEL,
+  MARK_LINE,
+  MARK_RECT,
+  isDrawableHref,
+} from "./scene.js";
 
 // --- What a node's box measures --------------------------------------
 
@@ -770,7 +779,15 @@ export function containerMarks(container) {
 //
 // It reads `+12` and never `12`: a bare number beside a box reads as a
 // property of the box.
+//
+// **It also carries a name, which is `map`'s shelf.** A shelved node is
+// a labelled plate in a strip along the bottom edge (§4.2), and that is
+// this plate with a word in it instead of a count — same height, same
+// ground, same hairline, so a designer meets one shape rather than two.
+// The two callers differ in exactly one thing, which is what `label`
+// takes: a number is written `+12`, a string is written as it stands.
 export const CLASS_CHIP = "chip";
+export const CLASS_CHIP_ABSENT = "chip absent";
 export const CLASS_CHIP_LABEL = "chip-label";
 export const CHIP_HEIGHT = LABEL_SIZE + NODE_PADDING_Y;
 
@@ -778,23 +795,47 @@ export function chipText(count) {
   return "+" + Math.max(0, Math.trunc(count));
 }
 
+// chipLabel is what a chip says: a count is written `+12`, a name is
+// written as it stands.
+export function chipLabel(label) {
+  return typeof label === "number" ? chipText(label) : String(label ?? "");
+}
+
+// chipWidth is how wide that plate is, **measured once**.
+//
+// A caller that has to lay chips out in a row — `map`'s shelf — needs
+// the width before the marks exist, and boxFor's own argument applies to
+// the second measurement exactly as it applies to a node's: a shelf
+// spaced by one estimate and drawn by another overlaps its own plates.
+// So chipMarks calls this too, and there is one number.
+export function chipWidth(label) {
+  return boxFor(chipLabel(label), { size: LABEL_SIZE }).width - NODE_PADDING_X;
+}
+
 // chipMarks is the plate and its text, centred on `at`.
-export function chipMarks(at, count, key) {
-  const text = chipText(count);
-  const width = boxFor(text, { size: LABEL_SIZE }).width - NODE_PADDING_X;
+//
+// `label` is a number — the count of what is not being drawn — or the
+// text of a plate that names something. `options.dash` marks the plate
+// the way ABSENT_DASH marks a box, and means the same thing: something
+// this plate needs is not here. That is what a shelf chip is.
+export function chipMarks(at, label, key, options = {}) {
+  const text = chipLabel(label);
+  const dash = options.dash === true;
+  const width = chipWidth(label);
   return [
     {
       kind: MARK_RECT,
       key,
-      class: CLASS_CHIP,
+      class: dash ? CLASS_CHIP_ABSENT : CLASS_CHIP,
       x: at.x - width / 2,
       y: at.y - CHIP_HEIGHT / 2,
       w: width,
       h: CHIP_HEIGHT,
       radius: 2,
       fill: PLATE_FILL,
-      stroke: NODE_STROKE,
+      stroke: dash ? "var(--line-strong)" : NODE_STROKE,
       strokeWidth: NODE_STROKE_WIDTH,
+      dash: dash ? ABSENT_DASH : undefined,
     },
     {
       kind: MARK_LABEL,
@@ -838,6 +879,208 @@ export function cycleGlyphMarks(box, key) {
       size: LABEL_SIZE,
       anchor: "end",
       baseline: "middle",
+    },
+  ];
+}
+
+// --- A ground, and marks on it ---------------------------------------
+//
+// `map` is the one renderer with an image under it (§4.6), and the four
+// marks below are what a map is made of. They live here rather than in
+// render/map.js for this file's own reason: the pin's hollow ring is the
+// stub's ring, the halo's ground is the edge plate's ground, and the
+// grid's hairline is the enclosure's hairline. Three of those are
+// decisions Task 1 took about what a reader is being told, and a
+// renderer that respelled any of them would say something slightly
+// different with the same picture.
+//
+// It is also where the *second* map-shaped renderer would come looking,
+// which is the test render/controls.js's header sets for a shared shape.
+
+// A node on a map is a 7px disc and not a labelled box: a map with two
+// hundred boxes on it is not a map (§4.6). The label sits beside it.
+export const CLASS_PIN = "pin";
+export const CLASS_PIN_UNPLACED = "pin unplaced";
+export const CLASS_PIN_LABEL = "pin-label";
+export const PIN_RADIUS = 3.5;
+export const PIN_LABEL_GAP = 5;
+
+// What a pin is painted with, and it is **chrome rather than data**.
+//
+// `map` does not tint its pins, which departs from what a reader coming
+// from `graph` would expect, and the reason is the hollow ring above:
+// §4.2 already spends "an outline with nothing in it" on *this
+// coordinate is one nobody chose*, and Task 1 spends the same treatment
+// — unfilled, dashed — on *this node's colour slot found nothing*. Two
+// facts cannot share one mark. The catalogue gives `map` no colour knob
+// either, so nothing is being withheld: the hue on a map belongs to the
+// designer's own image, which is §2's rule about where colour comes from
+// read in the one picture that has a ground.
+export const PIN_FILL = "var(--ink)";
+
+// The halo that lets an 11px label survive over a designer's own image.
+// It is the ground colour, painted as a stroke *under* the glyphs, which
+// is what `paint-order: stroke` in styles.css arranges; the mark carries
+// the two attributes and nothing about painting order, which is the
+// stylesheet's.
+export const LABEL_HALO = "var(--ground)";
+export const LABEL_HALO_WIDTH = 2;
+
+// pinMarks is one node on the map: its disc, its label up and to the
+// right, and the ambiguity mark when the envelope flagged the node.
+//
+// **A hollow disc is a coordinate nobody chose.** §4.2 asks for a hollow
+// anchor rather than a solid one for a node the client placed
+// automatically, and it is the same hollow the stub's terminus uses for
+// the same reason: an outline with nothing in it is this vocabulary's
+// one spelling of "there is less here than there looks". A designer who
+// has dragged nothing sees a map of rings and knows the arrangement is
+// not theirs yet.
+export function pinMarks(pin) {
+  const { key, label, x, y, fill, placed, ambiguous } = pin;
+  const marks = [
+    {
+      kind: MARK_DISC,
+      key,
+      class: placed ? CLASS_PIN : CLASS_PIN_UNPLACED,
+      cx: x,
+      cy: y,
+      r: PIN_RADIUS,
+      fill: placed ? (typeof fill === "string" && fill !== "" ? fill : PIN_FILL) : UNFILLED,
+      stroke: placed ? NODE_STROKE : "var(--line-strong)",
+      strokeWidth: NODE_STROKE_WIDTH,
+    },
+    ...haloLabelMarks(
+      { x: x + PIN_RADIUS + PIN_LABEL_GAP, y: y - PIN_RADIUS - PIN_LABEL_GAP },
+      label,
+      { key, class: CLASS_PIN_LABEL, anchor: "start", baseline: "auto" },
+    ),
+  ];
+  if (ambiguous) {
+    marks.push({
+      kind: MARK_DISC,
+      key,
+      class: CLASS_AMBIGUOUS,
+      cx: x + PIN_RADIUS,
+      cy: y - PIN_RADIUS,
+      r: AMBIGUOUS_RADIUS,
+      fill: AMBIGUOUS_FILL,
+    });
+  }
+  return marks;
+}
+
+// haloLabelMarks is a label that has to be legible over something this
+// interface did not choose.
+//
+// One mark and not two: a plate behind a name on a map would hide the
+// map, which is the thing the designer uploaded. The halo is the
+// alternative §4.6 names, and it is a property of the label rather than
+// a second mark so that a label and its halo cannot be separated by a
+// caller who forgot one.
+export function haloLabelMarks(at, label, options = {}) {
+  return [
+    {
+      kind: MARK_LABEL,
+      key: options.key,
+      class: typeof options.class === "string" ? options.class : CLASS_NODE_LABEL,
+      x: at.x,
+      y: at.y,
+      text: typeof label === "string" ? label : "",
+      fill: LABEL_FILL,
+      size: LABEL_SIZE,
+      anchor: typeof options.anchor === "string" ? options.anchor : "start",
+      baseline: typeof options.baseline === "string" ? options.baseline : "auto",
+      halo: LABEL_HALO,
+      haloWidth: LABEL_HALO_WIDTH,
+    },
+  ];
+}
+
+// The grid `snap` draws, under the background: hairline, `--line`, and
+// never `--muted`, which is the colour of something a reader is meant to
+// read.
+export const CLASS_GRID = "grid";
+
+// gridMarks is the lines of a grid of `spacing` over `bounds`.
+//
+// It draws nothing for a spacing that is not a positive number, which is
+// what `snap: 0` means — the catalogue's own doc says "0 for no grid" —
+// and nothing for bounds it cannot measure. Both are "there is no grid
+// here" rather than a grid of one line at the origin.
+//
+// The lines are on the **image** layer, under everything including the
+// background, which is §4.6's own instruction: a grid over a designer's
+// image competes with it, and a grid under it is visible exactly where
+// the image is not.
+export function gridMarks(bounds, spacing) {
+  if (!bounds || !Number.isFinite(spacing) || spacing <= 0) return [];
+  const marks = [];
+  const firstX = Math.ceil(bounds.minX / spacing) * spacing;
+  const firstY = Math.ceil(bounds.minY / spacing) * spacing;
+  for (let x = firstX; x <= bounds.maxX; x += spacing) {
+    marks.push(gridLine(x, bounds.minY, x, bounds.maxY));
+  }
+  for (let y = firstY; y <= bounds.maxY; y += spacing) {
+    marks.push(gridLine(bounds.minX, y, bounds.maxX, y));
+  }
+  return marks;
+}
+
+function gridLine(x1, y1, x2, y2) {
+  return {
+    kind: MARK_LINE,
+    class: CLASS_GRID,
+    layer: LAYER_IMAGE,
+    x1,
+    y1,
+    x2,
+    y2,
+    stroke: ENCLOSURE_STROKE,
+    strokeWidth: NODE_STROKE_WIDTH,
+  };
+}
+
+// The background image itself.
+export const CLASS_BACKGROUND = "background";
+
+// backgroundMarks is the designer's own image, at full opacity, at the
+// scale and offset the *view* carries — those are columns of the view
+// and not renderer parameters, which internal/views/renderers.go refuses
+// them as being, because only a foreign key can keep a reference to a
+// stored asset honest.
+//
+// **An href this interface would not fetch draws nothing**, through
+// render/scene.js's own isDrawableHref rather than through a second
+// rule: `<image>` is the one mark field a browser resolves rather than
+// draws, and the whole legitimate set is this instance's own asset
+// paths. A background that does not draw is not silent, either — the
+// renderer bands it, exactly as a removed one is banded, because a
+// ground that is simply missing looks like a ground that was never set.
+//
+// `preserveAspectRatio: "none"` is deliberate and is the only honest
+// answer: `background_scale` is one number, the width and the height are
+// both derived from it, so the image is drawn at its own aspect ratio
+// and the attribute is what says the emitter must not add a second
+// opinion.
+export function backgroundMarks(background) {
+  if (!background || !isDrawableHref(background.href)) return [];
+  const { href, x, y, width, height } = background;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return [];
+  return [
+    {
+      kind: MARK_IMAGE,
+      class: CLASS_BACKGROUND,
+      layer: LAYER_IMAGE,
+      x,
+      y,
+      w: width,
+      h: height,
+      href,
+      // §4.6: "at 100% opacity". A background dimmed to make the nodes
+      // read would be this interface editing the designer's own file.
+      opacity: 1,
+      fit: "none",
     },
   ];
 }

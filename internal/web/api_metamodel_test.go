@@ -746,6 +746,7 @@ type gameSummary struct {
 		Key           string `json:"key"`
 		Label         string `json:"label"`
 		RelationCount int64  `json:"relation_count"`
+		InvalidCount  int64  `json:"invalid_count"`
 	} `json:"relation_types"`
 	Totals struct {
 		Entities  int64 `json:"entities"`
@@ -1372,4 +1373,213 @@ func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
 		"/relations/one?type_key=connects+to&source_type_key=zone&source_key=elwynn"+
 			"&target_type_key=zone&target_key=westfall", nil),
 		http.StatusBadRequest, "invalid_input", "type_key")
+}
+
+// seedOneRESTEdge declares a quest type, a relation type carrying `note` and
+// `difficulty`, two quests and one edge between them holding both
+// values. It returns nothing: every test below addresses the edge by the
+// keys it was written with.
+func seedOneRESTEdge(t *testing.T, f restFixture) {
+	t.Helper()
+	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
+		"key": "quest", "label": "Quest", "label_plural": "Quests",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("quest type = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
+		"key": "requires", "label": "requires",
+		"field_schema": []any{
+			map[string]any{"key": "note", "type": "text"},
+			map[string]any{"key": "difficulty", "type": "number"},
+		},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("relation type = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
+		map[string]any{"type_key": "quest", "key": "hogger", "name": "Wanted: Hogger"},
+		map[string]any{"type_key": "quest", "key": "kobolds", "name": "Kobolds"},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("entities = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := f.as(t, http.MethodPost, "/relations", map[string]any{"items": []any{
+		map[string]any{"type_key": "requires",
+			"source": map[string]any{"type_key": "quest", "key": "kobolds"},
+			"target": map[string]any{"type_key": "quest", "key": "hogger"},
+			"fields": map[string]any{"note": "chain", "difficulty": 3}},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("relation = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// narrowRequiresOverREST re-declares the "requires" relation type without
+// `difficulty`, which is what leaves the seeded edge no longer fitting.
+func narrowRequiresOverREST(t *testing.T, f restFixture) {
+	t.Helper()
+	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
+		"key": "requires", "label": "requires", "expected_version": 1,
+		"field_schema": []any{map[string]any{"key": "note", "type": "text"}},
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("narrow = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// relationsPage is GET /relations' answer, as a client reads it.
+type relationsPage struct {
+	Items []struct {
+		ID      string `json:"id"`
+		TypeKey string `json:"type_key"`
+		Version int32  `json:"version"`
+		Invalid bool   `json:"invalid"`
+	} `json:"items"`
+}
+
+// TestRESTRelationsListFiltersByTheInvalidFlag is the REST half of the
+// read surface 0009's flag needs. A designer looking at a game summary
+// that says "3 no longer fit" has to be able to click through to them,
+// and the entity listing has taken `?invalid=` since it shipped.
+//
+// All three states are exercised, because a route that dropped the
+// parameter on the floor would satisfy any one of them alone.
+func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
+	f := newRESTFixture(t)
+	seedOneRESTEdge(t, f)
+
+	rec := f.as(t, http.MethodGet, "/relations", nil)
+	var before relationsPage
+	decodeBody(t, rec, &before)
+	if len(before.Items) != 1 || before.Items[0].Invalid {
+		t.Fatalf("items = %+v, want one edge that still fits", before.Items)
+	}
+	if before.Items[0].Version != 1 {
+		t.Fatalf("version = %d, want 1 — an agent cannot send an expected_version "+
+			"the listing never told it", before.Items[0].Version)
+	}
+
+	narrowRequiresOverREST(t, f)
+
+	for _, tc := range []struct {
+		query string
+		want  int
+	}{
+		{"", 1},
+		{"?invalid=true", 1},
+		{"?invalid=false", 0},
+	} {
+		t.Run("relations"+tc.query, func(t *testing.T) {
+			rec := f.as(t, http.MethodGet, "/relations"+tc.query, nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
+			}
+			var page relationsPage
+			decodeBody(t, rec, &page)
+			if len(page.Items) != tc.want {
+				t.Fatalf("items = %d, want %d: %s", len(page.Items), tc.want, rec.Body.String())
+			}
+			for _, item := range page.Items {
+				if tc.query == "?invalid=true" && !item.Invalid {
+					t.Fatalf("the invalid listing returned an edge with invalid=false: %+v", item)
+				}
+			}
+		})
+	}
+
+	// A value that is neither is the caller's own mistake, not "no
+	// opinion" — the same refusal the entity listing gives.
+	assertError(t, f.as(t, http.MethodGet, "/relations?invalid=maybe", nil),
+		http.StatusBadRequest, "invalid_input", "")
+}
+
+// TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated is the edge twin
+// of TestTheGameSummaryCountsTheRowsASchemaEditInvalidated.
+//
+// The totals line is the assertion that matters: `totals.invalid` is what
+// the home page renders as "N no longer fit their type", and before 0009
+// it could only ever count entities, so a game whose every broken row was
+// an edge told its designer there was nothing to fix.
+func TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated(t *testing.T) {
+	f := newRESTFixture(t)
+	seedOneRESTEdge(t, f)
+
+	rec := f.as(t, http.MethodGet, "/summary", nil)
+	var before gameSummary
+	decodeBody(t, rec, &before)
+	if len(before.RelationTypes) != 1 {
+		t.Fatalf("relation_types = %+v, want the one type", before.RelationTypes)
+	}
+	if before.RelationTypes[0].RelationCount != 1 || before.RelationTypes[0].InvalidCount != 0 {
+		t.Fatalf("requires = %+v, want 1 edge of which 0 invalid", before.RelationTypes[0])
+	}
+	if before.Totals.Invalid != 0 {
+		t.Fatalf("totals = %+v, want nothing to fix yet", before.Totals)
+	}
+
+	narrowRequiresOverREST(t, f)
+
+	rec = f.as(t, http.MethodGet, "/summary", nil)
+	var after gameSummary
+	decodeBody(t, rec, &after)
+	if after.RelationTypes[0].RelationCount != 1 || after.RelationTypes[0].InvalidCount != 1 {
+		t.Fatalf("requires = %+v, want 1 edge of which 1 invalid", after.RelationTypes[0])
+	}
+	if after.Totals.Invalid != 1 {
+		t.Fatalf("totals = %+v, want the broken edge counted", after.Totals)
+	}
+	// The entity half is untouched: this game's two quests still fit.
+	if after.EntityTypes[0].InvalidCount != 0 {
+		t.Fatalf("quest = %+v, want no invalid entities — the two counts are being "+
+			"read off each other", after.EntityTypes[0])
+	}
+}
+
+// TestRESTRelationsUpsertTakesAnExpectedVersion pins the write half over
+// REST: an edge is now a compare-and-set, and the number to send comes
+// back in the same answer that wrote it.
+func TestRESTRelationsUpsertTakesAnExpectedVersion(t *testing.T) {
+	f := newRESTFixture(t)
+	seedOneRESTEdge(t, f)
+
+	item := func(extra map[string]any) map[string]any {
+		out := map[string]any{"type_key": "requires",
+			"source": map[string]any{"type_key": "quest", "key": "kobolds"},
+			"target": map[string]any{"type_key": "quest", "key": "hogger"},
+			"fields": map[string]any{"note": "rewritten", "difficulty": 4}}
+		for k, v := range extra {
+			out[k] = v
+		}
+		return out
+	}
+
+	// No expected_version: refused per item, and the batch reports it
+	// rather than overwriting.
+	rec := f.as(t, http.MethodPost, "/relations", map[string]any{"items": []any{item(nil)}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("blind rewrite = %d: %s", rec.Code, rec.Body.String())
+	}
+	var report struct {
+		Count   int `json:"count"`
+		Written []struct {
+			Version int32 `json:"version"`
+		} `json:"written"`
+		Failed []struct {
+			Code string `json:"code"`
+		} `json:"failed"`
+	}
+	decodeBody(t, rec, &report)
+	if report.Count != 0 || len(report.Failed) != 1 || report.Failed[0].Code != "version_conflict" {
+		t.Fatalf("report = %+v, want one version_conflict", report)
+	}
+
+	rec = f.as(t, http.MethodPost, "/relations",
+		map[string]any{"items": []any{item(map[string]any{"expected_version": 1})}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("versioned rewrite = %d: %s", rec.Code, rec.Body.String())
+	}
+	decodeBody(t, rec, &report)
+	if report.Count != 1 {
+		t.Fatalf("report = %+v, want the write to land", report)
+	}
+	if report.Written[0].Version != 2 {
+		t.Fatalf("written version = %d, want 2 — the number the next edit has to send",
+			report.Written[0].Version)
+	}
 }

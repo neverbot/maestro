@@ -217,8 +217,8 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
         { id: "a", key: "quest", label: "Quest", label_plural: "<img src=x onerror=alert(1)>Quests", entity_count: 400, invalid_count: 3 },
         { id: "b", key: "zone", label: "Zone", label_plural: "Zones", entity_count: 1, invalid_count: 0 },
       ],
-      relation_types: [{ id: "c", key: "takes_place_in", label: "takes place in", relation_count: 12 }],
-      totals: { entities: 401, relations: 12, invalid: 3 },
+      relation_types: [{ id: "c", key: "takes_place_in", label: "takes place in", relation_count: 12, invalid_count: 2 }],
+      totals: { entities: 401, relations: 12, invalid: 5 },
     },
   });
 
@@ -232,6 +232,9 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   if (!rendered.includes("3 invalid")) {
     fail(`the invalid rows are not flagged: ${JSON.stringify(rendered)}`);
   }
+  if (rendered.includes("2 invalid")) {
+    fail(`the entity catalogue is showing the relation types' invalid count: ${JSON.stringify(rendered)}`);
+  }
   // The crafted label survives verbatim as *text*: the stub has no way
   // to interpret markup, so finding the raw string proves it went
   // through textContent rather than being parsed into elements.
@@ -241,8 +244,15 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   if (!text(elements["relation-types"]).includes("12 relations")) {
     fail(`the relation type row does not carry its count: ${JSON.stringify(text(elements["relation-types"]))}`);
   }
+  // Since 0009 an edge can stop fitting its relation type's field schema
+  // too, so this row carries the same flag the entity rows do. It read a
+  // hard-coded zero while an edge could not be invalid, and leaving it
+  // there would hide half of what the totals line below counts.
+  if (!text(elements["relation-types"]).includes("2 invalid")) {
+    fail(`the relation type row does not flag its invalid edges: ${JSON.stringify(text(elements["relation-types"]))}`);
+  }
   const totals = elements["game-summary"].textContent;
-  if (!totals.includes("401 entities") || !totals.includes("12 relations") || !totals.includes("3 no longer fit")) {
+  if (!totals.includes("401 entities") || !totals.includes("12 relations") || !totals.includes("5 no longer fit")) {
     fail(`the totals line reads ${JSON.stringify(totals)}`);
   }
   assertVisible(elements["game-content"], "game-content", "the page body is still hidden after a successful summary");

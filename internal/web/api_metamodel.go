@@ -572,6 +572,14 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 		}
 		*part.field = value
 	}
+	// The same tri-state parse the entity listing's own invalid filter
+	// takes, so `?invalid=true` means the same thing on both routes and a
+	// value that is neither is refused rather than read as "no opinion".
+	invalid, ok := queryTriState(w, r, "invalid")
+	if !ok {
+		return
+	}
+	in.Invalid = invalid
 	out, err := relationsList(r.Context(), s.deps(), caller, scope.ProjectID, in)
 	if err != nil {
 		s.writeDomainError(w, r, err)

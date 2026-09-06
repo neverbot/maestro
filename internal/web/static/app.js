@@ -777,7 +777,13 @@ async function renderGameSummary(gameID, slug) {
         type.label || type.key,
         type.key,
         countLabel(Number(type.relation_count ?? 0), "relation", "relations"),
-        0,
+        // The same flag the entity catalogue shows, and for the same
+        // reason: since 0009 an edge is judged against its relation
+        // type's field schema too, so a relation type can hold rows a
+        // designer has to go and fix. A hard-coded zero stood here while
+        // an edge could not be invalid, and it would now hide half of
+        // what the summary's own total counts.
+        Number(type.invalid_count ?? 0),
       ),
     ),
   );

@@ -921,7 +921,7 @@ func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
 		{"metamodel.BulkWrite", metamodel.BulkWrite{},
 			[]string{"id", "key", "type_key", "version"}},
 		{"metamodel.RelationWrite", metamodel.RelationWrite{},
-			[]string{"id", "source_id", "target_id", "type_key"}},
+			[]string{"id", "source_id", "target_id", "type_key", "version"}},
 		{"metamodel.BulkFailure", metamodel.BulkFailure{},
 			[]string{"code", "index", "key", "message"}},
 		// A Schema is a list of Fields, so the keys that matter are one
@@ -1107,10 +1107,124 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 		}
 	}
 
+	// **version and invalid are on the same contract**, and they are the
+	// half a write-only column ships without: an agent cannot send an
+	// expected_version it was never told, and cannot act on a flag whose
+	// existence its published schema denies. The output schema here is
+	// hand-written, so nothing but this connects it to RelationOutput.
+	for _, key := range []string{"version", "invalid"} {
+		if _, ok := served.Properties.Items.Items.Properties[key]; !ok {
+			t.Fatalf("output schema has no %q property: %s", key, raw)
+		}
+	}
+
 	// The description is the other half of the same contract, and Task
-	// 7 shipped it saying the opposite of what the tool now does.
+	// 7 shipped it saying the opposite of what the tool now does — twice
+	// over: it also told an agent an edge had no version and no
+	// expected_version to guard it, which 0009 made false.
 	if strings.Contains(list.Description, "not as the (type_key, key) refs") {
 		t.Fatalf("relations.list still tells an agent its endpoints are ids only: %s", list.Description)
+	}
+	if !strings.Contains(list.Description, "invalid") {
+		t.Fatalf("relations.list does not mention its invalid filter: %s", list.Description)
+	}
+	var upsert *mcp.Tool
+	for _, tool := range tools.Tools {
+		if tool.Name == "relations.upsert" {
+			upsert = tool
+		}
+	}
+	if upsert == nil {
+		t.Fatal("relations.upsert is not served")
+	}
+	if strings.Contains(upsert.Description, "has no version") ||
+		strings.Contains(upsert.Description, "last writer wins") {
+		t.Fatalf("relations.upsert still promises last-writer-wins, which 0009 ended: %s",
+			upsert.Description)
+	}
+	if !strings.Contains(upsert.Description, "expected_version") {
+		t.Fatalf("relations.upsert does not tell an agent to send expected_version: %s",
+			upsert.Description)
+	}
+	// The input schema is the third copy of the same claim: the SDK
+	// infers it from RelationItemInput, so a field the struct lacks is a
+	// field an agent cannot send however the prose reads.
+	rawIn, err := json.Marshal(upsert.InputSchema)
+	if err != nil {
+		t.Fatalf("marshal input schema: %v", err)
+	}
+	if !strings.Contains(string(rawIn), "expected_version") {
+		t.Fatalf("relations.upsert's input schema has no expected_version: %s", rawIn)
+	}
+}
+
+// TestRelationsListFindsTheEdgesASchemaEditBroke is the MCP half of the
+// read surface 0009's flag needs.
+//
+// entities.list has taken an `invalid` filter since it shipped, and until
+// this task its edge counterpart had nothing to filter on: editing a
+// relation type's field_schema left every edge unjudged. An agent that
+// has just narrowed a schema has to be able to ask what it broke, on
+// both tables, with the same argument name.
+func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	seedOneEdge(t, f)
+
+	// Narrowing the type: `act` is dropped, so the seeded edge carrying
+	// it stops fitting.
+	if _, err := web.MCPRelationTypesUpsert(ctx, f.deps, f.caller, f.game,
+		web.RelationTypesUpsertInput{
+			Key: "takes_place_in", Label: "takes place in",
+			ExpectedVersion: ptrInt32Web(1),
+		}); err != nil {
+		t.Fatalf("narrow the relation type: %v", err)
+	}
+
+	yes, no := true, false
+	for _, tc := range []struct {
+		name   string
+		filter *bool
+		want   int
+	}{
+		{"no opinion", nil, 1},
+		{"only the broken ones", &yes, 1},
+		{"only the intact ones", &no, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game,
+				web.RelationsListInput{Invalid: tc.filter})
+			if err != nil {
+				t.Fatalf("MCPRelationsList: %v", err)
+			}
+			if len(page.Items) != tc.want {
+				t.Fatalf("items = %d, want %d: %+v", len(page.Items), tc.want, page.Items)
+			}
+			for _, item := range page.Items {
+				if !item.Invalid {
+					t.Fatalf("the edge a schema edit broke is reported as valid: %+v", item)
+				}
+			}
+		})
+	}
+
+	// relations.get answers with the flag too: an agent that walked to one
+	// edge by its address must not have to page a listing to learn that
+	// the values it is reading no longer fit.
+	got, err := web.MCPRelationsGet(ctx, f.deps, f.caller, f.game, web.RelationsGetInput{
+		TypeKey: "takes_place_in",
+		Source:  web.RefInput{TypeKey: "quest", Key: "hogger"},
+		Target:  web.RefInput{TypeKey: "zone", Key: "elwynn"},
+	})
+	if err != nil {
+		t.Fatalf("MCPRelationsGet: %v", err)
+	}
+	if !got.Invalid {
+		t.Fatalf("relations.get = %+v, want the flag the listing reports", got)
+	}
+	if got.Version != 1 {
+		t.Fatalf("version = %d, want 1: a sweep is not an edit and must not move it",
+			got.Version)
 	}
 }
 

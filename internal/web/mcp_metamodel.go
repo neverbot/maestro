@@ -256,15 +256,21 @@ type RelationsUpsertInput struct {
 	Items []RelationItemInput `json:"items"`
 }
 
-// RelationItemInput is one edge of a relations.upsert batch. There is no
-// expected_version: an edge has no version column, and
-// metamodel.RelationInput's own doc comment records that decision and
-// what it costs.
+// RelationItemInput is one edge of a relations.upsert batch. It carries
+// no actor: see this file's header.
+//
+// **expected_version is here for the reason EntityItemInput's is**, and
+// it did not exist until 0009 gave edges a version column: updating an
+// existing edge means claiming the revision being updated, so a blind
+// rewrite of a row somebody else has edited is refused instead of losing
+// their work. The written entries of a previous call carry the number to
+// send next.
 type RelationItemInput struct {
-	TypeKey string         `json:"type_key"`
-	Source  RefInput       `json:"source"`
-	Target  RefInput       `json:"target"`
-	Fields  map[string]any `json:"fields,omitempty"`
+	TypeKey         string         `json:"type_key"`
+	Source          RefInput       `json:"source"`
+	Target          RefInput       `json:"target"`
+	Fields          map[string]any `json:"fields,omitempty"`
+	ExpectedVersion *int32         `json:"expected_version,omitempty"`
 }
 
 // RefInput addresses an entity the way an agent thinks of it.
@@ -282,9 +288,13 @@ type RefInput struct {
 // for. An agent walking a game's graph wants what each edge joins; it
 // asks for the values when it means to read them, and when it wants one
 // edge's values it has relations.get, which never needs the flag.
+// Invalid is EntitiesListInput.Invalid for edges, and it is spelled the
+// same because it is the same question: an agent that has just edited a
+// relation type's field_schema asks which of its edges that broke.
 type RelationsListInput struct {
 	ScopedArgs
 	TypeKey  string `json:"type_key,omitempty"`
+	Invalid  *bool  `json:"invalid,omitempty"`
 	SourceID string `json:"source_id,omitempty"`
 	TargetID string `json:"target_id,omitempty"`
 	Cursor   string `json:"cursor,omitempty"`
@@ -453,11 +463,19 @@ type RefOutput struct {
 // caller naming one edge is asking for its content. `omitempty` is
 // load-bearing on both: a client must be able to tell "not asked for"
 // from "asked for and empty".
+// **Version and Invalid are here because EntityOutput carries them**, and
+// they are not optional on either: an agent cannot send an
+// expected_version it was never told, and a flag it cannot see is a flag
+// it cannot act on. Both are unconditional, listing and get alike, and
+// neither is behind verbose — verbose gates the edge's own content, not
+// its identity or its state.
 type RelationOutput struct {
 	ID       uuid.UUID      `json:"id"`
 	TypeKey  string         `json:"type_key"`
 	SourceID uuid.UUID      `json:"source_id"`
 	TargetID uuid.UUID      `json:"target_id"`
+	Version  int32          `json:"version"`
+	Invalid  bool           `json:"invalid"`
 	Source   *RefOutput     `json:"source,omitempty"`
 	Target   *RefOutput     `json:"target,omitempty"`
 	Fields   map[string]any `json:"fields,omitempty"`
@@ -946,11 +964,12 @@ func relationsUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID
 	items := make([]metamodel.RelationInput, 0, len(in.Items))
 	for _, item := range in.Items {
 		items = append(items, metamodel.RelationInput{
-			TypeKey: item.TypeKey,
-			Source:  metamodel.Ref{TypeKey: item.Source.TypeKey, Key: item.Source.Key},
-			Target:  metamodel.Ref{TypeKey: item.Target.TypeKey, Key: item.Target.Key},
-			Fields:  item.Fields,
-			Actor:   actor,
+			TypeKey:         item.TypeKey,
+			Source:          metamodel.Ref{TypeKey: item.Source.TypeKey, Key: item.Source.Key},
+			Target:          metamodel.Ref{TypeKey: item.Target.TypeKey, Key: item.Target.Key},
+			Fields:          item.Fields,
+			ExpectedVersion: item.ExpectedVersion,
+			Actor:           actor,
 		})
 	}
 	result, err := deps.Metamodel.UpsertRelations(ctx, projectID, items, metamodel.BulkMode(in.Mode))
@@ -985,6 +1004,7 @@ func MCPRelationsList(ctx context.Context, deps MCPDeps, caller Caller, projectI
 func relationsList(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsListInput) (RelationsListOutput, error) {
 	filter := metamodel.RelationFilter{
 		TypeKey: in.TypeKey,
+		Invalid: in.Invalid,
 		Cursor:  in.Cursor,
 		Limit:   in.Limit,
 	}
@@ -1268,6 +1288,8 @@ func relationOf(row dbq.Relation, names map[uuid.UUID]string, refs map[uuid.UUID
 		TypeKey:  names[row.RelationTypeID],
 		SourceID: row.SourceID,
 		TargetID: row.TargetID,
+		Version:  row.Version,
+		Invalid:  row.Invalid,
 		Source:   refs[row.SourceID],
 		Target:   refs[row.TargetID],
 	}
@@ -1559,9 +1581,14 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"relation type by key and both endpoints by (type_key, key); both ends are " +
 			"checked against the relation type's declared endpoint lists, and a violation is " +
 			"endpoint_type_mismatch naming the end that is wrong. " +
-			"**An edge is identified by (relation type, source, target) and has no version**: " +
-			"writing one that already exists replaces its fields whole, last writer wins, and " +
-			"there is no expected_version to guard it. A game cannot hold two edges of one " +
+			"**An edge is identified by (relation type, source, target) and carries a " +
+			"version**: writing one that already exists replaces its fields whole and " +
+			"requires expected_version, which the written entries of a previous call carry, " +
+			"exactly as entities.upsert does. Sending the wrong one, or none, is " +
+			"version_conflict reporting the version to merge onto — nothing is overwritten. " +
+			"An edge's fields are validated against the relation type's field_schema, and a " +
+			"successful write clears any invalid flag a schema edit had put on it. " +
+			"A game cannot hold two edges of one " +
 			"relation type between the same ordered pair — say the second meaning as its own " +
 			"relation type, or as a field on the one edge.",
 		OutputSchema: relationsUpsertOutputSchema,
@@ -1573,7 +1600,9 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "relations.list",
 		Description: fmt.Sprintf(
-			"List a game's edges, optionally narrowed by relation type key and by either "+
+			"List a game's edges, optionally narrowed by relation type key, by invalid "+
+				"(edges whose values no longer fit their relation type's schema, the same "+
+				"filter entities.list takes) and by either "+
 				"endpoint's entity id. Paged by next_cursor exactly as entities.list is; "+
 				"limit defaults to %d and is capped at %d, and a limit below one gets the "+
 				"default rather than an error. "+
@@ -1582,6 +1611,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"endpoint filters take, and `source`/`target`, the (type_key, key, name) "+
 				"refs the edge was written with. An endpoint whose entity was removed while "+
 				"the page was being read has its id but no ref. "+
+				"Every edge also carries `version`, which is what relations.upsert's "+
+				"expected_version takes, and `invalid`, which is true when editing the "+
+				"relation type's field_schema left the edge's stored values no longer "+
+				"fitting it — the edge is kept and flagged, never deleted or back-filled. "+
+				"Rewrite it through relations.upsert with values that fit to clear the flag. "+
 				"**An edge's own fields are omitted unless verbose is true**, for the reason "+
 				"entities.list omits an entity's: a game has more edges than entities, so a "+
 				"full page of them with their values is most of the game in one answer. What "+
@@ -1609,7 +1643,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"published. Keys are matched without regard to case. An unknown relation type, " +
 			"an unknown endpoint and a real address holding no edge are all not_found, and " +
 			"the message says which of the three it was. The answer is one edge in the same " +
-			"shape relations.list returns, ids and refs included.",
+			"shape relations.list returns, ids, refs, version and invalid included.",
 		OutputSchema: relationOutputSchema(),
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsGetInput) (RelationOutput, error) {
@@ -1929,16 +1963,20 @@ func refOutputSchema() *jsonschema.Schema {
 // whose nodes do not form a tree.
 //
 // `fields` is not in Required, because it is absent from a listing that
-// was not asked to be verbose.
+// was not asked to be verbose. `version` and `invalid` are, for the
+// reason entityOutputSchema requires them: every edge carries both,
+// always.
 func relationOutputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:     "object",
-		Required: []string{"id", "type_key", "source_id", "target_id"},
+		Required: []string{"id", "type_key", "source_id", "target_id", "version", "invalid"},
 		Properties: map[string]*jsonschema.Schema{
 			"id":        stringSchema(),
 			"type_key":  stringSchema(),
 			"source_id": stringSchema(),
 			"target_id": stringSchema(),
+			"version":   {Type: "integer"},
+			"invalid":   boolSchema(),
 			"source":    refOutputSchema(),
 			"target":    refOutputSchema(),
 			"fields":    objectSchema(),
@@ -1987,12 +2025,13 @@ var relationsUpsertOutputSchema = &jsonschema.Schema{
 		"count": {Type: "integer"},
 		"written": arrayOf(&jsonschema.Schema{
 			Type:     "object",
-			Required: []string{"type_key", "id", "source_id", "target_id"},
+			Required: []string{"type_key", "id", "source_id", "target_id", "version"},
 			Properties: map[string]*jsonschema.Schema{
 				"type_key":  stringSchema(),
 				"id":        stringSchema(),
 				"source_id": stringSchema(),
 				"target_id": stringSchema(),
+				"version":   {Type: "integer"},
 			},
 		}),
 		"failed": arrayOf(bulkFailureSchema),

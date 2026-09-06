@@ -3599,21 +3599,88 @@ archaeology:
 ALTER TABLE views DROP COLUMN layout_seed;
 ```
 
-- [ ] Tests: `TestMigrationsApply` (existing) must stay green;
-  `TestNoSurfaceAcceptsALayoutSeed` — drive `views.upsert` on **both**
-  MCP and REST with a `layout_seed` member and assert it is refused as an
+- [x] Tests: the migration tests (`TestMigrateIsIdempotent`,
+  `TestMigrateUpDownUp`, `TestMigrationsCreateIdentityTables`,
+  `TestMigrateRefusesToServeAgainstANewerSchema` — the plan's
+  `TestMigrationsApply` is not a name this module has) stay green;
+  `TestNoSurfaceAcceptsALayoutSeed` — drives `views.upsert` on **both**
+  MCP and REST with a `layout_seed` member and asserts it is refused as an
   unknown field rather than silently ignored, because a silently ignored
   argument is the same lie one layer up; `TestTheViewToolDescriptionNamesNoSeed`
-  — assert the generated description, which is where an agent learns the
-  vocabulary; `TestUpsertRoundTripsWithoutASeed` as the positive control.
-- [ ] Grep for the identifier across the repository (`layout_seed`,
+  — asserts the generated description **and both schemas**, off the real
+  transport, which is where an agent learns the vocabulary;
+  `TestUpsertRoundTripsWithoutASeed` as the positive control.
+- [x] Grep for the identifier across the repository (`layout_seed`,
   `LayoutSeed`) after the change and assert the only survivors are the
-  migration and the two design documents, which are history.
+  migrations and the design documents, which are history. Run as a test,
+  `TestNoSourceFileNamesALayoutSeed`, rather than by hand: a removal is
+  finished when the identifier cannot come back without something going
+  red.
 
-- [ ] See red: leave the field on `ViewInput` and watch
+- [x] See red: leave the field on `ViewInput` and watch
   `TestNoSurfaceAcceptsALayoutSeed` accept it on one surface — **run this
   mutation on one surface only**, since the recurring defect of this
   project is a rule carried on one path and not the other.
+
+**Corrections found while doing this.**
+
+1. **The REST surface silently ignored unknown members, so half the test
+   the plan asked for could not have passed.** The MCP surface refuses a
+   `layout_seed` for free — the SDK infers `additionalProperties: false`
+   from `ViewsUpsertInput`, so deleting the field *was* the whole fix
+   there — while `decodeJSONBodyLimit` used `encoding/json`'s default,
+   which discards what it does not recognise. Measured before the fix: a
+   `POST /api/games/{game}/views` carrying `layout_seed: 7` answered 200.
+   That is the plan's own "a silently ignored argument is the same lie one
+   layer up", and it was the *live* state of the surface a browser talks
+   to, over every input in the package and not only this one. The fix is
+   `dec.DisallowUnknownFields()` in the shared decoder, with the member
+   named in the refusal (`{"fields":[{"path","message"}]}`, the shape the
+   domain's own field errors use) rather than answering "malformed JSON
+   body" to a body that parsed. No existing test anywhere in the module
+   sent an unknown member, so nothing else moved.
+   `TestARequestBodyWithAnUnknownMemberIsRefusedByName` pins it, including
+   the message parse — `DisallowUnknownFields` gives its error no type, so
+   the member's name is read back out of the string.
+
+2. **The reference count was 59 across fourteen non-documentation files,
+   against the plan's estimate of 56 across eleven.** The three files the
+   plan did not list are all comments citing the seed as an analogy or as
+   a consequence: `internal/web/static_appjs_browser_test.go`,
+   `internal/web/jstest/layout_test.mjs` and
+   `internal/web/static/layout/engine.js` each explain the determinism
+   guarantee by saying what it let the column lose. Those are the
+   references a compiler would never have found, and they are the ones a
+   removal that only chases build errors leaves behind.
+
+3. **`internal/web/api_views.go`, which the plan listed to modify, had no
+   reference at all.** It reaches the domain through `viewsUpsert`, which
+   both surfaces share. What it needed was the decoder change above, one
+   file over.
+
+4. **The migration needs goose annotations** (`-- +goose Up` /
+   `-- +goose Down`); without them every migration test fails to parse the
+   file. The Down arm re-adds the column with 0008's declaration, so
+   `TestMigrateUpDownUp` covers the rollback.
+
+**Mutations run, each verified applied and then reverted.**
+
+- `dec.DisallowUnknownFields()` removed → `TestNoSurfaceAcceptsALayoutSeed/REST`
+  red ("POST with a layout_seed = 200"), `/MCP` green. This is the
+  one-surface mutation the plan asked for, and it is the shape of the
+  defect: one path carrying the rule, the other not.
+- `LayoutSeed *int32` restored on `ViewsUpsertInput` → **both** subtests
+  red, and `TestNoSourceFileNamesALayoutSeed` red naming the line.
+- The old sentence restored in `views.upsert`'s description → only
+  `TestTheViewToolDescriptionNamesNoSeed` red. Nothing else moved, which
+  is exactly why the description needs its own assertion: the struct was
+  clean, both surfaces refused the argument, and the tool still taught it.
+- `"layout_seed": integerSchema()` restored in `viewOutputSchema` → the
+  same test red on three tools' output schemas.
+- The insert arm's `layout_mode` hard-wired to `'mixed'` →
+  `TestUpsertRoundTripsWithoutASeed` red, so the positive control is live.
+  Dropping `layout_mode` from the *update* arm leaves it green — that arm
+  is covered by `TestTheLayoutModeChangesNothingTheServerAnswers`, checked.
 
 ```bash
 git add internal/db/migrations/0012_drop_layout_seed.sql internal/db/queries/views.sql \

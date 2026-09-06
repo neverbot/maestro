@@ -2064,6 +2064,215 @@ git add internal/web/static/render/graph.js internal/web/jstest/render_graph_tes
 git commit -m "feat(web): the graph renderer, absences marked twice where there are two"
 ```
 
+#### Corrections made during implementation
+
+1. **Almost nothing in this task is only `graph`'s, so the drawing
+   vocabulary went into a file the five that follow can reach.**
+   `render/marks.js` holds the box measured from a label, the size
+   mapping, and the marks for a node, an edge, an arrowhead, an edge
+   label, a stub and an enclosure; `graph.js` chooses and arranges them.
+   §4.4 already says `layered` draws "the same node vocabulary", `nested`
+   and `map` draw boxes with labels in them, and every one of the six
+   meets an edge whose endpoint the query did not draw — so six copies of
+   a rounded box would be five places for the corner radius, the padding
+   and the **absent-value dash** to drift, and the dash is a decision
+   (Task 1) rather than a number: a renderer that spelled it differently
+   would tell a designer something different with the same picture.
+
+2. **The controls' shape is shared too, and the tooltip is deliberately
+   not the server's sentence.** `render/controls.js` is the descriptor
+   (`name`, `kind`, `tooltip`, `values`, frozen) that Task 16's dialog
+   paints for any renderer; each renderer declares its own list.
+   internal/views/renderers.go carries a `Doc` per parameter and says in
+   its own header that it "describes a contract, not an appearance" — its
+   words are what a *query* must produce, written for an agent. What a
+   designer needs at the control is what the knob does to the picture,
+   which for `group_by` and `cluster_by` is the whole difference between
+   them. The two are complementary and neither restates the other, so
+   this is not the drift Task 3's rule forbids.
+
+3. **A Go guard joins the module's controls to the catalogue, in both
+   directions** (`internal/web/static_render_test.go`). The Node harness
+   can read the module and not the Go table; internal/views' tests read
+   the table and not the module; the mistake between them is silent in
+   both — a control naming a parameter the catalogue lacks composes a
+   document `views.upsert` refuses, and a catalogue parameter with no
+   control is a knob only an agent can set, on a view the interface then
+   draws as if it were off. It reads the *generated* description rather
+   than a list retyped in the test, and
+   `TestTheCatalogueParameterScanReadsWhatItClaimsTo` is the guard on the
+   guard (it stops at the next renderer's section, and answers nothing
+   for a renderer the catalogue does not have).
+
+4. **`addressOf` moved out of `layout/engine.js` into `static/address.js`,
+   and the twin's private copy is gone with it.** Task 6's correction 2
+   put the one address function in the engine because the engine turns an
+   entity into a graph vertex; carrying that rule one step along, a
+   *renderer* needs the same string to look a placement up, and reaching
+   engine.js for it would put the vendored dagre (48 kB) on the main
+   thread to build a string. engine.js re-exports it, so every caller in
+   the layout layer keeps its one import and Task 6's guards are
+   untouched; `render/twin.js`'s own spelling — which Task 6 named and
+   left alone — now calls it, so the canvas's join between a twin row and
+   a laid-out node rests on one function rather than on two that agree
+   today.
+
+5. **`cluster_by` reaches dagre as a compound parent, because a request
+   nothing consumes is exactly the lie "draws nothing" would have become.**
+   The plan asks only that "the layout call received the clustering";
+   `engine.js` had no reader for it, so it grew one: a compound graph, one
+   parent vertex per value, inserted in sorted order like everything else
+   the engine inserts. Cluster vertices are prefixed and are never in
+   `placements` — a renderer handed one would draw a box for a *value*.
+   `clusteringMovesTheLayoutAndAddsNoNode` asserts the arrangement
+   changed, that the members of a cluster end up on one rank, that the
+   answer is still deterministic under a shuffle, and that no cluster
+   vertex escapes.
+
+6. **A latent crash was found doing it: dagre's compound layout throws on
+   an edge whose name is the empty string**, which is what every edge
+   carrying no relation type used to get ("Cannot set properties of
+   undefined (setting 'points')"). The day `cluster_by` was first switched
+   on over an untyped edge the whole picture would have gone down. Edges
+   now take a `":untyped"` sentinel, which internal/metamodel refuses in a
+   relation type key so it cannot collide, and
+   `anUntypedEdgeSurvivesAClusteredLayout` pins it.
+
+7. **The stub count reaches the footer, which is where §4.2 puts its
+   sentence.** `footerFor` gained `outside` beside `layoutMs`, for the
+   same reason: an edge that leaves the picture is discovered by joining
+   the node list to the edge list, so the envelope cannot report it and
+   the renderer that drew the picture does. A count of **zero says
+   nothing**, which is scene.js's own first rule — there is no clause for
+   the absence of a thing — while still being a different value from "not
+   counted". Without this the renderers' stub count would have been a
+   mechanism nothing reads.
+
+8. **The unfilled node is `var(--unset)`, not the SVG keyword `none`.**
+   The task asks the test to assert `fill === "none"`; Task 1 already
+   declared the token for "there was nothing to paint" (`--unset`, which
+   is `transparent` in both themes) and `palette.js`'s `fillFor` already
+   returns it. A literal `none` in the renderer would be a second
+   spelling of that decision, invisible to
+   internal/web/static_tokens_test.go's both-directions token guard and
+   free to drift from it. The assertion is against the palette's own
+   answer, and the hollow stub ring uses the same constant.
+
+9. **A third colour answer, which the task's two do not cover.** "This
+   view colours nothing" (`color_by` unset) is not "this node's colour
+   slot found nothing": the first is `--paper` with a solid hairline and
+   no legend at all, the second is unfilled and dashed with an `unset`
+   legend row. `noColourSlotIsNotAnAbsentOne` is the check; without it a
+   renderer that dashed every node in an uncoloured view would report an
+   absence nobody asked about and pass every other check in this task.
+
+10. **The arrowhead is a two-line chevron and not the filled triangle
+    §4.3 describes, and it names its target node at both ends.** A filled
+    head is a `polygon` with a `points` list, and the drag layer moves a
+    body by adding a delta to each of a kind's coordinate *pairs*
+    (`MARK_ORIGINS`) and bakes the offset in on drop — a points list has
+    no pairs, so a head that rode a drag would snap back on release. This
+    is Task 7's own rule about curved edges ("the renderer that wants one
+    adds the kind *and* the reshaping answer") applied to its neighbour.
+    Both of the head's endpoint keys being the target's is what makes it
+    ride that node's transform whole, which is exactly right for a mark
+    attached to the box it points at. The edge **label** takes the
+    opposite decision — no keys at all — because an edge whose one end
+    moved has a new midpoint, which no translation of a plate can
+    produce; it stands still during a drag and is redrawn with the
+    picture on the drop that writes.
+
+11. **The stub's direction and length are computed against the enclosure
+    it has to leave, and the first version of that check passed for the
+    wrong reason.** `stubsLeaveTheirGroupEnclosure` first put the anchored
+    node at the *edge* of its group, where a stub of any length at all
+    escapes — both the "ignore the enclosure and use a fixed length"
+    mutation and the "point inward" mutation stayed green. The fixture is
+    now a three-rank group whose anchor is deep inside it (asserted: more
+    than a stub's length of clearance on every side), which the
+    fixed-length mutation fails; and the direction has its own check,
+    `aStubLeavesAwayFromItsGroupRatherThanAcrossIt`, on an off-centre
+    node, because a stub that left *across* its group still ends up
+    outside the box and a "did it get out" assertion alone accepts it.
+
+12. **The box is measured once and read back never.** `graphScene` calls
+    the same `boxOf` the layout request called rather than reading the
+    width the engine echoes: reading it back would make the two agree by
+    construction and hide the mistake that matters, a renderer that
+    measured one box for the engine and another for the drawing.
+    `theLayoutIsAskedForTheBoxThatIsDrawn` can only fail because they are
+    two calls, and it does — the mutation reports *"the width laid out for
+    quest/b is the one drawn: got 230.36, want 133"*.
+
+13. **The ambiguity check asserts the absence of a per-slot mark
+    *first*.** Written in the plan's order it never ran: both mutations
+    (the mark replaced by a slot mark, and a slot mark added beside it)
+    failed the count assertion above it, so the per-slot assertion was
+    correct and unasserted. It now scans the whole scene before counting,
+    and the fixture's ambiguous node carries two slots so a per-slot
+    implementation has two marks to leave behind.
+
+14. **Two negative cases the task lists are answered by drawing
+    nothing, and both say so out loud.** A *truncated* answer draws
+    exactly what an untruncated one draws — the envelope says a cap was
+    hit and not which node lost a neighbour, so a mark claiming to know
+    would invent the one thing the server declined to measure, and the
+    frame owns the band. A node with *no position* is not drawn at all
+    and is named in `scene.unplaced`: a box at the origin is a position
+    nobody chose, and a designer could then drag and save it. Its edges
+    are not stubs either — the far end is in the answer, and calling it a
+    stub would say the query did not draw something it did.
+
+15. **`sizeMapsAreaNotDiameter` is asserted twice, because the plan's
+    numbers cannot both be true of one scene.** "A value four times
+    another produces twice the width" and "the area ratio is bounded at
+    3" are two different statements: with a bounded range no two nodes in
+    a picture can differ by four times the area. So the mapping is
+    asserted directly — `lengthScaleForArea(4) === 2` — and the scene is
+    asserted at its extremes, where the width ratio is √3 and the area
+    ratio is exactly 3. A renderer that scaled the length by the value
+    fails both.
+
+**Mutations run, all red.** The size map returning the minimum for a
+present value (*"the width grows as the area's root: got 1, want
+1.732…"*, and the bound *"got 1, want 3"*); the absent colour drawn
+without its dash (*"quest/b, whose colour slot found nothing, is dashed
+as well as unfilled: got undefined, want "4 3""*); the ambiguity mark
+carrying a slot (*"no mark is attributed to a slot: got [{… "slot":
+"color_by"}], want []"*) and moved to the node's centre (*"and its top
+edge"*); the enclosure filled (*"a hairline enclosure is not a filled
+panel: got "var(--ground)", want "var(--unset)""*) and drawn around the
+nodes whose group value is absent (*"one enclosure, for the one value:
+got 2, want 1"*); the stub given a fixed length (*"the stub's terminus is
+outside the enclosure: ring at 163.5,132 in 8,8 194x248"*) and pointed
+inward (*"the stub leaves outward: travel 148,143 against -47.5,-46"*);
+the arrowhead keyed to two nodes (*"both of the head's endpoint keys are
+the target's"*); the engine ignoring the clustering it was given
+(*"clustering changed no coordinate; the parameter reached nothing"*) and
+the renderer feeding it `group_by` instead (*"grouping tells the layout
+nothing"*); a node with no placement drawn at the origin (*"a box at the
+origin is a position nobody chose: got 2, want 0"*, and its edge drawn);
+the layout measured without the size scale
+(`theLayoutIsAskedForTheBoxThatIsDrawn`); the picture quietly dropping a
+node (*"every row the twin has is a box in the picture or a node the
+layout placed nowhere: got 3, want 4"*); the footer speaking a zero
+(*"and the strip is silent: … · 0 edges lead outside this picture"*); and
+both directions of the Go guard — a control renamed to a parameter the
+catalogue does not have, and a catalogue parameter left without one.
+
+**The hand check this task leaves**, to be performed at Task 15, when a
+route first mounts a view: **a hundred nodes coloured by an eleven-value
+slot.** Do eight hues plus a hatch read at 11px, and is the hatched tail
+legible as *a tail* rather than as a ninth colour? Nothing automated can
+answer either half — the palette's own tests hold contrast and hue
+separation as arithmetic, and the question here is whether the *ninth
+row* reads as "everything else" to somebody who did not write the
+legend. Two more things to look at while the picture is open, both of
+them this task's own and neither visible to a scene test: whether a
+dashed unfilled box reads as *an absence* beside seven filled ones or
+merely as a lighter node, and whether a stub's hollow ring is
+distinguishable from a small node at that density.
+
 ---
 
 ### Task 9: `layered`

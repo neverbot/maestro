@@ -349,7 +349,6 @@ export function client({
     pendingWrites: 0,
     hidden: false,
     connects: 0,
-    lastDecision: null,
   };
 
   // The pending re-reads. Two sets, because a re-read of the *picture*
@@ -369,7 +368,6 @@ export function client({
   const jsonHeaders = { "content-type": "application/json" };
 
   function emit(value) {
-    state.lastDecision = value;
     if (listener) listener(value);
   }
 
@@ -552,8 +550,19 @@ export function client({
     loop();
   }
 
+  // disconnect stops the stream and cancels a re-read that has not
+  // happened yet: a page that has navigated away has no picture to
+  // refresh, and a timer that fires into a closed surface is a request
+  // nobody asked for.
   function disconnect() {
     running = false;
+    if (timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+    dirtyRuns.clear();
+    dirtyRows.clear();
+    deferredFlush = false;
   }
 
   async function loop() {
@@ -633,13 +642,12 @@ export function client({
   return {
     state,
     runView,
+    readView,
     writePositions,
-    receive,
     connect,
     disconnect,
     setDragging,
     setHidden,
-    now,
   };
 }
 

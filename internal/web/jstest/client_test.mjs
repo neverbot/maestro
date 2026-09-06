@@ -626,6 +626,17 @@ check("theStreamReconnectsWhenTheServerClosesIt", async () => {
   h.client.disconnect();
 });
 
+check("disconnectingCancelsAReadNobodyIsWaitingFor", async () => {
+  const h = await harness();
+  const before = h.server.countOf("/views/run");
+  h.stream().write(frame("view.positions", { id: "u1", key: "world" }));
+  await settle();
+  h.client.disconnect();
+  await h.clock.advance(REREAD_DEBOUNCE_MS * 4);
+  assertEqual(h.server.countOf("/views/run") - before, 0, "a timer must not fire into a closed surface");
+  assertEqual(h.clock.pendingCount(), 0, "and the timer itself was cancelled, not merely ignored");
+});
+
 check("errorSentencesAreRenderedVerbatim", async () => {
   const h = await harness();
   // The server body, exactly as internal/web's writeCodedError composes

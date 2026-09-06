@@ -169,6 +169,47 @@ export function backgroundOf(row, asset) {
   };
 }
 
+// backgroundAssetFor resolves a view's `background_asset_id` to the asset
+// row that carries the URL and the pixel size, which is what
+// backgroundOf needs and what the view row does not have.
+//
+// **Nothing did this, and the symptom was a background that silently was
+// not there.** A view's three background columns are written by
+// views.set_background and read by the `map` renderer, and this page —
+// the only thing that mounts a renderer — passed `undefined` as the
+// asset on every draw, so backgroundOf answered an entry with an empty
+// href on every view that named a ground. An empty href is how this page
+// spells "the image is gone", so a correctly placed background drew
+// nothing and said nothing about it. Found by opening a map view with
+// two hundred pins over an uploaded image (Task 15).
+//
+// It is resolved by paging the asset listing rather than by fetching the
+// asset itself: `GET …/view-assets/{id}` answers the image *bytes*, and
+// the width and height a renderer needs live only in the listing.
+// `previous` short-circuits the walk, so a redraw of a view whose ground
+// has not changed costs nothing.
+export async function backgroundAssetFor(client, row, previous) {
+  const id = row && typeof row === "object" ? row.background_asset_id : null;
+  if (typeof id !== "string" || id === "") return null;
+  if (previous && previous.id === id) return previous;
+  if (!client || typeof client.listAssets !== "function") return null;
+  let cursor = "";
+  // Bounded, because a listing that never ends is a page that never
+  // draws: a ground a designer cannot find in the first few hundred
+  // images is answered as absent, which the renderer already bands.
+  for (let page = 0; page < 10; page += 1) {
+    const answer = await client.listAssets(cursor === "" ? {} : { cursor });
+    const body = answer && answer.ok === false ? null : answer && answer.result ? answer.result : answer;
+    const assets = body && Array.isArray(body.assets) ? body.assets : [];
+    for (const asset of assets) {
+      if (asset && asset.id === id) return asset;
+    }
+    cursor = body && typeof body.next_cursor === "string" ? body.next_cursor : "";
+    if (cursor === "") return null;
+  }
+  return null;
+}
+
 // --- The layout ------------------------------------------------------
 
 // layoutWith runs one attempt in a worker against budget.js's deadline.
@@ -347,6 +388,12 @@ async function draw(state, envelope, error, options) {
     // answer, whether that answer is a timeout or a throw.
     state.canvas.setLayoutResult(result);
   }
+
+  // The ground the `map` renderer draws over, resolved before the scene
+  // is composed. See backgroundAssetFor: the view row carries the
+  // reference and only the asset carries the URL and the pixel size, and
+  // until Task 15 mounted a map nothing in this page joined the two.
+  state.background = await backgroundAssetFor(state.client, state.row, state.background);
 
   const scene = envelope === null ? null : SCENES[renderer]
     ? SCENES[renderer](envelope, layout, params, {

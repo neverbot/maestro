@@ -1041,6 +1041,78 @@ check("aSceneWithNoPlaceableMarksIsNotFitted", async () => {
   assertEqual(canvas.measured, 0, "a canvas with nothing to fit is not even measured");
 });
 
+// --- The ground a map draws over --------------------------------------
+//
+// A view's `background_asset_id` is written by views.set_background and
+// read by the map renderer, and between them sits this page, which is
+// the only thing that mounts a renderer. It passed no asset at all: the
+// scene got an entry with an empty href, which is how this page spells
+// "the image is gone", so a correctly placed background drew nothing and
+// banded nothing. Found by opening a map view over an uploaded image.
+
+const ASSET = { id: "a1", url: "/api/games/azeroth/view-assets/a1", width: 1200, height: 800 };
+
+function assetClient(pages) {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    listAssets: async (options) => {
+      calls += 1;
+      const cursor = options && options.cursor ? options.cursor : "";
+      const page = pages[cursor];
+      return { ok: true, result: page };
+    },
+  };
+}
+
+check("aViewThatNamesAGroundIsGivenTheAssetThatCarriesItsURL", async () => {
+  const view = await load("view");
+  const client = assetClient({ "": { assets: [ASSET], next_cursor: "" } });
+  const asset = await view.backgroundAssetFor(client, { background_asset_id: "a1" }, null);
+  assertEqual(asset && asset.url, ASSET.url, "the asset's own URL reaches the page");
+  const ground = view.backgroundOf({ background_asset_id: "a1", background_scale: 1 }, asset);
+  assertEqual(ground.href, ASSET.url, "and the scene is given an href it can draw");
+  assertEqual(ground.width, 1200, "with the pixel width only the asset knows");
+});
+
+check("aGroundIsFoundOnALaterPageOfTheListing", async () => {
+  const view = await load("view");
+  const client = assetClient({
+    "": { assets: [{ id: "other" }], next_cursor: "c1" },
+    c1: { assets: [ASSET], next_cursor: "" },
+  });
+  const asset = await view.backgroundAssetFor(client, { background_asset_id: "a1" }, null);
+  assertEqual(asset && asset.id, "a1", "the walk follows the cursor");
+  assertEqual(client.calls(), 2, "and stops as soon as it finds it");
+});
+
+check("aRedrawOfAnUnchangedGroundCostsNoCall", async () => {
+  const view = await load("view");
+  const client = assetClient({ "": { assets: [ASSET], next_cursor: "" } });
+  const again = await view.backgroundAssetFor(client, { background_asset_id: "a1" }, ASSET);
+  assertEqual(again, ASSET, "the asset already held is the answer");
+  assertEqual(client.calls(), 0, "and the listing is not walked again");
+});
+
+check("aViewWithNoGroundAsksForNothing", async () => {
+  const view = await load("view");
+  const client = assetClient({ "": { assets: [ASSET], next_cursor: "" } });
+  assertEqual(await view.backgroundAssetFor(client, {}, null), null, "no reference, no asset");
+  assertEqual(await view.backgroundAssetFor(client, { background_asset_id: "" }, null), null, "an empty reference is no reference");
+  assertEqual(client.calls(), 0, "and neither costs a call");
+  assertEqual(view.backgroundOf({}, null), null, "and the scene is told there is no ground at all");
+});
+
+check("aGroundThatIsGoneIsAnHrefTheRendererCanBand", async () => {
+  const view = await load("view");
+  const client = assetClient({ "": { assets: [{ id: "other" }], next_cursor: "" } });
+  const asset = await view.backgroundAssetFor(client, { background_asset_id: "a1" }, null);
+  assertEqual(asset, null, "an asset that is no longer listed resolves to nothing");
+  const ground = view.backgroundOf({ background_asset_id: "a1" }, asset);
+  assert(ground !== null, "the view still says it names a ground");
+  assertEqual(ground.href, "", "and the empty href is what says the image is gone");
+});
+
 // --- The addresses ----------------------------------------------------
 
 check("everyAddressIsBuiltFromASlugAndAKey", async () => {

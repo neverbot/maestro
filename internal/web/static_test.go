@@ -333,6 +333,57 @@ func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
 	t.Logf("%d shipped asset(s) carry no inline style", scanned)
 }
 
+// TestTheViewPageResolvesAGroundBeforeItDrawsOne is a source-shape guard
+// over the one wire that had no reader.
+//
+// backgroundOf takes the view row *and the asset row*, because the row
+// carries the reference and only the asset carries the URL and the pixel
+// size a renderer needs. The view page passed `undefined` for the asset
+// on every draw. Nothing failed: backgroundOf answers an entry with an
+// empty href, an empty href is how the page spells "the image is gone",
+// and a map view with a correctly placed background drew no ground and
+// said nothing about it. Found by opening one (Task 15).
+//
+// It is a source-shape guard because the fix lives in the *call site*
+// and not in a function: internal/web/jstest/pages_test.mjs drives
+// backgroundAssetFor from every angle, and every one of those checks
+// passed while the page called it nowhere. So this reads the second
+// argument backgroundOf is actually given and asserts the page assigns
+// that same expression from backgroundAssetFor.
+func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
+	if err != nil {
+		t.Fatalf("read view.js: %v", err)
+	}
+	code := withoutComments(string(body))
+
+	// `(?:^|[^\w.])(?:function\s+)?` lets the declaration be recognised
+	// and skipped: `export function backgroundOf(row, asset)` is the
+	// definition and not a call site, and asserting over its parameter
+	// names would be asserting that a function has parameters.
+	call := regexp.MustCompile(`(?:^|[^\w.])(function\s+)?backgroundOf\(\s*([^,]+?)\s*,\s*([^,)]+?)\s*\)`)
+	matches := call.FindAllStringSubmatch(code, -1)
+	sites := 0
+	for _, match := range matches {
+		if match[1] != "" {
+			continue // the declaration
+		}
+		sites++
+		asset := match[3]
+		assigned := regexp.MustCompile(regexp.QuoteMeta(asset) + `\s*=\s*(await\s+)?backgroundAssetFor\(`)
+		if !assigned.MatchString(code) {
+			t.Errorf("backgroundOf is given %q as the asset and nothing in view.js assigns %q from "+
+				"backgroundAssetFor: an unresolved asset makes backgroundOf answer an empty href, which "+
+				"is how this page spells \"the image is gone\", so a placed background draws nothing and "+
+				"bands nothing", asset, asset)
+		}
+	}
+	if sites == 0 {
+		t.Fatal("view.js calls backgroundOf nowhere: this guard would pass over a page that draws no ground at all")
+	}
+	t.Logf("every ground backgroundOf is given (%d call site(s)) is resolved first", sites)
+}
+
 // TestConfigEndpointIsPublicAndMinimal pins GET /api/config: reachable
 // with no credential at all (an unauthenticated visitor is exactly who it
 // exists for — see its own doc comment), and carrying nothing beyond the

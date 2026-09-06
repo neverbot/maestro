@@ -616,3 +616,53 @@ func TestTheTimelineRenderer(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_timeline_test.mjs")
 }
+
+// TestTheTwoWrites drives internal/web/jstest/writes_test.mjs, which
+// imports the real internal/web/static/components/mst-canvas.js and
+// mst-ground.js and drives them against the real
+// internal/web/static/client.js over a stubbed fetch and a stubbed event
+// stream carrying real text/event-stream bytes.
+//
+// It is the whole of the evidence for the only two writes this front end
+// performs against a view, and what it holds has no Go counterpart and
+// could not have one. Every property here is about a *gesture*, and a
+// gesture does not exist on the server: by the time internal/web sees
+// anything, one write and sixty differ only in how many rows are already
+// in the table.
+//
+// That a drag of forty nodes is one call carrying forty entries, and
+// that sixty pointermoves before the drop are no call at all — a write
+// per frame is sixty rows and sixty events fanned out to every other
+// browser for one gesture whose only durable fact is where the node
+// ended up.
+//
+// That the arrow keys post the *shape* a drag posts, compared
+// structurally, because two write paths are two chances to differ.
+//
+// That what reaches the wire is the game's coordinate and never the
+// screen's: the fixture drags at 2× in a panned world, so a canvas
+// writing what the pointer did would drift the arrangement by whatever
+// viewport the designer had open.
+//
+// That a refused write puts the nodes back — in the model *and* in the
+// DOM — and bands the server's own sentence, which is the one outcome a
+// shared design tool may not produce: a screen that disagrees with the
+// database indefinitely and says nothing.
+//
+// That a drag in `auto` is refused and the canvas says why, because a
+// silently inert canvas is the write-a-row-nothing-reads defect wearing
+// a mouse; that the offered repair is a version-checked upsert; and that
+// a viewer gets the sentence without the button.
+//
+// And that a write of our own coming back as an event does not fight the
+// re-read it triggers: the re-read is held while the drag and the write
+// are in flight, and then happens exactly once however many events asked
+// for it.
+//
+// internal/web/static_ground_test.go holds the half no harness can see:
+// that the three refusals the picker states before a file is chosen are
+// the ones internal/views will really apply.
+func TestTheTwoWrites(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/writes_test.mjs")
+}

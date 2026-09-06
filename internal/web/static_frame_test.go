@@ -132,10 +132,28 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // the canvas stylesheet generates no `content:` of its own. A component
 // whose silence no test can see is a component this list should not have
 // let in quietly, which is why the argument is written down here.
+//
+// mst-canvas.js and mst-ground.js both carry **words of their own**, and
+// the argument for that is mst-view-frame.js's own exception carried one
+// step along. RUN_ANYWAY_LABEL sits in that component rather than in the
+// model because it names a *control* and not a state of the answer, and
+// everything these two say is the same kind of thing: what a button
+// does, and what it will not do. The arrangement menu says that
+// unpinning changes no pixel until the position is cleared, that undo
+// has one level and no server behind it, and that a position write loses
+// silently to a concurrent one — three behaviours a designer would
+// otherwise learn by watching nothing happen. The ground's picker states
+// the three refusals *before* a file is chosen, which is a precondition
+// and not a refusal: the refusals themselves are the server's, and
+// internal/web/jstest/writes_test.mjs asserts both components render a
+// rejected write's message exactly as it arrived, while
+// internal/web/static_ground_test.go pins the picker's promises to the
+// bounds internal/views really applies.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	found := componentFiles(t)
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
+		filepath.Join("static", "components", "mst-ground.js"),
 		filepath.Join("static", "components", "mst-twin.js"),
 		filepath.Join("static", "components", "mst-view-frame.js"),
 	}

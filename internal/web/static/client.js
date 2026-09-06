@@ -495,6 +495,25 @@ export function client({
     return counted(() => send(path, { positions }));
   }
 
+  // clearPositions drops saved coordinates for the nodes it is given.
+  //
+  // **It refuses an empty list rather than sending one**, because on this
+  // route an absent `entities` clears the *whole* view's arrangement and
+  // `[]` is refused by the server: internal/web/mcp_views.go's
+  // ViewsClearPositionsInput spends a pointer on exactly that distinction.
+  // A caller whose selection came out empty must not wipe a designer's
+  // afternoon of map work, and the shape that would do it is one absent
+  // member away, so the guard is here rather than at the call site.
+  async function clearPositions(key, nodes) {
+    const entities = [];
+    for (const node of Array.isArray(nodes) ? nodes : []) {
+      entities.push({ entity_type: String(node.type), entity_key: String(node.key) });
+    }
+    if (entities.length === 0) return { ok: false, error: emptyError(0) };
+    const path = base + "/views/by-key/" + encodeURIComponent(key) + "/positions/clear";
+    return counted(() => send(path, { entities }));
+  }
+
   // writeBackground points this view at an uploaded image, or clears it.
   //
   // **`asset_id: null` is the only spelling for a clear**, which is
@@ -738,6 +757,7 @@ export function client({
     runView,
     readView,
     writePositions,
+    clearPositions,
     writeBackground,
     upsertView,
     uploadAsset,

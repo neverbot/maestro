@@ -1,7 +1,6 @@
 package metamodel_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +19,17 @@ import (
 	"github.com/neverbot/maestro/internal/realtime"
 	"github.com/neverbot/maestro/internal/testutil"
 )
+
+// withVersion is one edge upsert re-aimed at the version a previous write
+// landed on. Since 0009 an edge carries `version` and its upsert is a
+// compare-and-set, so a test that rewrites the same triple twice has to
+// say which revision it is rewriting — exactly as an entity test does.
+// It copies rather than mutating, so a shared RelationInput literal keeps
+// meaning what its declaration says.
+func withVersion(in metamodel.RelationInput, version int32) metamodel.RelationInput {
+	in.ExpectedVersion = &version
+	return in
+}
 
 // seedWorld declares Quest, Zone and Class types plus a few entities of
 // each. Every entity goes in through the service, not through
@@ -208,20 +218,33 @@ func TestRelationUpsertIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	second, err := svc.UpsertRelation(ctx, project, in)
+	if first.Version != 1 {
+		t.Fatalf("a created edge is version %d, want 1", first.Version)
+	}
+
+	// **Idempotent by address, guarded by version** — exactly as an entity
+	// is. A second write of the same triple updates the same row rather
+	// than laying a second one beside it, and it has to claim the version
+	// it is updating: an edge carries `version` since 0009, and a blind
+	// re-write of a row somebody else may have edited is the lost update
+	// that column exists to refuse.
+	if _, err := svc.UpsertRelation(ctx, project, in); !errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("a re-seed with no expected version: err = %v, want ErrVersionConflict", err)
+	}
+	second, err := svc.UpsertRelation(ctx, project, withVersion(in, first.Version))
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
 	if first.ID != second.ID {
 		t.Fatal("re-seeding an edge created a duplicate")
 	}
+	if second.Version != 2 {
+		t.Fatalf("a rewritten edge is version %d, want 2", second.Version)
+	}
 
-	// An edge carries no version, so a second write of the same edge with
-	// different fields is not a conflict: it is the operation, and the
-	// last writer wins. RelationInput records that this is a decision.
 	third, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 		TypeKey: in.TypeKey, Source: in.Source, Target: in.Target,
-		Fields: map[string]any{"note": "rewritten"},
+		Fields: map[string]any{"note": "rewritten"}, ExpectedVersion: &second.Version,
 	})
 	if err != nil {
 		t.Fatalf("third: %v", err)
@@ -1348,16 +1371,23 @@ func TestRelationEventsReachEveryMemberOfTheGameIncludingAgents(t *testing.T) {
 		assertRelationPayload(t, name, receive(t, sub), "relation.upserted", edge.ID, "Requires")
 	}
 
+	// The second pass rewrites the edge the first one created, so it has
+	// to claim the version that write landed on: since 0009 an edge upsert
+	// is a compare-and-set like every other write here.
+	var back int32
 	for _, mode := range []metamodel.BulkMode{metamodel.BulkPartial, metamodel.BulkAtomic} {
-		result, err := svc.UpsertRelations(ctx, project, []metamodel.RelationInput{
-			{TypeKey: "requires", Source: hogger, Target: kobold},
-		}, mode)
+		item := metamodel.RelationInput{TypeKey: "requires", Source: hogger, Target: kobold}
+		if back > 0 {
+			item.ExpectedVersion = &back
+		}
+		result, err := svc.UpsertRelations(ctx, project, []metamodel.RelationInput{item}, mode)
 		if err != nil {
 			t.Fatalf("%s batch: %v", mode, err)
 		}
 		if len(result.Succeeded) != 1 {
 			t.Fatalf("%s batch landed %d edges, want 1", mode, len(result.Succeeded))
 		}
+		back = result.Succeeded[0].Version
 		for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
 			assertRelationPayload(t, name+" "+string(mode), receive(t, sub),
 				"relation.upserted", result.Succeeded[0].ID, "Requires")
@@ -1808,26 +1838,28 @@ func TestRemovingAnEntityTypePrunesItFromEveryEndpointList(t *testing.T) {
 	}
 }
 
-// TestConcurrentEditsToOneEdgesFieldsAreLostSilently pins, deliberately,
-// what the two linked decisions on RelationInput and UpsertRelation cost
-// together.
+// TestConcurrentEditsToOneEdgesFieldsAreRefused is the inverse of the
+// test that used to stand here, and the inversion is the point.
 //
-// Neither is being reversed and this test is not a bug report: it is the
-// evidence for a doc comment that would otherwise be an assertion. An
-// edge carries no `version`, so there is no compare-and-set to refuse a
-// stale write; and an edge's uniqueness index forbids parallel edges,
-// which is what sends a game's multiplicity into the edge's own fields —
-// the `passages: ["door", "vent"]` that UpsertRelation offers by name.
-// Put together, the field a designer was told to use for multiplicity is
-// the one field in the metamodel with no protection at all.
+// The test it replaces — named, in Task 7, for the loss it pinned rather
+// than for the guarantee this one pins — asserted the cost of two linked
+// decisions: an edge carried no `version`, so there was no
+// compare-and-set to refuse a stale write, and an edge's uniqueness index
+// forbids parallel edges, which sends a game's multiplicity into the
+// edge's own fields — the `passages: ["door", "vent"]` UpsertRelation
+// offers by name. Together they left the one field a designer was *told*
+// to use for multiplicity with no protection at all, and the old test
+// asserted the whole loss: one row, the second write whole, no error, two
+// events a subscriber could not tell apart. It said in as many words that
+// adding `version` to `relations` would turn it red and that the correct
+// response would be to rewrite it. 0009 added the column; this is that
+// rewrite.
 //
-// Two writers extend one list here. What the test asserts is the whole
-// loss: one row, the second write whole, no error, and two events a
-// subscriber cannot tell apart — so nothing anywhere in the system
-// records that a write was lost. If Task 7 adds `version` to `relations`
-// this test goes red, which is the correct outcome: the decision it pins
-// will have been reversed, and both doc comments need rewriting with it.
-func TestConcurrentEditsToOneEdgesFieldsAreLostSilently(t *testing.T) {
+// Two writers extend one list. The second, which never read the first,
+// is refused with the version it has to merge onto — and the row still
+// holds the first writer's value, which is the half that says the refusal
+// happened before the write rather than after it.
+func TestConcurrentEditsToOneEdgesFieldsAreRefused(t *testing.T) {
 	pool := testutil.NewPool(t)
 	hub := realtime.NewHub()
 	svc := metamodel.New(pool, hub)
@@ -1859,43 +1891,61 @@ func TestConcurrentEditsToOneEdgesFieldsAreLostSilently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	firstEvent := receive(t, sub)
+	if firstEvent := receive(t, sub); firstEvent.Kind != "relation.upserted" {
+		t.Fatalf("first event kind = %q, want relation.upserted", firstEvent.Kind)
+	}
 
 	// The designer who was extending the same list at the same time, and
-	// never read the first write. There is no ExpectedVersion to send.
-	second, err := svc.UpsertRelation(ctx, project, edge("vent"))
-	if err != nil {
-		t.Fatalf("second write was refused, so edges are no longer last-writer-wins: %v", err)
+	// never read the first write. There is no ExpectedVersion to send,
+	// and that is now a refusal rather than an overwrite.
+	_, err = svc.UpsertRelation(ctx, project, edge("vent"))
+	var conflict *metamodel.VersionConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("second write: err = %v, want a VersionConflictError — an unversioned "+
+			"rewrite of an edge is a lost update and must be refused", err)
 	}
-	secondEvent := receive(t, sub)
+	if conflict.Current != first.Version {
+		t.Fatalf("conflict reports version %d, want %d: a caller told the wrong number "+
+			"retries into the same refusal", conflict.Current, first.Version)
+	}
 
-	if first.ID != second.ID {
+	// **The refusal happened before the write.** A conflict raised after
+	// the row had already been overwritten would report the same error
+	// and lose the same value, so the error alone does not prove the fix.
+	stored, err := svc.RelationByEdge(ctx, project, "connects_to",
+		metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
+		metamodel.Ref{TypeKey: "quest", Key: "hogger"})
+	if err != nil {
+		t.Fatalf("RelationByEdge: %v", err)
+	}
+	if got, want := string(stored.Fields), `{"passages": "door"}`; got != want {
+		t.Fatalf("fields = %s, want %s — the refused write took the row anyway", got, want)
+	}
+	if stored.Version != first.Version {
+		t.Fatalf("version = %d, want %d — a refused write moved the version",
+			stored.Version, first.Version)
+	}
+
+	// And nothing was announced: an event for a write that did not happen
+	// would send every subscriber to re-read a row that did not change.
+	requireNothing(t, sub, "a refused write publishes nothing")
+
+	// The merge the caller is told to make does land, and it takes the row
+	// whole — the edge is still one row, which is the other half of the
+	// pair: parallel edges are still refused, so multiplicity still lives
+	// in this field and is now protected.
+	merged, err := svc.UpsertRelation(ctx, project,
+		withVersion(edge("door, vent"), conflict.Current))
+	if err != nil {
+		t.Fatalf("merged write: %v", err)
+	}
+	if merged.ID != first.ID {
 		t.Fatalf("two row ids (%s, %s): parallel edges are no longer refused, and the "+
-			"decision that pushes multiplicity into edge fields no longer holds", first.ID, second.ID)
+			"decision that pushes multiplicity into edge fields no longer holds",
+			first.ID, merged.ID)
 	}
-	if got, want := string(second.Fields), `{"passages": "vent"}`; got != want {
-		t.Fatalf("fields = %s, want %s — the second write did not take the row whole", got, want)
-	}
-
-	// The silence is the point: the two events are identical, so a
-	// subscriber watching this edge sees "it changed" twice and has
-	// nothing that says the first change was overwritten unread.
-	if firstEvent.Kind != secondEvent.Kind {
-		t.Fatalf("kinds = %q, %q — a lost update is now announced differently",
-			firstEvent.Kind, secondEvent.Kind)
-	}
-	firstJSON, err := json.Marshal(firstEvent.Payload)
-	if err != nil {
-		t.Fatalf("marshal first payload: %v", err)
-	}
-	secondJSON, err := json.Marshal(secondEvent.Payload)
-	if err != nil {
-		t.Fatalf("marshal second payload: %v", err)
-	}
-	if !bytes.Equal(firstJSON, secondJSON) {
-		t.Fatalf("payloads differ (%s, %s): something now distinguishes the write that "+
-			"was overwritten, and the doc comments claiming the loss is silent are stale",
-			firstJSON, secondJSON)
+	if merged.Version != first.Version+1 {
+		t.Fatalf("version = %d, want %d", merged.Version, first.Version+1)
 	}
 }
 
@@ -2446,12 +2496,21 @@ func TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge(t *testing.T) {
 
 	// The other game, holding this edge's three ids and its own project
 	// id, meets the guard: no row updated, and therefore no row returned.
+	//
+	// **It sends the edge's real version**, deliberately. Since 0009 the
+	// DO UPDATE carries a second guard — `relations.version =
+	// expected_version` — and a version this caller did not know would
+	// refuse the statement on its own, leaving the project filter
+	// untested and this test green for the wrong reason. With the true
+	// version the version guard is satisfied and the project filter is
+	// the only thing left standing between the two games.
 	row, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
-		ProjectID:      theirs,
-		RelationTypeID: stored.RelationTypeID,
-		SourceID:       stored.SourceID,
-		TargetID:       stored.TargetID,
-		Fields:         []byte(`{"note":"theirs"}`),
+		ProjectID:       theirs,
+		RelationTypeID:  stored.RelationTypeID,
+		SourceID:        stored.SourceID,
+		TargetID:        stored.TargetID,
+		Fields:          []byte(`{"note":"theirs"}`),
+		ExpectedVersion: stored.Version,
 	})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("UpsertRelation returned %+v (err = %v) for another game's edge, want no rows",
@@ -2468,13 +2527,548 @@ func TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge(t *testing.T) {
 		t.Fatalf("the edge's fields are %s after another game's write, want %s",
 			after.Fields, stored.Fields)
 	}
-	if _, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
-		ProjectID:      mine,
-		RelationTypeID: stored.RelationTypeID,
-		SourceID:       stored.SourceID,
-		TargetID:       stored.TargetID,
-		Fields:         []byte(`{"note":"mine"}`),
-	}); err != nil {
+	if after.Version != stored.Version {
+		t.Fatalf("the edge is version %d after another game's write, want %d",
+			after.Version, stored.Version)
+	}
+	mineRow, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
+		ProjectID:       mine,
+		RelationTypeID:  stored.RelationTypeID,
+		SourceID:        stored.SourceID,
+		TargetID:        stored.TargetID,
+		Fields:          []byte(`{"note":"mine"}`),
+		ExpectedVersion: stored.Version,
+	})
+	if err != nil {
 		t.Fatalf("the owning game cannot write its own edge: %v", err)
+	}
+	if mineRow.Version != stored.Version+1 {
+		t.Fatalf("the owning game's write left version %d, want %d",
+			mineRow.Version, stored.Version+1)
+	}
+}
+
+// relationState reads back the columns the re-validation sweep is
+// allowed and not allowed to touch. It is entityState's twin, and it
+// reads one column entityState does not: since 0009 an edge carries a
+// version, and a sweep must not move it.
+func relationState(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) (
+	invalid bool, version int32, fields string, updatedAt string,
+) {
+	t.Helper()
+	err := pool.QueryRow(context.Background(),
+		`SELECT invalid, version, fields::text, updated_at::text FROM relations WHERE id = $1`, id).
+		Scan(&invalid, &version, &fields, &updatedAt)
+	if err != nil {
+		t.Fatalf("read relation: %v", err)
+	}
+	return invalid, version, fields, updatedAt
+}
+
+// seedEdgeWorld declares a relation type with the given schema and
+// returns a helper that writes one edge between two of seedWorld's
+// quests, addressed by an index so a test can hold several.
+func seedEdgeWorld(t *testing.T, svc *metamodel.Service, project uuid.UUID,
+	schema metamodel.Schema,
+) {
+	t.Helper()
+	if _, err := svc.UpsertRelationType(context.Background(), project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires", Schema: schema,
+	}); err != nil {
+		t.Fatalf("declare relation type: %v", err)
+	}
+}
+
+// narrowRequires re-declares the "requires" relation type with a new
+// schema, at the version its previous declaration landed on.
+func narrowRequires(t *testing.T, svc *metamodel.Service, project uuid.UUID,
+	schema metamodel.Schema, version int32,
+) {
+	t.Helper()
+	if _, err := svc.UpsertRelationType(context.Background(), project, metamodel.RelationTypeInput{
+		Key: "requires", Label: "requires", Schema: schema,
+		ExpectedVersion: &version,
+	}); err != nil {
+		t.Fatalf("re-declare relation type at version %d: %v", version, err)
+	}
+}
+
+// TestAnEdgeSchemaChangeFlagsTheEdgesThatStopFittingWithoutTouchingThem is
+// TestSchemaChangeFlagsRowsInvalidWithoutTouchingThem for relations, and
+// it exists because until 0009 there was no answer to give: a relation
+// type carries a field schema exactly as an entity type does, and editing
+// it left every existing edge unjudged, with no column to record a
+// verdict in.
+//
+// Both halves are asserted, and the second is the one a write-only flag
+// would pass without: the edge that still fits keeps its values, its
+// version and its updated_at, so a validation pass cannot read as an edit
+// of content nobody edited.
+func TestAnEdgeSchemaChangeFlagsTheEdgesThatStopFittingWithoutTouchingThem(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+		{Key: "difficulty", Type: metamodel.FieldNumber},
+	})
+
+	carrying, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain", "difficulty": 3},
+	})
+	if err != nil {
+		t.Fatalf("write the edge that will stop fitting: %v", err)
+	}
+	sparse, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Fields:  map[string]any{"note": "still fits"},
+	})
+	if err != nil {
+		t.Fatalf("write the edge that will keep fitting: %v", err)
+	}
+	_, sparseVersionBefore, sparseFieldsBefore, sparseUpdatedBefore := relationState(t, pool, sparse.ID)
+
+	// "difficulty" is dropped from the declaration, so the edge carrying
+	// it no longer fits and the one that never had it still does.
+	narrowRequires(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+	}, 1)
+
+	invalid, version, fields, _ := relationState(t, pool, carrying.ID)
+	if !invalid {
+		t.Fatal("an edge carrying an undeclared field must be flagged invalid")
+	}
+	if version != carrying.Version {
+		t.Fatalf("the sweep moved the flagged edge's version: %d -> %d",
+			carrying.Version, version)
+	}
+	if !strings.Contains(fields, "difficulty") {
+		t.Fatalf("the sweep deleted the values it flagged: %s", fields)
+	}
+
+	invalid, version, fieldsAfter, updatedAfter := relationState(t, pool, sparse.ID)
+	if invalid {
+		t.Fatal("an edge that still fits its schema must not be flagged")
+	}
+	if fieldsAfter != sparseFieldsBefore {
+		t.Fatalf("the sweep rewrote stored values: %s -> %s", sparseFieldsBefore, fieldsAfter)
+	}
+	if version != sparseVersionBefore {
+		t.Fatalf("the sweep moved a version: %d -> %d", sparseVersionBefore, version)
+	}
+	// A row whose verdict has not changed must not be rewritten at all: a
+	// validation pass is not an edit, and a moved updated_at says it was.
+	if updatedAfter != sparseUpdatedBefore {
+		t.Fatalf("the sweep touched updated_at: %s -> %s", sparseUpdatedBefore, updatedAfter)
+	}
+}
+
+// TestAnEdgeSchemaChangeDoesNotBackFillDeclaredDefaults is the edge half
+// of TestSchemaChangeDoesNotBackFillDeclaredDefaults, and it pins the
+// half of the shared rule that is easiest to lose: revalidate calls
+// CheckValues rather than Validate precisely so there is no normalised
+// map in scope to write back.
+func TestAnEdgeSchemaChangeDoesNotBackFillDeclaredDefaults(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{{Key: "note", Type: metamodel.FieldText}})
+
+	edge, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	narrowRequires(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+		{Key: "hidden", Type: metamodel.FieldBool, HasDefault: true, Default: false},
+	}, 1)
+
+	invalid, _, fields, _ := relationState(t, pool, edge.ID)
+	if invalid {
+		t.Fatal("an edge missing a field that has a default still fits the schema")
+	}
+	if strings.Contains(fields, "hidden") {
+		t.Fatalf("the sweep back-filled the default: %s", fields)
+	}
+}
+
+// TestAnEdgeSchemaChangeClearsTheFlagWhenTheEdgeFitsAgain is the edge half
+// of TestSchemaChangeClearsTheFlagWhenTheRowFitsAgain. Declaring the
+// missing field is how a designer fixes the flag, so the sweep has to
+// clear it as readily as it sets it — a sweep that only ever set the flag
+// would leave a list of things to fix that never empties.
+func TestAnEdgeSchemaChangeClearsTheFlagWhenTheEdgeFitsAgain(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+	})
+
+	edge, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	narrowRequires(t, svc, project, nil, 1)
+	if invalid, _, _, _ := relationState(t, pool, edge.ID); !invalid {
+		t.Fatal("the edge must be flagged while note is undeclared")
+	}
+
+	narrowRequires(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+	}, 2)
+	if invalid, _, _, _ := relationState(t, pool, edge.ID); invalid {
+		t.Fatal("the edge fits the widened schema and must not stay flagged")
+	}
+}
+
+// TestRewritingAFlaggedEdgeClearsItsFlag pins the write path's half of
+// the rule: UpsertRelation resets `invalid` to false because the values
+// it just wrote were validated against the type's current schema, exactly
+// as UpsertEntity does.
+//
+// Without it a designer who fixed a flagged edge would be told it is
+// still broken, forever, and the only way back would be to delete and
+// re-create it.
+func TestRewritingAFlaggedEdgeClearsItsFlag(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+		{Key: "difficulty", Type: metamodel.FieldNumber},
+	})
+
+	in := metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain", "difficulty": 3},
+	}
+	edge, err := svc.UpsertRelation(ctx, project, in)
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+	narrowRequires(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+	}, 1)
+	if invalid, _, _, _ := relationState(t, pool, edge.ID); !invalid {
+		t.Fatal("the edge must be flagged before the rewrite, or this test proves nothing")
+	}
+
+	fixed := withVersion(in, edge.Version)
+	fixed.Fields = map[string]any{"note": "chain"}
+	rewritten, err := svc.UpsertRelation(ctx, project, fixed)
+	if err != nil {
+		t.Fatalf("rewrite the flagged edge: %v", err)
+	}
+	if rewritten.Invalid {
+		t.Fatal("the returned row still carries the flag after a validated write")
+	}
+	if invalid, _, _, _ := relationState(t, pool, edge.ID); invalid {
+		t.Fatal("a rewritten edge that fits its schema must not stay flagged")
+	}
+}
+
+// TestInvalidEdgesAreFindableThroughTheListing is the read half of the
+// flag, and it is the half a write-only column ships without.
+//
+// An agent that has just narrowed a relation type has to be able to ask
+// "which edges did that break", the same way it asks it of entities. All
+// three states of the filter are asserted, because a filter that ignored
+// its argument would satisfy any one of them on its own.
+func TestInvalidEdgesAreFindableThroughTheListing(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+		{Key: "difficulty", Type: metamodel.FieldNumber},
+	})
+
+	broken, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain", "difficulty": 3},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+	intact, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Fields:  map[string]any{"note": "fine"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+	narrowRequires(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+	}, 1)
+
+	yes, no := true, false
+	for _, tc := range []struct {
+		name   string
+		filter *bool
+		want   []uuid.UUID
+	}{
+		{"no opinion", nil, []uuid.UUID{broken.ID, intact.ID}},
+		{"only the broken ones", &yes, []uuid.UUID{broken.ID}},
+		{"only the intact ones", &no, []uuid.UUID{intact.ID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Invalid: tc.filter})
+			if err != nil {
+				t.Fatalf("ListRelations: %v", err)
+			}
+			got := make(map[uuid.UUID]bool, len(page.Relations))
+			for _, row := range page.Relations {
+				got[row.ID] = true
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("listed %d edges, want %d", len(got), len(tc.want))
+			}
+			for _, id := range tc.want {
+				if !got[id] {
+					t.Fatalf("edge %s is missing from the listing", id)
+				}
+			}
+		})
+	}
+}
+
+// TestARelationsCursorCannotCrossTheInvalidFilter pins that the invalid
+// filter is part of the listing's cursor fingerprint, exactly as it is on
+// the two entity listings.
+//
+// Every filter of one listing shares one sort order, so a cursor carried
+// from "the broken edges" to "all edges" would page perfectly and answer
+// a different question. A fingerprint that ignored the filter would leave
+// this test's cursor accepted and this whole listing silently mixing two
+// questions.
+func TestARelationsCursorCannotCrossTheInvalidFilter(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, nil)
+
+	for _, pair := range [][2]string{
+		{"kobold-camp", "hogger"}, {"hogger", "kobold-camp"},
+	} {
+		if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+			TypeKey: "requires",
+			Source:  metamodel.Ref{TypeKey: "quest", Key: pair[0]},
+			Target:  metamodel.Ref{TypeKey: "quest", Key: pair[1]},
+		}); err != nil {
+			t.Fatalf("UpsertRelation: %v", err)
+		}
+	}
+
+	yes := true
+	page, err := svc.ListRelations(ctx, project, metamodel.RelationFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("ListRelations: %v", err)
+	}
+	if page.NextCursor == "" {
+		t.Fatal("the unfiltered listing issued no cursor, so there is nothing to carry")
+	}
+	_, err = svc.ListRelations(ctx, project, metamodel.RelationFilter{
+		Invalid: &yes, Cursor: page.NextCursor, Limit: 1,
+	})
+	if !errors.Is(err, metamodel.ErrInvalidInput) {
+		t.Fatalf("err = %v, want invalid_input: a cursor from the unfiltered listing "+
+			"must not page the invalid one", err)
+	}
+}
+
+// TestRelationCountsCarryTheInvalidTally pins the count a game summary
+// reads. Until 0009 RelationCountsByType answered with a bare total and
+// its doc comment argued that an edge could not be invalid; the number is
+// what a designer's "what do I have to go and fix" is built from, and a
+// summary answering it for entities alone answers it wrongly.
+func TestRelationCountsCarryTheInvalidTally(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+		{Key: "difficulty", Type: metamodel.FieldNumber},
+	})
+
+	typ, err := svc.RelationTypeByKey(ctx, project, "requires")
+	if err != nil {
+		t.Fatalf("RelationTypeByKey: %v", err)
+	}
+	if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain", "difficulty": 3},
+	}); err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+	if _, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Fields:  map[string]any{"note": "fine"},
+	}); err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	counts, err := svc.RelationCountsByType(ctx, project)
+	if err != nil {
+		t.Fatalf("RelationCountsByType: %v", err)
+	}
+	if got := counts[typ.ID]; got.Total != 2 || got.Invalid != 0 {
+		t.Fatalf("before the schema edit: %+v, want {Total:2 Invalid:0}", got)
+	}
+
+	narrowRequires(t, svc, project, metamodel.Schema{
+		{Key: "note", Type: metamodel.FieldText},
+	}, 1)
+
+	counts, err = svc.RelationCountsByType(ctx, project)
+	if err != nil {
+		t.Fatalf("RelationCountsByType: %v", err)
+	}
+	if got := counts[typ.ID]; got.Total != 2 || got.Invalid != 1 {
+		t.Fatalf("after the schema edit: %+v, want {Total:2 Invalid:1}", got)
+	}
+}
+
+// TestAnEdgeSweepDoesNotReachAnotherGamesEdges pins the project filter on
+// the two statements the sweep runs. Two games declare the same relation
+// type key and hold an edge each; narrowing one game's declaration must
+// flag that game's edge and leave the other alone.
+//
+// The relation type ids differ between the games, so the type filter
+// alone would already do it — which is exactly why this is asserted
+// rather than assumed: the whole file's rule is that every statement
+// carries the project, and a sweep is the one place a missing filter
+// would rewrite content in a game the caller cannot see.
+func TestAnEdgeSweepDoesNotReachAnotherGamesEdges(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	mine, theirs := newProject(t, pool), newProject(t, pool)
+	edges := map[uuid.UUID]uuid.UUID{}
+	for _, project := range []uuid.UUID{mine, theirs} {
+		seedWorld(t, svc, project)
+		seedEdgeWorld(t, svc, project, metamodel.Schema{
+			{Key: "note", Type: metamodel.FieldText},
+		})
+		edge, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+			TypeKey: "requires",
+			Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+			Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+			Fields:  map[string]any{"note": "chain"},
+		})
+		if err != nil {
+			t.Fatalf("UpsertRelation: %v", err)
+		}
+		edges[project] = edge.ID
+	}
+
+	narrowRequires(t, svc, mine, nil, 1)
+
+	if invalid, _, _, _ := relationState(t, pool, edges[mine]); !invalid {
+		t.Fatal("the edited game's own edge was not flagged")
+	}
+	if invalid, _, _, _ := relationState(t, pool, edges[theirs]); invalid {
+		t.Fatal("a schema edit in one game flagged another game's edge")
+	}
+}
+
+// TestTheEdgeUpsertStatementRefusesAStaleVersion drives dbq.UpsertRelation
+// directly, because nothing reachable through the service can observe the
+// SQL guard on its own.
+//
+// upsertRelationWith takes a locked read first and refuses a stale
+// version in Go, so every sequential caller is answered before the
+// statement runs — measured, not assumed: making the DO UPDATE's
+// `relations.version = expected_version` clause trivially true left
+// TestConcurrentEditsToOneEdgesFieldsAreRefused green. The clause is not
+// redundant, it is the half that survives a race: on the creation path
+// there is nothing to lock, so two writers can both pass the Go check and
+// only the guard stands between them. A guard nothing pins is a guard the
+// next edit of this statement deletes.
+func TestTheEdgeUpsertStatementRefusesAStaleVersion(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedWorld(t, svc, project)
+	seedEdgeWorld(t, svc, project, metamodel.Schema{{Key: "note", Type: metamodel.FieldText}})
+
+	edge, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+		TypeKey: "requires",
+		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
+		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+		Fields:  map[string]any{"note": "chain"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRelation: %v", err)
+	}
+
+	q := dbq.New(pool)
+	params := dbq.UpsertRelationParams{
+		ProjectID:       project,
+		RelationTypeID:  edge.RelationTypeID,
+		SourceID:        edge.SourceID,
+		TargetID:        edge.TargetID,
+		Fields:          []byte(`{"note":"stale"}`),
+		ExpectedVersion: edge.Version + 1,
+	}
+	if row, err := q.UpsertRelation(ctx, params); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("UpsertRelation returned %+v (err = %v) for a version that does not "+
+			"match, want no rows", row, err)
+	}
+	if _, _, fields, _ := relationState(t, pool, edge.ID); fields != `{"note": "chain"}` {
+		t.Fatalf("the refused statement wrote anyway: %s", fields)
+	}
+
+	// The positive control: the same statement with the true version does
+	// land, so the refusal above is the guard and not some other clause.
+	params.ExpectedVersion = edge.Version
+	row, err := q.UpsertRelation(ctx, params)
+	if err != nil {
+		t.Fatalf("UpsertRelation with the true version: %v", err)
+	}
+	if row.Version != edge.Version+1 {
+		t.Fatalf("version = %d, want %d", row.Version, edge.Version+1)
 	}
 }

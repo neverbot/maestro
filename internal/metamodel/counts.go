@@ -7,17 +7,34 @@ import (
 	"github.com/google/uuid"
 )
 
-// EntityCounts is how many entities one type holds, and how many of
-// those no longer fit the schema the type declares.
+// TypeCounts is how many rows one declared type holds, and how many of
+// those no longer fit the schema it declares.
 //
 // Invalid is the number a designer has to act on: a schema edit that
 // narrows a type does not delete the rows that stop fitting, it marks
-// them (see Service.revalidateEntitiesOfType), and nothing tells anyone
-// how many there are unless something counts them.
-type EntityCounts struct {
+// them (see Service.revalidate), and nothing tells anyone how many there
+// are unless something counts them.
+//
+// **One type for both tables, not two.** Entities and edges are judged
+// against a field schema by the same Schema.Validate, flagged by the same
+// sweep and counted by the same FILTER, so a caller that has learned to
+// read one has learned to read the other. Two structs differing in
+// nothing would be two places for the next column to be added to one of.
+type TypeCounts struct {
 	Total   int64
 	Invalid int64
 }
+
+// EntityCounts is TypeCounts under the name every existing caller knows
+// it by. It is an alias rather than a second struct: the two were never
+// going to differ, and an alias means a caller holding an EntityCounts
+// and one holding a RelationCounts hold the same value.
+type EntityCounts = TypeCounts
+
+// RelationCounts is TypeCounts for a relation type. Named so that a
+// caller reading a game summary does not have to remember which of the
+// two halves of the page is spelled generically.
+type RelationCounts = TypeCounts
 
 // EntityCountsByType counts a game's entities, grouped by their type.
 //
@@ -45,20 +62,21 @@ func (s *Service) EntityCountsByType(ctx context.Context, projectID uuid.UUID) (
 // RelationCountsByType counts a game's edges, grouped by their relation
 // type. See EntityCountsByType for why an absent key means none.
 //
-// There is no invalid count here, and that is the domain's asymmetry
-// rather than an omission: an entity carries a version and is
-// re-validated when its type's schema changes, while an edge has
-// neither (metamodel.RelationInput's own doc comment records that
-// decision), so there is no such thing as an edge marked invalid to
-// count.
-func (s *Service) RelationCountsByType(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID]int64, error) {
+// **It carries an invalid count, and until 0009 it could not.** This
+// comment used to record the absence as the domain's own asymmetry: an
+// entity was re-validated when its type's schema changed and an edge was
+// not, because `relations` had no column to record a verdict in. That
+// asymmetry is gone — a relation type carries a field schema exactly as
+// an entity type does, and an edge's fields are now judged by the same
+// sweep — so the two halves of a game summary answer the same question.
+func (s *Service) RelationCountsByType(ctx context.Context, projectID uuid.UUID) (map[uuid.UUID]RelationCounts, error) {
 	rows, err := s.q.CountRelationsPerType(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("count relations per type: %w", err)
 	}
-	counts := make(map[uuid.UUID]int64, len(rows))
+	counts := make(map[uuid.UUID]RelationCounts, len(rows))
 	for _, row := range rows {
-		counts[row.RelationTypeID] = row.Total
+		counts[row.RelationTypeID] = RelationCounts{Total: row.Total, Invalid: row.Invalid}
 	}
 	return counts, nil
 }

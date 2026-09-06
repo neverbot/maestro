@@ -99,14 +99,16 @@ type relationTypeEvent struct {
 
 // UpsertRelationType creates or updates a relation type.
 //
-// **A known gap, recorded because the code does not close it.** Editing
-// an entity type's field schema re-checks that type's entities and flags
-// the ones that no longer fit (revalidateEntitiesOfType). Nothing of the
-// kind happens here: `relations` has no `invalid` column, so an edge
-// stored against this type keeps whatever fields it had and is never
-// re-judged against the schema this call may just have changed. It is
-// filed as its own piece of work; what this call does is exactly what is
-// written above it and no more.
+// **Editing the field schema re-judges this type's edges**, exactly as
+// editing an entity type's re-judges its entities, and by the same
+// function: revalidate applies the core design's schema-evolution rule to
+// both tables, so an edge whose values stop fitting is flagged rather than
+// deleted or back-filled, and one a widening makes legal again is
+// unflagged. Until 0009 nothing of the kind happened here — `relations`
+// had no `invalid` column, so an edge stored against this type kept
+// whatever fields it had and was never re-judged against a schema this
+// call may just have changed, silently. That gap is what 0009 and this
+// line close.
 func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, in RelationTypeInput) (dbq.RelationType, error) {
 	problems := rowKeyProblems("key", in.Key)
 	// relation_types has label and description and no plural, colour or
@@ -209,7 +211,12 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 		if row.Key != in.Key {
 			return keyRespellingError("key", in.Key, row.Key)
 		}
-		return nil
+
+		// A schema change can invalidate stored edges. Re-check them
+		// rather than rejecting the change or inventing values for a new
+		// field — the same rule, and the same call, the entity type path
+		// makes.
+		return s.revalidateRelationsOfType(ctx, q, row)
 	})
 	if err != nil {
 		return dbq.RelationType{}, err
@@ -421,4 +428,37 @@ func (s *Service) RemoveRelationType(ctx context.Context, projectID, id uuid.UUI
 	s.publish(projectID, eventRelationTypeRemoved, relationTypeEventMinRole, relationTypeEventHumanOnly,
 		relationTypeEvent{ID: id, Key: removedKey})
 	return nil
+}
+
+// revalidateRelationsOfType re-checks every stored edge against its
+// relation type's current schema and flags the ones that no longer fit.
+//
+// The rule it applies is revalidate's, shared with the entity sweep so
+// that neither table can be given a schema-evolution policy the other
+// does not have. What stays here is which two statements this table's
+// half of it runs.
+func (s *Service) revalidateRelationsOfType(ctx context.Context, q *dbq.Queries, typ dbq.RelationType) error {
+	return revalidate(ctx, sweep{
+		fieldSchema: typ.FieldSchema,
+		subject:     "relations",
+		list: func(ctx context.Context) ([]storedFields, error) {
+			rows, err := q.ListRelationFieldsOfType(ctx, dbq.ListRelationFieldsOfTypeParams{
+				ProjectID: typ.ProjectID, RelationTypeID: typ.ID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return storedFieldsOf(rows, func(row dbq.ListRelationFieldsOfTypeRow) storedFields {
+				return storedFields{ID: row.ID, Fields: row.Fields}
+			}), nil
+		},
+		mark: func(ctx context.Context, ids []uuid.UUID, invalid bool) error {
+			return q.MarkRelationsOfTypeInvalid(ctx, dbq.MarkRelationsOfTypeInvalidParams{
+				ProjectID:      typ.ProjectID,
+				RelationTypeID: typ.ID,
+				Ids:            ids,
+				Invalid:        invalid,
+			})
+		},
+	})
 }

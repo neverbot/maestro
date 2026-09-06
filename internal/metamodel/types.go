@@ -405,62 +405,34 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 }
 
 // revalidateEntitiesOfType re-checks every stored entity against its
-// type's current schema and flags the ones that no longer fit. Nothing is
-// deleted and nothing is back-filled: the designer decides what a newly
-// required field should hold, and a validation pass is not an edit of
-// their content.
+// type's current schema and flags the ones that no longer fit.
 //
-// CheckValues, never Validate — an intent, not a behaviour. CheckValues
-// *is* Validate with the map discarded (validate.go), so the two return
-// the same verdict on every input and no test can tell this sweep's call
-// from the other. What the narrower call earns is that there is no
-// normalised map in scope to write back: Validate hands one back with
-// declared defaults injected, and a later edit that stored it would
-// back-fill every row the sweep touched, silently, with values no
-// designer chose. TestSchemaChangeDoesNotBackFillDeclaredDefaults pins
-// the outcome; this line is what keeps the temptation out of reach.
+// The rule it applies — what is re-checked, what is flagged, why nothing
+// is back-filled and why both verdicts are written — is revalidate's, and
+// is shared with the edge sweep so the two cannot drift. What stays here
+// is which two statements this table's half of it runs.
 func (s *Service) revalidateEntitiesOfType(ctx context.Context, q *dbq.Queries, typ dbq.EntityType) error {
-	schema, err := ParseSchema(typ.FieldSchema)
-	if err != nil {
-		return err
-	}
-
-	rows, err := q.ListEntityFieldsOfType(ctx, dbq.ListEntityFieldsOfTypeParams{
-		ProjectID: typ.ProjectID, EntityTypeID: typ.ID,
+	return revalidate(ctx, sweep{
+		fieldSchema: typ.FieldSchema,
+		subject:     "entities",
+		list: func(ctx context.Context) ([]storedFields, error) {
+			rows, err := q.ListEntityFieldsOfType(ctx, dbq.ListEntityFieldsOfTypeParams{
+				ProjectID: typ.ProjectID, EntityTypeID: typ.ID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return storedFieldsOf(rows, func(row dbq.ListEntityFieldsOfTypeRow) storedFields {
+				return storedFields{ID: row.ID, Fields: row.Fields}
+			}), nil
+		},
+		mark: func(ctx context.Context, ids []uuid.UUID, invalid bool) error {
+			return q.MarkEntitiesOfTypeInvalid(ctx, dbq.MarkEntitiesOfTypeInvalidParams{
+				ProjectID:    typ.ProjectID,
+				EntityTypeID: typ.ID,
+				Ids:          ids,
+				Invalid:      invalid,
+			})
+		},
 	})
-	if err != nil {
-		return fmt.Errorf("list entities: %w", err)
-	}
-
-	var invalid, valid []uuid.UUID
-	for _, row := range rows {
-		values, err := decodeFields(row.Fields)
-		if err != nil {
-			invalid = append(invalid, row.ID)
-			continue
-		}
-		if err := schema.CheckValues(values); err != nil {
-			invalid = append(invalid, row.ID)
-			continue
-		}
-		valid = append(valid, row.ID)
-	}
-
-	for _, batch := range []struct {
-		ids  []uuid.UUID
-		flag bool
-	}{{invalid, true}, {valid, false}} {
-		if len(batch.ids) == 0 {
-			continue
-		}
-		if err := q.MarkEntitiesOfTypeInvalid(ctx, dbq.MarkEntitiesOfTypeInvalidParams{
-			ProjectID:    typ.ProjectID,
-			EntityTypeID: typ.ID,
-			Ids:          batch.ids,
-			Invalid:      batch.flag,
-		}); err != nil {
-			return fmt.Errorf("flag entities: %w", err)
-		}
-	}
-	return nil
 }

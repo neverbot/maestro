@@ -117,8 +117,15 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 GROUP BY entity_type_id;
 
 -- name: CountRelationsPerType :many
--- CountEntitiesPerType for edges; see its comment.
-SELECT relation_type_id, count(*) AS total
+-- CountEntitiesPerType for edges; see its comment. The invalid count is
+-- the same FILTER over the same column, because 0009 gave relations the
+-- `invalid` flag entities have had since 0004 and an edge is now judged
+-- against its type's field schema by the same rules: a designer's "what
+-- do I have to go and fix" is one question over both tables, and a
+-- summary that answered it for half the game answered it wrongly.
+SELECT relation_type_id,
+       count(*) AS total,
+       count(*) FILTER (WHERE invalid) AS invalid
 FROM relations
 WHERE project_id = sqlc.arg('project_id')::uuid
 GROUP BY relation_type_id;
@@ -399,12 +406,27 @@ DELETE FROM relation_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: UpsertRelation :one
--- No version guard, because relations carry no version column: an edge
--- is identified by (type, source, target) and re-writing its fields is
--- the operation, not a lost update. Two writers editing one edge's
--- fields therefore both succeed and the last one wins, which is this
--- table's documented concurrency behaviour and not an oversight -- see
--- RelationInput.
+-- **The DO UPDATE is guarded by the caller's expected version**, exactly
+-- as UpsertEntity's and UpsertEntityType's are, so the whole
+-- compare-and-set is one statement and two writers cannot both read
+-- version 1 and both succeed. A creating caller passes noVersion, which
+-- no stored version can equal, so the guard is a no-op on the insert path
+-- and a guaranteed mismatch when a row it did not know about turns out to
+-- exist. A guard that fails returns no row rather than an error;
+-- UpsertRelation turns that into the typed conflict.
+--
+-- Until 0009 this statement had no guard at all and said so: an edge was
+-- last-writer-wins, and two designers extending one edge's `passages`
+-- list at the same time silently lost one of the two. That was the
+-- documented behaviour of the one table in this schema without a
+-- version, and 0009 records why it could not stay.
+--
+-- **invalid is reset to false on both arms**, for the reason UpsertEntity
+-- resets it: the caller has just validated these values against the
+-- relation type's current schema, and a row that is being written is a
+-- row that has been judged. An edge that had been flagged by a sweep
+-- therefore stops being flagged the moment it is rewritten to fit -- and
+-- if it does not fit, the write never reaches this statement.
 --
 -- The ON CONFLICT target is relations_edge_key, so a re-seed of the same
 -- edge updates it rather than laying a second copy beside it. That is
@@ -454,9 +476,12 @@ VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('relation_type_id')::uuid,
         sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (relation_type_id, source_id, target_id) DO UPDATE
 SET fields              = excluded.fields,
+    invalid             = false,
+    version             = relations.version + 1,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
 WHERE relations.project_id = excluded.project_id
+  AND relations.version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
 -- name: ListRelations :many
@@ -473,9 +498,18 @@ RETURNING *;
 -- position seeks rather than scans. Before it, the LIMIT alone made
 -- every edge past the cap unreachable with nothing in the answer saying
 -- so.
+--
+-- The invalid filter is tri-state, spelled exactly as ListEntitiesPage's
+-- is: NULL is "no opinion" and lists both, true lists only the edges a
+-- schema edit stopped fitting, false only the ones that still fit. It is
+-- the read that makes 0009's flag findable rather than merely written,
+-- and it has to be the same three-valued shape the entity listing has,
+-- because an agent asking "what did my schema edit break" asks it of
+-- both tables with one filter name.
 SELECT r.* FROM relations r
 WHERE r.project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('relation_type_id')::uuid IS NULL OR r.relation_type_id = sqlc.narg('relation_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR r.invalid = sqlc.narg('invalid')::boolean)
   AND (sqlc.narg('source_id')::uuid IS NULL OR r.source_id = sqlc.narg('source_id')::uuid)
   AND (sqlc.narg('target_id')::uuid IS NULL OR r.target_id = sqlc.narg('target_id')::uuid)
   AND (sqlc.narg('after_id')::uuid IS NULL
@@ -503,6 +537,59 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND relation_type_id = sqlc.arg('relation_type_id')::uuid
   AND source_id = sqlc.arg('source_id')::uuid
   AND target_id = sqlc.arg('target_id')::uuid;
+
+-- name: GetRelationByEdgeForUpdate :one
+-- The upsert's own read, taken inside its transaction with the row lock
+-- held, so the version a caller is told about is the one its write will
+-- actually meet. It is GetEntityByKeyForUpdate for edges and it is here
+-- for the same reason that statement is: without the lock the read runs
+-- against the transaction's snapshot, so a caller racing an in-flight
+-- edit is told to merge onto a version that is already stale by the time
+-- it retries.
+--
+-- An edge has no key of its own, so there is no respelling to catch here
+-- and this read exists only for the version. The project filter is
+-- redundant against relations_edge_key for the reason GetRelationByEdge
+-- records, and is kept for the same one.
+SELECT * FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid
+  AND source_id = sqlc.arg('source_id')::uuid
+  AND target_id = sqlc.arg('target_id')::uuid
+FOR UPDATE;
+
+-- name: ListRelationFieldsOfType :many
+-- ListEntityFieldsOfType for edges: the re-validation sweep reads nothing
+-- but the stored values and the id to flag, so it does not load whole
+-- rows.
+--
+-- 0009 records why this needs no index of its own: relations_edge_key is
+-- UNIQUE (relation_type_id, source_id, target_id) and leads with the
+-- column this filters on, so the sweep seeks it.
+SELECT id, fields FROM relations
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid
+ORDER BY id;
+
+-- name: MarkRelationsOfTypeInvalid :exec
+-- MarkEntitiesOfTypeInvalid for edges, including its `invalid <> flag`
+-- guard and the reason for it: without that clause every schema edit
+-- would touch each of the type's edges and the set_updated_at trigger
+-- would move their updated_at, so a validation pass would read as an
+-- edit of content nobody edited.
+--
+-- **It deliberately does not move `version`.** A sweep is not an edit by
+-- a caller: it changes no field an agent wrote, and bumping the version
+-- would refuse the very next `expected_version` an agent is holding --
+-- for a row whose values it never touched, over a schema edit made by
+-- somebody else. Flagging is a verdict about a row, not a new revision of
+-- it. MarkEntitiesOfTypeInvalid leaves entities' version alone for the
+-- same reason, and the two must stay the same on this point.
+UPDATE relations SET invalid = sqlc.arg('invalid')::boolean
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND relation_type_id = sqlc.arg('relation_type_id')::uuid
+  AND id = ANY(sqlc.arg('ids')::uuid[])
+  AND invalid <> sqlc.arg('invalid')::boolean;
 
 -- name: DeleteRelation :execrows
 DELETE FROM relations

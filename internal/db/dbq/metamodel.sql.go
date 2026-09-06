@@ -90,7 +90,9 @@ func (q *Queries) CountRelationsOfType(ctx context.Context, arg CountRelationsOf
 }
 
 const countRelationsPerType = `-- name: CountRelationsPerType :many
-SELECT relation_type_id, count(*) AS total
+SELECT relation_type_id,
+       count(*) AS total,
+       count(*) FILTER (WHERE invalid) AS invalid
 FROM relations
 WHERE project_id = $1::uuid
 GROUP BY relation_type_id
@@ -99,9 +101,15 @@ GROUP BY relation_type_id
 type CountRelationsPerTypeRow struct {
 	RelationTypeID uuid.UUID
 	Total          int64
+	Invalid        int64
 }
 
-// CountEntitiesPerType for edges; see its comment.
+// CountEntitiesPerType for edges; see its comment. The invalid count is
+// the same FILTER over the same column, because 0009 gave relations the
+// `invalid` flag entities have had since 0004 and an edge is now judged
+// against its type's field schema by the same rules: a designer's "what
+// do I have to go and fix" is one question over both tables, and a
+// summary that answered it for half the game answered it wrongly.
 func (q *Queries) CountRelationsPerType(ctx context.Context, projectID uuid.UUID) ([]CountRelationsPerTypeRow, error) {
 	rows, err := q.db.Query(ctx, countRelationsPerType, projectID)
 	if err != nil {
@@ -111,7 +119,7 @@ func (q *Queries) CountRelationsPerType(ctx context.Context, projectID uuid.UUID
 	var items []CountRelationsPerTypeRow
 	for rows.Next() {
 		var i CountRelationsPerTypeRow
-		if err := rows.Scan(&i.RelationTypeID, &i.Total); err != nil {
+		if err := rows.Scan(&i.RelationTypeID, &i.Total, &i.Invalid); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -438,7 +446,7 @@ func (q *Queries) GetEntityTypeByKeyForUpdate(ctx context.Context, arg GetEntity
 }
 
 const getRelationByEdge = `-- name: GetRelationByEdge :one
-SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relations
+SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id, invalid, version FROM relations
 WHERE project_id = $1::uuid
   AND relation_type_id = $2::uuid
   AND source_id = $3::uuid
@@ -481,12 +489,67 @@ func (q *Queries) GetRelationByEdge(ctx context.Context, arg GetRelationByEdgePa
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.Invalid,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getRelationByEdgeForUpdate = `-- name: GetRelationByEdgeForUpdate :one
+SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id, invalid, version FROM relations
+WHERE project_id = $1::uuid
+  AND relation_type_id = $2::uuid
+  AND source_id = $3::uuid
+  AND target_id = $4::uuid
+FOR UPDATE
+`
+
+type GetRelationByEdgeForUpdateParams struct {
+	ProjectID      uuid.UUID
+	RelationTypeID uuid.UUID
+	SourceID       uuid.UUID
+	TargetID       uuid.UUID
+}
+
+// The upsert's own read, taken inside its transaction with the row lock
+// held, so the version a caller is told about is the one its write will
+// actually meet. It is GetEntityByKeyForUpdate for edges and it is here
+// for the same reason that statement is: without the lock the read runs
+// against the transaction's snapshot, so a caller racing an in-flight
+// edit is told to merge onto a version that is already stale by the time
+// it retries.
+//
+// An edge has no key of its own, so there is no respelling to catch here
+// and this read exists only for the version. The project filter is
+// redundant against relations_edge_key for the reason GetRelationByEdge
+// records, and is kept for the same one.
+func (q *Queries) GetRelationByEdgeForUpdate(ctx context.Context, arg GetRelationByEdgeForUpdateParams) (Relation, error) {
+	row := q.db.QueryRow(ctx, getRelationByEdgeForUpdate,
+		arg.ProjectID,
+		arg.RelationTypeID,
+		arg.SourceID,
+		arg.TargetID,
+	)
+	var i Relation
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.RelationTypeID,
+		&i.SourceID,
+		&i.TargetID,
+		&i.Fields,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+		&i.Invalid,
+		&i.Version,
 	)
 	return i, err
 }
 
 const getRelationByID = `-- name: GetRelationByID :one
-SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relations
+SELECT id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id, invalid, version FROM relations
 WHERE project_id = $1::uuid AND id = $2::uuid
 `
 
@@ -509,6 +572,8 @@ func (q *Queries) GetRelationByID(ctx context.Context, arg GetRelationByIDParams
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.Invalid,
+		&i.Version,
 	)
 	return i, err
 }
@@ -950,6 +1015,50 @@ func (q *Queries) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]E
 	return items, nil
 }
 
+const listRelationFieldsOfType = `-- name: ListRelationFieldsOfType :many
+SELECT id, fields FROM relations
+WHERE project_id = $1::uuid
+  AND relation_type_id = $2::uuid
+ORDER BY id
+`
+
+type ListRelationFieldsOfTypeParams struct {
+	ProjectID      uuid.UUID
+	RelationTypeID uuid.UUID
+}
+
+type ListRelationFieldsOfTypeRow struct {
+	ID     uuid.UUID
+	Fields []byte
+}
+
+// ListEntityFieldsOfType for edges: the re-validation sweep reads nothing
+// but the stored values and the id to flag, so it does not load whole
+// rows.
+//
+// 0009 records why this needs no index of its own: relations_edge_key is
+// UNIQUE (relation_type_id, source_id, target_id) and leads with the
+// column this filters on, so the sweep seeks it.
+func (q *Queries) ListRelationFieldsOfType(ctx context.Context, arg ListRelationFieldsOfTypeParams) ([]ListRelationFieldsOfTypeRow, error) {
+	rows, err := q.db.Query(ctx, listRelationFieldsOfType, arg.ProjectID, arg.RelationTypeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRelationFieldsOfTypeRow
+	for rows.Next() {
+		var i ListRelationFieldsOfTypeRow
+		if err := rows.Scan(&i.ID, &i.Fields); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRelationTypes = `-- name: ListRelationTypes :many
 SELECT id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM relation_types
 WHERE project_id = $1::uuid ORDER BY label, id
@@ -993,20 +1102,22 @@ func (q *Queries) ListRelationTypes(ctx context.Context, projectID uuid.UUID) ([
 }
 
 const listRelations = `-- name: ListRelations :many
-SELECT r.id, r.project_id, r.relation_type_id, r.source_id, r.target_id, r.fields, r.created_at, r.updated_at, r.updated_by_user_id, r.updated_by_token_id FROM relations r
+SELECT r.id, r.project_id, r.relation_type_id, r.source_id, r.target_id, r.fields, r.created_at, r.updated_at, r.updated_by_user_id, r.updated_by_token_id, r.invalid, r.version FROM relations r
 WHERE r.project_id = $1::uuid
   AND ($2::uuid IS NULL OR r.relation_type_id = $2::uuid)
-  AND ($3::uuid IS NULL OR r.source_id = $3::uuid)
-  AND ($4::uuid IS NULL OR r.target_id = $4::uuid)
-  AND ($5::uuid IS NULL
-       OR (r.created_at, r.id) > ($6::timestamptz, $5::uuid))
+  AND ($3::boolean IS NULL OR r.invalid = $3::boolean)
+  AND ($4::uuid IS NULL OR r.source_id = $4::uuid)
+  AND ($5::uuid IS NULL OR r.target_id = $5::uuid)
+  AND ($6::uuid IS NULL
+       OR (r.created_at, r.id) > ($7::timestamptz, $6::uuid))
 ORDER BY r.created_at, r.id
-LIMIT $7::int
+LIMIT $8::int
 `
 
 type ListRelationsParams struct {
 	ProjectID      uuid.UUID
 	RelationTypeID *uuid.UUID
+	Invalid        *bool
 	SourceID       *uuid.UUID
 	TargetID       *uuid.UUID
 	AfterID        *uuid.UUID
@@ -1027,10 +1138,19 @@ type ListRelationsParams struct {
 // position seeks rather than scans. Before it, the LIMIT alone made
 // every edge past the cap unreachable with nothing in the answer saying
 // so.
+//
+// The invalid filter is tri-state, spelled exactly as ListEntitiesPage's
+// is: NULL is "no opinion" and lists both, true lists only the edges a
+// schema edit stopped fitting, false only the ones that still fit. It is
+// the read that makes 0009's flag findable rather than merely written,
+// and it has to be the same three-valued shape the entity listing has,
+// because an agent asking "what did my schema edit break" asks it of
+// both tables with one filter name.
 func (q *Queries) ListRelations(ctx context.Context, arg ListRelationsParams) ([]Relation, error) {
 	rows, err := q.db.Query(ctx, listRelations,
 		arg.ProjectID,
 		arg.RelationTypeID,
+		arg.Invalid,
 		arg.SourceID,
 		arg.TargetID,
 		arg.AfterID,
@@ -1055,6 +1175,8 @@ func (q *Queries) ListRelations(ctx context.Context, arg ListRelationsParams) ([
 			&i.UpdatedAt,
 			&i.UpdatedByUserID,
 			&i.UpdatedByTokenID,
+			&i.Invalid,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -1166,6 +1288,44 @@ func (q *Queries) MarkEntitiesOfTypeInvalid(ctx context.Context, arg MarkEntitie
 		arg.Invalid,
 		arg.ProjectID,
 		arg.EntityTypeID,
+		arg.Ids,
+	)
+	return err
+}
+
+const markRelationsOfTypeInvalid = `-- name: MarkRelationsOfTypeInvalid :exec
+UPDATE relations SET invalid = $1::boolean
+WHERE project_id = $2::uuid
+  AND relation_type_id = $3::uuid
+  AND id = ANY($4::uuid[])
+  AND invalid <> $1::boolean
+`
+
+type MarkRelationsOfTypeInvalidParams struct {
+	Invalid        bool
+	ProjectID      uuid.UUID
+	RelationTypeID uuid.UUID
+	Ids            []uuid.UUID
+}
+
+// MarkEntitiesOfTypeInvalid for edges, including its `invalid <> flag`
+// guard and the reason for it: without that clause every schema edit
+// would touch each of the type's edges and the set_updated_at trigger
+// would move their updated_at, so a validation pass would read as an
+// edit of content nobody edited.
+//
+// **It deliberately does not move `version`.** A sweep is not an edit by
+// a caller: it changes no field an agent wrote, and bumping the version
+// would refuse the very next `expected_version` an agent is holding --
+// for a row whose values it never touched, over a schema edit made by
+// somebody else. Flagging is a verdict about a row, not a new revision of
+// it. MarkEntitiesOfTypeInvalid leaves entities' version alone for the
+// same reason, and the two must stay the same on this point.
+func (q *Queries) MarkRelationsOfTypeInvalid(ctx context.Context, arg MarkRelationsOfTypeInvalidParams) error {
+	_, err := q.db.Exec(ctx, markRelationsOfTypeInvalid,
+		arg.Invalid,
+		arg.ProjectID,
+		arg.RelationTypeID,
 		arg.Ids,
 	)
 	return err
@@ -1627,10 +1787,13 @@ VALUES ($1::uuid, $2::uuid,
         $6::uuid, $7::uuid)
 ON CONFLICT (relation_type_id, source_id, target_id) DO UPDATE
 SET fields              = excluded.fields,
+    invalid             = false,
+    version             = relations.version + 1,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
 WHERE relations.project_id = excluded.project_id
-RETURNING id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id
+  AND relations.version = $8::integer
+RETURNING id, project_id, relation_type_id, source_id, target_id, fields, created_at, updated_at, updated_by_user_id, updated_by_token_id, invalid, version
 `
 
 type UpsertRelationParams struct {
@@ -1641,14 +1804,30 @@ type UpsertRelationParams struct {
 	Fields           []byte
 	UpdatedByUserID  *uuid.UUID
 	UpdatedByTokenID *uuid.UUID
+	ExpectedVersion  int32
 }
 
-// No version guard, because relations carry no version column: an edge
-// is identified by (type, source, target) and re-writing its fields is
-// the operation, not a lost update. Two writers editing one edge's
-// fields therefore both succeed and the last one wins, which is this
-// table's documented concurrency behaviour and not an oversight -- see
-// RelationInput.
+// **The DO UPDATE is guarded by the caller's expected version**, exactly
+// as UpsertEntity's and UpsertEntityType's are, so the whole
+// compare-and-set is one statement and two writers cannot both read
+// version 1 and both succeed. A creating caller passes noVersion, which
+// no stored version can equal, so the guard is a no-op on the insert path
+// and a guaranteed mismatch when a row it did not know about turns out to
+// exist. A guard that fails returns no row rather than an error;
+// UpsertRelation turns that into the typed conflict.
+//
+// Until 0009 this statement had no guard at all and said so: an edge was
+// last-writer-wins, and two designers extending one edge's `passages`
+// list at the same time silently lost one of the two. That was the
+// documented behaviour of the one table in this schema without a
+// version, and 0009 records why it could not stay.
+//
+// **invalid is reset to false on both arms**, for the reason UpsertEntity
+// resets it: the caller has just validated these values against the
+// relation type's current schema, and a row that is being written is a
+// row that has been judged. An edge that had been flagged by a sweep
+// therefore stops being flagged the moment it is rewritten to fit -- and
+// if it does not fit, the write never reaches this statement.
 //
 // The ON CONFLICT target is relations_edge_key, so a re-seed of the same
 // edge updates it rather than laying a second copy beside it. That is
@@ -1700,6 +1879,7 @@ func (q *Queries) UpsertRelation(ctx context.Context, arg UpsertRelationParams) 
 		arg.Fields,
 		arg.UpdatedByUserID,
 		arg.UpdatedByTokenID,
+		arg.ExpectedVersion,
 	)
 	var i Relation
 	err := row.Scan(
@@ -1713,6 +1893,8 @@ func (q *Queries) UpsertRelation(ctx context.Context, arg UpsertRelationParams) 
 		&i.UpdatedAt,
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
+		&i.Invalid,
+		&i.Version,
 	)
 	return i, err
 }

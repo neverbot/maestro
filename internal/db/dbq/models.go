@@ -138,6 +138,8 @@ type Relation struct {
 	UpdatedAt        pgtype.Timestamptz
 	UpdatedByUserID  *uuid.UUID
 	UpdatedByTokenID *uuid.UUID
+	Invalid          bool
+	Version          int32
 }
 
 type RelationType struct {

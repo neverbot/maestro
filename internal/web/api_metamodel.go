@@ -1000,15 +1000,27 @@ type EntityTypeSummary struct {
 	InvalidCount int64 `json:"invalid_count"`
 }
 
-// RelationTypeSummary is one declared relation type and how many edges
-// instance it. There is no invalid count, because an edge cannot be
-// invalid — see metamodel.RelationCountsByType.
+// RelationTypeSummary is one declared relation type, how many edges
+// instance it, and how many of those a schema edit stopped fitting.
+//
+// InvalidCount is spelled the same as EntityTypeSummary's and means the
+// same thing, because since 0009 an edge is judged against its relation
+// type's field schema by the same sweep an entity is judged by. This
+// comment used to say an edge could not be invalid; a page that showed
+// the flag on half a game's content was the read half of that gap.
 type RelationTypeSummary struct {
 	RelationTypeOutput
 	RelationCount int64 `json:"relation_count"`
+	InvalidCount  int64 `json:"invalid_count"`
 }
 
 // GameTotals is the whole game in three numbers.
+//
+// **Invalid counts both tables**, entities and edges together, and it did
+// not before 0009 gave edges the flag. It is the "what do I have to go
+// and fix" number, and the designer fixing it does not care which table a
+// row lives in — a total that silently omitted every broken edge would
+// send them away from a game that still had work in it.
 type GameTotals struct {
 	Entities  int64 `json:"entities"`
 	Relations int64 `json:"relations"`
@@ -1061,11 +1073,13 @@ func (s *Server) handleGameSummary(w http.ResponseWriter, r *http.Request, _ Cal
 		out.Totals.Invalid += counts.Invalid
 	}
 	for _, row := range relationTypes {
-		count := relationCounts[row.ID]
+		counts := relationCounts[row.ID]
 		out.RelationTypes = append(out.RelationTypes, RelationTypeSummary{
-			RelationTypeOutput: relationTypeOf(row), RelationCount: count,
+			RelationTypeOutput: relationTypeOf(row),
+			RelationCount:      counts.Total, InvalidCount: counts.Invalid,
 		})
-		out.Totals.Relations += count
+		out.Totals.Relations += counts.Total
+		out.Totals.Invalid += counts.Invalid
 	}
 	// The totals are summed from the same per-type numbers the rows
 	// carry, rather than read from three separate count(*) queries, so

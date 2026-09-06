@@ -44,63 +44,49 @@ type Ref struct {
 
 // RelationInput is an upsert request for one edge.
 //
-// **There is no ExpectedVersion, and that is a decision.** `relations`
-// carries no version column: an edge is identified by (relation type,
-// source, target) and its own fields are all it holds, so re-writing
-// them is the whole operation rather than a lost update to guard
-// against, and the last writer wins. Two designers editing one edge's
-// fields at once therefore do not conflict — the second overwrites the
-// first, silently. Giving edges the same compare-and-set the other three
-// tables have would need a migration adding the column.
+// **ExpectedVersion carries exactly the meaning EntityInput's does**, and
+// the same caveat: on the insert path it is passed as the guard on the DO
+// UPDATE and is never evaluated, so a claim against an edge that does not
+// exist creates one rather than being refused. See
+// EntityTypeInput.ExpectedVersion for the argument.
 //
-// **Task 7 declined to add it**, and the MCP surface therefore offers no
-// expected_version on relations.upsert. The reason is the pair below:
-// adding `version` alone would harden the wrong half. The exposure is
-// specifically an edge's *fields*, which is where the parallel-edge
-// refusal pushes multiplicity, so whoever fixes this has to choose
-// between the two remedies knowing both — and Task 7, which adds no
-// column and rewrites no index, is not where that choice is cheapest.
-// What Task 7 did do is stop the surface from implying a guarantee that
-// is not there: relations.upsert's own description says an edge is
-// last-writer-wins.
-//
-// **This decision and UpsertRelation's refusal of parallel edges are one
-// pair, and must be revisited as a pair.** Read alone each is defensible
-// and neither is being reversed here; read together they compound.
-// Forbidding two edges of one type between one ordered pair *pushes
-// multiplicity into an edge's fields* — that is the escape hatch
-// UpsertRelation offers by name, `passages: ["door", "vent"]` on a
-// single `connects_to` — and this decision then leaves exactly those
+// **It did not exist until 0009, and this is what changed.** `relations`
+// carried no version column, so an edge was last-writer-wins: two
+// designers editing one edge's fields at once both succeeded and the
+// second overwrote the first, silently, with nothing — not the caller,
+// not a subscriber, not the row — recording that a write had been lost.
+// That was documented rather than hidden, and it was documented as one
+// half of a pair with UpsertRelation's refusal of parallel edges:
+// forbidding two edges of one type between one ordered pair *pushes
+// multiplicity into an edge's fields* — `passages: ["door", "vent"]` on a
+// single `connects_to` — and the old decision then left exactly those
 // fields with no concurrency protection at all. A list two designers
-// extend at the same time is the textbook lost update, and it is the
-// example the other decision leans on. Verified, not reasoned about:
-// two upserts of the same triple with `{"note":"A"}` then `{"note":"B"}`
-// hit one row id, the second wins whole, no error is raised and the two
-// `relation.upserted` events are indistinguishable, so nothing in the
-// system — not the caller, not a subscriber, not the row — records that
-// a write was lost. Entity fields never had this exposure: they have
-// `version`, and an entity is where multiplicity would otherwise have
-// gone.
+// extend at the same time is the textbook lost update.
 //
-// So the escape hatch is real but lossy under concurrent editing, which
-// is a smaller claim than the one the other doc comment makes on its
-// own. The migration is still unwritten — Task 7 declined it, above — and
-// whoever opens either question should read the other first: adding
-// `version` here makes the parallel-edge refusal cost what it was
-// assumed to cost, and relaxing the uniqueness index instead would make
-// this decision moot. Neither is a Task 5 change and neither was a Task
-// 7 change — one is a migration, the other rewrites the ON CONFLICT
-// target that makes a re-seed idempotent.
+// **The pair is now resolved on this side**: edges get the same
+// compare-and-set every other write in this repository has, so the escape
+// hatch the parallel-edge refusal offers costs what it was always assumed
+// to cost. The other half stands unchanged and needs no revisiting for
+// this reason — an edge is still identified by (type, source, target), a
+// re-seed still updates rather than duplicating, and relaxing that index
+// is a separate question about modelling rather than about concurrency.
 type RelationInput struct {
-	TypeKey string
-	Source  Ref
-	Target  Ref
-	Fields  map[string]any
-	Actor   Actor
+	TypeKey         string
+	Source          Ref
+	Target          Ref
+	Fields          map[string]any
+	ExpectedVersion *int32
+	Actor           Actor
 }
 
 // RelationFilter narrows a relation listing. Every field is optional;
 // the zero value lists the game's edges.
+//
+// Invalid is EntityFilter.Invalid for edges, and it is what makes 0009's
+// flag findable: nil lists both, true lists only the edges a relation
+// type's schema edit stopped fitting, false only the ones that still fit.
+// A flag nothing can query for is a flag nobody can act on, which is why
+// this field and the column landed in the same change.
 //
 // Cursor is the NextCursor of a previous call, and belongs to the game
 // and the filter it was issued for. EntityPage carries the whole
@@ -108,6 +94,7 @@ type RelationInput struct {
 // cannot be forged into another game's rows.
 type RelationFilter struct {
 	TypeKey  string
+	Invalid  *bool
 	SourceID *uuid.UUID
 	TargetID *uuid.UUID
 	Cursor   string
@@ -135,13 +122,16 @@ type RelationPage struct {
 // It is BulkWrite's edge counterpart; see that type for the argument
 // about what a success report should and should not carry.
 //
-// **It has no Version, and that is a decision rather than an omission.**
-// relations has no version column at all — an edge is identified by its
-// triple and the last writer of its fields wins, which RelationInput's
-// own doc comment records together with what it would take to change.
-// So the only things here a caller cannot derive from what it sent are
-// the edge's own id, which is what RemoveRelation takes, and the two
-// endpoint ids its refs resolved to.
+// **Version is here for the reason BulkWrite.Version is**: it is the
+// value ExpectedVersion takes on the next edit of this edge, nothing else
+// reports it, and re-reading a row to learn the version of a write you
+// just made is a round trip the write already knew the answer to. This
+// comment used to record its absence as a decision — edges had no version
+// column — and 0009 is what changed that.
+//
+// The rest a caller cannot derive from what it sent is the edge's own id,
+// which is what RemoveRelation takes, and the two endpoint ids its refs
+// resolved to.
 //
 // TypeKey is the *stored* spelling, for the reason upsertedRelation
 // exists.
@@ -150,6 +140,7 @@ type RelationWrite struct {
 	ID       uuid.UUID `json:"id"`
 	SourceID uuid.UUID `json:"source_id"`
 	TargetID uuid.UUID `json:"target_id"`
+	Version  int32     `json:"version"`
 }
 
 // RelationBulkResult reports what a batch of edges did.
@@ -214,12 +205,13 @@ func (u upsertedRelation) event() relationEvent {
 // put the multiplicity in the edge's own fields, which is what edge
 // fields are for — one `connects_to` from room A to room B carrying
 // `passages: ["door", "vent"]` rather than two identical edges nothing
-// tells apart. **That second escape hatch is qualified by RelationInput's
-// decision that edges carry no version**: the list it hands the problem
-// to is unprotected against a concurrent extension, and the loss is
-// silent. The two decisions are recorded there as one pair, because
-// changing either changes what the other costs; both stand, and Task 7
-// owns any migration. **Self-loops are allowed**: source and target may be the
+// tells apart. **That second escape hatch used to be qualified by the
+// absence of a version on edges** — the list it handed the problem to was
+// unprotected against a concurrent extension, and the loss was silent.
+// 0009 closed that half: an edge carries `version` and this upsert is a
+// compare-and-set, so two designers extending one `passages` list are
+// answered with a conflict rather than one of them being dropped. See
+// RelationInput. **Self-loops are allowed**: source and target may be the
 // same entity, and the index permits it. A championship that counts
 // towards itself is a modelling mistake a designer should be able to
 // make and then see; Maestro is not the arbiter of a game's graph, and
@@ -319,15 +311,52 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		return upsertedRelation{}, fmt.Errorf("encode fields: %w", err)
 	}
 
+	expected := noVersion
+	if in.ExpectedVersion != nil {
+		expected = *in.ExpectedVersion
+	}
+
+	// Read under the row lock, so the version this caller is told about is
+	// the one its own write will meet — the same rule and the same reason
+	// as upsertEntityWith's locked read. An edge has no key of its own, so
+	// there is no respelling to check here and the version is the whole
+	// content of the check.
+	existing, err := q.GetRelationByEdgeForUpdate(ctx, dbq.GetRelationByEdgeForUpdateParams{
+		ProjectID:      projectID,
+		RelationTypeID: relType.ID,
+		SourceID:       source.row.ID,
+		TargetID:       target.row.ID,
+	})
+	switch {
+	case err == nil:
+		if in.ExpectedVersion == nil || *in.ExpectedVersion != existing.Version {
+			return upsertedRelation{}, &VersionConflictError{Current: existing.Version}
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+		// Creation: no version to match, nothing to lock.
+	default:
+		return upsertedRelation{}, fmt.Errorf("lookup relation: %w", err)
+	}
+
 	row, err := q.UpsertRelation(ctx, dbq.UpsertRelationParams{
 		ProjectID:        projectID,
 		RelationTypeID:   relType.ID,
 		SourceID:         source.row.ID,
 		TargetID:         target.row.ID,
 		Fields:           encoded,
+		ExpectedVersion:  expected,
 		UpdatedByUserID:  in.Actor.UserID,
 		UpdatedByTokenID: in.Actor.TokenID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The guarded DO UPDATE matched nothing: between the locked read
+		// above and this statement another writer created or advanced the
+		// edge. That is reachable even with the lock held, because on the
+		// creation path there is no row to lock — two creators race into
+		// the unique index and the loser arrives here.
+		return upsertedRelation{}, conflictOnRelationEdge(ctx, q, projectID,
+			relType.ID, source.row.ID, target.row.ID)
+	}
 	if err != nil {
 		if mapped := ActorConstraintViolation(err); errors.Is(mapped, ErrActorNotInGame) {
 			return upsertedRelation{}, mapped
@@ -338,6 +367,28 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 		return upsertedRelation{}, fmt.Errorf("upsert relation: %w", err)
 	}
 	return upsertedRelation{row: row, typeKey: relType.Key}, nil
+}
+
+// conflictOnRelationEdge re-reads an edge whose guarded upsert matched no
+// row and reports the version that actually stands in the way.
+//
+// It is conflictOnEntityKey for edges, minus its respelling arm: an edge
+// has no key of its own, so a stale version is the only thing a failed
+// guard can mean. The re-read is what makes the reported number the one
+// the caller has to merge onto, rather than the one it was holding.
+func conflictOnRelationEdge(ctx context.Context, q *dbq.Queries,
+	projectID, relationTypeID, sourceID, targetID uuid.UUID,
+) error {
+	row, err := q.GetRelationByEdge(ctx, dbq.GetRelationByEdgeParams{
+		ProjectID:      projectID,
+		RelationTypeID: relationTypeID,
+		SourceID:       sourceID,
+		TargetID:       targetID,
+	})
+	if err != nil {
+		return fmt.Errorf("re-read relation after a failed upsert: %w", err)
+	}
+	return &VersionConflictError{Current: row.Version}
 }
 
 // edgeParentViolation recognises a write refused because one of an edge's
@@ -500,6 +551,7 @@ func (s *Service) UpsertRelations(ctx context.Context, projectID uuid.UUID, item
 		reports = append(reports, RelationWrite{
 			TypeKey: w.typeKey, ID: w.row.ID,
 			SourceID: w.row.SourceID, TargetID: w.row.TargetID,
+			Version: w.row.Version,
 		})
 	}
 	return RelationBulkResult{Succeeded: rows, Written: reports, Failed: failed}, err
@@ -574,6 +626,7 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	limit := relationPageSize(f.Limit)
 	params := dbq.ListRelationsParams{
 		ProjectID: projectID,
+		Invalid:   f.Invalid,
 		SourceID:  f.SourceID,
 		TargetID:  f.TargetID,
 		Limit:     limit,
@@ -599,8 +652,13 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 		typePart = relType.ID.String()
 	}
 
+	// The invalid filter is part of the fingerprint, exactly as it is on
+	// the two entity listings: every filter of a listing shares one sort
+	// order, so a cursor carried from "the invalid edges" to "all edges"
+	// would page perfectly and answer a different question.
 	fingerprint := fingerprintOf(projectID.String(), "relations", typePart,
-		endpointFilterPart(f.SourceID), endpointFilterPart(f.TargetID))
+		endpointFilterPart(f.SourceID), endpointFilterPart(f.TargetID),
+		invalidFilterPart(f.Invalid))
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
 		return RelationPage{}, err

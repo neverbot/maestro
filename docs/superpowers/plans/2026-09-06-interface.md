@@ -2027,7 +2027,7 @@ designer learns the difference.
 
 **The negative half.**
 
-- [ ] Tests: `anAbsentColourSlotIsDashedAndUnfilled` — assert
+- [x] Tests: `anAbsentColourSlotIsDashedAndUnfilled` — assert
   `fill === "none"` and the dashed outline, plus a legend row with the
   `unset` kind; `anAbsentSizeSlotTakesTheRangeMinimum`;
   `twoAbsencesAreTwoMarks` — a node missing both `color_by` and `size_by`,
@@ -2048,15 +2048,16 @@ designer learns the difference.
   since the catalogue refuses the combination at save time and the client
   never meets it; `theTwinAndTheSceneAgreeOnNodeCount`.
 
-- [ ] See red: return the range minimum for a *present* size slot and
+- [x] See red: return the range minimum for a *present* size slot and
   watch `sizeIsBoundedAtThreeTimes` and `sizeMapsAreaNotDiameter` fail;
   drop the dashed outline for an absent colour and watch its test name
   the node; put the ambiguity mark on the slot and watch its assertion
   find a per-slot mark.
 
-- [ ] Hand check: a hundred nodes coloured by an eleven-value slot. Do
-  eight hues plus a hatch read at 11px, and is the hatched tail legible
-  as *a tail* rather than as a ninth colour?
+- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+  a hundred nodes coloured by an eleven-value slot. Do eight hues plus a
+  hatch read at 11px, and is the hatched tail legible as *a tail* rather
+  than as a ninth colour?
 
 ```bash
 git add internal/web/static/render/graph.js internal/web/jstest/render_graph_test.mjs \

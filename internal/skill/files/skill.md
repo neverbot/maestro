@@ -9,11 +9,10 @@ Maestro records the **content design** of a game: what a player can be,
 where they can go, what they can do and what they unlock. It is not a
 task tracker and there is no kanban here.
 
-Maestro ships **no built-in game vocabulary**. There is no Quest, no
-Zone, no Class, no Circuit. A game declares its own, and that is the
-product rather than a gap. You will declare a vocabulary before you can
-write anything, and the shape you choose is the thing that is expensive
-to change later.
+Maestro ships **no built-in game vocabulary**. There is no Quest, no Zone,
+no Class, no Circuit. A game declares its own, and that is the product
+rather than a gap. You will declare a vocabulary before you can write
+anything, and the shape you choose is expensive to change later.
 
 Every tool's full contract is in that tool's own description, which your
 client already holds. These pages teach what no single description can:
@@ -24,8 +23,7 @@ calls later.
 
 Call `whoami` first. It says who you act for and which single game your
 token is bound to, and the slug it answers with is that game's address —
-the value the optional `game` argument on every other tool is checked
-against.
+the value the optional `game` argument on every other tool is checked against.
 
 One token, one game. A `scope_violation` is the answer to a request that
 names a different game, not a bug to route around. Ask the human for the
@@ -158,3 +156,13 @@ changed under you unless you changed it.
 
 Nothing in this bundle is required, and a game none of its examples
 matches is the normal case.
+
+## 8. Installing and updating
+
+`whoami` reports `skill_bundle_version`: the version of these pages the
+server would serve now. Matching the manifest beside your installed copy
+means you are current; otherwise call `skill.install`, fetch the zip its
+descriptor points at with your own HTTP tool, extract it over the install
+directory, and record the new version. **Then tell the human to restart
+the application that loads you**: most runtimes read a skills directory
+once, at session start, so the pages in effect are the ones you replaced.

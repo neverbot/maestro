@@ -15,6 +15,7 @@ import (
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
+	"github.com/neverbot/maestro/internal/skill"
 	"github.com/neverbot/maestro/internal/views"
 )
 
@@ -77,6 +78,14 @@ type WhoamiOutput struct {
 	ProjectID   *uuid.UUID `json:"project_id,omitempty"`
 	ProjectSlug string     `json:"project_slug,omitempty"`
 	ProjectName string     `json:"project_name,omitempty"`
+	// SkillBundleVersion is the content hash of the skill bundle this
+	// server would serve now, read from skill.Version() — the same
+	// source skill.install's bundle_version is read from, so the two
+	// cannot disagree. It is on whoami, the call an agent makes first,
+	// because that is the only moment at which "the pages I installed
+	// three months ago are stale" can be discovered before they are
+	// acted on.
+	SkillBundleVersion string `json:"skill_bundle_version"`
 }
 
 // GameOutput is the shape returned by the games.get tool and, nested in
@@ -174,9 +183,10 @@ func MCPWhoami(ctx context.Context, deps MCPDeps, caller Caller) (WhoamiOutput, 
 		return WhoamiOutput{}, err
 	}
 	out := WhoamiOutput{
-		UserID:      user.ID,
-		DisplayName: user.DisplayName,
-		IsAdmin:     user.IsAdmin,
+		UserID:             user.ID,
+		DisplayName:        user.DisplayName,
+		IsAdmin:            user.IsAdmin,
+		SkillBundleVersion: skill.Version(),
 	}
 	if projectID, ok := caller.ScopedProject(); ok {
 		project, err := deps.Projects.ByID(ctx, projectID)
@@ -440,7 +450,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 			"REST routes take in /api/games/{game}/…, what /g/{game} shows a designer, and " +
 			"the value the optional `game` argument on every other tool is checked against. " +
 			"project_id is returned too and is not an address: nothing on either surface " +
-			"takes it.",
+			"takes it.\n\n" +
+			"**skill_bundle_version is the version of the skill bundle this server would " +
+			"serve now.** Compare it against the manifest beside your installed copy: the " +
+			"same value means your pages are current, a different one means skill.install " +
+			"has a newer bundle than the one you are reading.",
 		OutputSchema: whoamiOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, _ uuid.UUID, _ whoamiInput) (WhoamiOutput, error) {
@@ -490,6 +504,13 @@ func (s *Server) newMCPServer() *mcp.Server {
 	if deps.Analysis != nil {
 		s.addAnalysisTools(srv, deps)
 	}
+
+	// skill.install, unconditionally: the bundle is embedded in the
+	// binary, so there is no service whose absence could make it
+	// unanswerable, and an instance that could not tell an agent where
+	// its own instructions are would be an instance every agent meets
+	// uninstructed.
+	s.addSkillTools(srv, deps)
 
 	return srv
 }
@@ -549,6 +570,13 @@ func (s *Server) mcpHandler() http.Handler {
 		}
 		setNoStoreHeaders(w)
 		r.Body = http.MaxBytesReader(w, r.Body, maxMCPRequestBodyBytes)
+		// The origin this request arrived on, carried on the context for
+		// skill.install: a tool handler is handed a context and never an
+		// *http.Request, and a download_url an agent has to guess the
+		// host of is a download_url an agent cannot fetch. Absent, the
+		// descriptor falls back to a path-only URL — see
+		// externalBaseURLFrom.
+		r = r.WithContext(withExternalBaseURL(r.Context(), s.externalBaseURLFor(r)))
 		s.mcp.ServeHTTP(w, r)
 	})
 }
@@ -593,13 +621,14 @@ var gamesListOutputSchema = &jsonschema.Schema{
 
 var whoamiOutputSchema = &jsonschema.Schema{
 	Type:     "object",
-	Required: []string{"user_id", "display_name", "is_admin"},
+	Required: []string{"user_id", "display_name", "is_admin", "skill_bundle_version"},
 	Properties: map[string]*jsonschema.Schema{
-		"user_id":      stringSchema(),
-		"display_name": stringSchema(),
-		"is_admin":     boolSchema(),
-		"project_id":   stringSchema(),
-		"project_slug": stringSchema(),
-		"project_name": stringSchema(),
+		"user_id":              stringSchema(),
+		"display_name":         stringSchema(),
+		"is_admin":             boolSchema(),
+		"project_id":           stringSchema(),
+		"project_slug":         stringSchema(),
+		"project_name":         stringSchema(),
+		"skill_bundle_version": stringSchema(),
 	},
 }

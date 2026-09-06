@@ -139,3 +139,24 @@ func ErrorCodesForTest() []string {
 		errCodeSemanticsUndeclared, errCodeForbidden,
 	}
 }
+
+// SignedSkillURLForTest mints a download URL with this server's own
+// process key, the way skill.install does. It exists for
+// skill_install_test.go, which cannot otherwise produce a signature at
+// all — which is the point of the key, and the reason the tests that
+// prove a *foreign* signature is refused have to be able to mint one
+// from a second server.
+func (s *Server) SignedSkillURLForTest(base string, exp int64) string {
+	return signedSkillURL(s.skillURLKey, base, exp)
+}
+
+// SkillURLSignatureForTest is the raw signature over one path and one
+// expiry, for the test that presents a signature minted for a different
+// path.
+func (s *Server) SkillURLSignatureForTest(path string, exp int64) string {
+	return signSkillURL(s.skillURLKey, path, exp)
+}
+
+// SkillZipPathForTest is the download route, so a test names it from the
+// same constant the handler and the signer do.
+func SkillZipPathForTest() string { return skillZipPath }

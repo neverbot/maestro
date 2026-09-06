@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/neverbot/maestro/internal/config"
@@ -201,9 +202,42 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 
 	inv, err := s.q.CreateInvite(ctx, params)
 	if err != nil {
+		if merr := mapInviteInsertError(err); merr != nil {
+			return "", InviteSummary{}, merr
+		}
 		return "", InviteSummary{}, fmt.Errorf("create invite: %w", err)
 	}
 	return token, inviteSummaryFrom(inv), nil
+}
+
+// mapInviteInsertError narrows a foreign-key violation from
+// CreateInvite's insert to ErrInviteRequestInvalid, exactly the way
+// mapAPITokenInsertError (tokens.go) and projects.mapMembershipInsertError
+// already narrow their own: by constraint name, not by SQLSTATE 23503
+// alone, so a future unrelated foreign key on this table cannot be
+// misreported as "bad request". Returns nil when err is neither, so the
+// caller falls through to its own generic wrap.
+//
+// **This was the one insert of the three that never got the treatment**,
+// and it is reachable by the same race the other two are: an owner
+// inviting someone into a game a co-owner is deleting at that moment
+// resolved their membership a round trip earlier, so the project row can
+// be gone by the time this insert runs. Unnarrowed, that answered 500 —
+// a lost race reported as a fault in this server, when what the caller
+// needs to be told is that the game is gone.
+func mapInviteInsertError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		return nil
+	}
+	switch pgErr.ConstraintName {
+	case "invites_project_id_fkey":
+		return fmt.Errorf("%w: that game no longer exists", ErrInviteRequestInvalid)
+	case "invites_created_by_fkey":
+		return fmt.Errorf("%w: the account creating this invite no longer exists", ErrInviteRequestInvalid)
+	default:
+		return nil
+	}
 }
 
 // RedeemInvite consumes an invite and creates the account it grants. When

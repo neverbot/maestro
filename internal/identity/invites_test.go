@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
@@ -1256,5 +1257,60 @@ func TestARevokedInviteListsAsRevoked(t *testing.T) {
 	// Still listed — revocation keeps the audit trail — and flagged.
 	if len(listed) != 1 || !listed[0].Revoked {
 		t.Fatalf("a revoked invite lists as %+v, want one row with revoked true", listed)
+	}
+}
+
+// TestInviteForAVanishedGameIsRefusedNotAFault provokes the foreign-key
+// violation rather than constructing it: the game is really created,
+// really deleted, and the insert really fails against Postgres, which is
+// what makes this a statement about the path and not only about the
+// mapping.
+//
+// It is the race an owner meets when a co-owner deletes the game between
+// their membership check and this insert. Before mapInviteInsertError,
+// the raw SQLSTATE 23503 reached internal/web unrecognised and was
+// answered 500 — a caller told this server broke, when what happened is
+// that the thing they named is gone.
+func TestInviteForAVanishedGameIsRefusedNotAFault(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	projSvc := projects.New(pool)
+	ctx := context.Background()
+
+	owner, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := projSvc.Delete(ctx, project.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	_, _, err = svc.CreateInvite(ctx, identity.InviteRequest{
+		ProjectID: &project.ID, Role: "editor", CreatedBy: &owner.ID,
+	})
+	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
+		t.Fatalf("CreateInvite for a deleted game = %v, want ErrInviteRequestInvalid", err)
+	}
+}
+
+// TestInviteByAVanishedAccountIsRefusedNotAFault is the other constraint
+// on the same insert, carried in the same step rather than left for the
+// next reader to find: invites.created_by references users, so an admin
+// whose own account was deleted mid-request hits it exactly the way the
+// game half above does.
+func TestInviteByAVanishedAccountIsRefusedNotAFault(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	gone := uuid.New()
+
+	_, _, err := svc.CreateInvite(context.Background(), identity.InviteRequest{CreatedBy: &gone})
+	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
+		t.Fatalf("CreateInvite by an unknown account = %v, want ErrInviteRequestInvalid", err)
 	}
 }

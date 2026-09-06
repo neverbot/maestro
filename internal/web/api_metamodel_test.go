@@ -302,6 +302,103 @@ func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
 	}
 }
 
+// TestTheRenameRoutesMirrorTheirTools is what stops the REST rename from
+// being a mirror that compiles and is never called: two surfaces, one
+// core each, and the browser's route is the half a mirror most easily
+// gets wrong.
+//
+// It drives both renames through HTTP and asserts what the tool asserts
+// — the row keeps its id and picks up the new key — plus the two
+// refusals whose status codes are this surface's own addition: a taken
+// destination is 400 invalid_input, and a stale version is 409.
+func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
+	f := newRESTFixture(t)
+
+	declare := func(key string) string {
+		rec := f.as(t, http.MethodPost, "/types", map[string]any{
+			"key": key, "label": key, "label_plural": key + "s",
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("declare %q = %d: %s", key, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			ID string `json:"id"`
+		}
+		decodeBody(t, rec, &out)
+		return out.ID
+	}
+	questID := declare("quest")
+	declare("zone")
+
+	rec := f.as(t, http.MethodPost, "/types/rename", map[string]any{
+		"from": "quest", "to": "mission", "expected_version": 1,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename = %d: %s", rec.Code, rec.Body.String())
+	}
+	var renamed struct {
+		ID      string `json:"id"`
+		Key     string `json:"key"`
+		Version int32  `json:"version"`
+	}
+	decodeBody(t, rec, &renamed)
+	if renamed.ID != questID || renamed.Key != "mission" || renamed.Version != 2 {
+		t.Fatalf("the rename answered %+v, want the same id under the new key at version 2",
+			renamed)
+	}
+	if got := f.as(t, http.MethodGet, "/types/by-key/quest", nil); got.Code != http.StatusNotFound {
+		t.Fatalf("the old key = %d, want 404: the type moved, it was not copied", got.Code)
+	}
+
+	// A taken destination is the caller's own argument, so 400 rather
+	// than the 409 a version conflict gets.
+	taken := f.as(t, http.MethodPost, "/types/rename", map[string]any{
+		"from": "mission", "to": "zone", "expected_version": 2,
+	})
+	if taken.Code != http.StatusBadRequest {
+		t.Fatalf("renaming onto a taken key = %d, want 400: %s", taken.Code, taken.Body.String())
+	}
+	var problem wireError
+	decodeBody(t, taken, &problem)
+	if problem.Error != "invalid_input" || len(problem.Details.Fields) == 0 ||
+		problem.Details.Fields[0].Path != "to" {
+		t.Fatalf("the refusal is %+v, want invalid_input reported at `to`", problem)
+	}
+
+	stale := f.as(t, http.MethodPost, "/types/rename", map[string]any{
+		"from": "mission", "to": "quest", "expected_version": 1,
+	})
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("a stale version = %d, want 409: %s", stale.Code, stale.Body.String())
+	}
+	var conflict wireError
+	decodeBody(t, stale, &conflict)
+	if conflict.Details.CurrentVersion == nil || *conflict.Details.CurrentVersion != 2 {
+		t.Fatalf("the conflict is %+v, want the version to merge onto", conflict)
+	}
+
+	// The relation-type twin, over its own route.
+	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
+		"key": "available_to", "label": "Available to",
+	}); rec.Code != http.StatusOK {
+		t.Fatalf("declare the relation type = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = f.as(t, http.MethodPost, "/relation-types/rename", map[string]any{
+		"from": "available_to", "to": "usable_by", "expected_version": 1,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename the relation type = %d: %s", rec.Code, rec.Body.String())
+	}
+	var movedEdgeType struct {
+		Key     string `json:"key"`
+		Version int32  `json:"version"`
+	}
+	decodeBody(t, rec, &movedEdgeType)
+	if movedEdgeType.Key != "usable_by" || movedEdgeType.Version != 2 {
+		t.Fatalf("the relation type answered %+v, want usable_by at version 2", movedEdgeType)
+	}
+}
+
 // TestARouteShapedKeyIsStillAddressable is decision 1 of this task,
 // proved rather than argued: row keys permit `new`, `index`, `id`,
 // `null`, `games` and `types`, so the route shape must not put a key in
@@ -312,7 +409,14 @@ func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
 // themselves, which are perfectly legal keys too.
 func TestARouteShapedKeyIsStillAddressable(t *testing.T) {
 	f := newRESTFixture(t)
-	keys := []string{"new", "index", "id", "null", "games", "types", "by-key", "by-id", "search"}
+	// `rename` joins the list with types.rename: the rename route is
+	// POST /types/rename, a literal sibling of the collection route, so
+	// a type keyed `rename` is exactly the collision the by-key
+	// discriminator exists to make impossible. A route added without a
+	// discriminator would make this key unreachable and nothing else
+	// would fail.
+	keys := []string{"new", "index", "id", "null", "games", "types", "by-key", "by-id",
+		"search", "rename"}
 	for _, key := range keys {
 		rec := f.as(t, http.MethodPost, "/types", map[string]any{
 			"key": key, "label": key, "label_plural": key + "s",

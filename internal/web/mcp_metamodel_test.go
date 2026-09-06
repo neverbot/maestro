@@ -188,6 +188,12 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 			_, err := web.MCPTypesRemove(ctx, f.deps, f.caller, f.other, web.TypesRemoveInput{Key: "circuit"})
 			return err
 		},
+		"types.rename": func() error {
+			_, err := web.MCPTypesRename(ctx, f.deps, f.caller, f.other, web.TypesRenameInput{
+				From: "circuit", To: "track", ExpectedVersion: ptrInt32Web(1),
+			})
+			return err
+		},
 		"relation_types.upsert": func() error {
 			_, err := web.MCPRelationTypesUpsert(ctx, f.deps, f.caller, f.other, web.RelationTypesUpsertInput{
 				Key: "races_on", Label: "races on",
@@ -204,6 +210,13 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 		},
 		"relation_types.remove": func() error {
 			_, err := web.MCPRelationTypesRemove(ctx, f.deps, f.caller, f.other, web.RelationTypesRemoveInput{Key: "races_on"})
+			return err
+		},
+		"relation_types.rename": func() error {
+			_, err := web.MCPRelationTypesRename(ctx, f.deps, f.caller, f.other,
+				web.RelationTypesRenameInput{
+					From: "races_on", To: "drives_on", ExpectedVersion: ptrInt32Web(1),
+				})
 			return err
 		},
 		"entities.upsert": func() error {
@@ -439,8 +452,9 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 	}
 	for _, want := range []string{
 		"games.counts",
-		"types.upsert", "types.list", "types.get", "types.remove",
-		"relation_types.upsert", "relation_types.list", "relation_types.get", "relation_types.remove",
+		"types.upsert", "types.list", "types.get", "types.remove", "types.rename",
+		"relation_types.upsert", "relation_types.list", "relation_types.get",
+		"relation_types.remove", "relation_types.rename",
 		"entities.upsert", "entities.list", "entities.get", "entities.remove",
 		"entities.repair",
 		"relations.upsert", "relations.list", "relations.remove", "relations.repair",

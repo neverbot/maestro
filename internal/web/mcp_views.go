@@ -142,14 +142,26 @@ var viewsStaleDoc = "**A saved view whose game has moved is the normal case, not
 	"document nobody wrote."
 
 // viewsKeyDoc is the fact about keys an agent will otherwise discover by
-// trying, and it is filed as an open product question rather than
-// defended: this is what is true today.
-var viewsKeyDoc = "**A key is permanent.** There is no rename anywhere in this product — " +
-	"not for a view, not for an entity type, not for a relation type. views.upsert is " +
-	"addressed *by key*, so upserting under a new one creates a second view and leaves the " +
-	"first standing. Fixing a misspelled key means creating the new thing, moving what " +
-	"pointed at the old one, and deleting the old one: several calls, and the history and " +
-	"the version go with the row that is deleted. Spell keys deliberately the first time."
+// trying.
+//
+// **It used to say a key is permanent everywhere, and that stopped being
+// true**: types.rename and relation_types.rename move an entity type's
+// or a relation type's key, keeping the row, its id and its history. A
+// *view's* key has no rename, and that is what this paragraph is still
+// about — so it says which is which rather than repeating a blanket
+// claim the metamodel no longer honours. A description that told an
+// agent no rename exists would send it to the several-call workaround
+// for a job one call now does.
+var viewsKeyDoc = "**A view's key is permanent.** views.upsert is addressed *by key*, so " +
+	"upserting under a new one creates a second view and leaves the first standing. " +
+	"Fixing a misspelled view key means creating the new view, moving what pointed at the " +
+	"old one, and deleting the old one: several calls, and the history and the version go " +
+	"with the row that is deleted. Spell a view's key deliberately the first time.\n\n" +
+	"**Type keys are the exception.** types.rename and relation_types.rename move an " +
+	"entity type's or a relation type's key while keeping the row — its id, its history " +
+	"and its content — which is exactly why a saved view survives one: this view records " +
+	"the *id* of every type it names. What a rename leaves behind is the old spelling in " +
+	"this document, reported in `stale` on every run until the view is saved again."
 
 // --- Inputs ---
 

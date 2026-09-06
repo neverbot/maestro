@@ -513,9 +513,13 @@ surfaces now go through one assembly, so the page and the tool cannot
 report different numbers. Its cost does not grow with the game's
 content, which is why it has no page and no cursor.
 
-Schema — `types.list`, `types.get`, `types.upsert`, `types.remove`,
-`relation_types.list`, `relation_types.get`, `relation_types.upsert`,
+Schema — `types.list`, `types.get`, `types.upsert`, `types.rename`,
+`types.remove`, `relation_types.list`, `relation_types.get`,
+`relation_types.upsert`, `relation_types.rename`,
 `relation_types.remove`.
+
+The two `rename` tools were not in this spec's own list; see "A type can
+be renamed" below.
 
 A relation type's endpoint rules are stated and read back as entity type
 **keys** (`source_type_keys`, `target_type_keys`), not ids — see
@@ -610,7 +614,9 @@ the row decision above refuses it: two names for one thing cost every
 call site a decision and an "exactly one of" refusal path and buy a
 caller nothing. A game is not an exception to that rule — if anything it
 is the clearest case of it. A slug is unique per instance under a
-case-folding index, immutable (there is no rename), and already the
+case-folding index, immutable (this package offers no rename for a game
+slug — "A type can be renamed" below is about entity and relation type
+keys and nothing else), and already the
 address a human types; `validateSlug` refuses any slug that `uuid.Parse`
 accepts, so the two spellings can never be confused for one another.
 There is nothing a uuid can address here that a slug cannot. Nothing is
@@ -658,6 +664,76 @@ written under: the relation type's key and both endpoints as
 On REST the same change removed the last `by-id` segment: the content
 routes are `by-key` throughout, and an edge's two by-address routes are
 `GET`/`DELETE /relations/one` with the same five query parameters.
+
+### A type can be renamed
+
+**An entity type's key and a relation type's key can be changed, in one
+call, keeping the row.** `types.rename(from, to, expected_version)` and
+`relation_types.rename` update the catalogue row's `key` column and
+nothing else. Nothing else needs updating: entities, edges, endpoint
+rules, prose links and saved-view references all name a type by **id**,
+which a rename does not change.
+
+Before it, both type upserts were addressed by key and idempotent by it,
+so writing a different key created a *second* type and left the first
+standing. Fixing a misspelled handle meant declaring the new type,
+moving every entity onto it and deleting the old one: several calls, and
+the row's history, version and id went with the row that was deleted.
+
+**Why this is worth building rather than documenting permanence.** The
+machinery a rename needs was already built and idle. The views design
+(`2026-09-02-views-and-query-language-design.md` §6.1) resolves a saved
+view's type references *by id* precisely so a rename is transparent to
+the picture, and two of its eight staleness diagnostics —
+`entity_type_renamed` and `relation_type_renamed` — exist to report a
+stored query that still spells a type the old way. All of that shipped
+for a state no caller could produce; the rename is its producer.
+
+**Addressed by the old key, not by an id.** "Addressing" below decided
+that keys *replace* ids on this surface rather than sitting beside them,
+and a rename addressed by `from` keeps that intact — it also reads as
+what it is.
+
+The rules, each of which is a refusal a caller can act on:
+
+- **`expected_version` is required.** A rename advances the version, so
+  an unguarded one would land on top of an edit the caller never read,
+  and it would do it to the one column every other reader of the game
+  spells out loud. Stale is `version_conflict` with the current version,
+  as everywhere else.
+- **`from` is an address; `to` is a value.** `from` is matched without
+  regard to case, like every other by-key read; `to` is stored verbatim.
+- **A case-only respelling is refused** — `invalid_input` at `to`. The
+  uniqueness index is `(project_id, lower(key))`, so `quest` and `Quest`
+  are one address written two ways: such a rename would change no
+  address while announcing a change no reader can observe. This is the
+  same answer `keyRespellingError` gives on the write path and the same
+  answer `docs.move` gives for a document path; all three agree.
+- **A destination another type already holds is refused** —
+  `invalid_input` at `to`, naming the stored spelling when it differs. A
+  rename never merges two types.
+- **A `from` that names no type is `not_found`.**
+
+**It does not repair saved views, and that is the design.** A view that
+named the type keeps resolving by id and keeps reporting `*_renamed` at
+the pointer that has to change, until somebody saves it again with the
+new spelling. §6.4 of the views spec argues why: rewriting a stored
+query behind its author makes the next `expected_version` check pass
+against a document nobody wrote.
+
+**It also does not tidy `view_refs.ref_key`**, and that omission is
+load-bearing rather than laziness. Resolution by id fires only when the
+ref row and the stored document agree on the spelling — a disagreement
+is how a torn index is told from an ordinary one — so a rename that
+helpfully updated the index would make every affected view fall through
+to the by-key lookup and report its type **missing**: the feature
+causing the exact failure it exists to prevent. The two spellings move
+together or neither moves.
+
+**Entity keys and view keys have no rename.** An entity is referenced by
+id everywhere too, so one is addable; a view's key is not referenced by
+anything, so the several-call workaround costs a view nothing but its
+history. Neither was in scope here.
 
 ### Idempotency
 

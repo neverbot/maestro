@@ -17,42 +17,72 @@ import (
 // This file is staleness: a view saved against one vocabulary, run
 // against the next one.
 //
-// **A rename is performed here with an UPDATE, because the product has no
-// rename.** The plan's step 1 says to rename `requires` through
-// `relation_types.upsert`, and that call cannot do it: both type upserts
-// are addressed *by key* (EntityTypeInput and RelationTypeInput carry no
-// id), so upserting under a new key creates a second type and leaves the
-// first standing — which is a different scenario entirely, and one where
-// resolution by id would never be exercised. The rename these tests need
-// is the one a rename operation would perform when it is built, so it is
-// performed directly on the row here. That is also why the id-first
-// resolution matters before any such operation exists: it is what makes
-// the operation addable without breaking every saved view in a game.
+// **A rename is performed here through the product's own rename**, and
+// that is new: until types.rename existed these helpers ran a bare
+// UPDATE on the catalogue row, because both type upserts are addressed
+// by key and upserting under a new one creates a second type rather than
+// moving the first. The staged UPDATE was a fair imitation — a rename
+// moves the key column and nothing else — but an imitation is what it
+// was, and every staleness test in this file rested on it. They now
+// drive metamodel.RenameEntityType and metamodel.RenameRelationType, so
+// what the diagnostics report is the state the product can actually
+// produce. That is also the answer to why id-first resolution was built
+// before any rename existed: it is what made the operation addable
+// without breaking every saved view in a game.
+//
+// The service is called rather than the SQL kept beside it for the
+// reason a mirror that is never called is a mirror that compiles: a
+// rename that started tidying view_refs, or rewriting a stored query,
+// would leave these tests green if they went on staging their own.
 
 func (g *game) renameEntityType(t *testing.T, from, to string) {
 	t.Helper()
-	tag, err := g.pool.Exec(context.Background(),
-		`UPDATE entity_types SET key = $3 WHERE project_id = $1 AND lower(key) = lower($2)`,
-		g.projectID, from, to)
+	ctx := context.Background()
+	row, err := g.meta.EntityTypeByKey(ctx, g.projectID, from)
 	if err != nil {
-		t.Fatalf("rename entity type %s: %v", from, err)
+		t.Fatalf("read entity type %s before renaming it: %v", from, err)
 	}
-	if tag.RowsAffected() != 1 {
-		t.Fatalf("rename entity type %s changed %d rows", from, tag.RowsAffected())
+	if _, err := g.meta.RenameEntityType(ctx, g.projectID, metamodel.RenameInput{
+		From: from, To: to, ExpectedVersion: &row.Version,
+	}); err != nil {
+		t.Fatalf("rename entity type %s: %v", from, err)
 	}
 }
 
 func (g *game) renameRelationType(t *testing.T, from, to string) {
 	t.Helper()
-	tag, err := g.pool.Exec(context.Background(),
-		`UPDATE relation_types SET key = $3 WHERE project_id = $1 AND lower(key) = lower($2)`,
-		g.projectID, from, to)
+	ctx := context.Background()
+	row, err := g.meta.RelationTypeByKey(ctx, g.projectID, from)
 	if err != nil {
+		t.Fatalf("read relation type %s before renaming it: %v", from, err)
+	}
+	if _, err := g.meta.RenameRelationType(ctx, g.projectID, metamodel.RenameInput{
+		From: from, To: to, ExpectedVersion: &row.Version,
+	}); err != nil {
 		t.Fatalf("rename relation type %s: %v", from, err)
 	}
-	if tag.RowsAffected() != 1 {
-		t.Fatalf("rename relation type %s changed %d rows", from, tag.RowsAffected())
+}
+
+// entityTypeVersion and relationTypeVersion read the version a type
+// stands at, for a test that edits a type after renaming it. Counting
+// the writes instead was what these tests did while a rename was staged
+// with a bare UPDATE that moved no version; the real call moves one.
+func (g *game) entityTypeVersion(t *testing.T, key string) int32 {
+	t.Helper()
+	row, err := g.meta.EntityTypeByKey(context.Background(), g.projectID, key)
+	if err != nil {
+		t.Fatalf("read entity type %s: %v", key, err)
 	}
+	return row.Version
+}
+
+func (g *game) relationTypeVersion(t *testing.T, key string) int32 {
+	t.Helper()
+	row, err := g.meta.RelationTypeByKey(context.Background(), g.projectID, key)
+	if err != nil {
+		t.Fatalf("read relation type %s: %v", key, err)
+	}
+	return row.Version
 }
 
 // typeIDOf reads a declared type's id, which is what a deletion is
@@ -193,6 +223,137 @@ func TestARenameDoesNotRewriteTheStoredQuery(t *testing.T) {
 	if step["via"] != "requires" {
 		t.Fatalf("via = %v, want the spelling the author wrote", step["via"])
 	}
+}
+
+// TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey is the test
+// the rename operation exists to be held by, and it asserts a *negative*
+// about a call in another package: metamodel.RenameEntityType moves the
+// catalogue row and must not touch view_refs.
+//
+// **Why the hands-off is the load-bearing half.** storedID (stale.go)
+// resolves a reference by id only when the ref row and the stored query
+// agree on the spelling, because a disagreement is how a torn index —
+// refs written from a document this run is not holding — is told from an
+// ordinary one. A rename that helpfully tidied `ref_key` to the new
+// spelling would manufacture exactly that disagreement on every view
+// that names the type: storedID would answer nil, resolution would fall
+// through to the by-key lookup, find nothing under the old key, and the
+// view would report its type **missing** — the feature causing the exact
+// failure it exists to prevent, on views it was supposed to carry
+// through untouched.
+//
+// So the assertions are, in order: the ref row still spells the old key,
+// it still carries the same non-null type id, the stored document is
+// untouched at the same version, and the run therefore reports a rename
+// rather than a missing type and draws the picture it drew before.
+// Teaching the rename to update `ref_key` turns the last of those from
+// entity_type_renamed into entity_type_missing.
+func TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	g.save(t, "levels", `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"project":{"color_by":"min_level"}}`)
+	typeID := g.typeIDOf(t, KindEntityType, "quest")
+
+	before := g.refRow(t, "levels", "/from/0/type")
+	if before.key != "quest" || before.entityTypeID == nil || *before.entityTypeID != typeID {
+		t.Fatalf("before the rename the ref is %+v, want quest and the type's own id", before)
+	}
+
+	g.renameEntityType(t, "quest", "mission")
+
+	after := g.refRow(t, "levels", "/from/0/type")
+	if after.key != "quest" {
+		t.Fatalf("the rename rewrote the reference index to %q: the index and the stored "+
+			"document must go on agreeing on the old spelling, or storedID reads their "+
+			"disagreement as a torn index and every view that names this type reports it "+
+			"missing", after.key)
+	}
+	if after.entityTypeID == nil || *after.entityTypeID != typeID {
+		t.Fatalf("the ref points at %v, want the type's unchanged id (%s): resolution by "+
+			"id is the whole reason a rename is survivable", after.entityTypeID, typeID)
+	}
+
+	// The stored document is untouched and the view did not move: a
+	// rename that repaired the query would make the next
+	// expected_version check pass against a document nobody wrote.
+	stored, err := g.views.ViewByKey(ctx, g.projectID, "levels")
+	if err != nil {
+		t.Fatalf("read the view back: %v", err)
+	}
+	if stored.Version != 1 {
+		t.Fatalf("the view is at version %d, want 1: a rename writes no view", stored.Version)
+	}
+	if !strings.Contains(string(stored.Query), `"quest"`) {
+		t.Fatalf("the stored query is %s, want the spelling its author wrote", stored.Query)
+	}
+
+	// And the consequence the hands-off buys, which is what a caller
+	// actually sees: the view runs, whole, and says what moved.
+	res, err := g.views.RunView(ctx, g.projectID, "levels", RunRequest{})
+	if err != nil {
+		t.Fatalf("the renamed type must still resolve by id: %v", err)
+	}
+	if len(res.Nodes) != 3 {
+		t.Fatalf("the view drew %d nodes, want the 3 it drew before the rename", len(res.Nodes))
+	}
+	wants(t, res.Stale, Diagnostic{
+		Code: DiagEntityTypeRenamed, Pointer: "/from/0/type", Was: "quest", Now: "mission",
+	})
+}
+
+// TestARelationTypeRenameLeavesItsViewReferenceAloneToo carries the same
+// negative one step along, onto the other table and the other id column:
+// a shared decision honoured by one of two callers is a decision that
+// holds in one of two places.
+func TestARelationTypeRenameLeavesItsViewReferenceAloneToo(t *testing.T) {
+	g, _ := newGame(t)
+	g.save(t, "chain", chainView)
+	typeID := g.typeIDOf(t, KindRelationType, "requires")
+
+	g.renameRelationType(t, "requires", "depends_on")
+
+	after := g.refRow(t, "chain", "/traverse/0/via/0")
+	if after.key != "requires" {
+		t.Fatalf("the rename rewrote the reference index to %q; see "+
+			"TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey", after.key)
+	}
+	if after.relationTypeID == nil || *after.relationTypeID != typeID {
+		t.Fatalf("the ref points at %v, want the relation type's unchanged id (%s)",
+			after.relationTypeID, typeID)
+	}
+	res, err := g.views.RunView(t.Context(), g.projectID, "chain", RunRequest{})
+	if err != nil {
+		t.Fatalf("the renamed relation type must still resolve by id: %v", err)
+	}
+	wants(t, res.Stale, Diagnostic{
+		Code: DiagRelationTypeRenamed, Pointer: "/traverse/0/via/0",
+		Was: "requires", Now: "depends_on",
+	})
+}
+
+// storedRef is one row of the dependency index, read straight out of the
+// table rather than through this package's own reader: the claim under
+// test is about what is *stored*, and a reader that folded or repaired
+// anything would hide exactly the defect these tests look for.
+type storedRef struct {
+	key            string
+	entityTypeID   *uuid.UUID
+	relationTypeID *uuid.UUID
+}
+
+func (g *game) refRow(t *testing.T, viewKey, pointer string) storedRef {
+	t.Helper()
+	var got storedRef
+	err := g.pool.QueryRow(context.Background(), `
+		SELECT r.ref_key, r.entity_type_id, r.relation_type_id
+		FROM view_refs r JOIN views v ON v.id = r.view_id
+		WHERE v.project_id = $1 AND lower(v.key) = lower($2) AND r.pointer = $3`,
+		g.projectID, viewKey, pointer).Scan(&got.key, &got.entityTypeID, &got.relationTypeID)
+	if err != nil {
+		t.Fatalf("read the view ref at %s: %v", pointer, err)
+	}
+	return got
 }
 
 // TestARenamedEntityTypeStillJudgesTheProjectionThatDrawsIt is the rule
@@ -890,7 +1051,10 @@ func TestARenamedRelationTypeStillJudgesTheEdgeLabelItDraws(t *testing.T) {
 	// One edit that renames the type and drops the field the label reads.
 	g.renameRelationType(t, "requires", "depends_on")
 	if _, err := g.meta.UpsertRelationType(t.Context(), g.projectID, metamodel.RelationTypeInput{
-		Key: "depends_on", Label: "Requires", ExpectedVersion: ptrInt32(2),
+		// The version the rename left behind, read rather than counted:
+		// a rename advances the version like any other write.
+		Key: "depends_on", Label: "Requires",
+		ExpectedVersion: ptrInt32(g.relationTypeVersion(t, "depends_on")),
 	}); err != nil {
 		t.Fatalf("drop the field: %v", err)
 	}
@@ -1015,7 +1179,9 @@ func TestARenamedTypeDoesNotSwitchOffTheProjectionsTypoCheck(t *testing.T) {
 		"project":{"color_by":"difficulty"}}`)
 	g.renameEntityType(t, "quest", "mission")
 	if _, err := g.meta.UpsertEntityType(t.Context(), g.projectID, metamodel.EntityTypeInput{
-		Key: "mission", Label: "Quest", LabelPlural: "Quests", ExpectedVersion: ptrInt32(1),
+		Key: "mission", Label: "Quest", LabelPlural: "Quests",
+		// Read rather than counted: the rename above advanced it.
+		ExpectedVersion: ptrInt32(g.entityTypeVersion(t, "mission")),
 		Schema: metamodel.Schema{
 			{Key: "min_level", Type: metamodel.FieldNumber},
 			{Key: "tags", Type: metamodel.FieldListText},

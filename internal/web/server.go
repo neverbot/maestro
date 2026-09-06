@@ -328,10 +328,16 @@ func NewServer(opts Options) *Server {
 	// address relations.upsert writes it under.
 	s.registerContentRoute("GET /api/games/{game}/types", s.handleListTypes)
 	s.registerContentRoute("POST /api/games/{game}/types", s.handleUpsertType)
+	// A rename is a POST with a body and not a PATCH on the key segment:
+	// it names two keys, and only one of them can be in the path. Same
+	// shape, and the same argument, as the document move above it in
+	// this list.
+	s.registerContentRoute("POST /api/games/{game}/types/rename", s.handleRenameType)
 	s.registerContentRoute("GET /api/games/{game}/types/by-key/{key}", s.handleGetType)
 	s.registerContentRoute("DELETE /api/games/{game}/types/by-key/{key}", s.handleRemoveType)
 	s.registerContentRoute("GET /api/games/{game}/relation-types", s.handleListRelationTypes)
 	s.registerContentRoute("POST /api/games/{game}/relation-types", s.handleUpsertRelationType)
+	s.registerContentRoute("POST /api/games/{game}/relation-types/rename", s.handleRenameRelationType)
 	s.registerContentRoute("GET /api/games/{game}/relation-types/by-key/{key}", s.handleGetRelationType)
 	s.registerContentRoute("DELETE /api/games/{game}/relation-types/by-key/{key}", s.handleRemoveRelationType)
 	s.registerContentRoute("GET /api/games/{game}/entities", s.handleListEntities)

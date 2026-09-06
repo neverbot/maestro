@@ -1667,6 +1667,132 @@ func (q *Queries) PruneEntityTypeFromEndpointLists(ctx context.Context, arg Prun
 	return items, nil
 }
 
+const renameEntityType = `-- name: RenameEntityType :one
+UPDATE entity_types
+SET key                 = $1::text,
+    version             = version + 1,
+    updated_by_user_id  = $2::uuid,
+    updated_by_token_id = $3::uuid
+WHERE project_id = $4::uuid
+  AND lower(key) = lower($5::text)
+  AND version = $6::integer
+RETURNING id, project_id, key, label, label_plural, description, color, icon, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
+`
+
+type RenameEntityTypeParams struct {
+	ToKey            string
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+	ProjectID        uuid.UUID
+	FromKey          string
+	ExpectedVersion  int32
+}
+
+// The rename, addressed by the *old* key and guarded by the caller's
+// version, exactly as every other write in this file is guarded.
+//
+// **It is the one statement that writes entity_types.key.** The upsert
+// deliberately keeps `key` out of its SET list so that a re-seed under a
+// different casing cannot rewrite the handle a designer bookmarks; a
+// rename is the explicit, version-claimed call that says "change the
+// handle", and it changes nothing else. No child row is touched, because
+// no child row carries the key: entities, relations' endpoint lists and
+// view_refs all point at `id`, which this statement leaves alone. That
+// is the whole reason a rename can be one UPDATE.
+//
+// `lower(key) = lower(from_key)` addresses the row the way every other
+// read in this file does: `from` is an address, not a value being
+// stored, so a caller that reads `Quest` and renames `quest` finds the
+// same row rather than being told about a spelling it is not writing.
+//
+// The version is guarded here as well as compared in Go, for the reason
+// the upserts' guard exists: the Go check runs under this row's FOR
+// UPDATE lock and could not be raced today, and this clause is what
+// keeps that true if the lock is ever dropped. A guard that matches
+// nothing returns no row rather than an error.
+func (q *Queries) RenameEntityType(ctx context.Context, arg RenameEntityTypeParams) (EntityType, error) {
+	row := q.db.QueryRow(ctx, renameEntityType,
+		arg.ToKey,
+		arg.UpdatedByUserID,
+		arg.UpdatedByTokenID,
+		arg.ProjectID,
+		arg.FromKey,
+		arg.ExpectedVersion,
+	)
+	var i EntityType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.LabelPlural,
+		&i.Description,
+		&i.Color,
+		&i.Icon,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const renameRelationType = `-- name: RenameRelationType :one
+UPDATE relation_types
+SET key                 = $1::text,
+    version             = version + 1,
+    updated_by_user_id  = $2::uuid,
+    updated_by_token_id = $3::uuid
+WHERE project_id = $4::uuid
+  AND lower(key) = lower($5::text)
+  AND version = $6::integer
+RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
+`
+
+type RenameRelationTypeParams struct {
+	ToKey            string
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+	ProjectID        uuid.UUID
+	FromKey          string
+	ExpectedVersion  int32
+}
+
+// The relation type's twin of RenameEntityType; that statement's comment
+// carries the argument and it is not restated. The only difference is
+// the table, and that a relation type is named by nothing but its own
+// id anywhere else in the schema, so this too is one UPDATE.
+func (q *Queries) RenameRelationType(ctx context.Context, arg RenameRelationTypeParams) (RelationType, error) {
+	row := q.db.QueryRow(ctx, renameRelationType,
+		arg.ToKey,
+		arg.UpdatedByUserID,
+		arg.UpdatedByTokenID,
+		arg.ProjectID,
+		arg.FromKey,
+		arg.ExpectedVersion,
+	)
+	var i RelationType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.Description,
+		&i.SourceTypeIds,
+		&i.TargetTypeIds,
+		&i.SemanticRole,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
 const searchEntities = `-- name: SearchEntities :many
 SELECT e.id, e.project_id, e.entity_type_id, e.key, e.name, e.fields, e.invalid, e.version, e.search, e.created_at, e.updated_at, e.updated_by_user_id, e.updated_by_token_id,
        ts_rank(e.search, plainto_tsquery('simple', $1::text)) AS rank,

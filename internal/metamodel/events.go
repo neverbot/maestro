@@ -63,6 +63,23 @@ const (
 	eventTypeUpserted = "type.upserted"
 	eventTypeRemoved  = "type.removed"
 
+	// eventTypeRenamed fires from RenameEntityType once its transaction
+	// has committed, under the same gating as its two neighbours: a
+	// rename is a change to the game's vocabulary, which is exactly what
+	// eventTypeUpserted's argument above is about, and a subscriber that
+	// may read every type on demand loses nothing by being told one
+	// changed handle.
+	//
+	// **It is a kind of its own rather than another type.upserted**, and
+	// that is the whole reason it exists. Its payload is the only one in
+	// this package that carries two spellings (typeRenameEvent), because
+	// a subscriber holding the type under its old key cannot act on an
+	// event that names only the new one — it has no way to know which of
+	// its entries to drop. A `type.upserted` carrying only the new key
+	// would leave a stale entry under the old key in every client that
+	// caches by key, which is every client that renders a type list.
+	eventTypeRenamed = "type.renamed"
+
 	// eventEntityUpserted and eventEntityRemoved fire from UpsertEntity,
 	// UpsertEntities and RemoveEntity once their transaction has
 	// committed.
@@ -173,6 +190,13 @@ const (
 	// explain, and this is the one event that warns it.
 	eventRelationTypeUpserted = "relation_type.upserted"
 	eventRelationTypeRemoved  = "relation_type.removed"
+
+	// eventRelationTypeRenamed is eventTypeRenamed for the edge
+	// vocabulary, with the same payload and the same argument for being
+	// a kind of its own; see it. The gating is this pair's, not that
+	// pair's, for the reason all four gating constants below are four
+	// and not two.
+	eventRelationTypeRenamed = "relation_type.renamed"
 
 	// eventRelationUpserted and eventRelationRemoved fire from
 	// UpsertRelation, UpsertRelations and RemoveRelation once their

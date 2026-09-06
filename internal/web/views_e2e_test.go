@@ -783,38 +783,37 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 	// --- Step 8: the vocabulary moves under the saved document.
 	//
 	// **The plan's step 8 says to rename available_to through
-	// relation_types.upsert. There is no rename.** Both type upserts are
-	// addressed by key and idempotent by it — neither input carries an id
-	// — so writing a different key creates a *second* type and leaves the
-	// first standing, and there is no UPDATE … SET key anywhere in
-	// internal/db/queries. Making that call would exercise nothing this
-	// step is about: resolution by id would never be reached, and the
-	// view would go on drawing correctly beside a type nobody uses.
+	// relation_types.upsert, and that call still cannot do it**: both
+	// type upserts are addressed by key and idempotent by it, so writing
+	// a different key creates a *second* type and leaves the first
+	// standing. What this walk does instead is the call that was built
+	// for the job — `relation_types.rename`, over the same MCP surface
+	// as every other step here, with the version it read.
 	//
-	// So the state is reached the only way the product can reach it, on
-	// the row, exactly as internal/views' own staleness tests do — and
-	// the reason is written here rather than on a helper, because the
-	// honesty of this walk is the thing being tested. What it stands in
-	// for is a rename *operation* that does not exist yet; id-first
-	// resolution is what will let one be added without breaking every
-	// saved view in a game, which is why staleness was built before it.
+	// It used to be an UPDATE on the row, because no rename existed and
+	// the state had to be reached somehow. Driving the real tool is the
+	// point of this walk: the honesty of the whole file is that an agent
+	// could have made every call in it.
 	//
 	// **Only the catalogue moves.** The stored document and its ref row
-	// both keep the old spelling, which is the state a rename produces
-	// and the state this walk needs: tidying view_refs.ref_key to the new
-	// key while the documents keep the old one is read as a torn index,
-	// deliberately, and would report the type missing instead.
+	// both keep the old spelling, which is what a rename must leave
+	// behind: tidying view_refs.ref_key to the new key while the
+	// documents keep the old one is read as a torn index, deliberately,
+	// and would report the type missing instead.
 	//
-	// The deletion branch — the thing an agent really can do to a type —
+	// The deletion branch — the other thing an agent can do to a type —
 	// is step 11, and it is where on_stale earns its two spellings.
-	tag, err := w.pool.Exec(ctx,
-		`UPDATE relation_types SET key = 'usable_by' WHERE project_id = $1 AND key = 'available_to'`,
-		w.game)
+	beforeRename, err := web.MCPRelationTypesGet(ctx, w.deps, w.agent, w.game,
+		web.RelationTypesGetInput{Key: "available_to"})
 	if err != nil {
-		t.Fatalf("rename available_to: %v", err)
+		t.Fatalf("read available_to before renaming it: %v", err)
 	}
-	if tag.RowsAffected() != 1 {
-		t.Fatalf("the rename changed %d rows", tag.RowsAffected())
+	if _, err := web.MCPRelationTypesRename(ctx, w.deps, w.agent, w.game,
+		web.RelationTypesRenameInput{
+			From: "available_to", To: "usable_by",
+			ExpectedVersion: &beforeRename.Version,
+		}); err != nil {
+		t.Fatalf("rename available_to: %v", err)
 	}
 
 	// **A rename is reported and still drawn, and the plan's own step 8

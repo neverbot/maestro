@@ -1042,10 +1042,13 @@ omission as an oversight.
   discomfort is real: recorded as O1.
 - **No repair action for a rename.** The views spec §6.4 imagines a
   "one-click update references" that bumps the version like any other
-  edit. It edits an author's document, it needs a diff shown before it
-  is applied, and the *rename operation it exists to repair does not
-  exist yet* (the views plan closes on exactly that). Building the
-  repair before the wound is speculative. O6.
+  edit. It edits an author's document and it needs a diff shown before
+  it is applied, so it stays out of scope here. *The second half of this
+  entry has expired*: it read "the rename operation it exists to repair
+  does not exist yet", and `types.rename` and `relation_types.rename`
+  now exist, so the repair is no longer speculative — a designer can
+  produce a `*_renamed` banner in one call. O6 is now a question about
+  when, not about whether.
 - **No analysis.** Cycles, unreachable content, orphans, routes — all of
   sub-project 6. §4.4's "3 edges run against the ranking" is a drawing
   artefact honestly reported, not an analysis, and must not grow into
@@ -1105,8 +1108,12 @@ belong to the analysis sub-project, which is already building reachability
 over the same graph.
 
 **O6 — who writes the rename repair** (§9), and does it belong to the
-interface at all, given that the rename operation it repairs does not
-exist?
+interface at all? The half of this question that asked whether the wound
+was reachable is answered: `types.rename` and `relation_types.rename`
+ship, so a designer can rename a type and meet the banner. What is still
+open is whether the one-click repair belongs to this interface or to the
+agent surface, and what diff it shows before it edits an author's
+document.
 
 **O7 — `view.upserted` for a viewer.** §6.3 refuses to swap the picture
 automatically. For a *viewer* who cannot have composed the edit and has

@@ -82,6 +82,39 @@ SET label               = excluded.label,
 WHERE entity_types.version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
+-- name: RenameEntityType :one
+-- The rename, addressed by the *old* key and guarded by the caller's
+-- version, exactly as every other write in this file is guarded.
+--
+-- **It is the one statement that writes entity_types.key.** The upsert
+-- deliberately keeps `key` out of its SET list so that a re-seed under a
+-- different casing cannot rewrite the handle a designer bookmarks; a
+-- rename is the explicit, version-claimed call that says "change the
+-- handle", and it changes nothing else. No child row is touched, because
+-- no child row carries the key: entities, relations' endpoint lists and
+-- view_refs all point at `id`, which this statement leaves alone. That
+-- is the whole reason a rename can be one UPDATE.
+--
+-- `lower(key) = lower(from_key)` addresses the row the way every other
+-- read in this file does: `from` is an address, not a value being
+-- stored, so a caller that reads `Quest` and renames `quest` finds the
+-- same row rather than being told about a spelling it is not writing.
+--
+-- The version is guarded here as well as compared in Go, for the reason
+-- the upserts' guard exists: the Go check runs under this row's FOR
+-- UPDATE lock and could not be raced today, and this clause is what
+-- keeps that true if the lock is ever dropped. A guard that matches
+-- nothing returns no row rather than an error.
+UPDATE entity_types
+SET key                 = sqlc.arg('to_key')::text,
+    version             = version + 1,
+    updated_by_user_id  = sqlc.narg('updated_by_user_id')::uuid,
+    updated_by_token_id = sqlc.narg('updated_by_token_id')::uuid
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND lower(key) = lower(sqlc.arg('from_key')::text)
+  AND version = sqlc.arg('expected_version')::integer
+RETURNING *;
+
 -- name: GetEntityTypeByKey :one
 SELECT * FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text);
@@ -499,6 +532,21 @@ SET label               = excluded.label,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
 WHERE relation_types.version = sqlc.arg('expected_version')::integer
+RETURNING *;
+
+-- name: RenameRelationType :one
+-- The relation type's twin of RenameEntityType; that statement's comment
+-- carries the argument and it is not restated. The only difference is
+-- the table, and that a relation type is named by nothing but its own
+-- id anywhere else in the schema, so this too is one UPDATE.
+UPDATE relation_types
+SET key                 = sqlc.arg('to_key')::text,
+    version             = version + 1,
+    updated_by_user_id  = sqlc.narg('updated_by_user_id')::uuid,
+    updated_by_token_id = sqlc.narg('updated_by_token_id')::uuid
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND lower(key) = lower(sqlc.arg('from_key')::text)
+  AND version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
 -- name: GetRelationTypeByKey :one

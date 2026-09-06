@@ -364,6 +364,28 @@ func (s *Server) handleUpsertType(w http.ResponseWriter, r *http.Request, caller
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleRenameType is the REST mirror of types.rename. It is a POST with
+// a body rather than a PATCH on the key segment, for the reason
+// handleMoveDoc gives about a document move: the call names *two* keys,
+// and putting one of them in the path and the other in the body would
+// make the request read as an edit of the row at that path rather than
+// as the move it is.
+func (s *Server) handleRenameType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	var in TypesRenameInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := typesRename(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleGetType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !s.requireContentService(w) {
 		return
@@ -395,6 +417,25 @@ func (s *Server) handleRemoveType(w http.ResponseWriter, r *http.Request, caller
 }
 
 // --- Relation types ---
+
+// handleRenameRelationType is the REST mirror of
+// relation_types.rename, in the same shape and for the same reason as
+// handleRenameType.
+func (s *Server) handleRenameRelationType(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireContentService(w) {
+		return
+	}
+	var in RelationTypesRenameInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := relationTypesRename(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
 func (s *Server) handleListRelationTypes(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
 	if !s.requireContentService(w) {

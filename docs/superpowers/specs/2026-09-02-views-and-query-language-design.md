@@ -902,6 +902,14 @@ and to the agent editing it. But `view_refs` records the resolved
 
 1. Resolve through `view_refs` by id. A renamed type still resolves,
    because a rename does not change its id.
+
+   *(`types.rename` and `relation_types.rename` are the operation that
+   produces this state. They landed after this section was written —
+   §6.1 and §6.4 were designed for a rename that did not exist yet, and
+   the two `*_renamed` diagnostics had no producer until then. Nothing
+   here changed to accommodate them; that is the point of having
+   resolved by id from the start. See "A type can be renamed" in
+   `2026-08-31-core-and-metamodel-design.md` §4.)*
 2. If the id is null (the type was deleted), fall back to the key. A
    type deleted and re-created under the same key resolves, which is
    the common shape of a designer fixing a mistake.
@@ -955,6 +963,20 @@ version bump makes optimistic concurrency lie — the next
 Repair is an explicit `views.upsert` by an agent, or a one-click
 "update references" in the UI, both of which bump the version like any
 other edit.
+
+**The rename operation must not tidy `view_refs.ref_key` either**, and
+that is a stronger constraint than "leave the query alone". Resolution
+by id fires only when the ref row and the stored query agree on the
+spelling, because a disagreement between them is how an index written
+from *another* version of the document is detected. A rename that moved
+`ref_key` to the new spelling while leaving the documents alone would
+manufacture that disagreement on every affected view: each would fall
+through to the by-key lookup, find nothing under the old key, and report
+its type `*_missing` — a rename breaking exactly the views this design
+exists to carry through. The two spellings move together or neither
+moves, and `types.rename` moves neither.
+`TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey`
+(`internal/views/stale_test.go`) holds it.
 
 ### 6.5 Deleting a type that views depend on
 

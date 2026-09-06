@@ -638,8 +638,10 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 		{"views.run", "text, number or bool", "a parameter cannot feed an enum or a list field"},
 		{"views.run", "Every other comparison against a declared field — equality included",
 			"what a condition actually costs"},
-		{"views.upsert", "A key is permanent", "there is no rename in this product"},
-		{"views.get", "A key is permanent", "the tool a caller reads a key from says so too"},
+		{"views.upsert", "A view's key is permanent", "there is no rename for a view"},
+		{"views.upsert", "types.rename", "a *type* key can be renamed, and an agent told " +
+			"otherwise would take the several-call workaround for a one-call job"},
+		{"views.get", "A view's key is permanent", "the tool a caller reads a key from says so too"},
 	} {
 		if !strings.Contains(descriptions[want.tool], want.phrase) {
 			t.Errorf("%s does not say %q — %s", want.tool, want.phrase, want.why)

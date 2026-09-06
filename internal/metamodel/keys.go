@@ -38,6 +38,16 @@ const maxRowKeyLen = 64
 // far likelier to be a typo than a deliberate rename of a handle other
 // rows and documents already refer to.
 //
+// **A deliberate rename of a type's key has its own call**, and it does
+// not weaken any of the above: RenameEntityType and RenameRelationType
+// (rename.go) move the catalogue row under an explicit version claim,
+// and they refuse a *case-only* respelling for the same reason
+// keyRespellingError refuses one — the folding index makes the two
+// spellings one address, so such a "rename" would change no address
+// while announcing a change no reader can observe. Entity keys and view
+// keys have no rename; a type's key is the exception, because a saved
+// view resolves a type by id and can therefore survive one.
+//
 // What the pattern does exclude earns its place:
 //
 //   - No dot, slash, space or percent, so a key drops into a REST path

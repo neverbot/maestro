@@ -156,6 +156,39 @@ type TypesRemoveInput struct {
 	Cascade bool   `json:"cascade,omitempty"`
 }
 
+// TypesRenameInput changes one entity type's key, and
+// RelationTypesRenameInput does the same for a relation type.
+//
+// **Addressed by the old key, not by an id**, which is the same
+// addressing decision Metamodel 14 made for every removal on this
+// surface: keys replace ids here rather than sitting beside them, and
+// `from` plus `to` says the whole operation in its own arguments.
+//
+// ExpectedVersion is required and is a plain requirement rather than an
+// optional guard: a rename advances the version, so an unguarded one
+// would land on top of an edit the caller never read. It is a pointer
+// because absent and zero are different things to say, and absent is
+// invalid_input at its own path rather than a guess.
+type TypesRenameInput struct {
+	ScopedArgs
+	From            string `json:"from"`
+	To              string `json:"to"`
+	ExpectedVersion *int32 `json:"expected_version"`
+}
+
+// RelationTypesRenameInput is TypesRenameInput for a relation type. It
+// is a separate type rather than the same struct reused, for the reason
+// DocsLinkAddInput and DocsLinkRemoveInput are separate: the SDK reports
+// a validation failure against the input schema's *name*, and one name
+// covering two tools tells an agent which shape was wrong but not which
+// call.
+type RelationTypesRenameInput struct {
+	ScopedArgs
+	From            string `json:"from"`
+	To              string `json:"to"`
+	ExpectedVersion *int32 `json:"expected_version"`
+}
+
 // RelationTypesUpsertInput is the argument shape of
 // relation_types.upsert.
 //
@@ -171,10 +204,22 @@ type TypesRemoveInput struct {
 //
 // **Keys replace ids here rather than being accepted beside them.** The
 // argument is in the tool description and in the plan; the short of it
-// is that a key is not a nickname for an id in this game — it is
-// immutable, unique per game, and the address every other tool on this
-// surface speaks — so a second spelling would buy a caller nothing and
-// cost every reader of this struct a decision.
+// is that a key is not a nickname for an id in this game — it is unique
+// per game and the address every other tool on this surface speaks — so
+// a second spelling would buy a caller nothing and cost every reader of
+// this struct a decision.
+//
+// **The argument used to say "immutable" and no longer can**:
+// relation_types.rename moves a type's key. It survives the loss, and
+// this is where to say why. The stored column is uuid[], so a renamed
+// endpoint type keeps satisfying every rule that names it; what a
+// rename changes is the *spelling* a caller reads back here, which is
+// the same spelling it would read from relation_types.get. A key is
+// still a total replacement for an id on this surface — there is
+// nothing an id can address that a key cannot — and it is now a
+// spelling that can move, which is exactly why the answer states the
+// endpoint rules as keys rather than expecting a caller to have cached
+// them.
 //
 // The stored column is still uuid[], which does not change and should
 // not: an id is what the entity type removal's prune can remove from an
@@ -282,9 +327,10 @@ type EntitiesGetInput struct {
 // just written cost it a resolving read first.
 //
 // Accepting both was considered and rejected. A key here is not a
-// nickname for an id: it is immutable (the first spelling stored stands,
-// and a respelling is refused after the write), unique per game and
-// type, and therefore a *total* replacement rather than a convenience —
+// nickname for an id: it is stable (the first spelling stored stands, a
+// respelling is refused, and only an explicit types.rename moves it),
+// unique per game and type, and therefore a *total* replacement rather
+// than a convenience —
 // there is nothing an id can address that a key cannot. What a second
 // spelling would cost is real and paid at every call site: an
 // "exactly one of" refusal path, two branches in every description, and
@@ -834,6 +880,60 @@ func typesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uui
 		return TypeRemovedOutput{}, err
 	}
 	return removeTypeReportingViews(ctx, deps, projectID, views.KindEntityType, row.ID, in.Cascade)
+}
+
+// MCPTypesRename implements types.rename.
+func MCPTypesRename(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRenameInput) (TypeDetailOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return TypeDetailOutput{}, err
+	}
+	return typesRename(ctx, deps, caller, projectID, in)
+}
+
+// typesRename is MCPTypesRename without the token-binding check, for the
+// REST mirror (api_metamodel.go), whose caller is a person whose
+// standing requireProject already resolved. See this file's header.
+func typesRename(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRenameInput) (TypeDetailOutput, error) {
+	row, err := deps.Metamodel.RenameEntityType(ctx, projectID, metamodel.RenameInput{
+		From:            in.From,
+		To:              in.To,
+		ExpectedVersion: in.ExpectedVersion,
+		Actor:           actorOf(caller),
+	})
+	if err != nil {
+		return TypeDetailOutput{}, err
+	}
+	return typeDetailOf(row)
+}
+
+// MCPRelationTypesRename implements relation_types.rename.
+func MCPRelationTypesRename(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRenameInput) (RelationTypeDetailOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return RelationTypeDetailOutput{}, err
+	}
+	return relationTypesRename(ctx, deps, caller, projectID, in)
+}
+
+// relationTypesRename is MCPRelationTypesRename without the
+// token-binding check, for the REST mirror. Its answer carries the
+// endpoint rules as keys, exactly as relation_types.upsert's does, so a
+// caller that renamed a type reads back the same shape it would have
+// read back from an edit.
+func relationTypesRename(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRenameInput) (RelationTypeDetailOutput, error) {
+	row, err := deps.Metamodel.RenameRelationType(ctx, projectID, metamodel.RenameInput{
+		From:            in.From,
+		To:              in.To,
+		ExpectedVersion: in.ExpectedVersion,
+		Actor:           actorOf(caller),
+	})
+	if err != nil {
+		return RelationTypeDetailOutput{}, err
+	}
+	names, err := entityTypeKeys(ctx, deps, projectID)
+	if err != nil {
+		return RelationTypeDetailOutput{}, err
+	}
+	return relationTypeDetailOf(row, names)
 }
 
 // MCPRelationTypesUpsert implements relation_types.upsert.
@@ -1615,6 +1715,32 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 		"rewriting every flagged row with the values it already holds would either do " +
 		"nothing or quietly back-fill a default nobody asked for."
 
+	// The half of both rename descriptions that is one decision written
+	// once: what a rename does *not* do. Both tools carry it verbatim,
+	// because a designer renaming an entity type and a designer renaming
+	// a relation type meet the same diagnostic afterwards and must not
+	// have to find the explanation under only one of the two names.
+	renameLimits := "**A rename does not repair the saved views that name this type, and " +
+		"that is the design rather than a limitation.** A view records the *id* of every " +
+		"type its query names, so a renamed type still resolves and the picture is " +
+		"unchanged; what the stored query still holds is the old spelling, and every run " +
+		"of that view reports `entity_type_renamed` or `relation_type_renamed` in " +
+		"`stale`, naming both spellings at the JSON pointer that has to change. It goes " +
+		"on reporting it until somebody saves the view again with the new spelling " +
+		"(views.upsert). Nothing rewrites a stored query behind its author: a silent " +
+		"repair would make the next expected_version check pass against a document " +
+		"nobody wrote.\n\n" +
+		"It rewrites nothing else either, and nothing else needs rewriting: entities, " +
+		"edges, endpoint rules, prose links and view references all name the type by id, " +
+		"which a rename does not change. The row keeps its id, its history and its " +
+		"content, which is the whole difference from the workaround it replaces — " +
+		"declare the new type, move every row, delete the old one.\n\n" +
+		"**A key differing only in capitalisation is not a different key.** Keys are " +
+		"matched without regard to case, so renaming `quest` to `Quest` is refused as " +
+		"invalid_input at `to`: it would change no address while announcing a change no " +
+		"reader can observe. Renaming onto a key another type already holds is refused " +
+		"at `to` as well — a rename never merges two types."
+
 	repairLoop := fmt.Sprintf("**Loop until it stops repairing.** limit defaults to %d and is "+
 		"capped at %d. There is no cursor and none is needed: a repaired row leaves "+
 		"the selection, so calling again works on what the last call did not fix. "+
@@ -1687,6 +1813,19 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "types.rename",
+		Description: "Give an entity type a different key, keeping the type. `from` is the " +
+			"key it has now — matched without regard to case, like every other key on this " +
+			"surface — and `to` is the key it will have. expected_version is required and " +
+			"must match the version you read, so a rename cannot land on top of an edit " +
+			"you never saw.\n\n" + renameLimits,
+		OutputSchema: typeDetailOutputSchema,
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in TypesRenameInput) (TypeDetailOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPTypesRename(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "types.remove",
 		Description: "Remove an entity type, addressed by its key — the same handle " +
 			"types.get takes and entities.upsert writes against. Without cascade, a type that still has entities is refused as " +
@@ -1753,6 +1892,18 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesGetInput) (RelationTypeDetailOutput, error) {
 		caller, _ := CallerFrom(ctx)
 		return MCPRelationTypesGet(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "relation_types.rename",
+		Description: "Give a relation type a different key, keeping the type and every edge " +
+			"of it. `from` is the key it has now, `to` is the key it will have, and " +
+			"expected_version is required and must match the version you read.\n\n" +
+			renameLimits,
+		OutputSchema: relationTypeDetailOutputSchema,
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesRenameInput) (RelationTypeDetailOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPRelationTypesRename(ctx, deps, caller, projectID, in)
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{

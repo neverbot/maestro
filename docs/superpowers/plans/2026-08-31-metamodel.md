@@ -9718,6 +9718,103 @@ round-tripping a declaration through its own answer.
 
 ---
 
+### Metamodel 16: a type cannot be renamed, and the staleness machinery built for a rename has no producer
+
+**Status: done.** Two new domain calls, two SQL statements, two MCP
+tools, two REST routes, two event kinds, and the staleness helpers in
+`internal/views` moved off a staged `UPDATE` onto the real operation.
+
+**What was wrong.** Both type upserts are addressed by key and
+idempotent by it, so writing a different key created a *second* type and
+left the first standing. There was no rename anywhere in the product,
+and `internal/views` said so in the tool description an agent reads.
+Fixing a misspelled handle meant declaring the new type, moving every
+entity onto it and deleting the old one: several calls, and the row's
+id, history and version went with the row that was deleted.
+
+**Why it was worth building rather than documenting permanence.** The
+machinery a rename needs was already built and idle. A saved view
+resolves its type references *by id* precisely so a rename is
+transparent to the picture, and two of the eight staleness diagnostics —
+`entity_type_renamed` and `relation_type_renamed` — exist to report a
+stored query that still spells a type the old way. All of that shipped
+for a state no caller could produce; `internal/views/stale_test.go` had
+to run `UPDATE entity_types SET key = …` on the row to reach it, and
+`views_e2e_test.go` did the same in the middle of a walk whose whole
+claim is that an agent could have made every call in it. Both now drive
+the real tools.
+
+**The shape.** `types.rename(from, to, expected_version)` and
+`relation_types.rename`, addressed by the **old key** rather than by an
+id — Metamodel 14 decided keys *replace* ids on this surface rather than
+sitting beside them, and addressing a rename by `from` keeps that intact
+and reads as what it is. One `UPDATE` of one column under the row's own
+version, plus an event carrying the row's id and both spellings. No
+child row is touched because no child row carries the key: entities,
+edges, endpoint lists and `view_refs` all point at the id.
+
+**Five refusals, none of them new in kind:**
+
+- `expected_version` is required — a rename advances the version, so an
+  unguarded one lands on top of an edit the caller never read. This is
+  the rule `internal/markdown`'s `Move` states for a document.
+- A **case-only respelling** is refused, and this was not a fresh
+  judgement: the unique index folds case, so the two spellings are one
+  address written two ways, and the "rename" would change no address
+  while announcing a change no reader can observe. `keyRespellingError`
+  refuses it on the write path and `docs.move` refuses it for a path;
+  this makes three, and the fold comparison runs *after* validation in
+  all three, because `strings.EqualFold` means what SQL's `lower()`
+  means only once both values are known to be ASCII.
+- A **taken destination** is `invalid_input` at `to`, naming the stored
+  spelling when it differs — the shape a duplicate is refused with, and
+  deliberately not a conflict: no amount of retrying frees a key.
+- A `from` that names no type is `not_found`, judged before the version.
+- The two ends are locked in **folded-key order**, not from-then-to
+  order, so two opposite renames cannot deadlock —
+  `internal/markdown`'s `lockBothEnds` again, over a different table.
+  `TestTwoOppositeRenamesDoNotDeadlock` is red (SQLSTATE 40P01, within
+  two rounds) with the ordering removed.
+
+**What a rename deliberately does not do, and the trap inside it.** It
+does not repair saved views: a view that named the type keeps resolving
+by id and keeps reporting `*_renamed` until it is saved again. The tool
+descriptions say so, because a caller that met the diagnostic without
+being told would read it as a defect.
+
+The trap is one step further in. A rename must **not** tidy
+`view_refs.ref_key` to the new spelling. `staleness.storedID` resolves
+by id only when the ref row and the stored query agree on the spelling,
+since a disagreement is how an index written from another version of the
+document is detected — so a helpful tidy would make every affected view
+fall through to the by-key lookup, find nothing, and report its type
+**missing**: the feature causing the exact failure it exists to prevent.
+`TestARenameLeavesTheViewReferenceIndexSpellingTheOldKey` asserts the
+ref row still spells the old key, still carries the same non-null type
+id, and that the run therefore reports a rename and draws its three
+nodes. Teaching the SQL to update `view_refs` was measured: that test
+fails on the spelling, and
+`TestARenamedEntityTypeStillJudgesTheProjectionThatDrawsIt` fails with
+`query_stale: this view names the entity type "quest" and this game no
+longer has it`.
+
+**Everything that assumed a type key never changes**, found and carried:
+`viewsKeyDoc` (the views tools' own description, which told an agent no
+rename exists anywhere), its guard in `mcp_views_test.go`,
+`keys.go`'s row-key policy, `RelationTypesUpsertInput`'s and
+`EntitiesRemoveInput`'s "a key is immutable" arguments for keys
+replacing ids, the two staleness helpers in `internal/views`, step 8 of
+the views end-to-end walk, and this repository's own specs. A **view's**
+key and an **entity's** key still have no rename, and the descriptions
+now say which is which rather than making a blanket claim the metamodel
+no longer honours.
+
+**One route-shape consequence.** `POST /api/games/{game}/types/rename`
+is a literal sibling of the collection route, so a type keyed `rename`
+is exactly the collision the `by-key` discriminator exists to make
+impossible. `rename` joins the word list in
+`TestARouteShapedKeyIsStillAddressable`.
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:

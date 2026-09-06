@@ -158,3 +158,29 @@ func TestTheVendoredRuntimeLoads(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/vendor_modules_test.mjs")
 }
+
+// TestTheDataClientRules drives internal/web/jstest/client_test.mjs,
+// which imports the real internal/web/static/client.js and drives it the
+// way a page does: a stubbed fetch, a stubbed event stream carrying real
+// text/event-stream bytes, and an injected clock so the 750ms coalescing
+// window costs a millisecond of test time.
+//
+// It is the whole of the evidence for the module every other module in
+// this front end depends on. What it holds has no Go counterpart and
+// could not have one: that forty position events inside one window are
+// one re-read, that a re-read waits for a drag, for an unacknowledged
+// write and for a hidden tab, that a payload never becomes state, that a
+// position write carries an entity's type and key and never its uuid,
+// that a heartbeat comment fires no decision, that the stream reconnects
+// when the server closes it — which internal/web/events.go does to every
+// stream, on purpose, after five minutes — and that a refusal reaches
+// the caller as the server's own code, pointer and message, character
+// for character.
+//
+// internal/web/static_client_test.go holds the two halves of that no Go
+// test could see at runtime either: that no string literal in the module
+// is a sentence, and that no other module of ours fetches at all.
+func TestTheDataClientRules(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/client_test.mjs")
+}

@@ -418,6 +418,19 @@ check("theFooterKeepsTheQueryAndTheLayoutApart", () => {
   assertEqual(withLayout.maxDepth, 1, "and reports the depth that was reached, not one that was asked for");
 });
 
+check("aRefusalCountsNothingBecauseItMeasuredNothing", () => {
+  const refused = frameFor({ view, error: staleRefusal, declarations });
+  assertEqual(refused.footer.nodes, null, "a refused run counted no nodes; it did not count zero");
+  assertEqual(refused.footer.edges, null, "nor zero edges");
+  assertEqual(refused.footer.durationMs, null, "and it timed nothing");
+  assertEqual(refused.footer.text, "", "so the strip is present and says nothing");
+  // The control: a run that really did match nothing says so, and the
+  // two states must not be spelled the same way.
+  const matchedNothing = frameFor({ view, envelope: emptyEnvelope, declarations, sets: ["zones"] });
+  assertEqual(matchedNothing.footer.nodes, 0, "a run that matched nothing counted zero");
+  assert(matchedNothing.footer.text.startsWith("0 nodes, 0 edges"), "and says so");
+});
+
 // --- The stack -------------------------------------------------------
 
 check("bannersKeepTheirFixedOrder", () => {

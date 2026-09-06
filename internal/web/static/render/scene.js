@@ -358,15 +358,31 @@ export function runAction(action, client, options = {}) {
 // `max_depth_reached` is measured and not declared (execute.go), so it
 // is reported as what was reached and never as what was asked for.
 export function footerFor(envelope, options = {}) {
-  const env = envelope && typeof envelope === "object" ? envelope : {};
-  const stats = env.stats && typeof env.stats === "object" ? env.stats : {};
+  const layoutMs = options.layoutMs === undefined || options.layoutMs === null
+    ? null
+    : countOf(options.layoutMs);
+  // A refused run measured nothing. The strip stays — it is always
+  // present — and it says nothing, because "0 nodes, 0 edges" beside a
+  // refusal reads exactly like an answer that matched nothing, which is
+  // a different thing that also happens here and must not be confused
+  // with it. Absent, not zero, for the same reason execute.go refuses to
+  // return an unplaced node at the origin.
+  if (!envelope || typeof envelope !== "object") {
+    return {
+      nodes: null,
+      edges: null,
+      maxDepth: null,
+      durationMs: null,
+      layoutMs,
+      css: "var(--muted)",
+      text: "",
+    };
+  }
+  const stats = envelope.stats && typeof envelope.stats === "object" ? envelope.stats : {};
   const nodes = countOf(stats.nodes);
   const edges = countOf(stats.edges);
   const maxDepth = countOf(stats.max_depth_reached);
   const durationMs = countOf(stats.duration_ms);
-  const layoutMs = options.layoutMs === undefined || options.layoutMs === null
-    ? null
-    : countOf(options.layoutMs);
   const parts = [
     `${count(nodes, "node", "nodes")}, ${count(edges, "edge", "edges")}`,
     `depth ${maxDepth}`,

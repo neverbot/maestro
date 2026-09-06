@@ -94,6 +94,21 @@ function assertEqual(actual, expected, message) {
   }
 }
 
+// assertSame compares identity and describes an element by what it is
+// rather than by JSON, which a DOM node's parent links make circular.
+function assertSame(actual, expected, message) {
+  if (actual !== expected) {
+    throw new Error(`${message}: got ${describe(actual)}, want ${describe(expected)}`);
+  }
+}
+
+function describe(node) {
+  if (node === null || node === undefined) return String(node);
+  if (typeof node !== "object" || typeof node.tagName !== "string") return JSON.stringify(node);
+  const className = node.getAttribute("class");
+  return `<${node.tagName}${className === null ? "" : ` class=${JSON.stringify(className)}`}>`;
+}
+
 function assertClose(actual, expected, message) {
   if (!(Math.abs(actual - expected) < 1e-9)) {
     throw new Error(`${message}: got ${actual}, want ${expected}`);
@@ -198,8 +213,8 @@ check("joinEdgesSeparatesStubs", () => {
   // one outcome.
   assertEqual(drawn.length, 1, "the edge whose two ends are in the picture is drawn");
   assertEqual(drawn[0].edge.id, "e-drawn", "and it is the one with both ends");
-  assertEqual(drawn[0].source, alpha, "with its endpoints resolved to the node objects");
-  assertEqual(drawn[0].target, beta, "both of them");
+  assertSame(drawn[0].source, alpha, "with its endpoints resolved to the node objects");
+  assertSame(drawn[0].target, beta, "both of them");
 
   assertEqual(stubs.length, 2, "and the two that leave the picture are stubs");
   assertDeepEqual(
@@ -211,8 +226,8 @@ check("joinEdgesSeparatesStubs", () => {
     !stubs.some((stub) => stub.edge.id === "e-drawn"),
     "and the drawn edge is in neither half twice",
   );
-  assertEqual(stubs[0].source, alpha, "a stub still resolves the end it has");
-  assertEqual(stubs[0].target, null, "and answers null for the one it does not");
+  assertSame(stubs[0].source, alpha, "a stub still resolves the end it has");
+  assertSame(stubs[0].target, null, "and answers null for the one it does not");
 
   // A node with no usable id is not an endpoint anybody can join to. If
   // it were indexed under `undefined` it would silently resolve every
@@ -424,7 +439,7 @@ check("sceneOrderIsPaintOrder", () => {
     ["layer layer-image", "layer layer-edges", "layer layer-nodes", "layer layer-labels", "layer layer-drag"],
     "the layers are five sibling groups in paint order",
   );
-  assertEqual(
+  assertSame(
     tree.world.childNodes[tree.world.childNodes.length - 1],
     tree.layers.get(LAYER_DRAG),
     "and the drag layer is last, so a dragged body paints over everything it crosses",
@@ -481,7 +496,7 @@ check("zoomAndPanMoveOneTransform", () => {
 
   const transformed = walk(tree.root).filter((element) => element.hasAttribute("transform"));
   assertEqual(transformed.length, 1, "pan and zoom are one transform on one element, and never two that can drift");
-  assertEqual(transformed[0], tree.world, "and it is the world group");
+  assertSame(transformed[0], tree.world, "and it is the world group");
   assertEqual(
     tree.world.getAttribute("transform"),
     "translate(10 20) scale(2)",
@@ -612,7 +627,7 @@ check("aDragTouchesOnlyTheDraggedSubtree", () => {
   assertEqual(drop.dx, 13, "with the offset it accumulated");
   assertEqual(drop.dy, -3, "in both axes");
   assertEqual(tree.layers.get(LAYER_DRAG).childNodes.length, 0, "the drag layer is emptied");
-  assertEqual(draggedRect.parentNode, tree.layers.get(LAYER_NODES), "and every element goes back to its own layer");
+  assertSame(draggedRect.parentNode, tree.layers.get(LAYER_NODES), "and every element goes back to its own layer");
   assertEqual(draggedRect.getAttribute("x"), "513", "with the offset baked into the coordinate it rode on");
   assertEqual(
     tree.nodes.get("zone/n7").shapes[0].element.getAttribute("x"),

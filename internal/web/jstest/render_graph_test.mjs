@@ -772,6 +772,28 @@ check("anEdgeToAnUnplacedNodeIsNotAStub", () => {
 
 // --- The joins -------------------------------------------------------
 
+check("aRelationFromANodeToItselfIsCountedRatherThanDropped", () => {
+  // The metamodel permits a relation from an entity to itself, and a
+  // straight line from a box to the same box has no length — so this
+  // vocabulary cannot draw one. Counting it is what keeps the picture
+  // and the twin from disagreeing about an answer they both received;
+  // drawing it needs a curved mark kind, which Task 7's rule says
+  // arrives together with the drag layer's answer for reshaping one.
+  const envelope = envelopeOf(
+    [node("a", { label: "Alpha" }), node("b", { label: "Beta" })],
+    [edge("id-a", "id-a"), edge("id-a", "id-b")],
+  );
+  const result = scene(envelope, {});
+  assertEqual(result.loops, 1, "the self-relation is counted");
+  assertEqual(marksOfClass(result, CLASS_EDGE).length, 1, "and only the other edge is drawn");
+  assertEqual(result.stubs.total, 0, "it does not lead outside the picture either");
+  assertEqual(
+    marksOfClass(result, CLASS_EDGE).length + result.stubs.total + result.loops,
+    twinFor(envelope).edges.rows.length,
+    "and the picture accounts for every edge row the twin has",
+  );
+});
+
 check("theTwinAndTheSceneAgreeOnNodeCount", () => {
   // Task 5 built the twin before the renderers so that this could be
   // asserted. A picture and a twin that disagree is a view telling two
@@ -807,9 +829,9 @@ check("theTwinAndTheSceneAgreeOnNodeCount", () => {
   // The edges as well, in both halves: an edge the twin has a row for is
   // drawn or leads outside.
   assertEqual(
-    marksOfClass(result, CLASS_EDGE).length + result.stubs.total,
+    marksOfClass(result, CLASS_EDGE).length + result.stubs.total + result.loops,
     twin.edges.rows.length,
-    "every edge row is a line in the picture or an edge that leaves it",
+    "every edge row is a line in the picture, an edge that leaves it, or a loop this vocabulary cannot draw",
   );
 
   // And the words agree: a node's label in the picture is the text the

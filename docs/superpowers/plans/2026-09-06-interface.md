@@ -2223,7 +2223,18 @@ git commit -m "feat(web): the graph renderer, absences marked twice where there 
     are not stubs either — the far end is in the answer, and calling it a
     stub would say the query did not draw something it did.
 
-15. **`sizeMapsAreaNotDiameter` is asserted twice, because the plan's
+15. **A relation from an entity to itself is counted rather than
+    silently dropped.** `relations` carries no constraint against one, so
+    a `graph` view can meet it, and a straight line from a box to the
+    same box has no length — this vocabulary cannot draw a loop. The
+    first version dropped it in a `continue` and nothing noticed, which
+    is a picture and a twin disagreeing about an answer they both
+    received. `scene.loops` counts them, the twin-agreement check
+    includes them in its arithmetic, and drawing them is left to the
+    renderer that adds a curved mark kind — with the drag layer's
+    reshaping answer beside it, which is Task 7's rule for exactly this.
+
+16. **`sizeMapsAreaNotDiameter` is asserted twice, because the plan's
     numbers cannot both be true of one scene.** "A value four times
     another produces twice the width" and "the area ratio is bounded at
     3" are two different statements: with a bounded range no two nodes in
@@ -2256,7 +2267,9 @@ the layout measured without the size scale
 (`theLayoutIsAskedForTheBoxThatIsDrawn`); the picture quietly dropping a
 node (*"every row the twin has is a box in the picture or a node the
 layout placed nowhere: got 3, want 4"*); the footer speaking a zero
-(*"and the strip is silent: … · 0 edges lead outside this picture"*); and
+(*"and the strip is silent: … · 0 edges lead outside this picture"*); a
+self-relation dropped instead of counted (*"the self-relation is counted:
+got 0, want 1"*); and
 both directions of the Go guard — a control renamed to a parameter the
 catalogue does not have, and a catalogue parameter left without one.
 

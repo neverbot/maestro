@@ -211,6 +211,8 @@ export function graphLayoutRequest(envelope, params = {}) {
 //              *"n edges lead outside this picture"*; `anchorless` is the
 //              part of it nothing can be drawn for, because **both**
 //              endpoints are outside and there is no known end to leave.
+//   loops    — how many relations run from an entity to itself, which
+//              this vocabulary cannot draw and does not silently drop.
 //   unplaced — the addresses of nodes the layout placed nowhere.
 //   groups   — one entry per `group_by` value that has an enclosure.
 export function graphScene(envelope, layout, params = {}) {
@@ -251,14 +253,27 @@ export function graphScene(envelope, layout, params = {}) {
   const pictureBounds = boundsOf([...boxes.values()]);
 
   const { drawn, stubs } = joinEdges(nodes, edgesOf(envelope));
+  let loops = 0;
   for (const { edge, source, target } of drawn) {
     const from = boxes.get(addressOf(source));
     const to = boxes.get(addressOf(target));
+    // A relation from an entity to itself. The metamodel permits one —
+    // relations carries no constraint against it — and a straight line
+    // between one box and the same box has no length, so this drawing
+    // vocabulary cannot show it. It is **counted** rather than dropped:
+    // a silent drop is a picture and a twin disagreeing about the same
+    // answer, which is the one thing this renderer is measured against.
+    // Drawing it needs a curved mark kind, which Task 7's rule says
+    // arrives with the drag layer's answer for reshaping one.
+    if (from && to && from === to) {
+      loops++;
+      continue;
+    }
     // An edge between two nodes of the answer where one of them was
     // never placed. It is not an edge leaving the picture and is not
     // counted as one: the far end is in the answer, and the reason
     // nothing is drawn is the unplaced node, which is reported by name.
-    if (!from || !to || from === to) continue;
+    if (!from || !to) continue;
     marks.push(
       ...edgeMarks({
         source: from,
@@ -306,6 +321,7 @@ export function graphScene(envelope, layout, params = {}) {
     marks,
     legend,
     stubs: { total: stubs.length, drawn: stubs.length - anchorless, anchorless },
+    loops,
     unplaced,
     groups: groups.map((group) => ({ value: group.value, heading: group.heading, count: group.members.length })),
   };

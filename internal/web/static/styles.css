@@ -62,6 +62,16 @@
      they get two legend rows and never one. */
   --unset: transparent;
 
+  /* What best effort removed (spec §2.3). It is the wash on the dropped
+     references the view frame bands, and it is deliberately *not* held
+     to 3:1: it is never the only carrier — the band's sentence counts
+     them and every dropped reference is listed as text beside its
+     swatch — so it is decoration in WCAG 1.4.11's sense, exactly as
+     --line is. It is declared here rather than in the token task
+     because this is the task that reads it, and a token nothing reads
+     is a lie. */
+  --dropped: #b0a89a;
+
   /* The eight categorical hues (spec §2.5), assigned to a value by
      hashing its text — internal/web/static/palette.js is the only thing
      that reads them, and its doc comment carries that argument.
@@ -116,6 +126,8 @@
     --danger: #ef9a9e;
 
     --unset: transparent;
+
+    --dropped: #6b6459;
 
     --data-1: #c5684f;
     --data-2: #6bc3fe;

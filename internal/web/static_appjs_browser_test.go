@@ -184,3 +184,29 @@ func TestTheDataClientRules(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/client_test.mjs")
 }
+
+// TestTheViewFrame drives internal/web/jstest/frame_test.mjs, which
+// imports the real internal/web/static/render/scene.js and asserts over
+// the plain data it returns.
+//
+// It is the whole of the evidence for the surface written *before* any
+// renderer, so that no renderer can invent its own version of the states
+// below. What it holds has no Go counterpart: that three truncation
+// flags are three sentences and never one summary; that a clean envelope
+// bands nothing and in particular never claims a complete picture, which
+// internal/views/execute.go says the flags cannot support; that the
+// ambiguity band counts nodes rather than slots, because the flag is on
+// the node; that a stale view under the failing policy draws no picture
+// at all and answers with the server's own sentences, their pointers and
+// one explicit action to run it anyway; that a best-effort picture bands
+// permanently and names what it lost; that a rename is a quiet title
+// line and never a band and offers no repair; that an unbound parameter
+// is answered in the parameter bar; and that an empty answer is a
+// success that guesses at no cause.
+//
+// internal/web/static_frame_test.go holds the half no harness can see:
+// that the component painting all of this writes none of the words.
+func TestTheViewFrame(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/frame_test.mjs")
+}

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -388,13 +387,24 @@ func TestNoModuleFetchesFromTheNetwork(t *testing.T) {
 }
 
 // TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes is the
-// guard on the scan above, and it exists because that scan reports
-// nothing in two indistinguishable cases: the modules are clean, or the
-// walk never opened them. The specific mistake it pins is an extension
-// filter that says `.js` — which is what the plan's own sentence says,
-// and which would silently exempt dagre.mjs and graphlib.mjs, i.e. two
+// guard on the guard, and it exists because that scan reports nothing in
+// two indistinguishable cases: the modules are clean, or the walk never
+// opened them. The specific mistake it pins is an extension filter that
+// says `.js` — which is what the interface plan's own sentence says, and
+// which would silently exempt dagre.mjs and graphlib.mjs, i.e. two
 // thirds of the code this project did not write.
+//
+// **It spells the module extensions out itself rather than reusing
+// moduleExtensions.** Sharing that map is what made the first version of
+// this test a tautology: narrowing the map to `.js` narrowed the scan
+// and this test's own expectation in the same stroke, and the mutation
+// that was supposed to turn it red left it green. Two spellings of the
+// same list is the price of one of them being able to judge the other.
 func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
+	isModule := func(p string) bool {
+		return strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs")
+	}
+
 	read, _ := scanForNetworkReach(t)
 	seen := map[string]bool{}
 	for _, p := range read {
@@ -402,25 +412,33 @@ func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
 	}
 
 	manifest := readVendorManifest(t)
+	vendoredModules := 0
 	for _, entry := range manifest.Files {
-		if !moduleExtensions[path.Ext(entry.Path)] {
+		if !isModule(entry.Path) {
 			continue
 		}
+		vendoredModules++
 		want := vendorRoot + "/" + entry.Path
 		if !seen[want] {
 			t.Errorf("the network scan never read %s; it is a module this instance ships", want)
 		}
 	}
+	if vendoredModules == 0 {
+		t.Error("the manifest lists no module at all, so the loop above asserted nothing")
+	}
 
 	// And the same for our own modules, by an independent walk.
+	own := 0
 	err := filepath.WalkDir("static", func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !moduleExtensions[filepath.Ext(p)] {
+		slashed := filepath.ToSlash(p)
+		if d.IsDir() || !isModule(slashed) {
 			return nil
 		}
-		if slashed := filepath.ToSlash(p); !seen[slashed] {
+		own++
+		if !seen[slashed] {
 			t.Errorf("the network scan never read %s", slashed)
 		}
 		return nil
@@ -428,7 +446,11 @@ func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk static: %v", err)
 	}
-	t.Logf("network scan read %d module(s): %s", len(read), strings.Join(read, ", "))
+	if own == 0 {
+		t.Error("the walk found no module under static: this test would pass on an empty tree")
+	}
+	t.Logf("network scan read %d module(s) of %d found by an independent walk: %s",
+		len(read), own, strings.Join(read, ", "))
 }
 
 // TestTheNetworkScanFlagsAFabricatedFetch is the other half of the same
@@ -595,15 +617,23 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 		vendored["/static/vendor/"+entry.Path] = true
 	}
 
-	maps := shellImportMaps(t)
+	// Every shell's map, not just the first: leaning on
+	// TestTheImportMapIsIdenticalInEveryShell to make one shell stand
+	// for four would make this test's reach a consequence of that test
+	// passing, and a mutation in a shell this one never opened stays
+	// green here — which is exactly what happened the first time it was
+	// written against maps[0] alone.
 	mapped := map[string]bool{}
-	for specifier, target := range maps[0].imports {
-		mapped[target] = true
-		if !vendored[target] {
-			t.Errorf("the import map sends %q to %q, which %s does not list", specifier, target, manifestPath)
-		}
-		if _, err := os.Stat(filepath.Join("static", strings.TrimPrefix(target, "/static/"))); err != nil {
-			t.Errorf("the import map sends %q to %q, which is not in the tree: %v", specifier, target, err)
+	for _, m := range shellImportMaps(t) {
+		for specifier, target := range m.imports {
+			mapped[target] = true
+			if !vendored[target] {
+				t.Errorf("%s sends %q to %q, which %s does not list",
+					m.shell, specifier, target, manifestPath)
+			}
+			if _, err := os.Stat(filepath.Join("static", strings.TrimPrefix(target, "/static/"))); err != nil {
+				t.Errorf("%s sends %q to %q, which is not in the tree: %v", m.shell, specifier, target, err)
+			}
 		}
 	}
 
@@ -612,7 +642,10 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 	// and reachable by no specifier is either dead weight in the budget
 	// or a missing map entry, and both want a human.
 	for _, entry := range manifest.Files {
-		if !moduleExtensions[path.Ext(entry.Path)] {
+		// Spelled out rather than read from moduleExtensions for the
+		// reason TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes
+		// gives: a shared list lets one narrowing silence two checks.
+		if !strings.HasSuffix(entry.Path, ".js") && !strings.HasSuffix(entry.Path, ".mjs") {
 			continue
 		}
 		if !mapped["/static/vendor/"+entry.Path] {
@@ -631,9 +664,16 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 // error naming neither the map nor the file.
 func TestEveryImportMapTargetIsServedAsJavaScript(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	maps := shellImportMaps(t)
 
-	for specifier, target := range maps[0].imports {
+	// Every target of every shell, deduplicated: same reason as above.
+	targets := map[string]string{}
+	for _, m := range shellImportMaps(t) {
+		for specifier, target := range m.imports {
+			targets[target] = specifier
+		}
+	}
+
+	for target, specifier := range targets {
 		req := httptest.NewRequest(http.MethodGet, target, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

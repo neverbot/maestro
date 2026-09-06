@@ -60,6 +60,7 @@ const {
 
 const {
   CANVAS_CSS,
+  adoptCanvasStyles,
   CLASS_PANELS,
   CLASS_ROOT,
   CLASS_SURFACE,
@@ -661,6 +662,45 @@ check("anEdgeInsideTheSelectionRidesTheTransformAndOneLeavingItDoesNot", () => {
 
 // --- The shell -------------------------------------------------------
 
+check("theCanvasStylesheetIsAdoptedAndNeverAnElement", () => {
+  // The rule, and the defect it closes: this component used to give
+  // itself CANVAS_CSS by appending a `<style>` element to its shadow
+  // root, and under `default-src 'self'` a browser refuses to apply it —
+  // silently. The element stays in the tree with its text intact,
+  // `querySelector` finds it, and `style.sheet` is null, so the canvas
+  // shipped from Task 7 with none of its own layout: the host laid out
+  // `static` instead of `absolute` and the surface drew at an SVG's
+  // default 300x150. Found by mounting the first view (Task 15).
+  //
+  // `adoptedStyleSheets` is not inline style and no policy governs it.
+  const adopted = [];
+  const shadow = { adoptedStyleSheets: [] };
+  const previous = globalThis.CSSStyleSheet;
+  globalThis.CSSStyleSheet = class {
+    replaceSync(text) {
+      this.cssText = text;
+      adopted.push(text);
+    }
+  };
+  try {
+    const sheet = adoptCanvasStyles(shadow);
+    assert(sheet !== null, "a shadow root that supports constructible sheets gets one");
+    assertEqual(shadow.adoptedStyleSheets.length, 1, "adopted onto the shadow root");
+    assertEqual(adopted[0], CANVAS_CSS, "and it carries the component's own stylesheet");
+  } finally {
+    globalThis.CSSStyleSheet = previous;
+  }
+});
+
+check("aShadowRootWithoutConstructibleSheetsGetsNoStyleElementFallback", () => {
+  // There is deliberately no fallback. A `<style>` appended when
+  // constructible sheets are missing could not work under this policy
+  // anyway, and a mechanism nothing reads is worse than an absence.
+  const shadow = { appendChild: () => assert(false, "nothing is appended as a fallback") };
+  assertEqual(adoptCanvasStyles(shadow), null, "an unsupported shadow root is left unstyled");
+  assertEqual(adoptCanvasStyles(null), null, "and so is no shadow root at all");
+});
+
 check("theCanvasIsFullBleedAndThePanelsFloat", () => {
   const canvas = newCanvas();
   canvas.draw(mapScene());
@@ -671,8 +711,16 @@ check("theCanvasIsFullBleedAndThePanelsFloat", () => {
   const classes = root.childNodes.map((child) => classOf(child));
   assertDeepEqual(
     classes,
-    [null, CLASS_SURFACE_HOST, CLASS_PANELS],
-    "the shell is a stylesheet, the drawing, and the panels — in that order",
+    [CLASS_SURFACE_HOST, CLASS_PANELS],
+    "the shell is the drawing and then the panels, in that order",
+  );
+  // And no stylesheet element among them: a `<style>` built in script is
+  // inline style to a Content-Security-Policy, and this product's policy
+  // refuses inline style without saying so. See
+  // theCanvasStylesheetIsAdoptedAndNeverAnElement below.
+  assert(
+    !root.childNodes.some((child) => child.tagName === "style"),
+    "the shell builds no style element",
   );
   assert(CLASS_PANELS.includes("floating"), "the panels float rather than taking space from the drawing");
   assertEqual(

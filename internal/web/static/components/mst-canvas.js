@@ -305,10 +305,6 @@ export function buildShell(doc) {
   const root = doc.createElement("div");
   root.setAttribute("class", CLASS_ROOT);
 
-  const style = doc.createElement("style");
-  style.textContent = CANVAS_CSS;
-  root.appendChild(style);
-
   const surfaceHost = doc.createElement("div");
   surfaceHost.setAttribute("class", CLASS_SURFACE_HOST);
   root.appendChild(surfaceHost);
@@ -318,7 +314,42 @@ export function buildShell(doc) {
   panels.appendChild(doc.createElement("slot"));
   root.appendChild(panels);
 
-  return { root, style, surfaceHost, panels };
+  return { root, surfaceHost, panels };
+}
+
+// adoptCanvasStyles puts CANVAS_CSS on a shadow root as a **constructible
+// stylesheet**, and there is no `<style>` element fallback on purpose.
+//
+// A `<style>` element built in script is *inline style* to a
+// Content-Security-Policy, and this product's policy is `default-src
+// 'self'` with no style hash and no 'unsafe-inline'. A browser therefore
+// refuses to apply it — `style.sheet` comes back null — and refuses in
+// the same silent way it refuses an unhashed import map: the element is
+// in the shadow tree, its textContent is intact, `querySelector` finds
+// it, and the only symptom is that none of the rules are in effect. That
+// is what this component shipped until Task 15 mounted a view and read
+// `shadowRoot.querySelector("style").sheet` in a real browser: null, the
+// host laid out `static` rather than `absolute`, and the surface drawn
+// at an SVG's default 300x150 instead of filling the frame.
+//
+// `adoptedStyleSheets` is not inline style and no policy governs it,
+// which is also why every Lit component beside this one was unaffected —
+// `static styles` takes exactly this path. A fallback that appended a
+// `<style>` when constructible sheets are missing would be a mechanism
+// nothing reads: under this policy it cannot work, so a shadow root
+// without `adoptedStyleSheets` is left unstyled and honest about it.
+export function adoptCanvasStyles(shadow) {
+  if (!shadow || !Array.isArray(shadow.adoptedStyleSheets)) return null;
+  if (typeof CSSStyleSheet !== "function") return null;
+  let sheet;
+  try {
+    sheet = new CSSStyleSheet();
+    sheet.replaceSync(CANVAS_CSS);
+  } catch {
+    return null;
+  }
+  shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
+  return sheet;
 }
 
 // --- The component ---------------------------------------------------
@@ -345,6 +376,7 @@ export class MstCanvas extends HTMLElement {
     this.menuElement = null;
     this.shell = buildShell(this.doc);
     const shadow = this.attachShadow({ mode: "open" });
+    this.sheet = adoptCanvasStyles(shadow);
     if (shadow && typeof shadow.appendChild === "function") shadow.appendChild(this.shell.root);
   }
 

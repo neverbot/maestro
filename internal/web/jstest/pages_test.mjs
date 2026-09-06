@@ -963,6 +963,84 @@ check("anEmptyGameGetsItsEmptyStatesAndNotTwoBlankLists", async () => {
   assert(dom.elements["doc-kinds"].hidden, "the kind line shows on a game with no kinds");
 });
 
+// --- The first sight of a picture -------------------------------------
+//
+// A view opens fitted, and the reason these checks exist is that the
+// first version of the fit *looked* correct and did nothing. It measured
+// the canvas in the same turn that put the frame on the page, got a
+// 0x0 box because the frame had not laid out yet, computed no fit, and
+// then recorded the view as fitted — so every view in this product
+// opened at the origin at 1x and no test anywhere disagreed. Found by
+// mounting a view in a browser and reading `canvas.view` afterwards.
+
+// fakeCanvas is a canvas that measures nothing until it is allowed to.
+// `sizes` is the sequence getBoundingClientRect answers with, which is
+// how a frame that has not laid out yet is spelled.
+function fakeCanvas(sizes) {
+  const remaining = sizes.slice();
+  let last = remaining[remaining.length - 1];
+  return {
+    view: { x: 0, y: 0, k: 1 },
+    measured: 0,
+    getBoundingClientRect() {
+      this.measured += 1;
+      const next = remaining.length > 1 ? remaining.shift() : last;
+      return { width: next.width, height: next.height };
+    },
+    setView(view) {
+      this.view = { ...this.view, ...view };
+      return this.view;
+    },
+  };
+}
+
+const FIT_MARKS = [
+  { x: 0, y: 0, w: 100, h: 40 },
+  { x: 300, y: 200, w: 100, h: 40 },
+];
+
+check("aViewOpensFittedEvenWhenTheFrameHasNotLaidOutYet", async () => {
+  const view = await load("view");
+  const canvas = fakeCanvas([{ width: 0, height: 0 }, { width: 800, height: 600 }]);
+  let settled = 0;
+  const fitted = await view.fitOnce(canvas, FIT_MARKS, { settle: async () => { settled += 1; } });
+  assertEqual(fitted, true, "the fit reports that it happened");
+  assertEqual(settled, 1, "it waited for the frame exactly once");
+  assert(canvas.view.k > 0 && canvas.view.k <= view.FIT_MAX_ZOOM, "it zoomed within the cap");
+  assert(canvas.view.x !== 0 || canvas.view.y !== 0, "and it panned off the origin");
+});
+
+check("aFitThatCouldNotMeasureSaysSoRatherThanRecordingItself", async () => {
+  const view = await load("view");
+  const canvas = fakeCanvas([{ width: 0, height: 0 }]);
+  const fitted = await view.fitOnce(canvas, FIT_MARKS, { settle: async () => {} });
+  assertEqual(fitted, false, "a canvas that never has a size is not reported as fitted");
+  assertEqual(canvas.view.x, 0, "and nothing was written to the view");
+  assertEqual(canvas.view.k, 1, "including the zoom");
+});
+
+check("aFitCentresTheWholePictureAndNeverZoomsPastTheCap", async () => {
+  const view = await load("view");
+  const canvas = fakeCanvas([{ width: 800, height: 600 }]);
+  await view.fitOnce(canvas, FIT_MARKS, { settle: async () => {} });
+  const bounds = view.boundsOf(FIT_MARKS);
+  assertEqual(bounds.x, 0, "the bounds start at the leftmost mark");
+  assertEqual(bounds.width, 400, "and span to the far edge of the rightmost one");
+  const centreX = canvas.view.x + canvas.view.k * (bounds.x + bounds.width / 2);
+  const centreY = canvas.view.y + canvas.view.k * (bounds.y + bounds.height / 2);
+  assert(Math.abs(centreX - 400) < 0.001, "the picture's centre lands on the canvas's centre in x");
+  assert(Math.abs(centreY - 300) < 0.001, "and in y");
+  assertEqual(canvas.view.k, view.FIT_MAX_ZOOM, "a small answer in a big window stops at the cap");
+});
+
+check("aSceneWithNoPlaceableMarksIsNotFitted", async () => {
+  const view = await load("view");
+  const canvas = fakeCanvas([{ width: 800, height: 600 }]);
+  assertEqual(view.boundsOf([]), null, "an empty scene has no bounds");
+  assertEqual(await view.fitOnce(canvas, [], { settle: async () => {} }), false, "and is not reported as fitted");
+  assertEqual(canvas.measured, 0, "a canvas with nothing to fit is not even measured");
+});
+
 // --- The addresses ----------------------------------------------------
 
 check("everyAddressIsBuiltFromASlugAndAKey", async () => {

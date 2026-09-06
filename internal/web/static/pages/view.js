@@ -385,14 +385,6 @@ async function draw(state, envelope, error, options) {
   state.canvas.hidden = false;
   state.canvas.draw({ marks: scene.marks });
 
-  // Fitted once, on the first drawing of this view.
-  if (!state.fitted) {
-    const box = state.canvas.getBoundingClientRect ? state.canvas.getBoundingClientRect() : null;
-    const fitted = fitView(boundsOf(scene.marks), box ? box.width : 0, box ? box.height : 0);
-    if (fitted) state.canvas.setView(fitted);
-    state.fitted = true;
-  }
-
   // The arrangement is rebuilt on every draw, from the coordinates the
   // composition actually used: an arrangement holding the previous
   // picture's nodes would move things that are no longer on screen.
@@ -407,6 +399,13 @@ async function draw(state, envelope, error, options) {
     nodes: nodesOfScene(scene, layout),
   });
   state.canvas.showArrangement(state.arrangement);
+
+  // Fitted once, on the first drawing of this view, and *last*: the
+  // measurement it needs is a laid-out canvas, and everything above this
+  // line is what puts one on the screen.
+  if (!state.fitted) {
+    state.fitted = await fitOnce(state.canvas, scene.marks, { frame: state.frame, settle: options.settle });
+  }
   return state;
 }
 
@@ -465,6 +464,54 @@ export function fitView(bounds, width, height) {
     x: width / 2 - k * (bounds.x + bounds.width / 2),
     y: height / 2 - k * (bounds.y + bounds.height / 2),
   };
+}
+
+// settleLayout waits for the frame to have rendered and the browser to
+// have laid it out, which is the difference between measuring a canvas
+// and measuring nothing. The frame is a Lit element: on the first draw
+// of a page its shadow DOM — the positioned, 70vh-tall box the canvas
+// fills — has been *requested* and not yet produced, so a
+// getBoundingClientRect taken in the same turn answers 0x0.
+async function settleLayout(frame) {
+  if (frame && frame.updateComplete && typeof frame.updateComplete.then === "function") {
+    await frame.updateComplete;
+  }
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    await new Promise((resolve) => globalThis.requestAnimationFrame(() => resolve()));
+  }
+}
+
+// fitOnce fits a canvas to a scene and **answers whether it did**.
+//
+// The answer is the whole of why this is a function. The first version
+// of this fit measured once and set `fitted = true` whatever came back,
+// so on the first draw of a page — the only draw that was ever going to
+// be fitted — it measured a canvas the frame had not laid out yet, got
+// 0x0, computed no fit, and marked the view fitted anyway. The picture
+// opened at the origin at 1x, which is exactly what the fit exists to
+// prevent, and nothing anywhere said so: `fitView` returning null is
+// indistinguishable from a fit that was not wanted. Found by mounting
+// the first real view and reading the canvas's `view` afterwards.
+//
+// So: measure, and if the box has no size, let the frame lay out and
+// measure again. If it still has none — a hidden tab, a canvas in a
+// collapsed panel — the caller is told `false` and the *next* draw tries
+// again, because a view that is never fitted is a bug and a view fitted
+// on the second draw is a view a designer never saw unfitted.
+export async function fitOnce(canvas, marks, options = {}) {
+  const bounds = boundsOf(marks);
+  if (!bounds || !canvas || typeof canvas.setView !== "function") return false;
+  const settle = options.settle || settleLayout;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const box = typeof canvas.getBoundingClientRect === "function" ? canvas.getBoundingClientRect() : null;
+    const fitted = fitView(bounds, box ? box.width : 0, box ? box.height : 0);
+    if (fitted) {
+      canvas.setView(fitted);
+      return true;
+    }
+    if (attempt === 0) await settle(options.frame);
+  }
+  return false;
 }
 
 // nodesOfScene is the model the arrangement moves: one record per node,

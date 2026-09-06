@@ -246,6 +246,93 @@ func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
 	t.Logf("the policy admits the import map of %d shell(s)", found)
 }
 
+// TestNoShippedAssetCarriesInlineStyleThePolicyBlocks is the second half
+// of the guard TestThePolicyAdmitsEveryShellsImportMap opens, and it
+// exists because the import map was not the only thing `default-src
+// 'self'` was silently switching off.
+//
+// **An inline style is refused exactly as silently as an inline script.**
+// A `<style>` element — written into a shell, or built in script and
+// appended to a shadow root, which is the same thing to a policy —
+// carries no hash here, so a browser leaves it in the tree with its text
+// intact and applies none of it: `style.sheet` is null and nothing
+// anywhere throws. The canvas shipped that way from Task 7 until Task 15
+// mounted a view and read the sheet back: the host laid out `static`
+// instead of `absolute` and the surface drew at an SVG's default
+// 300x150. A `style` attribute set from script is refused the same way
+// and was confirmed the same way, in the same browser.
+//
+// So the rule this test keeps is that **this product's own assets ship
+// no inline style at all**, and the way to give a component a stylesheet
+// is `adoptedStyleSheets`, which no policy governs — which is also why
+// every Lit component was unaffected while the one hand-rolled element
+// was not. There is no allowance for "guarded by a feature check": a
+// fallback this policy cannot execute is a mechanism nothing reads.
+//
+// vendor/ is exempt and named as such: it is third-party code this
+// repository does not write, and Lit's own `<style>` path is reached
+// only when `adoptedStyleSheets` is missing, which no browser this
+// product targets is.
+func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
+	forbidden := []struct {
+		pattern *regexp.Regexp
+		why     string
+	}{
+		{regexp.MustCompile(`(?i)<style[\s>]`), "an inline <style> element is refused by default-src 'self' and applies nothing"},
+		{regexp.MustCompile(`(?i)\bstyle\s*=\s*["']`), "an inline style attribute is refused by default-src 'self'"},
+		{regexp.MustCompile(`createElement\(\s*["']style["']\s*\)`), "a <style> built in script is inline style to a policy; adopt a constructible stylesheet instead"},
+		{regexp.MustCompile(`setAttribute\(\s*["']style["']`), "a style attribute written from script is refused; use a class and a stylesheet"},
+	}
+
+	scanned := 0
+	err := filepath.Walk("static", func(name string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if info.Name() == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		ext := filepath.Ext(name)
+		if ext != ".html" && ext != ".js" {
+			return nil
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		scanned++
+		// A JS file is read with its comments stripped, by the same
+		// helper static_layout_test.go's source-shape guard uses: the
+		// reason a component does not build a style element is written
+		// directly above the code that does not build one, and a scan
+		// that read its own explanation as a violation would push that
+		// explanation out of the file. A shell is read whole — its only
+		// comment syntax is `<!-- -->`, no shell carries one, and the
+		// line-comment stripper would eat the rest of any line holding a
+		// `//` in a URL, which in markup is most of them.
+		code := string(body)
+		if ext == ".js" {
+			code = withoutComments(code)
+		}
+		for _, rule := range forbidden {
+			if loc := rule.pattern.FindStringIndex(code); loc != nil {
+				t.Errorf("%s carries %q: %s", name, code[loc[0]:loc[1]], rule.why)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk static: %v", err)
+	}
+	if scanned < 10 {
+		t.Fatalf("scanned only %d asset(s): this test would pass on a tree it never read", scanned)
+	}
+	t.Logf("%d shipped asset(s) carry no inline style", scanned)
+}
+
 // TestConfigEndpointIsPublicAndMinimal pins GET /api/config: reachable
 // with no credential at all (an unauthenticated visitor is exactly who it
 // exists for — see its own doc comment), and carrying nothing beyond the

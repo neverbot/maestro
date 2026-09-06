@@ -143,6 +143,9 @@ changed under you unless you changed it.
 
 | You are about to… | Read |
 |---|---|
+| decide a game's shape, or wonder whether something is a field or a relation | `modelling/deciding.md` |
+| choose keys, or wonder what a rename costs | `modelling/naming.md` |
+| recognise a shape that will cost a rewrite | `modelling/mistakes.md` |
 | find which of the tools exists | `reference/tools.md` |
 | declare a field type, or wonder what one costs later | `reference/fields.md` |
 | read an error and pick a recovery | `reference/errors.md` |

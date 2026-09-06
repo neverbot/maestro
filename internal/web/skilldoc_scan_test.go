@@ -415,13 +415,11 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 // fails, and a tool that quietly stops being taught fails too. Task 12
 // asserts the list is empty.
 var notYetTaughtOutsideTheIndex = []string{
-	"entities.get", "entities.remove", "games.get",
-	"games.list", "relation_types.get", "relation_types.list",
-	"relation_types.remove", "relations.get", "relations.remove",
-	"types.get", "types.list", "types.remove",
-	"views.clear_positions", "views.get", "views.list",
-	"views.list_assets", "views.remove", "views.set_background",
-	"views.set_positions",
+	"entities.get", "games.get", "games.list",
+	"relation_types.get", "relation_types.list", "relations.get",
+	"types.get", "types.list", "views.clear_positions",
+	"views.get", "views.list", "views.list_assets",
+	"views.remove", "views.set_background", "views.set_positions",
 }
 
 // TestEveryRegisteredToolIsRoutedFromTheBundle asserts every registered

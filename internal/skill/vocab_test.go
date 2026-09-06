@@ -1,6 +1,8 @@
 package skill_test
 
 import (
+	"io/fs"
+	"path"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -240,4 +242,241 @@ func mustFences(t *testing.T, fsys fstest.MapFS) []skill.VocabFence {
 		t.Fatalf("reading fences: %v", err)
 	}
 	return fences
+}
+
+// The modelling pages are the three in this bundle that no generator
+// could produce and no test can judge. Whether the advice on them is
+// *good* is a question for a reader; these three guards pin the three
+// properties of them that are not a matter of taste.
+//
+// Each reads the shipped pages out of skill.Files(), not a fixture. A
+// guard pointed at a fixture is a guard that stays green while the
+// shipped page says anything at all — and it walks every modelling/*.md
+// rather than the three that exist today, so a fourth page added
+// tomorrow is judged without editing this file.
+
+// modellingPages reads every modelling/*.md out of a bundle tree.
+func modellingPages(t *testing.T, fsys fs.FS) map[string]string {
+	t.Helper()
+	pages := map[string]string{}
+	err := fs.WalkDir(fsys, "modelling", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || path.Ext(p) != ".md" {
+			return nil
+		}
+		body, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		pages[p] = string(body)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the modelling pages: %v", err)
+	}
+	if len(pages) == 0 {
+		t.Fatal("no modelling page was found: every assertion below would pass over an " +
+			"empty set, which is how a guard of this shape goes quiet")
+	}
+	return pages
+}
+
+// costPhrases is the closed list of ways these pages state a
+// consequence. Closed rather than a heuristic, for the reason every
+// closed list in this sub-project is closed: a heuristic drifts, and one
+// that drifted towards matching everything would pass a style guide.
+var costPhrases = []string{"calls become", "one write per", "costs", "cost"}
+
+func statesACost(body string) bool {
+	lowered := strings.ToLower(body)
+	for _, phrase := range costPhrases {
+		if strings.Contains(lowered, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestEveryModellingPageStatesACost. A modelling page with no
+// consequence in it is a style guide: it tells an agent what somebody
+// prefers rather than what the alternative will cost, and an agent given
+// a preference has no way to weigh it against the thing it is trading
+// away.
+func TestEveryModellingPageStatesACost(t *testing.T) {
+	for name, body := range modellingPages(t, skill.Files()) {
+		if !statesACost(body) {
+			t.Errorf("%s states no cost: a modelling page that names no consequence is a "+
+				"style guide, and the pages here exist to say what the wrong shape is paid "+
+				"for in", name)
+		}
+	}
+
+	// The precision fixture. Every assertion above is "the check found
+	// nothing wrong", and a check whose phrase list matched every input
+	// reports nothing wrong too.
+	if statesACost("keys") {
+		t.Error("a page consisting of the word \"keys\" passed the cost check: the phrase " +
+			"list matches text that states no consequence at all")
+	}
+	if !statesACost("Six calls become six hundred.") {
+		t.Error("a page stating \"six calls become six hundred\" failed the cost check: the " +
+			"phrase list does not match the shape it was written for")
+	}
+}
+
+// renameSentences splits a page into sentences, cheaply. It is a
+// different splitter from internal/web's, deliberately: this package may
+// not import that one, and a sentence rule good enough to hold a page to
+// "do not say a type cannot be renamed" needs no more than this.
+func renameSentences(body string) []string {
+	flat := strings.Join(strings.Fields(body), " ")
+	var out []string
+	start := 0
+	for i, r := range flat {
+		if r == '.' || r == '!' || r == '?' || r == ':' {
+			if piece := strings.TrimSpace(flat[start : i+1]); piece != "" {
+				out = append(out, piece)
+			}
+			start = i + 1
+		}
+	}
+	if piece := strings.TrimSpace(flat[start:]); piece != "" {
+		out = append(out, piece)
+	}
+	return out
+}
+
+// deniedRename reports the sentences of a page that assert something
+// cannot be renamed without saying it is an entity or a row.
+//
+// The asymmetry is the point: a *type* can be renamed and an *entity*
+// cannot, and a page that states only the first half sends an agent at a
+// tool that does not exist, while a page that states only the second
+// half sends it at the delete-and-recreate workaround the rename
+// replaced — which loses every edge.
+func deniedRename(body string) []string {
+	var out []string
+	for _, sentence := range renameSentences(body) {
+		lowered := strings.ToLower(sentence)
+		if !strings.Contains(lowered, "rename") {
+			continue
+		}
+		denied := false
+		for _, word := range []string{"cannot", "can not", "never", "no way", "impossible"} {
+			if strings.Contains(lowered, word) {
+				denied = true
+			}
+		}
+		if !denied {
+			continue
+		}
+		if strings.Contains(lowered, "entity") || strings.Contains(lowered, "row") {
+			continue
+		}
+		out = append(out, sentence)
+	}
+	return out
+}
+
+// TestTheRenameRuleIsTaughtBothWays exists because the spec this bundle
+// was planned from was written before the rename shipped, and it says in
+// as many words that there is no rename operation. The most likely
+// defect in this whole sub-project is a page repeating that.
+func TestTheRenameRuleIsTaughtBothWays(t *testing.T) {
+	pages := modellingPages(t, skill.Files())
+	naming, ok := pages["modelling/naming.md"]
+	if !ok {
+		t.Fatal("modelling/naming.md is missing: the page that carries the rename rule is " +
+			"the page this guard reads")
+	}
+	for _, tool := range []string{"types.rename", "relation_types.rename"} {
+		if !strings.Contains(naming, "`"+tool+"`") {
+			t.Errorf("modelling/naming.md does not name %s: half the rename rule is "+
+				"missing, and an agent that does not know the call exists is left with the "+
+				"delete-and-recreate workaround, which loses every edge", tool)
+		}
+	}
+	if !strings.Contains(strings.ToLower(naming), "permanent") {
+		t.Error("modelling/naming.md never says an entity's own key is permanent: the other " +
+			"half of the asymmetry, and the one an agent gets wrong in the expensive direction")
+	}
+	for name, body := range pages {
+		for _, sentence := range deniedRename(body) {
+			t.Errorf("%s says %q. A type's key can be renamed, addressed by the key it has "+
+				"now; only an entity's own key is permanent. Say which of the two the "+
+				"sentence is about", name, sentence)
+		}
+	}
+
+	// The plan's mutation, run on every build: the false half pasted into
+	// a page, and the true half beside it, which must not be reported.
+	if len(deniedRename("A type cannot be renamed.")) != 1 {
+		t.Error("the guard did not catch \"a type cannot be renamed\": the sentence the " +
+			"overtaken spec would have put on this page passes")
+	}
+	if got := deniedRename("An entity's own key can never be renamed."); len(got) != 0 {
+		t.Errorf("the guard reported the true half of the rule as a defect: %v", got)
+	}
+}
+
+// TestTheAnalyticalAxisIsTaughtAsShippedNotAsComing replaces the plan's
+// TestNoModellingPageTeachesAnUnshippedColumn, and the replacement is
+// itself the correction it guards.
+//
+// The plan's ship-order section states that analysis_traits is not a
+// column, so its guard forbade the identifier on these pages. It is a
+// column today (0013_analysis.sql), an accepted input on
+// relation_types.upsert, and that tool's own description says declaring
+// a semantic_role does not declare behaviour. The old guard would now
+// forbid teaching a shipped argument an agent has to send; this one
+// requires it to be taught, and forbids the sentence the plan itself
+// would have produced — an axis described as still on its way.
+func TestTheAnalyticalAxisIsTaughtAsShippedNotAsComing(t *testing.T) {
+	pages := modellingPages(t, skill.Files())
+	deciding, ok := pages["modelling/deciding.md"]
+	if !ok {
+		t.Fatal("modelling/deciding.md is missing: the page that argues one relation type " +
+			"against two is where the traits decision lives")
+	}
+	if !strings.Contains(deciding, "analysis_traits") {
+		t.Error("modelling/deciding.md never names analysis_traits: the decision between one " +
+			"relation type and two is settled by it, and a page arguing that decision " +
+			"without it is arguing from taste")
+	}
+	for name, body := range pages {
+		for _, sentence := range unshippedAxis(body) {
+			t.Errorf("%s says %q. The analytical axis has shipped: it is a declared argument "+
+				"today, not something an agent should wait for", name, sentence)
+		}
+	}
+
+	// Precision, both ways: the sentence the plan would have written must
+	// be caught, and the shipped page's own wording must not be.
+	if len(unshippedAxis("A second, analytical axis is coming and will be read off this.")) != 1 {
+		t.Error("the guard did not catch an axis described as coming")
+	}
+	if got := unshippedAxis("A relation type declares analysis_traits, which a walk reads."); len(got) != 0 {
+		t.Errorf("the guard reported the shipped wording as a defect: %v", got)
+	}
+}
+
+// unshippedAxis reports the sentences that present the analytical axis
+// as something that has not arrived.
+func unshippedAxis(body string) []string {
+	var out []string
+	for _, sentence := range renameSentences(body) {
+		lowered := strings.ToLower(sentence)
+		if !strings.Contains(lowered, "analytical axis") && !strings.Contains(lowered, "analysis_traits") {
+			continue
+		}
+		for _, phrase := range []string{"is coming", "will arrive", "not yet", "does not exist", "when it lands"} {
+			if strings.Contains(lowered, phrase) {
+				out = append(out, sentence)
+				break
+			}
+		}
+	}
+	return out
 }

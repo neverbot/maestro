@@ -173,7 +173,12 @@ export function legendFor(nodes, slot) {
 // game wrote it; anything else is shown as its JSON text, so a number,
 // a boolean and null are visibly not strings — which is the same
 // distinction that gives `20` and `"20"` two rows.
-function labelFor(jsonText) {
+//
+// Exported because the text twin (render/twin.js) writes the same values
+// into its cells, and "colour is never the only carrier" is only true if
+// the carrier says the same thing the hue does. One rule, called twice;
+// a second spelling of it is a second place for it to drift.
+export function labelFor(jsonText) {
   return jsonText.startsWith('"') ? JSON.parse(jsonText) : jsonText;
 }
 

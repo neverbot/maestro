@@ -21,6 +21,7 @@
 import { LitElement, css, html, nothing } from "lit";
 
 import { ACTION_RUN_BEST_EFFORT, KIND_DIAGNOSTICS, KIND_EMPTY, KIND_UNBOUND, runAction } from "../render/scene.js";
+import "./mst-twin.js";
 
 // The label of the one action, and the only human words in this file.
 // It is here rather than in the model because it names a *control* and
@@ -116,6 +117,14 @@ export class MstViewFrame extends LitElement {
       text-align: center;
       color: var(--muted);
     }
+    /* The drawing is hidden from assistive technology and the twin is
+       not. Nothing about an SVG scene is navigable without sight, and a
+       canvas decorated with ARIA roles would be a second, worse twin
+       that nobody can read; the honest arrangement is one accessible
+       representation and one that says it is decoration. */
+    .canvas {
+      display: block;
+    }
     .footer {
       padding: 0.4rem 0.75rem;
       border-top: 1px solid var(--line);
@@ -210,8 +219,20 @@ export class MstViewFrame extends LitElement {
   body(frame) {
     if (frame.kind === KIND_DIAGNOSTICS) return this.panel(frame);
     if (frame.kind === KIND_UNBOUND) return nothing;
-    if (frame.kind === KIND_EMPTY) return this.emptyAnswer(frame);
-    return html`<slot></slot>`;
+    if (frame.kind === KIND_EMPTY) return html`${this.emptyAnswer(frame)}${this.twin(frame)}`;
+    return html`<div class="canvas" aria-hidden="true"><slot></slot></div>${this.twin(frame)}`;
+  }
+
+  // The twin is rendered for every answer, in the same place, whichever
+  // of the six renderers is in the slot above it — which is the whole of
+  // "every view has a text twin" (spec §8.1). It is not rendered for a
+  // refusal: there is no answer to describe, and a pair of empty tables
+  // under a panel of diagnostics would read as an answer that matched
+  // nothing, which is the one thing the frame is most careful never to
+  // let a refusal look like.
+  twin(frame) {
+    if (!frame.twin) return nothing;
+    return html`<mst-twin .twin=${frame.twin}></mst-twin>`;
   }
 
   panel(frame) {

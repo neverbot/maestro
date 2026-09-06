@@ -2,12 +2,14 @@ package web_test
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
 
-// The view frame's one property with no runtime signature: **the
+// Every component's one property with no runtime signature: **a
 // component invents no words.**
 //
 // Every sentence a designer reads in the frame is built in
@@ -22,15 +24,24 @@ import (
 // five renderers would each grow their own copy.
 //
 // So it is held by shape, the way internal/web/static_client_test.go
-// holds "this module composes no sentence": **every text node in the
+// holds "this module composes no sentence": **every text node in a
 // component's templates is either whitespace or an interpolation.** A
 // word typed between two tags is a failing test.
 //
 // The one deliberate exception is the label of the single action the
-// diagnostics panel offers, which is a constant at the top of the file
-// and reaches the template as `${RUN_ANYWAY_LABEL}` — an interpolation
-// like any other, and named there rather than in the model because it
-// names a *control* and not a state of the answer.
+// diagnostics panel offers, which is a constant at the top of
+// mst-view-frame.js and reaches the template as `${RUN_ANYWAY_LABEL}` —
+// an interpolation like any other, and named there rather than in the
+// model because it names a *control* and not a state of the answer.
+//
+// **It walks the directory rather than naming a file.** The first
+// version of this guard named mst-view-frame.js literally, which is this
+// project's standing failure — a rule established and not carried one
+// step along — waiting to happen: the text twin landed the next task and
+// would have been the first component nobody scanned, and it is the
+// component that renders the most game strings of any. Every component
+// is read on the day it lands, and TestTheComponentScanReadsEveryComponent
+// is what stops the walk quietly finding none.
 
 // textNodeRE finds a candidate text node: a `>` that closes a tag —
 // preceded by something that is neither whitespace nor `=`, which is
@@ -79,16 +90,54 @@ func stripCSSBlock(src string) string {
 	}
 }
 
-func TestTheViewFrameSpeaksOnlyTheModelsWords(t *testing.T) {
-	raw, err := os.ReadFile("static/components/mst-view-frame.js")
+// componentFiles is every component this server ships, discovered rather
+// than listed.
+func componentFiles(t *testing.T) []string {
+	t.Helper()
+	found, err := filepath.Glob(filepath.Join("static", "components", "*.js"))
 	if err != nil {
-		t.Fatalf("read mst-view-frame.js: %v", err)
+		t.Fatalf("glob components: %v", err)
 	}
-	if offences := scanTemplateText(string(raw)); len(offences) > 0 {
-		t.Errorf("mst-view-frame.js writes its own words into %d text node(s): %q\n"+
-			"every sentence in the frame belongs to static/render/scene.js, which is where the "+
-			"server's own sentences are carried verbatim and where a harness can read them",
-			len(offences), offences)
+	sort.Strings(found)
+	return found
+}
+
+func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
+	for _, path := range componentFiles(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if offences := scanTemplateText(string(raw)); len(offences) > 0 {
+			t.Errorf("%s writes its own words into %d text node(s): %q\n"+
+				"every sentence a designer reads belongs to a model under static/render/, which is where the "+
+				"server's own sentences are carried verbatim and where a harness can read them",
+				path, len(offences), offences)
+		}
+	}
+}
+
+// TestTheComponentScanReadsEveryComponent is the other half: the test
+// above passes when it finds no offence and finds none both when the
+// components are silent and when it never opened one. Naming the two
+// that exist today is deliberate — a component deleted or renamed
+// without this list being updated is a change somebody should have to
+// look at — and the count assertion is what catches the third one
+// arriving.
+func TestTheComponentScanReadsEveryComponent(t *testing.T) {
+	found := componentFiles(t)
+	want := []string{
+		filepath.Join("static", "components", "mst-twin.js"),
+		filepath.Join("static", "components", "mst-view-frame.js"),
+	}
+	if len(found) != len(want) {
+		t.Fatalf("the component scan read %v, want %v: a component this list does not name is a component "+
+			"whose silence nobody has argued for", found, want)
+	}
+	for i, path := range want {
+		if found[i] != path {
+			t.Errorf("the component scan read %q where %q was expected", found[i], path)
+		}
 	}
 }
 

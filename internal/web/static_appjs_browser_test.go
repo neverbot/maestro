@@ -210,3 +210,43 @@ func TestTheViewFrame(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/frame_test.mjs")
 }
+
+// TestTheTextTwin drives internal/web/jstest/twin_test.mjs, which
+// imports the real internal/web/static/render/twin.js and — through the
+// import map this server ships, read out of a shell by
+// internal/web/jstest/importmap_loader.mjs — the real
+// internal/web/static/components/mst-twin.js and
+// mst-view-frame.js beside it.
+//
+// The twin is the accessible content of every view, the five graphical
+// ones included, and this is the whole of the evidence for it. What it
+// holds has no Go counterpart:
+//
+// That the twin describes the **answer** and not the drawing — a node a
+// renderer shelved, dropped beyond a depth bound or collapsed into a
+// count chip still has a row, which the harness asserts against a
+// stand-in renderer that really does all three, because a twin derived
+// from a scene would be a second rendering rather than the ground truth
+// the six renderer tasks are checked against.
+//
+// That a projection slot the query did not find is **visibly absent**
+// rather than blank, and that the empty string is not — the distinction
+// internal/views/execute.go builds out of jsonb and the last place it
+// could be thrown away.
+//
+// That every coloured node's value is written out as text, in the
+// palette's own words, which is what makes "colour is never the only
+// carrier" an assertion rather than a claim.
+//
+// And that a node named `<img src=x onerror=…>` arrives as text: the
+// harness walks the emitted Lit template and asserts every game string
+// is bound in *child position*, where Lit commits a Text node, and that
+// none of them appears in the component's own markup.
+// internal/web/static_twin_test.go holds the half no harness can see —
+// that no own module reaches for a raw-HTML directive — and
+// internal/web/static_frame_test.go holds that the component writes none
+// of the twin's words.
+func TestTheTextTwin(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/twin_test.mjs")
+}

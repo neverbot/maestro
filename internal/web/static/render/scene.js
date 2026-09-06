@@ -1,5 +1,8 @@
 // The view frame's model: a pure function from what the server said to
-// the plain data the frame draws. No DOM, no fetch, no state, no import.
+// the plain data the frame draws. No DOM, no fetch, no state, and one
+// import — the text twin's model, because the twin is the accessible
+// content of *every* view (spec §8.1) and a frame that could be built
+// without one is a frame that eventually is.
 //
 // This module is written **before any renderer** and on purpose. The six
 // drawings are drawings; this is where a designer learns the drawing is
@@ -35,6 +38,8 @@
 // which of the two is deliberately not said), so the ambiguity band
 // counts nodes and its sentence names nodes. Counting slots would be
 // inventing a distinction the server declined to carry.
+
+import { twinFor } from "./twin.js";
 
 // --- The banner vocabulary -------------------------------------------
 
@@ -467,6 +472,7 @@ export function frameFor(input = {}) {
     if (rows.length === 0 && unbound.length > 0) {
       return {
         kind: KIND_UNBOUND,
+        twin: null,
         title,
         bar,
         banners: [],
@@ -480,6 +486,7 @@ export function frameFor(input = {}) {
     }
     return {
       kind: KIND_DIAGNOSTICS,
+      twin: null,
       title,
       bar,
       banners: [],
@@ -510,6 +517,12 @@ export function frameFor(input = {}) {
 
   return {
     kind: empty ? KIND_EMPTY : KIND_PICTURE,
+    // Every answer has a twin, and the empty answer's is the empty one:
+    // "the accessible content of every view" is a claim the frame makes
+    // structurally rather than a thing each renderer remembers to do. A
+    // refusal has none because there is no answer to describe — the two
+    // refusing kinds above set it to null, and a picture never can.
+    twin: twinFor(envelope),
     title,
     bar,
     banners,

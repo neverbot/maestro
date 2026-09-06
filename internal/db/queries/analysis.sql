@@ -38,8 +38,14 @@ SELECT EXISTS (
 -- source. After this statement nothing downstream knows which trait an
 -- edge carried, which is the whole point of normalising.
 --
+-- Containment has an arm of its own rather than riding in with the
+-- forward gates, because the unreachable analysis owes a reason and
+-- "the only way in is through a container nobody can reach" is a
+-- different sentence, with a different fix, from "every route to it is
+-- blocked". Everything else treats a container as a gate.
+--
 -- The adjacency arms are symmetric types, listed in both directions and
--- marked gate = false: a symmetric edge joins two entities without
+-- marked `adjacency`: a symmetric edge joins two entities without
 -- ordering them, so it may admit under `any` and may never be required
 -- under `all`.
 --
@@ -48,25 +54,30 @@ SELECT EXISTS (
 -- analysis.Params for the argument, which is that `invalid` describes a
 -- row's fields and this question reads only its endpoints.
 -- name: ListNormalisedInEdges :many
-SELECT dependent, needed, gate
+SELECT dependent, needed, kind
 FROM (
         SELECT r.target_id AS dependent, r.source_id AS needed,
-               true AS gate, r.invalid AS invalid
+               'gate'::text AS kind, r.invalid AS invalid
         FROM relations r
         WHERE r.project_id = @project_id
           AND r.relation_type_id = ANY(@forward_gates::uuid[])
     UNION ALL
-        SELECT r.source_id, r.target_id, true, r.invalid
+        SELECT r.source_id, r.target_id, 'gate'::text, r.invalid
         FROM relations r
         WHERE r.project_id = @project_id
           AND r.relation_type_id = ANY(@reverse_gates::uuid[])
     UNION ALL
-        SELECT r.target_id, r.source_id, false, r.invalid
+        SELECT r.target_id, r.source_id, 'containment'::text, r.invalid
+        FROM relations r
+        WHERE r.project_id = @project_id
+          AND r.relation_type_id = ANY(@containment::uuid[])
+    UNION ALL
+        SELECT r.target_id, r.source_id, 'adjacency'::text, r.invalid
         FROM relations r
         WHERE r.project_id = @project_id
           AND r.relation_type_id = ANY(@adjacency::uuid[])
     UNION ALL
-        SELECT r.source_id, r.target_id, false, r.invalid
+        SELECT r.source_id, r.target_id, 'adjacency'::text, r.invalid
         FROM relations r
         WHERE r.project_id = @project_id
           AND r.relation_type_id = ANY(@adjacency::uuid[])

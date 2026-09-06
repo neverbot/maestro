@@ -12,37 +12,43 @@ import (
 )
 
 const listNormalisedInEdges = `-- name: ListNormalisedInEdges :many
-SELECT dependent, needed, gate
+SELECT dependent, needed, kind
 FROM (
         SELECT r.target_id AS dependent, r.source_id AS needed,
-               true AS gate, r.invalid AS invalid
+               'gate'::text AS kind, r.invalid AS invalid
         FROM relations r
         WHERE r.project_id = $1
           AND r.relation_type_id = ANY($2::uuid[])
     UNION ALL
-        SELECT r.source_id, r.target_id, true, r.invalid
+        SELECT r.source_id, r.target_id, 'gate'::text, r.invalid
         FROM relations r
         WHERE r.project_id = $1
           AND r.relation_type_id = ANY($3::uuid[])
     UNION ALL
-        SELECT r.target_id, r.source_id, false, r.invalid
+        SELECT r.target_id, r.source_id, 'containment'::text, r.invalid
         FROM relations r
         WHERE r.project_id = $1
           AND r.relation_type_id = ANY($4::uuid[])
     UNION ALL
-        SELECT r.source_id, r.target_id, false, r.invalid
+        SELECT r.target_id, r.source_id, 'adjacency'::text, r.invalid
         FROM relations r
         WHERE r.project_id = $1
-          AND r.relation_type_id = ANY($4::uuid[])
+          AND r.relation_type_id = ANY($5::uuid[])
+    UNION ALL
+        SELECT r.source_id, r.target_id, 'adjacency'::text, r.invalid
+        FROM relations r
+        WHERE r.project_id = $1
+          AND r.relation_type_id = ANY($5::uuid[])
 ) AS edges
-WHERE dependent = ANY($5::uuid[])
-  AND (NOT $6::boolean OR NOT invalid)
+WHERE dependent = ANY($6::uuid[])
+  AND (NOT $7::boolean OR NOT invalid)
 `
 
 type ListNormalisedInEdgesParams struct {
 	ProjectID      uuid.UUID
 	ForwardGates   []uuid.UUID
 	ReverseGates   []uuid.UUID
+	Containment    []uuid.UUID
 	Adjacency      []uuid.UUID
 	Dependents     []uuid.UUID
 	ExcludeInvalid bool
@@ -51,7 +57,7 @@ type ListNormalisedInEdgesParams struct {
 type ListNormalisedInEdgesRow struct {
 	Dependent uuid.UUID
 	Needed    uuid.UUID
-	Gate      bool
+	Kind      string
 }
 
 // ListNormalisedInEdges is the in-neighbourhood of a set of entities in
@@ -62,8 +68,14 @@ type ListNormalisedInEdgesRow struct {
 // source. After this statement nothing downstream knows which trait an
 // edge carried, which is the whole point of normalising.
 //
+// Containment has an arm of its own rather than riding in with the
+// forward gates, because the unreachable analysis owes a reason and
+// "the only way in is through a container nobody can reach" is a
+// different sentence, with a different fix, from "every route to it is
+// blocked". Everything else treats a container as a gate.
+//
 // The adjacency arms are symmetric types, listed in both directions and
-// marked gate = false: a symmetric edge joins two entities without
+// marked `adjacency`: a symmetric edge joins two entities without
 // ordering them, so it may admit under `any` and may never be required
 // under `all`.
 //
@@ -76,6 +88,7 @@ func (q *Queries) ListNormalisedInEdges(ctx context.Context, arg ListNormalisedI
 		arg.ProjectID,
 		arg.ForwardGates,
 		arg.ReverseGates,
+		arg.Containment,
 		arg.Adjacency,
 		arg.Dependents,
 		arg.ExcludeInvalid,
@@ -87,7 +100,7 @@ func (q *Queries) ListNormalisedInEdges(ctx context.Context, arg ListNormalisedI
 	var items []ListNormalisedInEdgesRow
 	for rows.Next() {
 		var i ListNormalisedInEdgesRow
-		if err := rows.Scan(&i.Dependent, &i.Needed, &i.Gate); err != nil {
+		if err := rows.Scan(&i.Dependent, &i.Needed, &i.Kind); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

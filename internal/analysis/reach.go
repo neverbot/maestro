@@ -356,14 +356,31 @@ func (p Params) normalisedWalk(name, seedSQL string, seedArgs []any) graph.Walk 
 // propagation on. `annotation` and a bare `acyclic` appear in none of
 // the three, which is how a type declared inert is followed by nothing.
 func (p Params) edgeSets() (forward, reverse, symmetric []uuid.UUID) {
+	gates, containment, reverse, symmetric := p.edgeSetsByKind()
+	return dedupeIDs(concatIDs(gates, containment)), reverse, symmetric
+}
+
+// edgeSetsByKind is the same four sets with containment kept apart from
+// the other forward gates.
+//
+// The split exists for one reader: the unreachable analysis owes a
+// *reason*, and "the only way in is through a container nobody can
+// reach" is a different sentence, with a different fix, from "every
+// route to it is blocked". Everything else folds the two together, which
+// is what edgeSets above does, so the walk and the fixpoint cannot start
+// disagreeing about what a gate is.
+//
+// containment comes back empty when the caller switched propagation off,
+// which is the single place that switch is applied.
+func (p Params) edgeSetsByKind() (gates, containment, reverse, symmetric []uuid.UUID) {
 	sem := p.Semantics
-	forward = concatIDs(sem.WithTrait("unlocks"), sem.WithTrait("ordering"))
+	gates = dedupeIDs(concatIDs(sem.WithTrait("unlocks"), sem.WithTrait("ordering")))
 	if p.propagateContainment() {
-		forward = concatIDs(forward, sem.WithTrait("containment"))
+		containment = dedupeIDs(sem.WithTrait("containment"))
 	}
-	reverse = sem.WithTrait("prerequisite_of")
-	symmetric = sem.WithTrait("symmetric")
-	return dedupeIDs(forward), dedupeIDs(reverse), dedupeIDs(symmetric)
+	reverse = dedupeIDs(sem.WithTrait("prerequisite_of"))
+	symmetric = dedupeIDs(sem.WithTrait("symmetric"))
+	return gates, containment, reverse, symmetric
 }
 
 // inGateSQL is the normalised in-edge test, written once because five
@@ -584,9 +601,9 @@ func (s *Service) allFixpoint(ctx context.Context, p Params, out *Reach) error {
 				continue
 			}
 			in := edges[id]
-			if len(in.gates) > 0 {
+			if gates := in.all(); len(gates) > 0 {
 				every := true
-				for _, needed := range in.gates {
+				for _, needed := range gates {
 					if !admitted[needed] {
 						every = false
 						break
@@ -636,9 +653,16 @@ func (s *Service) allFixpoint(ctx context.Context, p Params, out *Reach) error {
 // inEdge is one entity's normalised in-neighbourhood, split by whether
 // each neighbour gates it or is merely adjacent to it.
 type inEdge struct {
-	gates    []uuid.UUID
-	adjacent []uuid.UUID
+	// gates and containers are both gates -- every reader but one folds
+	// them together -- and they are kept apart so the unreachable
+	// analysis can say which sentence a finding deserves.
+	gates      []uuid.UUID
+	containers []uuid.UUID
+	adjacent   []uuid.UUID
 }
+
+// all is the whole in-neighbourhood a gate-counting reader needs.
+func (e inEdge) all() []uuid.UUID { return concatIDs(e.gates, e.containers) }
 
 // inEdges reads the normalised in-neighbourhood of a set of entities. It
 // is the "one in-degree query" the all-fixpoint runs beside the walk,
@@ -647,12 +671,13 @@ type inEdge struct {
 func (s *Service) inEdges(ctx context.Context, p Params, of []uuid.UUID) (
 	map[uuid.UUID]inEdge, error,
 ) {
-	forward, reverse, symmetric := p.edgeSets()
+	gates, containment, reverse, symmetric := p.edgeSetsByKind()
 	rows, err := s.q.ListNormalisedInEdges(ctx, dbq.ListNormalisedInEdgesParams{
 		ProjectID:      p.ProjectID,
 		Dependents:     of,
-		ForwardGates:   forward,
+		ForwardGates:   gates,
 		ReverseGates:   reverse,
+		Containment:    containment,
 		Adjacency:      symmetric,
 		ExcludeInvalid: p.ExcludeInvalid,
 	})
@@ -662,9 +687,12 @@ func (s *Service) inEdges(ctx context.Context, p Params, of []uuid.UUID) (
 	out := make(map[uuid.UUID]inEdge, len(of))
 	for _, row := range rows {
 		entry := out[row.Dependent]
-		if row.Gate {
+		switch row.Kind {
+		case "gate":
 			entry.gates = append(entry.gates, row.Needed)
-		} else {
+		case "containment":
+			entry.containers = append(entry.containers, row.Needed)
+		default:
 			entry.adjacent = append(entry.adjacent, row.Needed)
 		}
 		out[row.Dependent] = entry

@@ -4358,33 +4358,33 @@ This drives the spec's §11 as one sequence, over the real transports,
 against a real server and a real browser. Everything before this task
 proved a module; this task proves the product.
 
-- [ ] Step 1: seed a game over MCP exactly as an agent would — types,
+- [x] Step 1: seed a game over MCP exactly as an agent would — types,
   entities, relations, one document, one saved view (*Mage quests 20–30*,
   `graph`, `color_by: "zone"`), one uploaded background.
-- [ ] Step 2: open `/g/{slug}` in the browser. Assert the three lanes,
+- [x] Step 2: open `/g/{slug}` in the browser. Assert the three lanes,
   and assert with `evaluate_script` that `getComputedStyle` resolves
   `--paper` and `--ink` to the token values — the one thing no Node
   harness can see, because it needs a cascade.
-- [ ] Step 3: open `/g/{slug}/v/mage-quests` with `?p.class=mage`. Assert
+- [x] Step 3: open `/g/{slug}/v/mage-quests` with `?p.class=mage`. Assert
   the parameter bar shows the binding, the legend has readable rows, and
   the footer carries both durations. Record `stats.duration_ms` and the
   layout elapsed for the commit message — this is O4's and O10's
   measurement.
-- [ ] Step 4: assert the budget with `performance.now()` around the run:
+- [x] Step 4: assert the budget with `performance.now()` around the run:
   first contentful paint of the game page under 1s, a 500-node `graph`
   under 1s total including layout, layout hard-stopped at 2s. **Where a
   budget fails, record the number and open it as a finding rather than
   loosening the constant quietly.**
-- [ ] Step 5: drag four quests. Assert one `POST …/positions`, reload,
+- [x] Step 5: drag four quests. Assert one `POST …/positions`, reload,
   assert the four coordinates survive.
-- [ ] Step 6: open a second page on the same view. Assert the first
+- [x] Step 6: open a second page on the same view. Assert the first
   page's drag reaches it as **one** coalesced re-read, and that a
   colleague's drag does not arrive while a local drag is in flight.
-- [ ] Step 7: add twelve quests over MCP. Assert they arrive auto-placed,
+- [x] Step 7: add twelve quests over MCP. Assert they arrive auto-placed,
   unpinned (hollow anchors), and counted in the band that says so, and
   that the four pinned nodes did not move — asserted by coordinate
   equality, not by eye.
-- [ ] Step 8: `types.rename` a relation type over MCP. Assert the view
+- [x] Step 8: `types.rename` a relation type over MCP. Assert the view
   **does not draw**, that the diagnostics panel names the step in the
   server's own words with the pointer, that one click on *Run anyway*
   produces the reduced picture under the amber band, and that the dropped
@@ -4392,7 +4392,7 @@ proved a module; this task proves the product.
   picture drawn that was quietly wrong — concretely: assert the
   best-effort picture's banner names the dropped step, and assert the
   pre-repair render produced zero node marks.
-- [ ] Step 9: drive the keyboard path alone — tab to the twin, move
+- [x] Step 9: drive the keyboard path alone — tab to the twin, move
   through rows, nudge a node with the arrow keys, assert the write, and
   assert `document.activeElement` never lands inside the `aria-hidden`
   canvas.
@@ -4411,6 +4411,180 @@ proved a module; this task proves the product.
 git add internal/web/interface_e2e_test.go
 git commit -m "test(web): the interface end to end, from a seeded game to a stale view repaired by hand"
 ```
+
+#### Corrections made during implementation
+
+The walk was driven twice: once over the routes the front end calls
+(`internal/web/interface_e2e_test.go`, which runs in CI) and once in
+Firefox against a `make dev` instance, whose measurements are recorded in
+that file's header. Everything below came out of the browser half.
+
+1. **The colour key was built by four renderers and drawn by nobody.**
+   `palette.js`'s `legendFor` returns the rows — eight hues by frequency,
+   the hatched tail, the `unset` row — `scene.legend` carries them,
+   `render_graph_test.mjs` and its three siblings assert over them, and
+   **no component, page or emitter in the product ever read the field.**
+   A `graph` with `color_by` drew eight colours and nothing anywhere on
+   the page said what one meant, which makes §2.3's whole colour
+   discipline unreadable and the plan's own step 3 ("the legend has
+   readable rows") unsatisfiable. Found by searching the rendered page —
+   light DOM and every shadow root — for a swatch: there was none.
+
+   Fixed in the pure half first: `scene.js` gains `legendModel`, which
+   pairs each row with `fillFor` so the swatch and the node's fill are
+   one answer read twice, and `frameFor` carries it on the frame.
+   `mst-view-frame` renders a strip of chips between the banner stack and
+   the drawing. **The swatch is painted by a class and not by a `style`
+   attribute**, and that is Task 15's third correction talking rather than
+   taste: a style attribute is inline style, this policy refuses it with
+   no error at all, and a legend painted from the model would have been
+   the same dead-on-the-wire defect one layer down. So `legendModel`
+   carries `kind` and `index`, and the component declares all ten paints.
+   Confirmed on the seeded game: two rows computing to rgb(122, 53, 140)
+   and rgb(110, 79, 233), the nodes carrying `var(--data-6)` and
+   `var(--data-4)`, which are those two colours.
+
+2. **The map renderer was never given a composition.** `render/map.js`'s
+   header promises that on a map which *has* a saved arrangement, a node
+   new to it "is placed by the client, drawn with a hollow anchor, and
+   counted — *12 new nodes were placed automatically*". `coordinatesFor`
+   reads that from `options.layout`; `LAYOUT_REQUESTS` names only `graph`
+   and `layered`, and the `SCENES` entry for `map` passed
+   `{background, axis, zoom}` and no layout at all. So
+   `placementsOf(options.layout)` was empty on every real page, the
+   exception could not fire, and `scene.automatic` was structurally zero.
+   `render_map_test.mjs` passes a composition by hand and proves the
+   module; nothing proved the call. Measured before the fix, on a map
+   with four pinned rows and twelve quests added afterwards: **twelve
+   shelf chips, zero hollow rings, no band.** After: 4 solid anchors, 13
+   hollow rings (the twelve new ones plus one stored row nobody is
+   holding — the distinction map.js insists on), the band *"12 new nodes
+   were placed automatically."*, and the four pinned coordinates
+   unmoved.
+
+   The composition is built on the main thread by `mapComposition` and
+   not through the worker, because a map is not a graph and nothing about
+   it wants dagre: what a node with no row needs is a coordinate near the
+   arrangement, which is `gridFallback` fitted by `compose` against the
+   pins. A `fields` map gets none — there the game states every
+   coordinate and a composition would be a placement nothing reads.
+
+3. **`mst-select` had no listener.** `mst-twin` dispatches it when a row
+   takes focus, its header says the selection travels "so the canvas can
+   highlight what the reader is standing on", and `twin_test.mjs` asserts
+   it goes out "under the name a canvas will listen for" — and nothing in
+   the product listened. The whole keyboard path of §8.1 was dead:
+   measured before the fix, focusing the *Wanted: Hogger* row set
+   `mst-twin.selected`, and one ArrowRight on the focused surface left
+   the node's `x` at 287 and sent zero writes, because
+   `Arrangement.selection` was still empty. After: 287 to 288 and exactly
+   one write.
+
+   The listener is bound on the **frame** and not on the twin: the event
+   is `composed` so it crosses the boundary, and the twin is rebuilt on
+   every draw while the frame is not. The guard is
+   `theTwinsSelectionReachesTheArrangementAtItsCallSite`
+   (`jstest/pages_test.mjs`), which drives `wire` — a check that called
+   the handler would stay green with the binding deleted, which is
+   exactly the defect. Mutation, verified applied: guarding the
+   `addEventListener` call behind `if (false)` — *"focusing a twin row
+   selected no node on the canvas: got 0, want 1"*.
+
+4. **The plan's step 8 describes a failure a rename does not produce.** A
+   rename moves the *catalogue* and not the *reference*: the stored ref
+   row carries the relation type's id, so after
+   `relation_types.rename` the view still runs, answers 200 with a
+   `stale[]` advisory, and the frame shows a `<details>` in the title
+   strip naming the pointer and both spellings. The refusal step 8 wants
+   — no picture, a diagnostics panel, *Run anyway* — needs a reference
+   the game no longer **has**, so the walk removes the `requires`
+   relation type as well. It then behaves exactly as written: zero node
+   marks, both of the server's sentences with their pointers, and one
+   click producing 17 nodes and 16 edges under a `data-code="stale"`
+   banner whose row swatch computes to rgb(176, 168, 154), which is
+   `--dropped`. This is the second time in this repository that a plan
+   step was written against the spec rather than against the code; the
+   first is recorded in the views plan's learned section.
+
+5. **Step 1's `color_by: "zone"` is not a value the catalogue accepts.** A
+   `kindSlot` parameter names a *projection slot*, and the slots are the
+   five a document may write — `label`, `color_by`, `group_by`,
+   `size_by`, `sort_by`. "zone" is the entity type the slot hops to. The
+   seeded view says `color_by: "color_by"`, which reads oddly and is
+   correct; the plan's spelling would have been refused with a pointer.
+
+6. **The twelve quests do not arrive in an open page, and that is by
+   design.** `applyEvent` handles the four `view.*` kinds, the two
+   renames and `resync`; `entity.upserted` falls to the `kind.unhandled`
+   arm, so a picture is never swapped under a designer by content
+   arriving. **But nothing tells the designer either.** The rename rule
+   re-reads the *view row*, which a rename does not change, so an open
+   picture goes quietly out of date with no band and no invitation to
+   re-run. Recorded and not fixed: what a designer is told and when is a
+   design decision, and inventing one inside the end-to-end task is how a
+   product acquires a notification nobody argued for. It is the sub-project's
+   one open question and belongs in whichever plan next touches the client.
+
+7. **Step 10's fallback was never built.** Below tablet width the view
+   page is meant to fall back to the twin with the writing interactions
+   disabled rather than shrunk (design spec §9, and `mst-twin`'s own
+   header claims the twin serves "a designer on a screen narrower than a
+   tablet"). At a 600 px viewport the canvas was still displayed at
+   536 px with every writing interaction live, and `styles.css` holds
+   exactly one media query that is not the dark theme — the game home's
+   three-lane grid. No task of this plan built it and Task 18 did not
+   invent one: a CSS-only hide would leave `Arrangement.mayWrite` true
+   and a keyboard user nudging an invisible canvas, which is a half-truth
+   rather than a fallback. **The step is left unticked.** It is the one
+   item of §11 this sub-project does not deliver.
+
+8. **Notes from driving, for whoever drives next.** An iframe cannot be
+   used to time a page: `frame-ancestors 'none'` refuses framing even
+   same-origin, the frame stays at `about:blank`, and the first attempt
+   at the budget measurement timed out rather than failing. `window.open`
+   works. Patching `window.fetch` after load intercepts nothing —
+   `client.js` captures `fetch` in a default parameter when the client is
+   constructed — so requests are counted off Resource Timing instead;
+   filter on the full path, because `/static/positions.js` matches a
+   naive search for "positions". And a Lit `.value=` binding puts the
+   parameter's value in `input.value` and in neither the attribute nor
+   the text, so a check that read the bar as text would have called a
+   working binding broken.
+
+#### The hand check
+
+Answered from two screenshots of the running instance. **A human still
+owes the final word on all four**; what follows is what the pixels show.
+
+- *Is the eight-hue legend discriminable at a glance?* On the
+  thousand-creature graph all eight rows and the hatched tail are on
+  screen at once. Seven of the eight read apart immediately; `--data-1`
+  and `--data-5` are the closest pair (both dark reds) and are the one
+  place a reader would have to compare rather than recognise. The tail's
+  hatch is unmistakably not a ninth colour, which is what it is for.
+- *Is there any saturated pixel that does not belong to the game's data?*
+  No. Every colour outside the legend chips and the node fills is paper,
+  ink or grey — the title strip, the parameter bar, the arrangement
+  panel, the footer and the chrome are all achromatic.
+- *Is the thousand-node graph legible or a hairball?* **A hairball**, and
+  not marginally: at the fitted zoom it is a solid black band about
+  90 px tall. It draws in half a second and says nothing. Nothing in this
+  sub-project claims otherwise, but it is the honest answer and the
+  analysis sub-project should not assume a graph renderer is a way to
+  read a thousand nodes.
+- *Does the stale panel read like an explanation rather than a stack
+  trace?* Yes. Both rows are the server's own sentences and each names
+  the action that fixes it — *"declare it again with
+  relation_types.upsert, point this reference at another type, or run
+  with on_stale best_effort to draw what is left"* — with the JSON
+  pointer set small and grey beside it rather than leading.
+
+One thing the screenshots show that no question asked about: **the
+arrangement menu is always open**, a bordered panel of three paragraphs
+sitting over the top-left of the canvas on every view, taller than the
+drawing itself on a small answer. Every word in it is true and useful
+once; permanently is not where it belongs. Recorded for whoever owns the
+canvas next.
 
 ---
 
@@ -4460,3 +4634,205 @@ looks at them first:
    a test that enumerates the shells rather than listing the routes.
 3. **`views.layout_seed` is dropped** (Task 17): a migration, both wire
    surfaces, `dbq`, and the generated tool description.
+
+---
+
+## What this sub-project learned
+
+Eighteen tasks, one browser opened twice, and about a hundred and eighty
+corrections recorded across their blocks. This section is for whoever
+writes the analysis sub-project — whose plan is already written, and
+whose surface is a set of reports rendered in this same front end. It is
+not a summary of what was built; it is what kept going wrong, what
+actually caught it, and what a front end can and cannot verify about
+itself.
+
+Read the views plan's own learned section first. Both defects it names
+recurred here, and one of them recurred in a form that section could not
+have predicted.
+
+### The defect that recurred, and it is one defect
+
+**Correct in the module, asserted by a harness that called the module
+directly, dead at the call site.** Every serious defect this sub-project
+shipped is that sentence. Not a family of related mistakes — the same
+mistake, ten times:
+
+- The import map was in every shell and the policy refused to apply it
+  (Task 2, found in Task 15). Nothing throws, nothing logs, the element
+  stays in the DOM with its JSON intact.
+- `mst-canvas` built its stylesheet as a `<style>` element, which is
+  inline style to a policy, so the canvas had *no styles at all* and drew
+  at an SVG's default 300×150 inside a 686×641 frame (Task 7, found in
+  Task 15).
+- `backgroundOf` takes the view row *and* the asset; `pages/view.js`
+  passed `undefined` for the asset on every draw, so a correctly placed
+  ground drew nothing (Task 11, found in Task 15).
+- The timeline was never given its axis declaration, so an enum axis
+  silently became a number axis and piled every event into "no value"
+  (Task 13, found in Task 15).
+- `wireSaveAs` had a harness driving it directly, and commenting out its
+  one call in `wire` left every check green (Task 16, found by its own
+  mutation round).
+- `scene.legend` was built by four renderers, asserted by four harnesses,
+  and read by nothing — no legend has ever been on screen in this product
+  until Task 18.
+- `mapScene` reads `options.layout` for its auto-placement branch and the
+  page passed none, so "n new nodes were placed automatically" was
+  unreachable code with a passing test (Task 11, found in Task 18).
+- `mst-select` is dispatched by the twin, asserted by `twin_test.mjs`
+  "under the name a canvas will listen for", and listened for by nothing
+  — the whole keyboard path of §8.1 (Task 5, found in Task 18).
+
+Two things make this shape specific to a front end rather than a
+restatement of the views plan's "a rule not carried one step along".
+
+**First: the join between a pure function and a DOM is exactly where a
+scene-is-data architecture puts its seam, and a seam is a place with two
+sides and no owner.** The architecture is right — it is the reason the
+six renderers have hundreds of assertions over readable data — and it
+manufactures this defect as a by-product. Every one of the ten above sits
+on that seam.
+
+**Second: a browser fails silently in ways a server never does.** A
+refused import map, a refused `<style>`, a refused `style` attribute, an
+unheard event, a field nobody read: none of them throws, none logs, and
+the page looks like a page. On the server a missing wire is a nil
+dereference or a 500. Here it is a picture that is merely a little
+wrong, and "a little wrong" is what the whole negative half of this plan
+exists to refuse.
+
+### What a front end can verify about itself, honestly rated
+
+The plan's preamble named four layers before any of them existed. After
+eighteen tasks, here is what each one was actually worth.
+
+1. **Scene tests over pure data — worth exactly what was claimed, and
+   they are most of the value.** Hundreds of checks, mutation-sensitive,
+   fast, and they caught real design errors while the design was still
+   being made: `layered`'s cycle sentence conflating two facts, `nested`
+   drawing a thing contained in two places twice, a sort putting absent
+   values first in one direction only. Keep this layer and keep it large.
+2. **DOM tests in a hand-written stub — worth much less than it looks,
+   and it is the layer that produced the false confidence.** The stub
+   cannot fail to apply a stylesheet, cannot refuse an inline script,
+   cannot decline to fire an event, and does not lay anything out. Nine
+   of the ten defects above ran green through it. Its real value is
+   narrow and should be stated narrowly: it proves a value reached a
+   `textContent` rather than an `innerHTML`, which is the escaping
+   perimeter, and it can drive a *call site* if you make it (see below).
+3. **Go source-shape guards — the weakest checks in the repository and
+   the correct answer anyway.** They found nothing on their own; they
+   exist so that a wiring line, once found by a human with a browser,
+   cannot be deleted again. Three of them are at the bottom of
+   `interface_e2e_test.go` and they say so in their own comment. A weak
+   guard over a property with no runtime signature beats no guard, and
+   pretending otherwise is how the property gets deleted twice.
+4. **A driven browser — the only thing that found any of it.** Task 15
+   opened one for the first time and found eight defects in a sitting,
+   two of them four tasks old. Task 18 opened one again and found three
+   more, plus two errors in the plan itself. **The score is: everything
+   the harnesses could catch, they caught; everything else waited for a
+   browser, however long that took.**
+
+The honest conclusion is not "the harnesses are bad". It is that **the
+four layers are not four filters of decreasing coarseness — three of them
+cannot see the fourth's failure mode at all**, and the amount of work
+that accumulated behind that blind spot was four tasks' worth twice
+over.
+
+### The one change that would have changed the outcome
+
+**Open a browser in Task 2, not in Task 15.**
+
+The import map defect was shipped by Task 2 and found by Task 15. In
+between, Tasks 3 through 14 built a data client, a frame, a twin, a
+layout engine, a canvas and six renderers, all of which import `lit` by
+bare specifier, none of which could have resolved in a browser, and every
+one of which was reported as done. The canvas had no styles from Task 7
+to Task 15. Nothing about those tasks' *own* correctness was wrong; they
+were built on a floor that was not there, and no harness in the plan
+could see the floor.
+
+It does not need a browser test suite, which this repository has
+deliberately not bought. It needs **one page opened by a human, once, as
+soon as the first module loads in a document** — and then again whenever
+a new *kind* of thing is mounted. Two sittings found eleven defects. A
+third sitting, early, would have found three of them before ten tasks
+were built on top.
+
+The analysis sub-project mounts new report surfaces in this same shell.
+Open one the day the first one renders.
+
+### Tests that pass for the wrong reason, front-end edition
+
+The views plan's four shapes all recurred. Two are worth restating
+because their front-end form is not obvious:
+
+- **A harness that drives the handler instead of the event.** This is
+  the call-site defect wearing a test. The fix is mechanical and it
+  works: in `pages_test.mjs` and `save_as_test.mjs`, the check builds the
+  state, calls the real `wire`, and then *dispatches on the element* —
+  `frame.dispatch("mst-select", …)`, `dialog.root.dispatch("click", …)`.
+  Both go red when the one binding line is removed. Every controller this
+  front end has should be reached that way and most now are.
+- **A mutation that does not apply.** Task 13 recorded it, Task 15's own
+  hand-check list recorded two exercises that were "not performable as
+  written", and Task 18 found three plan steps describing behaviour the
+  product deliberately does not have. **Treat a plan's prescribed
+  mutation as a hypothesis**: run it, confirm the named test is the one
+  that goes red, and if the mutation cannot reach the path, find the one
+  that does and write down that the plan's was wrong. Six of this plan's
+  mutations needed replacing.
+
+And one shape the views plan did not have, because a server has no
+equivalent: **an assertion that reads the DOM as text.** A Lit `.value=`
+binding puts a value in the property and in neither the attribute nor the
+`textContent`. A check that read the parameter bar as text would have
+reported a working binding as broken — and the inverse, a check that reads
+a class name where the paint comes from a stylesheet, reports a broken
+one as working.
+
+### What a later sub-project should copy
+
+- **Keep the scene-is-data split.** It is the reason the negative half of
+  this product is trustworthy, and it is worth its seam. Copy the seam's
+  cost too: every renderer that returns a field, name the call site that
+  reads it in the same commit, or the field is decoration with a test.
+- **Every field a pure function returns needs a named reader.** Three of
+  Task 18's defects are one sentence: `scene.legend`, `options.layout`,
+  `SELECT_EVENT` — built, tested, unread. The views plan's rule was "a
+  mechanism nothing reads is a lie"; the front-end form is stricter,
+  because here a mechanism nothing reads *looks fine on screen*.
+- **Name the hand check's question, not the exercise.** Tasks 8–15 each
+  end with a specific question — *does the tail read as a tail; is the
+  cycle findable without being told; does the stale panel read like an
+  explanation* — and four of them were answered **no**, which is what
+  produced the hatch, the visible cycle mark and the hollow anchor. A
+  hand check that says "look at it" produces "looks fine".
+- **Write down what the browser refuses.** This front end has a running
+  list — inline scripts, script-built `<style>`, `style` attributes,
+  framing even same-origin, `window.fetch` captured before you can patch
+  it, a downloaded file the sandbox will not save. Each cost a debugging
+  session and each is now a sentence in the code beside the thing that
+  avoids it. Add to the list; do not rediscover it.
+- **Measure the performance claim on a real frame.** Task 14 claimed a
+  drag writes one transform plus the edges of the selection. It was true
+  — 5 mutations out of 25 elements, 3 ms — and nobody knew that for four
+  tasks. A claim about frames is not checkable off a frame.
+
+### What is not done
+
+**Step 10 of the definition of done is not built and is left unticked.**
+Below tablet width the view page should fall back to the twin with the
+writing interactions disabled; it does not, and no task in this plan
+built it. It is recorded in Task 18's corrections with what was measured.
+Whoever picks it up owns a real decision — a CSS-only hide leaves the
+arrangement writable by a keyboard on an invisible canvas — and that
+decision is why it was not improvised at the end of the sub-project.
+
+**And one thing this front end cannot yet say.** Content arriving from an
+agent does not reach an open picture, by design, and nothing tells the
+designer it happened. The event rules are right; the silence around them
+is a gap. It is the first thing the analysis sub-project will feel, since
+a report is stale the moment the game moves under it.

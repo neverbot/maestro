@@ -570,3 +570,203 @@ func TestThePaletteModuleAndTheStylesheetAgreeOnEight(t *testing.T) {
 		t.Errorf("palette.js names %d data tokens, want %d", named, dataSlots)
 	}
 }
+
+// --- The chrome spends no hue, and that is arithmetic too -------------
+
+// literalColourRE finds a colour written out rather than named. It is
+// matched against the stylesheet with its comments stripped, so the hex
+// values quoted in the prose above a rule — which is where this file's
+// arguments keep their numbers — are not mistaken for paint.
+var literalColourRE = regexp.MustCompile(`(?i)(#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|color-mix|oklch|lab|lch)\s*\()`)
+
+// diffRuleRE isolates the rules that draw a document comparison.
+var diffRuleRE = regexp.MustCompile(`(?s)(\.diff[a-z-]*)\s*\{([^}]*)\}`)
+
+// TestNoRuleSpellsAColourLiterally is the guard that would have caught
+// the diff and now catches whatever comes next.
+//
+// The token layer's whole claim is that every colour on screen is
+// declared twice, contrast-checked against both grounds and separated
+// under both dichromacies. A rule that writes `#14532d` instead of
+// naming a token opts out of all three silently: nothing fails, nothing
+// warns, and the value is simply never looked at again — which is
+// exactly what happened to the diff's two greens, chosen for a light
+// ground and left at 1.91:1 on the dark one for as long as the dark
+// theme has existed.
+//
+// So: outside the two token blocks, no rule in this stylesheet spells a
+// colour. The declarations themselves are where literals belong and are
+// skipped by name; every other rule paints with `var(--…)` or does not
+// paint. `transparent` and `currentColor` are keywords rather than
+// values and are not colours this test has anything to check.
+func TestNoRuleSpellsAColourLiterally(t *testing.T) {
+	raw, err := os.ReadFile(stylesheetPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", stylesheetPath, err)
+	}
+	src := stripComments(string(raw))
+
+	// The token declarations are the one place a literal is the point.
+	// They are removed wholesale rather than exempted line by line, so a
+	// literal that appears anywhere else is found however it is spelled.
+	withoutTokens := declarationRE.ReplaceAllString(src, "")
+
+	var offenders []string
+	for _, line := range strings.Split(withoutTokens, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if hit := literalColourRE.FindString(trimmed); hit != "" {
+			offenders = append(offenders, fmt.Sprintf("%q spells %s", trimmed, hit))
+		}
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("%d rule(s) spell a colour literally instead of naming a token:\n  %s\n"+
+			"a literal is a colour that is never contrast-checked, never checked for colour-blind "+
+			"separation and has no dark value at all",
+			len(offenders), strings.Join(offenders, "\n  "))
+	}
+}
+
+// TestTheDiffReadsNoChromaticToken is the second half, and it is the one
+// that holds the *decision* rather than the spelling.
+//
+// A diff is the strongest case this product has for a third chromatic
+// exception — added and removed are opposites a reader must separate at
+// a glance — and it was argued and refused (styles.css says why, at
+// length, beside the rules). The refusal is only worth anything if it is
+// held: this asserts the comparison paints with the achromatic tokens
+// and never with --danger, --focus or one of the eight data hues, so
+// re-admitting a hue there means re-arguing it and not editing a line.
+func TestTheDiffReadsNoChromaticToken(t *testing.T) {
+	raw, err := os.ReadFile(stylesheetPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", stylesheetPath, err)
+	}
+	src := stripComments(string(raw))
+
+	chromatic := map[string]bool{"--danger": true, "--focus": true, "--focus-ink": true}
+	for i := 1; i <= dataSlots; i++ {
+		chromatic[fmt.Sprintf("--data-%d", i)] = true
+	}
+
+	rules := diffRuleRE.FindAllStringSubmatch(src, -1)
+	if len(rules) < 5 {
+		t.Fatalf("found %d .diff rules; RenderDiff writes five classes and the container, so this test has stopped reading the thing it names", len(rules))
+	}
+	for _, rule := range rules {
+		for _, hit := range referenceRE.FindAllStringSubmatch(rule[2], -1) {
+			if chromatic[hit[1]] {
+				t.Errorf("%s reads %s: the diff was argued for a hue of its own and refused, and this is that hue arriving by the side door",
+					rule[1], hit[1])
+			}
+		}
+	}
+}
+
+// TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies is the palette's
+// own arithmetic, turned on the chrome.
+//
+// Added and removed are told apart four times over — the `+`/`-` the
+// unified format writes into the line's text, a solid rule against a
+// dashed one, a filled ground against an unfilled one, and full ink
+// against muted — and only the last of those is a colour. This asserts
+// the colour half to the same floor and in the same three vision models
+// as the eight data hues, which is what makes "this spends no hue" a
+// measurement rather than a claim: an achromatic pair separates by the
+// same distance whichever cone is missing, and the numbers here move by
+// less than a tenth of a unit between the three models.
+//
+// What the two greens scored, for the record and for whoever proposes a
+// hue here next: 81.4 in normal vision, 23.0 under deuteranopia and 7.4
+// under protanopia, against this floor of 20.
+func TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies(t *testing.T) {
+	vision := []struct {
+		name string
+		of   func(rgb) rgb
+	}{
+		{"normal vision", func(c rgb) rgb { return c }},
+		{"deuteranopia", func(c rgb) rgb { return simulate(c, false) }},
+		{"protanopia", func(c rgb) rgb { return simulate(c, true) }},
+	}
+	for _, th := range themes(t) {
+		added := th.colour(t, "--ink")
+		removed := th.colour(t, "--muted")
+		for _, mode := range vision {
+			got := deltaE76(mode.of(added), mode.of(removed))
+			if got < minSeparation {
+				t.Errorf("%s theme, %s: an added line's --ink and a removed line's --muted are %.1f apart, want >= %.1f",
+					th.name, mode.name, got, minSeparation)
+			}
+		}
+	}
+}
+
+// TestTheDiffsGroundsAndItsGutterAreLegible closes the arithmetic the
+// two greens actually failed: not their separation from each other but
+// their contrast against the ground they were painted on. #14532d was
+// 8.59:1 on the light paper and 1.91:1 on the dark one — the same rule,
+// legible in one theme and not in the other, because only one theme was
+// ever looked at.
+//
+// The five pairs below are every text-on-ground the comparison puts on
+// screen plus the gutter rule, which is a stroke that carries meaning
+// and is therefore held to WCAG 1.4.11's 3:1 rather than exempted as
+// decoration: it is one of the four things telling added from removed.
+func TestTheDiffsGroundsAndItsGutterAreLegible(t *testing.T) {
+	text := [][2]string{
+		{"--ink", "--ground"},   // an added line, on its fill
+		{"--muted", "--paper"},  // a removed line, on the page
+		{"--muted", "--ground"}, // a hunk header, on its fill
+		{"--ink", "--paper"},    // a context line
+	}
+	for _, th := range themes(t) {
+		for _, pair := range text {
+			if got := contrastRatio(th.colour(t, pair[0]), th.colour(t, pair[1])); got < 4.5 {
+				t.Errorf("%s theme: a diff line's %s on %s is %.2f:1, want >= 4.5:1", th.name, pair[0], pair[1], got)
+			}
+		}
+		for _, ground := range []string{"--paper", "--ground"} {
+			if got := contrastRatio(th.colour(t, "--line-strong"), th.colour(t, ground)); got < 3 {
+				t.Errorf("%s theme: the diff's gutter rule --line-strong on %s is %.2f:1, want >= 3:1", th.name, ground, got)
+			}
+		}
+	}
+}
+
+// TestTheDiffsGutterOutranksItsOwnDefault is a source-shape guard over a
+// cascade, which is the one thing every other check in this file is
+// blind to: a token can be right, declared in both themes, contrast-
+// checked and colour-blind-checked, and still never reach the pixel.
+//
+// The comparison draws a transparent 3px rule on **every** line, so that
+// the monospace columns of lines that show a gutter and lines that do
+// not stay aligned. That default is `.diff > div`, which outranks a bare
+// `.diff-added`. Written the obvious way, `.diff-added`'s
+// `border-left-color` therefore lost to it: both gutters computed to
+// `rgba(0, 0, 0, 0)`, added and removed differed only in their text, and
+// **nothing here failed** — the tokens above were all correct. It was
+// found by opening the page and reading the computed style, which is
+// this sub-project's own recurring lesson arriving one more time.
+//
+// So the two overriding rules must carry the container in their
+// selector. It is a weak check over a property with no runtime
+// signature, and that is exactly when this repository writes one.
+func TestTheDiffsGutterOutranksItsOwnDefault(t *testing.T) {
+	raw, err := os.ReadFile(stylesheetPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", stylesheetPath, err)
+	}
+	src := stripComments(string(raw))
+
+	if !strings.Contains(src, ".diff > div {") {
+		t.Fatal("the diff no longer draws a gutter on every line: this guard is about the rule that one outranks, and there is no longer one")
+	}
+	for _, class := range []string{".diff-added", ".diff-removed"} {
+		if !strings.Contains(src, ".diff > "+class+" {") {
+			t.Errorf("%s is not written as `.diff > %s`: `.diff > div` outranks a bare class, so its gutter silently computes to transparent and added and removed look the same",
+				class, class)
+		}
+	}
+}

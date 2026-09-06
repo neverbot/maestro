@@ -4934,3 +4934,147 @@ which this plan's own learned section rates honestly: the weakest check
 in the repository and the correct answer for a property with no runtime
 signature. Both mutations were run and both go red with the guard's own
 sentence.
+
+
+---
+
+## The diff's two greens, and the third exception that was refused
+
+The document comparison hard-coded `#14532d` and `#166534` for the added
+side and `--danger` for the removed one. It was the only place in the
+product where the chrome spent a hue on its own meaning, the only rule
+in the whole front end that spelled a colour literally, and the only
+place the dark theme was simply wrong.
+
+### Decided: no hue, and here is the argument
+
+The question was fair and worth asking properly: added and removed are
+opposites a reader must separate instantly, weight and rule-lines carry
+that badly, and the identity's two exceptions are a rule with a reason
+rather than a taboo. If it were admitted it had to be admitted
+explicitly, as a third exception with tokens in both themes.
+
+**It was refused, on three grounds:**
+
+1. **A hue there repeats rather than carries.** A unified diff's lines
+   begin with `+` and `-`, in the line's own text, in a monospace column
+   — the format carries the meaning losslessly before any stylesheet
+   touches it — and the gutter rule says it again. The identity's rule
+   is not "no colour", it is "colour is spent on the game's data"; a
+   channel spent on a fact already told twice has not earned it. The bar
+   a future candidate has to clear is now written into `styles.css`'s
+   header: not *would a colour help* but *is there a fact on screen that
+   nothing else says*.
+2. **The pair a reader expects is the pair that fails.** Any admissible
+   pair would not be red and green, so it would have to be learned — a
+   legend for a diff — which is worse than a spelling that needs none.
+3. **`--danger` for a removed line was a category error.** That token
+   means "this needs your attention". A line somebody deleted three
+   versions ago does not. (The analysis spec's own rule — stale is
+   "never as green, never as red" — is the same instinct, already held
+   elsewhere in this product.)
+
+### What it is spelled with instead
+
+Four channels, none of them hue: the `+`/`-` the format already writes;
+a **solid** gutter rule against a **dashed** one; a filled ground
+(`--ground`) against an unfilled one; and full `--ink` at weight 600
+against `--muted` at 400. Dashed-and-unfilled is deliberately the same
+vocabulary the palette already uses for "this is not there" — the dashed
+`--line-strong` outline of a node whose `color_by` slot found nothing —
+so a reader who has met one has met the other. Every line now carries a
+transparent 3px gutter so the monospace columns stay aligned whether a
+line shows a rule or not.
+
+### The arithmetic, which is what actually decided it
+
+Run with the same functions `static_tokens_test.go` already uses on the
+eight data hues.
+
+**What was there, measured:**
+
+| | light | dark |
+|---|---|---|
+| `#14532d` (added text) on `--paper` | 8.59:1 | **1.91:1** |
+| `#166534` (added rule) on `--paper` | 6.73:1 | **2.44:1** |
+
+Body text wants 4.5:1 and a meaningful stroke wants 3:1. The dark theme
+was not slightly off; it was unreadable, and had been for as long as the
+dark block has existed.
+
+And the separation of the two spellings, against the palette's own floor
+of 20 ΔE:
+
+| vision | added green vs removed `--danger` |
+|---|---|
+| normal | 81.4 |
+| deuteranopia | 23.0 |
+| **protanopia** | **7.4** |
+
+A diff a protanope cannot read is not a diff. This is the textbook case
+and it failed the textbook way.
+
+**What ships, measured:** `--ink` against `--muted` separates by
+36.8 / 37.0 / 36.4 ΔE (normal / deuteranopia / protanopia) in the light
+theme and 29.5 / 29.4 / 29.5 in the dark — above the floor in all six,
+and moving by less than a tenth of a unit between vision models, which
+is the measurement behind "this spends no hue". Contrast: `--ink` on
+`--ground` 16.1:1 and 14.6:1; `--muted` on `--ground` 5.09:1 and 6.11:1;
+`--muted` on `--paper` 5.51:1 and 5.81:1; the `--line-strong` gutter
+3.79:1 and 3.86:1 on `--paper`, 3.50:1 and 4.06:1 on `--ground`.
+
+### The guards, and the mutation each answers to
+
+Five, in `internal/web/static_tokens_test.go`:
+
+- `TestNoRuleSpellsAColourLiterally` — **the guard that would have
+  caught this in the first place.** Outside the two token blocks, no
+  rule in the stylesheet spells a colour; those two `.diff` lines were
+  the only literals in the entire shipped front end. A literal opts out
+  of every check this file makes, silently. *Mutation: put `#166534`
+  back → red, naming the rule.*
+- `TestTheDiffReadsNoChromaticToken` — holds the **decision** and not
+  the spelling: the comparison reads no `--danger`, no `--focus`, no
+  `--data-n`, so re-admitting a hue means re-arguing it. *Mutation:
+  `.diff-added { color: var(--data-5) }` → red.*
+- `TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies` — the
+  palette's floor and its three vision models, turned on the chrome.
+  *Mutation: `--muted: #2b2820` → red at 10.5/10.6/10.3.*
+- `TestTheDiffsGroundsAndItsGutterAreLegible` — the arithmetic the
+  greens actually failed. *Mutation: a light dark `--ground` → red on
+  all three pairs.*
+- `TestTheDiffsGutterOutranksItsOwnDefault` — see below. *Mutation:
+  write `.diff-added` bare → red.*
+
+### What the browser showed, and the defect only it could find
+
+**Written correctly and dead on screen.** The overrides were first
+written as `.diff-added` and `.diff-removed`. The gutter default is
+`.diff > div`, which outranks a bare class, so `border-left-color` lost
+to it: both gutters computed to `rgba(0, 0, 0, 0)` and added and removed
+differed only in their text. Every token was correct, every one of the
+five guards above was green, and the page was wrong. Found by opening
+the document page and reading the computed style — the eleventh instance
+of this sub-project's one defect, in the one form a stylesheet has for
+it. The fix is `.diff > .diff-added` / `.diff > .diff-removed`, and
+`TestTheDiffsGutterOutranksItsOwnDefault` is the weak source-shape guard
+that keeps it, for the reason this plan already gives: a guard over a
+property with no runtime signature beats no guard.
+
+After the fix, computed on the running instance: added is
+`rgb(20, 20, 15)` at weight 600 on `rgb(242, 239, 233)` behind a solid
+`rgb(133, 126, 114)` rule; removed is `rgb(107, 100, 89)` at 400 on no
+fill behind a **dashed** rule of the same colour; a context line's text
+starts at the same x as both. In the dark block, driven against the real
+stylesheet with its media query forced open: added `rgb(236, 229, 216)`
+on `rgb(22, 21, 15)`, removed `rgb(156, 148, 138)` on none, the same two
+gutter styles at `rgb(125, 118, 104)`. Both read at a glance, and
+neither reads as an alarm.
+
+The one honest caveat: **the diff itself was probed and not driven.**
+The dev instance holds a single document at version 1, so there is no
+second version to compare and producing one would have written to seeded
+data. `internal/markdown.RenderDiff`'s real output was generated and
+injected into the real document page, so the markup, the stylesheet and
+the cascade are the product's; the route that fetches a comparison is
+unchanged by this work and is covered where it already was.

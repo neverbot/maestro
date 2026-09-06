@@ -13,6 +13,18 @@
  * "this needs your attention", and --focus, the one accent, which means
  * focus, selection and the current item and nothing else.
  *
+ * **A third was asked for and refused**, and it is written down here so
+ * the next one is argued against the same test rather than against a
+ * habit. The document diff — added and removed, which are opposites a
+ * reader must tell apart instantly — is the strongest case this product
+ * has for a chromatic exception, and it did not survive: the meaning is
+ * already carried losslessly by the `+`/`-` the unified format writes
+ * into the line's own text, so a hue there repeats rather than carries.
+ * The argument in full, and the arithmetic that decided it, sits beside
+ * the .diff rules below. The bar a fourth candidate has to clear is
+ * that one: not "would a colour help" but "is there a fact on screen
+ * that nothing else says".
+ *
  * Every colour token is declared twice — once here for the warm paper
  * ground and once in the dark block at the end of this file — and
  * internal/web/static_tokens_test.go holds that the two sets are the same
@@ -387,9 +399,57 @@ ul.history li {
 
 /* The comparison. internal/markdown's RenderDiff writes one <div> per
    line with exactly these five classes and escapes the line's text, so
-   colouring happens here and the client never parses a diff. Each class
-   carries a border or a weight as well as a colour: a diff that can only
-   be read in colour cannot be read by everyone. */
+   the spelling happens here and the client never parses a diff.
+ *
+ * **This was the one place in the product where the chrome spent a hue
+ * on its own meaning, and the hue is refused.** It used to be two greens
+ * chosen for a light ground plus --danger for the removed side. Both
+ * halves were wrong and the arithmetic says so rather than a taste does:
+ *
+ *   - the greens were never tuned for a dark ground. #14532d on the dark
+ *     --paper is 1.91:1, where body text wants 4.5:1, and the 3px rule's
+ *     #166534 is 2.44:1 where a stroke that carries meaning wants 3:1.
+ *     The dark theme was not "a bit off"; it was unreadable.
+ *   - green against red is the textbook pair that fails for a large
+ *     minority. Those two separate by 81.4 ΔE in normal vision, by 23.0
+ *     under deuteranopia and by **7.4 under protanopia** — against the
+ *     palette's own floor of 20, which every one of the eight data hues
+ *     clears in all three models. A diff a protanope cannot read is not
+ *     a diff.
+ *
+ * The question worth asking was whether added-and-removed deserves a
+ * *third* chromatic exception beside --danger and --focus, tuned
+ * properly in both themes. It does not, and the reason is not that the
+ * rule is sacred:
+ *
+ *   1. **It would be a third channel for something already said twice.**
+ *      A unified diff's lines begin with `+` and `-`, in a monospace
+ *      column, in the line's own text — the format carries the meaning
+ *      losslessly before any stylesheet touches it — and the rule down
+ *      the gutter says it again. Colour here carries nothing; it
+ *      repeats. The identity's rule is not "no colour", it is "colour is
+ *      spent on the game's data", and a channel spent on a fact already
+ *      told twice has not earned it.
+ *   2. **The pair a reader expects is the pair that fails.** Any
+ *      admissible pair would not be red and green, so it would have to
+ *      be *learned* — a legend for a diff — which is worse than the
+ *      spelling below, which needs none.
+ *   3. **--danger for a removed line was a category error anyway.** That
+ *      token means "this needs your attention". A line somebody deleted
+ *      three versions ago does not.
+ *
+ * So added and removed are told apart four times over and never by hue:
+ * by the marker character the format already writes, by a solid rule
+ * against a dashed one, by a filled ground against an unfilled one, and
+ * by weight — full ink against muted. Every value below is a token
+ * declared in both themes, and internal/web/static_tokens_test.go now
+ * holds three things about it: that no rule in this stylesheet spells a
+ * colour literally, that these rules read no chromatic token, and that
+ * the two spellings separate by ≥20 ΔE in normal vision *and* under both
+ * simulated dichromacies, which is the palette's own arithmetic applied
+ * to the chrome. They clear it by 36.8/37.0/36.4 in light and by
+ * 29.5/29.4/29.5 in dark: a dichromacy changes nothing here, because
+ * there is nothing chromatic to change. */
 .diff {
   font-family: var(--mono);
   font-size: 0.85rem;
@@ -398,12 +458,37 @@ ul.history li {
   overflow-x: auto;
   margin-top: 1rem;
 }
-.diff > div { padding: 0.1rem 0.6rem; white-space: pre; }
+/* The transparent rule is on every line, not only on the two that show
+   one: the text is `white-space: pre` in a monospace face, and a gutter
+   that appeared on some lines and not others would shift their columns
+   by three pixels against the ones above them. */
+.diff > div { padding: 0.1rem 0.6rem; white-space: pre; border-left: 3px solid transparent; }
 .diff-file { color: var(--muted); font-weight: 600; }
 .diff-hunk { color: var(--muted); background: var(--ground); }
 .diff-context { color: var(--ink); }
-.diff-added { color: #14532d; background: rgba(22, 101, 52, 0.12); border-left: 3px solid #166534; }
-.diff-removed { color: var(--danger); background: rgba(164, 38, 44, 0.1); border-left: 3px solid var(--danger); }
+/* `.diff > .diff-added` and not `.diff-added`, and the reason is the
+   cascade rather than taste: the gutter default above is `.diff > div`,
+   which outranks a bare class, so a rule written as `.diff-added` sets
+   its border-left-color and loses — leaving both gutters transparent and
+   both spellings identical apart from their text. Written that way
+   first, and **found by opening the page**: every token was right, every
+   test was green, and the computed border-left-color read
+   `rgba(0, 0, 0, 0)`. */
+.diff > .diff-added {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--ground);
+  border-left-color: var(--line-strong);
+}
+/* Dashed, unfilled and muted: the same three words the identity already
+   uses for "this is not there" — a node whose colour_by slot found
+   nothing wears a dashed --line-strong outline and no fill — so a reader
+   who has met one has met the other. */
+.diff > .diff-removed {
+  color: var(--muted);
+  border-left-color: var(--line-strong);
+  border-left-style: dashed;
+}
 
 /* --- Task 15: the three destinations, and the pages under them -------
  *

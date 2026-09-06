@@ -164,7 +164,7 @@ check("anAbsentColourSlotIsDashedAndUnfilled", () => {
 
   const absent = boxOf(result, "b");
   assertEqual(absent.fill, UNFILLED, "a node whose colour slot found nothing carries no fill");
-  assertEqual(absent.dash, ABSENT_DASH, "and is dashed, which is the second carrier");
+  assertEqual(absent.dash, ABSENT_DASH, "quest/b, whose colour slot found nothing, is dashed as well as unfilled");
   assertEqual(absent.class, CLASS_NODE_ABSENT, "and says so in its class as well as its stroke");
 
   // The control: the node that *has* a value is filled and solid, so a
@@ -221,7 +221,7 @@ check("twoAbsencesAreTwoMarks", () => {
 
   const both = boxOf(result, "c");
   assertEqual(both.fill, UNFILLED, "the colour absence is unfilled");
-  assertEqual(both.dash, ABSENT_DASH, "and dashed");
+  assertEqual(both.dash, ABSENT_DASH, "quest/c is dashed");
   assertClose(
     areaOf(both),
     areaOf(boxOf(result, "a")),
@@ -317,13 +317,24 @@ check("aNonNumericSizeValueIsNotASize", () => {
 
 check("anAmbiguousNodeCarriesItsMarkAtTheCorner", () => {
   const envelope = envelopeOf([
-    node("a", { label: "Alpha", zone: "elwynn" }, { ambiguous: true }),
-    node("b", { label: "Beta", zone: "elwynn" }),
+    node("a", { label: "Alpha", zone: "elwynn", faction: "alliance" }, { ambiguous: true }),
+    node("b", { label: "Beta", zone: "elwynn", faction: "horde" }),
   ]);
   const result = scene(envelope, { color_by: "zone" });
 
+  // The scan first, over the whole scene, because it has to be able to
+  // fail on its own: execute.go says the flag is on the node and that
+  // which slot was ambiguous is deliberately not carried, so a per-slot
+  // mark would be this interface inventing a distinction the server
+  // declined to make. The fixture's ambiguous node carries two slots, so
+  // a per-slot implementation has two marks to leave behind.
+  const perSlot = result.marks.filter(
+    (mark) => typeof mark.slot === "string" || (typeof mark.class === "string" && mark.class.includes("slot")),
+  );
+  assertDeepEqual(perSlot, [], "no mark is attributed to a slot");
+
   const marks = marksOfClass(result, CLASS_AMBIGUOUS);
-  assertEqual(marks.length, 1, "one mark for one ambiguous node");
+  assertEqual(marks.length, 1, "one mark for one ambiguous node, however many slots it has");
   assertEqual(marks[0].key, addressOf({ type: "quest", key: "a" }), "on the node that is flagged");
 
   // At the corner of that node's box, which is what makes it readable as
@@ -335,14 +346,6 @@ check("anAmbiguousNodeCarriesItsMarkAtTheCorner", () => {
   );
   assert(marks[0].cy >= box.y && marks[0].cy < box.y + 10, "and its top edge");
 
-  // And nowhere is there a mark naming a *slot*: execute.go says the
-  // flag is on the node and that which slot was ambiguous is
-  // deliberately not carried, so a per-slot mark would be this interface
-  // inventing a distinction the server declined to make.
-  const perSlot = result.marks.filter(
-    (mark) => typeof mark.slot === "string" || (typeof mark.class === "string" && mark.class.includes("slot")),
-  );
-  assertDeepEqual(perSlot, [], "no mark is attributed to a slot");
 });
 
 // --- Grouping draws; clustering does not -----------------------------
@@ -566,13 +569,31 @@ check("stubsLeaveTheirGroupEnclosure", () => {
   // enclosure of that node's group — which is *why* an enclosure is a
   // hairline and not a filled panel, and which is asserted here as a
   // property of the drawing rather than of a lucky arrangement.
+  //
+  // The stub's node is deliberately in the **middle** of a five-node
+  // group: a node at the edge of its own enclosure is one a stub of any
+  // length at all escapes, and a fixture like that would hold for a
+  // renderer that ignored the enclosure entirely.
   const envelope = envelopeOf(
     [
       node("a", { label: "Alpha", zone: "elwynn" }),
       node("b", { label: "Beta", zone: "elwynn" }),
-      node("c", { label: "Gamma", zone: "duskwood" }),
+      node("c", { label: "Gamma", zone: "elwynn" }),
+      node("d", { label: "Delta", zone: "elwynn" }),
+      node("e", { label: "Epsilon", zone: "elwynn" }),
+      node("f", { label: "Zeta", zone: "duskwood" }),
     ],
-    [edge("id-a", "id-outside")],
+    [
+      // A shape with three ranks, so the anchored node sits in the
+      // middle of its enclosure in *both* dimensions: a row of nodes
+      // would leave it a padding's width from the top edge, and a stub
+      // would escape without ever consulting the enclosure.
+      edge("id-a", "id-c"),
+      edge("id-b", "id-c"),
+      edge("id-c", "id-d"),
+      edge("id-c", "id-e"),
+      edge("id-c", "id-outside"),
+    ],
   );
   const result = scene(envelope, { group_by: "zone" });
 
@@ -591,6 +612,19 @@ check("stubsLeaveTheirGroupEnclosure", () => {
       stub[0].y1 <= encl.y + encl.h,
   );
   assert(home !== undefined, "the stub starts inside its node's enclosure");
+
+  // The fixture is one a lazy stub would fail to escape: the node it
+  // leaves from is further than a stub's own length from every edge of
+  // the enclosure.
+  const anchor = boxOf(result, "c");
+  const clearance = Math.min(
+    anchor.x - home.x,
+    home.x + home.w - (anchor.x + anchor.w),
+    anchor.y - home.y,
+    home.y + home.h - (anchor.y + anchor.h),
+  );
+  assert(clearance > 28, `the anchor is well inside its enclosure: ${clearance}px of clearance`);
+
   const outside =
     ring[0].cx < home.x || ring[0].cx > home.x + home.w || ring[0].cy < home.y || ring[0].cy > home.y + home.h;
   assert(
@@ -599,8 +633,47 @@ check("stubsLeaveTheirGroupEnclosure", () => {
       `${home.x},${home.y} ${home.w}x${home.h}`,
   );
 
+  // Which way it leaves has its own check below, on a node far enough
+  // off centre to have an unambiguous direction; this fixture's anchor
+  // is deliberately in the middle, where the question is only whether
+  // the enclosure was consulted at all.
+
   assertEqual(result.stubs.total, 1, "and the scene counts it");
   assertEqual(result.stubs.anchorless, 0, "with a known end to leave from");
+});
+
+check("aStubLeavesAwayFromItsGroupRatherThanAcrossIt", () => {
+  // A stub that left towards the middle of its own group would cross
+  // every node in it on the way out — and it would still end up
+  // outside the enclosure, which is why "did it get out" cannot be the
+  // only thing asserted about it.
+  const envelope = envelopeOf(
+    [
+      node("a", { label: "Alpha", zone: "elwynn" }),
+      node("b", { label: "Beta", zone: "elwynn" }),
+      node("c", { label: "Gamma", zone: "elwynn" }),
+      node("d", { label: "Delta", zone: "elwynn" }),
+    ],
+    [edge("id-a", "id-c"), edge("id-b", "id-d"), edge("id-a", "id-outside")],
+  );
+  const result = scene(envelope, { group_by: "zone" });
+  const home = marksOfClass(result, CLASS_ENCLOSURE)[0];
+  const ring = marksOfClass(result, CLASS_STUB_RING)[0];
+  const anchor = boxOf(result, "a");
+
+  const centre = { x: home.x + home.w / 2, y: home.y + home.h / 2 };
+  const from = { x: anchor.x + anchor.w / 2, y: anchor.y + anchor.h / 2 };
+  const offset = Math.hypot(from.x - centre.x, from.y - centre.y);
+  assert(offset > 1, `the anchor is off centre, so it has an outward direction: ${offset}`);
+
+  // The stub's travel and the node's own offset from the centre point
+  // the same way.
+  const travel = { x: ring.cx - from.x, y: ring.cy - from.y };
+  const away = { x: from.x - centre.x, y: from.y - centre.y };
+  assert(
+    travel.x * away.x + travel.y * away.y > 0,
+    `the stub leaves outward: travel ${travel.x},${travel.y} against ${away.x},${away.y}`,
+  );
 });
 
 check("bothEndpointsOutsideIsCountedAndDrawsNothing", () => {

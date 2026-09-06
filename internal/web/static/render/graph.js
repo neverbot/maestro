@@ -231,9 +231,15 @@ export function graphScene(envelope, layout, params = {}) {
       unplaced.push(key);
       continue;
     }
-    const authored = boxOf(node, options, domain);
-    const width = positive(placement.width, authored.width);
-    const height = positive(placement.height, authored.height);
+    // The box is **measured here**, not read back off the placement.
+    // The engine echoes the size it was handed, so reading it back would
+    // make this function agree with the layout by construction and hide
+    // exactly the mistake that matters: a renderer that measured one box
+    // for the engine and another for the drawing, which draws a
+    // three-times-area node into a hole reserved for a one-times one.
+    // theLayoutIsAskedForTheBoxThatIsDrawn is the join, and it can only
+    // fail if the two measurements are two calls.
+    const { width, height } = boxOf(node, options, domain);
     boxes.set(key, { key, x: placement.x, y: placement.y, width, height, node });
   }
 
@@ -466,10 +472,6 @@ function valueOf(node, slotName) {
 function valueText(node, slotName) {
   const json = valueJSON(node, slotName);
   return json === null ? null : json;
-}
-
-function positive(value, fallback) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function isObject(value) {

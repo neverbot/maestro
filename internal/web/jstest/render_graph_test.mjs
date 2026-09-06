@@ -36,7 +36,7 @@
 
 import { addressOf } from "../static/address.js";
 import { UNSET_LABEL, legendFor } from "../static/palette.js";
-import { footerFor, joinEdges } from "../static/render/scene.js";
+import { MARK_ELEMENTS, MARK_ORIGINS, footerFor, joinEdges } from "../static/render/scene.js";
 import { twinFor } from "../static/render/twin.js";
 import { layoutGraph } from "../static/layout/engine.js";
 import { controlNamed } from "../static/render/controls.js";
@@ -964,8 +964,15 @@ check("everyMarkIsAKindTheContractNamesAndCanBeDragged", () => {
   assert(result.marks.length > 10, "the fixture draws every kind of thing this renderer has");
   for (const mark of result.marks) {
     assert(
-      ["rect", "disc", "line", "label", "image"].includes(mark.kind),
-      `mark kind ${JSON.stringify(mark.kind)} is one the emitter knows`,
+      Object.prototype.hasOwnProperty.call(MARK_ELEMENTS, mark.kind),
+      `mark kind ${JSON.stringify(mark.kind)} is one the emitter knows; anything else is dropped silently`,
+    );
+    // And one the drag layer can move: a kind with no coordinate pairs
+    // rides a drag and then snaps back when the offset is baked in,
+    // which is why a filled arrowhead is a chevron of lines.
+    assert(
+      Array.isArray(MARK_ORIGINS[mark.kind]) && MARK_ORIGINS[mark.kind].length > 0,
+      `mark kind ${JSON.stringify(mark.kind)} has coordinate pairs the drag layer can translate`,
     );
     for (const [field, value] of Object.entries(mark)) {
       if (field === "kind" || field === "layer") continue;

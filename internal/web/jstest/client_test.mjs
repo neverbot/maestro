@@ -462,12 +462,25 @@ check("fortyPositionEventsCauseOneReread", async () => {
 
 check("aRereadRepeatsTheSameQuestion", async () => {
   const h = await harness();
+  // The same question includes how this run wanted staleness handled: a
+  // re-read that quietly dropped on_stale would answer a different
+  // question from the one on screen, and would do it at the moment a
+  // rename made the difference matter.
+  await h.client.runView("world", { class: "mage" }, { onStale: "best_effort" });
+  assertEqual(h.server.lastBody("/views/run").on_stale, "best_effort", "the run carried it");
+
   h.stream().write(frame("view.positions", { id: "u1", key: "world" }));
   await settle();
   await h.clock.advance(REREAD_DEBOUNCE_MS);
   const body = h.server.lastBody("/views/run");
   assertEqual(body.key, "world", "the same view");
   assertDeepEqual(body.params, { class: "mage" }, "with the parameters it was run with");
+  assertEqual(body.on_stale, "best_effort", "and the same staleness handling");
+
+  // And a run that asked for nothing says nothing: an absent on_stale is
+  // the server default, which is not the same statement as naming it.
+  await h.client.runView("world", {});
+  assert(!("on_stale" in h.server.lastBody("/views/run")), "an unasked-for on_stale is absent");
 });
 
 check("aRereadIsDeferredWhileDragging", async () => {
@@ -685,11 +698,13 @@ check("anUnreadableAnswerGetsNoInventedSentence", async () => {
 
 check("aRenameOverTheWireReadsTheRowAndDoesNotRunTheQuery", async () => {
   const h = await harness();
+  h.server.answer("/views/by-key/world", jsonResponse(200, { key: "world" }));
   h.stream().write(frame("type.renamed", { id: "u1", from: "zone", to: "region" }));
   await settle();
   await h.clock.advance(REREAD_DEBOUNCE_MS);
   assertEqual(h.server.countOf("/views/run"), 1, "the query was not silently re-run");
   assertEqual(h.server.countOf("/views/by-key/world"), 1, "the view row was re-read");
+  assertDeepEqual(h.client.state.views.world.row, { key: "world" }, "and the row the server sent is what landed");
 });
 
 // --- Run -------------------------------------------------------------

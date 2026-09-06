@@ -1230,7 +1230,7 @@ It is built **before** the renderers on purpose: every renderer task can
 then assert that its picture and the twin describe the same answer, and
 the twin is what a designer falls back to below tablet width (§9).
 
-- [ ] Tests: `everyNodeInTheEnvelopeHasARow` — including nodes the
+- [x] Tests: `everyNodeInTheEnvelopeHasARow` — including nodes the
   renderer shelved, dropped beyond `max_depth`, or collapsed into a count
   chip, because the twin is a description of the *answer* and not of the
   drawing; `everyEdgeHasARowIncludingStubs` — a stub's far end is its id,
@@ -1242,16 +1242,170 @@ the twin is what a designer falls back to below tablet width (§9).
   `theTwinRendersEveryStringAsText` — a node named
   `<img src=x onerror=…>` arrives through `textContent`.
 
-- [ ] See red: drop the shelved nodes from the twin's row source and
+- [x] See red: drop the shelved nodes from the twin's row source and
   watch `everyNodeInTheEnvelopeHasARow` fail with a count difference;
   remove `aria-hidden` from the canvas and watch its test fail.
 
+- [ ] Hand check (**left for a person; it cannot be done yet**): open a
+  view whose game holds a node named with markup
+  and read the twin in a real browser. Two questions a test cannot ask:
+  whether the name shows as characters on the screen (the harness proves
+  Lit is handed the string in a text position; only a browser proves the
+  text node), and whether a keyboard user reaches the twin from the top
+  of the page in a sensible number of tabs now that the drawing is
+  `aria-hidden` and holds no tab stop of its own. Both wait on Task 15,
+  which is the first task that mounts a view on a route; Task 18's
+  browser pass is where the first half becomes an assertion.
+
 ```bash
-git add internal/web/static/components/mst-twin.js \
-        internal/web/jstest/twin_test.mjs \
-        internal/web/static/components/mst-view-frame.js
+git add internal/web/static/render/twin.js \
+        internal/web/static/components/mst-twin.js \
+        internal/web/static/components/mst-view-frame.js \
+        internal/web/static/render/scene.js internal/web/static/palette.js \
+        internal/web/jstest/twin_test.mjs internal/web/jstest/importmap_loader.mjs \
+        internal/web/static_frame_test.go internal/web/static_twin_test.go \
+        internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the text twin, which is every view's accessible content"
 ```
+
+#### Corrections made during implementation
+
+1. **The model was split from the painter, into a file the task did not
+   name.** `render/twin.js` is the pure function from the envelope to
+   the two tables; `components/mst-twin.js` paints it and writes none of
+   its words. This is Task 4's shape carried one step along, and it is
+   what lets every assertion below be made over plain data that a
+   mutation turns red. The alternative — one component holding both —
+   would have put "every node has a row" and "absent is not empty"
+   inside a class no harness can drive without a DOM.
+
+2. **`frameFor` carries the twin, so a view cannot be drawn without
+   one.** The task lists `mst-view-frame.js` as modified and says the
+   twin is the accessible content of *every* view; making each of the
+   six renderer tasks remember to mount one is exactly how five of them
+   would. `frame.twin` is `twinFor(envelope)` for a picture and for an
+   empty answer, and **null for a refusal** — there is no answer to
+   describe, and two empty tables under a panel of diagnostics would
+   read as an answer that matched nothing, which is the one thing the
+   frame is most careful never to let a refusal look like.
+   `everyAnswerHasATwinAndNoRefusalDoes` pins all three.
+
+3. **The component-silence guard now walks the directory instead of
+   naming a file**, and this is the standing failure pattern caught in
+   the act. `TestTheViewFrameSpeaksOnlyTheModelsWords` opened
+   `mst-view-frame.js` by name; the twin is the second component and
+   renders more of the game's own words than any other surface, so it
+   would have been the first component nobody scanned. It is now
+   `TestEveryComponentSpeaksOnlyItsModelsWords` over
+   `static/components/*.js`, with `TestTheComponentScanReadsEveryComponent`
+   as the other half — a glob that matched nothing would pass the first
+   test forever.
+
+4. **A second escaping guard was needed, because Lit's escape hatches
+   are not DOM sinks.** `static_sinks_test.go`'s perimeter reads every
+   own asset for `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+   `setHTMLUnsafe`, `createContextualFragment` and `document.write` — a
+   complete list for a module that touches the DOM, and blind to
+   `unsafeHTML`, `unsafeSVG` and the static-html tags, which are
+   *imports*. `internal/web/static_twin_test.go`'s
+   `TestNoOwnModuleReachesForARawHTMLDirective` closes that, with
+   `TestTheRawDirectiveScanReadsWhatItClaimsTo` on top of it in both
+   directions. What makes the property hold today is arrangement rather
+   than vigilance — those directives live in packages this repository
+   has not vendored, and an unmapped bare specifier resolves to nothing
+   in a browser — and this is the guard that fails loudly on the day
+   somebody vendors one.
+
+5. **The framework does the escaping, and the harness asserts we hand it
+   the string where it does.** A game's words reach the DOM as
+   *interpolated values in child position* of a Lit template, which Lit
+   commits as Text nodes; nothing in this repository escapes anything.
+   So the property under our control is *placement*, and
+   `theTwinRendersEveryStringAsText` asserts exactly that: the walk
+   flattens the emitted template into markup chunks and bound values,
+   runs the chunks through a small HTML state machine, and fails if a
+   game string is bound anywhere but in text position — an attribute, a
+   `<script>`, a comment — or if it appears in the component's own
+   static markup at all, where it would not be a value and no escaping
+   could reach it. `theBindingPositionScannerReadsWhatItClaimsTo` is the
+   guard on that scanner in all four positions, because a scanner that
+   answered "text" to everything would have made the assertion pass on
+   any component ever written. Moving one cell's text into a `title=`
+   attribute turns it red, quoting the attribute by name.
+
+6. **Absent and empty are told apart twice, because a game may hold an
+   em dash.** The task asks for the em dash and the em dash alone would
+   be a second `color_by`: a value carried by one signal that the
+   content can forge. The cell carries `absent` as well, the component
+   paints it as a class, and
+   `aValueThatLooksLikeTheAbsentMarkIsStillNotAbsent` is the fixture
+   whose `color_by` *is* an em dash.
+
+7. **`labelFor` is exported from `palette.js` and called rather than
+   restated.** "Colour is never the only carrier" is only true if the
+   carrier says the same thing the hue does, so the twin's cell text is
+   character for character the legend row's label, from one function.
+   `theTwinCarriesTheValueTextForEveryColouredNode` joins the two
+   modules on it.
+
+8. **The selection has a reader today, and a second one waiting.**
+   Focusing a node row marks the row (`aria-current`, read by the
+   component's own stylesheet) and dispatches a composed `mst-select`
+   event carrying the node's **two keys and never its id**, which is how
+   `client.js` addresses a node and what execute.go says an id is not.
+   The event is the seam Task 7's canvas listens on; the mark is what
+   makes the mechanism something rather than a promise before that task
+   exists. `focusingARowSelectsItsNode` takes the handler out of the
+   emitted template rather than calling `select` by name, so a row wired
+   to nothing fails.
+
+9. **Edge rows are not focusable.** A focused row selects the node it
+   describes and an edge describes two, so there is no one answer to
+   send; a table is navigable by a screen reader without a tab stop on
+   every row, and a stop that selected nothing would be a stop that does
+   nothing. The edge table still gains the same absent/empty
+   distinction for free: `label` is `omitempty` on the wire, so an edge
+   nobody asked a label of is absent and an edge labelled `""` is empty.
+
+10. **A Node module-resolution hook was added, because the components
+    import `lit` by bare specifier.** The browser resolves that through
+    the import map this server ships; Node has no import map, no
+    `node_modules` here and no build step to rewrite either.
+    `internal/web/jstest/importmap_loader.mjs` reads the map out of a
+    shipped shell and answers with the file it names, so the harness
+    loads exactly what the browser loads — and a specifier renamed in
+    the shells and not here fails rather than passing against something
+    the browser would never see. It is the same argument
+    `vendor_modules_test.mjs` makes for reading the map instead of
+    restating it.
+
+11. **The twin's DOM half is asserted over the emitted template rather
+    than a rendered document, and that is a real limit.** Lit builds a
+    `TemplateResult` without touching the DOM, so a component's
+    `render()` can be driven in Node; committing one into a container
+    needs an HTML parser, and a stub that parsed HTML would be a second,
+    worse browser — at which point the escaping question would be a
+    question about the stub. So this layer holds *where each value is
+    bound*, and the real Text node is Task 18's, in a real browser,
+    against a real name.
+
+12. **The column-union assertion passed for the wrong reason and was
+    fixed in a follow-up commit.** The fixture's first node happened to
+    carry every projection slot, so a twin that read its columns off the
+    first row would have satisfied
+    `absentSlotsRenderAsAnEmDashNotBlank` — found by applying the
+    mutation and watching nothing go red. A fourth node now carries a
+    `region` slot no earlier node has, and the test says out loud that
+    the first node does not carry every slot, so the fixture cannot
+    quietly narrow again.
+
+13. **`theCanvasIsAriaHiddenAndTheTwinIsNot` is asserted against the
+    frame, because no canvas component exists yet.** The drawing is
+    slotted into a `div.canvas` the frame marks `aria-hidden="true"`,
+    and the assertion is positional — the `<slot>` is inside the hidden
+    element and `<mst-twin>` is outside it — rather than a search for an
+    attribute somewhere in the tree. Task 7 inherits the wrapper; it
+    does not get to decide the question again.
 
 ---
 

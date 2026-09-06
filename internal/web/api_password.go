@@ -151,8 +151,13 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, ca
 		case errors.Is(err, identity.ErrPasswordInvalid):
 			writeError(w, http.StatusUnprocessableEntity, errCodePasswordInvalid, "that password does not meet requirements")
 		default:
-			slog.ErrorContext(r.Context(), "change password failed", "user_id", caller.UserID, "error", err)
-			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not change the password")
+			// The change itself has not happened yet on this path, so
+			// contention here is answerable with "send the same request
+			// again" — the caller still holds the current password the
+			// resend needs. The IssueSession failure *below* is the
+			// opposite case and keeps its unconditional 500.
+			writeUnmappedError(w, r, err, "change password failed", "could not change the password",
+				"user_id", caller.UserID)
 		}
 		return
 	}
@@ -166,6 +171,12 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request, ca
 		// that made the change cannot also carry a fresh cookie back;
 		// the client has to log in again with the new password, same as
 		// any other device.
+		// **Deliberately not writeUnmappedError**, for the reason the
+		// comment above gives and startSessionFor (api_auth.go) gives at
+		// length: the password has already changed, so "send the same
+		// request again" is advice that cannot work — the resend would
+		// be refused 401, the current password it names being the old
+		// one. The message already says the only thing that helps.
 		slog.ErrorContext(r.Context(), "issue session after password change failed", "user_id", caller.UserID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "password changed, but could not start a new session — please log in again")
 		return

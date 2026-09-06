@@ -2,7 +2,6 @@ package web
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -46,8 +45,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request, calle
 	case errors.Is(err, identity.ErrTokenRequestInvalid):
 		writeError(w, http.StatusUnprocessableEntity, errCodeLabelInvalid, "that label is not usable")
 	case err != nil:
-		slog.ErrorContext(r.Context(), "create api token failed", "project_id", scope.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not create the token")
+		writeUnmappedError(w, r, err, "create api token failed", "could not create the token", "project_id", scope.ProjectID)
 	default:
 		// Published with the same fields apiTokenResponse exposes to
 		// handleListTokens — never the clear value, which appears in
@@ -115,8 +113,7 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request, caller
 	}
 	rows, err := s.opts.Identity.ListAPITokens(r.Context(), scope.ProjectID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "list api tokens failed", "project_id", scope.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not list tokens")
+		writeUnmappedError(w, r, err, "list api tokens failed", "could not list tokens", "project_id", scope.ProjectID)
 		return
 	}
 	tokens := make([]apiTokenResponse, len(rows))
@@ -147,8 +144,8 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, calle
 		return
 	}
 	if err := s.opts.Identity.RevokeAPIToken(r.Context(), identity.RevokeAPITokenRequest{ProjectID: scope.ProjectID, TokenID: tokenID}); err != nil {
-		slog.ErrorContext(r.Context(), "revoke api token failed", "project_id", scope.ProjectID, "token_id", tokenID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not revoke the token")
+		writeUnmappedError(w, r, err, "revoke api token failed", "could not revoke the token",
+			"project_id", scope.ProjectID, "token_id", tokenID)
 		return
 	}
 	// Published even for the no-op case (an unknown or foreign token id

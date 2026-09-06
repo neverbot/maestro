@@ -103,9 +103,8 @@ func (s *Server) handleSetAdmin(w http.ResponseWriter, r *http.Request, caller C
 			// least attributable one, unlike handleDeleteGame and every
 			// other consequential mutation in this file, which already
 			// log the acting caller.
-			slog.ErrorContext(r.Context(), "set admin failed",
-				"actor_user_id", caller.UserID, "target_email", req.Email, "is_admin", *req.IsAdmin, "error", err)
-			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not update admin status")
+			writeUnmappedError(w, r, err, "set admin failed", "could not update admin status",
+				"actor_user_id", caller.UserID, "target_email", req.Email, "is_admin", *req.IsAdmin)
 		}
 		return
 	}

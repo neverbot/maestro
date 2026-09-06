@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/identity"
+	"github.com/neverbot/maestro/internal/metamodel"
 )
 
 // SessionCookie is the name of the browser session cookie.
@@ -249,8 +250,12 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 			caller, ok, err := s.resolveBearerCaller(ctx, token)
 			if err != nil {
-				slog.ErrorContext(ctx, "resolve bearer caller failed", "error", err)
-				writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify the token")
+				// Admission is swept too, not only the handlers behind
+				// it: this lookup runs on every authenticated request, so
+				// a contended one would otherwise report every agent's
+				// call during a lock storm as a server fault before any
+				// handler that classifies properly ever ran.
+				writeUnmappedError(w, r, err, "resolve bearer caller failed", "could not verify the token")
 				return
 			}
 			if ok {
@@ -263,8 +268,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		if cookie, err := r.Cookie(SessionCookie); err == nil {
 			caller, ok, err := s.resolveSessionCaller(ctx, cookie.Value)
 			if err != nil {
-				slog.ErrorContext(ctx, "resolve session caller failed", "error", err)
-				writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify the session")
+				writeUnmappedError(w, r, err, "resolve session caller failed", "could not verify the session")
 				return
 			}
 			if ok {
@@ -476,4 +480,74 @@ func requireCaller(h func(http.ResponseWriter, *http.Request, Caller)) http.Hand
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]string{"error": code, "message": message})
+}
+
+// retryableAdvice is the one sentence the REST surface says about
+// database contention, written here once and used by every handler in
+// this package through writeRetryableError below. mcpErrorFor
+// (mcp_errors.go) argues both halves of it at length — why the code is
+// still `retryable` when 57014 can also mean "too expensive", and why the
+// database's own message is logged rather than carried — and says it in
+// the vocabulary of a tool call ("send the same call again") because that
+// is the surface it answers. This is the same advice in the vocabulary of
+// an HTTP request.
+const retryableAdvice = "the database refused this over contention; send the same request again. " +
+	"If it keeps failing, the request is too expensive as written rather than " +
+	"unlucky: ask for less rather than resending it again"
+
+// writeRetryableError is the contention answer, in one place. Both REST
+// callers of it — writeDomainError's tail for the content surface
+// (api_metamodel.go) and writeUnmappedError below for the
+// game-administration one — log first, on their own terms, and then call
+// this: the status, the code and the sentence are not theirs to choose
+// separately, and this repository's most repeated defect is a rule
+// written once and copied.
+func writeRetryableError(w http.ResponseWriter) {
+	writeCodedError(w, http.StatusServiceUnavailable, errCodeRetryable, retryableAdvice, nil)
+}
+
+// writeUnmappedError is the tail every REST handler in this package
+// shares: an error no arm above it recognised is contention first and a
+// server fault only as the default.
+//
+// **It exists because the game-administration handlers did not have
+// that tail.** api_projects.go, api_tokens.go, api_invites.go,
+// api_auth.go, api_admin.go and api_password.go each mapped their own
+// domain sentinels carefully and then answered *every* remaining error
+// with 500 internal_error — including the four contention SQLSTATEs
+// metamodel.IsRetryable admits, which the content surface has reported
+// as `retryable` since Task 7. A game deletion cascading over a game an
+// agent is concurrently writing deadlocks in Postgres (SQLSTATE 40P01),
+// and that deadlock was being reported to the caller as our bug rather
+// than as the one thing that would have worked: sending the same request
+// again. TestAGameDeletionDeadlockedByAContentWriteIsRetryable provokes
+// exactly that pair and is red without this function.
+//
+// logMsg and clientMsg stay the caller's: the operator-facing line names
+// which operation failed ("delete game failed") and the caller-facing one
+// names it in the product's own words ("could not delete the game"), and
+// neither is something a shared tail can invent. attrs are the caller's
+// own log fields, and are logged on both paths — an operator seeing a run
+// of contention wants the project id as much as they want it on a fault.
+//
+// Not every 500 in those files may become a 503: see
+// handleChangePassword's and startSessionFor's own comments for the two
+// call sites where "send the same request again" would be wrong advice
+// because the request already changed something, and which therefore
+// keep their unconditional 500 deliberately.
+func writeUnmappedError(w http.ResponseWriter, r *http.Request, err error, logMsg, clientMsg string, attrs ...any) {
+	if metamodel.IsRetryable(err) {
+		// Warn, not error: nothing is broken, and the database's own
+		// message ("deadlock detected", "canceling statement due to lock
+		// timeout") is logged rather than carried to the caller for the
+		// reason mcpErrorFor gives — it describes this server's
+		// internals, not the caller's next move, and an operator seeing a
+		// run of these wants to know which lock.
+		slog.WarnContext(r.Context(), "request hit database contention",
+			append([]any{"path", r.URL.Path, "operation", logMsg, "error", err}, attrs...)...)
+		writeRetryableError(w)
+		return
+	}
+	slog.ErrorContext(r.Context(), logMsg, append(attrs, "error", err)...)
+	writeError(w, http.StatusInternalServerError, errCodeInternal, clientMsg)
 }

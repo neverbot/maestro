@@ -262,27 +262,17 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 		slog.WarnContext(r.Context(), "a view run exceeded its statement budget",
 			"path", r.URL.Path, "error", err)
 		writeCodedError(w, http.StatusServiceUnavailable, errCodeRetryable, viewTimeout.Error(), nil)
-	case metamodel.IsRetryable(err):
-		// Logged, not carried: the database's own "canceling statement
-		// due to lock timeout" describes this server's internals, not
-		// the caller's next move, and an operator seeing a run of these
-		// wants to know which lock. Same split mcpErrorFor makes.
-		slog.WarnContext(r.Context(), "game-content request hit database contention",
-			"path", r.URL.Path, "error", err)
-		// The second sentence is Task 7's, and it is not decoration:
-		// 57014 is also what an operator's statement_timeout raises on a
-		// request that is simply too expensive, and that one fails every
-		// time it is resent. A browser client gets the same advice an
-		// agent does — mcpErrorFor's own comment argues the case.
-		writeCodedError(w, http.StatusServiceUnavailable, errCodeRetryable,
-			"the database refused this over contention; send the same request again. "+
-				"If it keeps failing, the request is too expensive as written rather than "+
-				"unlucky: ask for less rather than resending it again", nil)
+	// The tail — contention, then a server fault as the default — is
+	// writeUnmappedError (auth.go), not two arms of its own. It used to
+	// be two arms here, and the copy of them that the
+	// game-administration handlers never got is the whole reason that
+	// function exists: the retryable arm was written once, correctly,
+	// and half this package's REST surface was left answering a deadlock
+	// as our bug. It stays last, which is what keeps IsRetryable behind
+	// every arm above that names something the caller sent.
 	default:
-		slog.ErrorContext(r.Context(), "game-content request failed",
-			"path", r.URL.Path, "error", err)
-		writeCodedError(w, http.StatusInternalServerError, errCodeInternal,
-			"the server could not complete the request", nil)
+		writeUnmappedError(w, r, err, "game-content request failed",
+			"the server could not complete the request", "path", r.URL.Path)
 	}
 }
 

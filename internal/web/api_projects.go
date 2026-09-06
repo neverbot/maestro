@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/roles"
 )
@@ -58,8 +59,7 @@ func (s *Server) handleListGames(w http.ResponseWriter, r *http.Request, caller 
 	}
 	rows, err := s.opts.Projects.ListForUser(r.Context(), caller.UserID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "list games failed", "user_id", caller.UserID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not list games")
+		writeUnmappedError(w, r, err, "list games failed", "could not list games", "user_id", caller.UserID)
 		return
 	}
 	games := make([]map[string]any, 0, len(rows))
@@ -86,8 +86,7 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request, caller
 	case errors.Is(err, projects.ErrNameInvalid):
 		writeError(w, http.StatusUnprocessableEntity, errCodeNameInvalid, "that name is not usable")
 	case err != nil:
-		slog.ErrorContext(r.Context(), "create game failed", "user_id", caller.UserID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not create the game")
+		writeUnmappedError(w, r, err, "create game failed", "could not create the game", "user_id", caller.UserID)
 	default:
 		// Ids, not slugs, are what the rest of the API addresses a game
 		// by (see ProjectScope's own doc comment below): the SPA maps
@@ -209,9 +208,14 @@ func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Calle
 			// "this caller was rejected" when nothing about them was
 			// actually evaluated. See resolveProjectScope's own doc
 			// comment for the split.
-			slog.ErrorContext(r.Context(), "resolve project scope failed",
-				"game", ref, "user_id", caller.UserID, "error", err)
-			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify game membership")
+			// Contention is still not a verdict about this caller, and
+			// is not a fault either: this lookup runs on every
+			// project-scoped request, including the ones racing a
+			// deletion of the very game they name, so it is exactly
+			// where a lock timeout lands. writeUnmappedError keeps the
+			// split this comment draws and adds the one below it.
+			writeUnmappedError(w, r, err, "resolve project scope failed", "could not verify game membership",
+				"game", ref, "user_id", caller.UserID)
 			return
 		}
 		h(w, r, caller, scope)
@@ -418,8 +422,7 @@ func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request, calle
 	}
 	rows, err := s.opts.Projects.ListMembers(r.Context(), scope.ProjectID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "list members failed", "project_id", scope.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not list members")
+		writeUnmappedError(w, r, err, "list members failed", "could not list members", "project_id", scope.ProjectID)
 		return
 	}
 	// No email: projects.Member carries none (Task 8's Round 2
@@ -486,8 +489,8 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 		// reached here when the change would demote the game's only owner.
 		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one owner — promote someone else first")
 	case err != nil:
-		slog.ErrorContext(r.Context(), "change role failed", "project_id", scope.ProjectID, "target_user_id", targetID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not change the member's role")
+		writeUnmappedError(w, r, err, "change role failed", "could not change the member's role",
+			"project_id", scope.ProjectID, "target_user_id", targetID)
 	default:
 		// Published after SetRole has already returned successfully —
 		// see publish.go's own doc comment on eventMemberUpdated for why
@@ -547,8 +550,8 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 	case errors.Is(err, projects.ErrLastOwner):
 		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one owner — promote someone else first")
 	case err != nil:
-		slog.ErrorContext(r.Context(), "remove member failed", "project_id", scope.ProjectID, "target_user_id", targetID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not remove the member")
+		writeUnmappedError(w, r, err, "remove member failed", "could not remove the member",
+			"project_id", scope.ProjectID, "target_user_id", targetID)
 	default:
 		s.publish(scope.ProjectID, eventMemberRemoved, "", true, map[string]any{"user_id": targetID})
 		writeJSON(w, http.StatusOK, map[string]any{"revoked_tokens": revoked})
@@ -645,8 +648,7 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 			writeError(w, http.StatusNotFound, errCodeNotFound, "no such game")
 			return
 		}
-		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
+		writeUnmappedError(w, r, err, "delete game failed", "could not delete the game", "project_id", scope.ProjectID)
 		return
 	}
 	if confirm := r.URL.Query().Get("confirm"); confirm == "" || confirm != project.Slug {
@@ -672,9 +674,15 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 		slog.ErrorContext(r.Context(), "count invites before game deletion failed", "project_id", scope.ProjectID, "error", err)
 	}
 
+	// The one call in this file the defect was filed against: this
+	// DELETE cascades over every row the game owns, so an agent writing
+	// the game's content at the same moment deadlocks it (SQLSTATE
+	// 40P01) — measured, and provoked deterministically by
+	// TestAGameDeletionDeadlockedByAContentWriteIsRetryable. Answering
+	// that 500 told the owner their deletion had hit a bug in this
+	// server; it had hit a race, and clicking again would have worked.
 	if err := s.opts.Projects.Delete(r.Context(), scope.ProjectID); err != nil {
-		slog.ErrorContext(r.Context(), "delete game failed", "project_id", scope.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not delete the game")
+		writeUnmappedError(w, r, err, "delete game failed", "could not delete the game", "project_id", scope.ProjectID)
 		return
 	}
 	slog.InfoContext(r.Context(), "game deleted",
@@ -719,6 +727,18 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	games, err := s.opts.Projects.ListForUser(r.Context(), caller.UserID)
 	if err != nil {
+		// The same classification every other handler in this file now
+		// makes, said in this route's own vocabulary rather than through
+		// writeUnmappedError: this route serves an HTML navigation and
+		// has no JSON error body to put a code in (see this handler's
+		// own doc comment). What a browser can still act on is the
+		// status — 503 on a reload that would have worked, not a 500
+		// that reads as "this instance is broken".
+		if metamodel.IsRetryable(err) {
+			slog.WarnContext(r.Context(), "root redirect hit database contention", "user_id", caller.UserID, "error", err)
+			http.Error(w, retryableAdvice, http.StatusServiceUnavailable)
+			return
+		}
 		slog.ErrorContext(r.Context(), "list games for root redirect failed", "user_id", caller.UserID, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return

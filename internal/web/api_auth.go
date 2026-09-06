@@ -283,8 +283,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			// the client gets a fixed, generic message, and the operator
 			// gets the real error, since otherwise nothing anywhere
 			// would record that this happened at all.
-			slog.ErrorContext(r.Context(), "authenticate failed", "error", err)
-			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not log in")
+			writeUnmappedError(w, r, err, "authenticate failed", "could not log in")
 		}
 		return
 	}
@@ -296,8 +295,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	token, expiresAt, err := s.opts.Identity.IssueSession(r.Context(), user.ID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "issue session failed", "user_id", user.ID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not start a session")
+		// Contention here is answerable with "send it again", unlike the
+		// same call in startSessionFor below: a login changed nothing, so
+		// a second attempt with the same credentials is the same request,
+		// not a different one.
+		writeUnmappedError(w, r, err, "issue session failed", "could not start a session", "user_id", user.ID)
 		return
 	}
 	s.setSessionCookie(w, r, token, expiresAt)
@@ -328,8 +330,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(SessionCookie); err == nil {
 		if err := s.opts.Identity.RevokeSession(r.Context(), cookie.Value); err != nil {
-			slog.ErrorContext(r.Context(), "revoke session failed", "error", err)
-			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not log out")
+			// Retryable contention reaches the client as such: this
+			// handler already keeps the cookie live on failure precisely
+			// so the client can retry, and a revocation that lost a race
+			// is the case that retry was written for.
+			writeUnmappedError(w, r, err, "revoke session failed", "could not log out")
 			return
 		}
 	}
@@ -494,14 +499,24 @@ func (s *Server) writeRegistrationError(w http.ResponseWriter, r *http.Request, 
 		// gets a fixed, generic message; the operator gets the actual
 		// error server-side, since otherwise nothing anywhere records
 		// that this happened at all.
-		slog.ErrorContext(r.Context(), "registration failed", "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not complete registration")
+		writeUnmappedError(w, r, err, "registration failed", "could not complete registration")
 	}
 }
 
 func (s *Server) startSessionFor(w http.ResponseWriter, r *http.Request, userID uuidValue) {
 	token, expiresAt, err := s.opts.Identity.IssueSession(r.Context(), userID)
 	if err != nil {
+		// **Deliberately not writeUnmappedError**, and this is the line
+		// where that sweep stops. Every caller of startSessionFor
+		// reaches it *after* the mutation its request asked for has
+		// already committed — a registration that created the account,
+		// an invite redemption that spent the invite — so `retryable`
+		// would be false advice: the same request sent again does not
+		// retry this failure, it fails differently (409 email_taken, a
+		// spent invite). A contended IssueSession here is indistinguish-
+		// able to the client from any other, and the honest answer to
+		// both is "the account is made, log in". handleChangePassword's
+		// own tail (api_password.go) stops for the same reason.
 		slog.ErrorContext(r.Context(), "issue session failed", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not start a session")
 		return

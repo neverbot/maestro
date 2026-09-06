@@ -2,7 +2,6 @@ package web
 
 import (
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -143,8 +142,7 @@ func writeCreateInviteError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, identity.ErrInviteRequestInvalid):
 		writeError(w, http.StatusUnprocessableEntity, errCodeInviteRequestInvalid, err.Error())
 	default:
-		slog.ErrorContext(r.Context(), "create invite failed", "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not create the invite")
+		writeUnmappedError(w, r, err, "create invite failed", "could not create the invite")
 	}
 }
 
@@ -210,8 +208,7 @@ func (s *Server) handleListInstanceInvites(w http.ResponseWriter, r *http.Reques
 	}
 	rows, err := s.opts.Identity.ListOutstandingInvites(r.Context())
 	if err != nil {
-		slog.ErrorContext(r.Context(), "list outstanding invites failed", "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not list invites")
+		writeUnmappedError(w, r, err, "list outstanding invites failed", "could not list invites")
 		return
 	}
 	invites := make([]inviteResponse, len(rows))
@@ -239,8 +236,7 @@ func (s *Server) handleRevokeInstanceInvite(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.opts.Identity.RevokeInvite(r.Context(), inviteID); err != nil {
-		slog.ErrorContext(r.Context(), "revoke invite failed", "invite_id", inviteID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not revoke the invite")
+		writeUnmappedError(w, r, err, "revoke invite failed", "could not revoke the invite", "invite_id", inviteID)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -344,8 +340,8 @@ func (s *Server) handleListProjectInvites(w http.ResponseWriter, r *http.Request
 	}
 	rows, err := s.opts.Identity.ListOutstandingInvitesForProject(r.Context(), scope.ProjectID)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "list outstanding project invites failed", "project_id", scope.ProjectID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not list invites")
+		writeUnmappedError(w, r, err, "list outstanding project invites failed", "could not list invites",
+			"project_id", scope.ProjectID)
 		return
 	}
 	invites := make([]inviteResponse, len(rows))
@@ -372,8 +368,8 @@ func (s *Server) handleRevokeProjectInvite(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := s.opts.Identity.RevokeProjectInvite(r.Context(), scope.ProjectID, inviteID); err != nil {
-		slog.ErrorContext(r.Context(), "revoke project invite failed", "project_id", scope.ProjectID, "invite_id", inviteID, "error", err)
-		writeError(w, http.StatusInternalServerError, errCodeInternal, "could not revoke the invite")
+		writeUnmappedError(w, r, err, "revoke project invite failed", "could not revoke the invite",
+			"project_id", scope.ProjectID, "invite_id", inviteID)
 		return
 	}
 	// Published even for the no-op case, the same convention

@@ -9,12 +9,16 @@ of a game together: characters, places, missions, progression, story.**
 Self-hosted. Open source. It holds the *design* of a game, never a
 running one: no live instances, no real players, no telemetry.
 
-> **Early days.** A game can declare its own types and be filled with
-> content today, by an agent over MCP or a person over the HTTP API.
-> What is not built yet is everything you would *look at* it with: no
-> diagrams, no catalogues to browse, no prose, no analysis. The web
-> interface is one page showing what a game contains. See
-> [Running it](#running-it) to start an instance, the
+> **Early days.** A game can declare its own types, be filled with
+> content, carry versioned prose, and be *queried* — a saved view names
+> what to draw, how to traverse it and what to colour it by, and answers
+> with nodes and edges. All of it by an agent over MCP or a person over
+> the HTTP API.
+>
+> What is not built yet is the part that draws: no diagrams on screen, no
+> catalogues to browse, no analysis. The web interface is still one page
+> showing what a game contains, so today a view's answer is JSON rather
+> than a picture. See [Running it](#running-it) to start an instance, the
 > [Roadmap](#roadmap) for what is done, and
 > [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design.
 
@@ -230,8 +234,8 @@ as an unknown token.
 
 - [x] **Core.** Server, Postgres, identity, MCP and REST surfaces.
 - [x] **Metamodel.** The four primitives, field schemas, validation.
-- [ ] **Markdown.** Versioned prose, linked to entities.
-- [ ] **Views.** The query language, saved views, layouts, coordinates.
+- [x] **Markdown.** Versioned prose, linked to entities.
+- [x] **Views.** The query language, saved views, layouts, coordinates.
 - [ ] **Interface.** Maestro's own look, and the renderer catalogue.
 - [ ] **Analysis.** Cycles, unreachable content, orphans, routes.
 - [ ] **Skills.** The agent bundle and genre templates.

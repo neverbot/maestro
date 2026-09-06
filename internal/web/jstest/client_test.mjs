@@ -1,8 +1,8 @@
 // The harness for internal/web/static/client.js: it imports the real,
 // unmodified module and drives it the way a page does — a stubbed fetch,
-// a stubbed event stream carrying real `text/event-stream` bytes, and an
-// injected clock so a 750ms debounce is a millisecond of test time
-// rather than a sleep.
+// a stubbed event stream carrying real `text/event-stream` bytes, and
+// injected timers so a 750ms coalescing window is a millisecond of test
+// time rather than a sleep.
 //
 // What this covers that no Go test can. The client is the only module in
 // this front end that fetches, and everything that makes it safe is a
@@ -84,7 +84,7 @@ function walkStrings(value, visit) {
   }
 }
 
-// --- The injected clock ----------------------------------------------
+// --- The injected timers ---------------------------------------------
 
 function fakeClock() {
   let at = 0;

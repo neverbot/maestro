@@ -500,8 +500,14 @@ export class MstSaveAs extends HTMLElement {
     const tooltip = this.doc.createElement("p");
     tooltip.setAttribute("class", CLASS_TOOLTIP);
     // Both sentences: what the knob does to the drawing, and what the
-    // catalogue says a query must produce for it.
-    tooltip.textContent = this.tooltipFor(param.name) + " " + String(param.doc || "");
+    // catalogue says a query must produce for it. Joined by a dash and
+    // not by a space — the catalogue's line is a phrase written for an
+    // agent and starts lowercase, so run together the two read as one
+    // ungrammatical sentence. Seen on screen, on the `table` renderer's
+    // four knobs.
+    tooltip.textContent = [this.tooltipFor(param.name), String(param.doc || "")]
+      .filter((sentence) => sentence !== "")
+      .join(" — ");
     label.appendChild(tooltip);
     return label;
   }

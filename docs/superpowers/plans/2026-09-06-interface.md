@@ -4157,7 +4157,16 @@ and points at the agent workflow for changing it.
    `TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper` holds
    both.
 
-5. **The element is mounted, not its panel.** The first version mounted
+5. **A control's two sentences were run together.** Each knob carries
+   both what it does to the picture (render/*.js's CONTROLS tooltip) and
+   what a query must produce for it (the catalogue's own `Doc`), which is
+   render/controls.js's argument that neither restates the other. Joined
+   by a space they read as one ungrammatical sentence, because the
+   catalogue's line is a phrase for an agent and starts lowercase. Seen
+   on the `table` renderer's four knobs in a browser; joined by a dash
+   now.
+
+6. **The element is mounted, not its panel.** The first version mounted
    `saveAs.root` — the inner tree — which leaves the shadow root, and the
    constructible stylesheet adopted onto it, attached to nothing. That is
    Task 15's own canvas-stylesheet finding one component later: a page

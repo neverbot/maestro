@@ -138,3 +138,23 @@ func TestPaletteRules(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/palette_test.mjs")
 }
+
+// TestTheVendoredRuntimeLoads drives
+// internal/web/jstest/vendor_modules_test.mjs, which reads the import
+// map out of a shipped shell, resolves each specifier the way a browser
+// would, and imports the vendored file it names.
+//
+// static_vendor_test.go is arithmetic over the vendored bytes — the hash
+// matches, the payload fits its budget, every shell carries the same
+// map, the server serves each target as JavaScript. All of that is
+// satisfiable by three files that do not parse. This is the test that
+// they load, that they export the identifiers the components and the
+// layout worker are about to import by name, and that dagre lays out a
+// graph built from the *separately* vendored graphlib — a tolerance
+// dagre provides by reading a graph structurally, which is an upstream
+// detail Task 6 depends on entirely and a minor version could withdraw
+// without a word.
+func TestTheVendoredRuntimeLoads(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/vendor_modules_test.mjs")
+}

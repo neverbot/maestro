@@ -452,6 +452,113 @@ git add internal/web/static/styles.css internal/web/static/palette.js \
 git commit -m "feat(web): the interface token layer and a data palette judged by arithmetic"
 ```
 
+**Hand check.** Open the game page in both themes and look at eight
+swatches at the size a node label actually is — about 11px — scattered
+over the canvas ground rather than lined up in a legend. The arithmetic
+below proves every pair is far apart in CIELAB under normal vision and
+under both simulated dichromacies; it cannot say whether a reader
+*recognises* the third hue as the same third hue two hundred nodes away,
+and it says nothing at all about anomalous trichromacy, which is far
+commoner than the dichromacies simulated here. Look also at the
+serif/sans/mono split on the document page: whether it reads as
+editorial or as an accident is the other thing no test in this task can
+answer.
+
+#### Corrections made during implementation
+
+1. **A second rule token, `--line-strong`, was added, and `--line` is
+   deliberately *not* held to 3:1.** The task asks
+   `TestMeaningfulOutlinesMeetThreeToOne` to hold "`--line` and each
+   `--data-n` against `--ground`". `--line` is `#ded7cb` on `#f2efe9`:
+   1.25:1, and any value that reaches 3:1 is a strong grey — at which
+   point the spec's "hairline rules instead of boxes and shadows" is
+   gone, because a rule at 3:1 against its own surface is a box. The two
+   demands are both right about different strokes, so there are now two
+   tokens: `--line` stays the decorative hairline (a table rule, a panel
+   edge, which WCAG 1.4.11 exempts as decoration), and `--line-strong`
+   is the stroke that *is* the signal — the dashed outline of a node
+   whose `color_by` slot found nothing, and the palette's hatched tail.
+   `--line-strong` and the eight hues are what the test guards.
+
+2. **`--dropped` and `--pending` are not declared yet.** The spec lists
+   them in §2.3 and this task's code block repeats them, but nothing in
+   this task reads either one, and this plan's own preamble says a
+   mechanism nothing reads is a lie. They land with the banner stack
+   (Task 4) and the write-in-flight state (Task 14) that read them.
+   `TestEveryDeclaredTokenIsUsed` therefore ships with **no exception
+   list**, deliberately: an exemption is the hiding place every unread
+   token in the future would use.
+
+3. **The renamed accent did not follow its call site into the button.**
+   `--accent` / `--accent-ink` are renamed to `--focus` / `--focus-ink`
+   as the task requires, but the one call site — the primary button's
+   fill — was moved to `--ink` / `--paper` rather than to `--focus`. A
+   button filled with `--focus` is a coloured button, which is exactly
+   what the identity's central rule forbids, and it would spend the
+   accent on a fourth meaning. `--focus` instead gained its real
+   readers in the same commit: the `:focus-visible` ring and
+   `::selection`. Note that the old `--accent` was `#2b2b2b`, an
+   achromatic near-black, so this is what the rename *preserved* rather
+   than a change of look.
+
+4. **The both-themes guard compares colour tokens, not all tokens.**
+   `--serif`, `--sans` and `--mono` are declared once: a font stack does
+   not have a theme, and redeclaring three identical stacks in the dark
+   block to satisfy a name-set comparison would be noise pretending to
+   be rigour. The classification is mechanical (a value is a colour if
+   it is a six-digit hex or `transparent`), not a hand-maintained list,
+   so a colour added to `:root` and forgotten in the dark block still
+   fails — and the test additionally asserts that the dark block
+   declares *nothing but* colours, so the exemption cannot become a
+   hiding place either.
+
+5. **"Matched chroma and lightness" could not survive the colour-blind
+   requirement, and the lightness varies on purpose.** Under
+   deuteranopia the red-green axis collapses, so eight hues at one
+   lightness collapse with it; separation has to come from lightness for
+   at least half the pairs. The shipped sets run 3.3:1 to 6.7:1 against
+   the light ground and 4.8:1 to 10.9:1 against the dark one. Both sets
+   were found by search under three simultaneous constraints — ≥3:1
+   against the ground, ≥28° apart on the hue wheel, and maximum minimum
+   pairwise ΔE across normal vision, deuteranopia and protanopia — and
+   the dark set is the same eight hue angles at the lightness a dark
+   ground needs, in the same order, so a legend reads the same in both.
+
+6. **The hash is FNV-1a over UTF-8 bytes, not over JS string code
+   units.** FNV is defined over bytes; hashing UTF-16 code units would
+   make the slot a property of the host's string representation rather
+   than of the value.
+
+7. **Two guards the task did not name were added, both because the
+   guards it did name could otherwise pass for the wrong reason.**
+   `TestATokenNamedOnlyInACommentIsNotAUse` pins the comment strip in
+   the reference scan: without it a token mentioned only in a doc
+   comment counts as used and keeps an orphan alive forever, and an
+   example spelled in a comment fails the other direction for a name no
+   stylesheet was ever asked to have. (This was not hypothetical: the
+   first run failed on `var(--data-N)` inside `palette.js`'s own doc
+   comment.) `TestThePaletteModuleAndTheStylesheetAgreeOnEight` is the
+   seam between the two halves: the stylesheet's `--data-n` count, the
+   module's `DATA_SLOTS` and the eight token names it writes out are one
+   number, where each of the other guards only ever sees its own half.
+
+8. **`legendFor`'s row order is fixed beyond what the task specified.**
+   Count-descending-then-value-ascending orders the *hue* rows; the task
+   does not say where the hatched tail and the unset row sit. They are
+   last, in that order, always, and the harness asserts the whole row
+   shape as one string rather than the ordering of the hues alone.
+
+9. **A known gap, named rather than fixed.** `.diff-added` in
+   `styles.css` still hard-codes two greens tuned for a light ground —
+   the one place the chrome still spends a hue, and now also the one
+   place the new dark theme is wrong. Fixing it means deciding what
+   "added" looks like in an achromatic chrome, which is a reading-view
+   decision and not a token-layer one; it belongs to the task that owns
+   the reading view. Two translucent-black backgrounds (`.notice`,
+   `.diff-hunk`) *were* fixed here, to `--ground`, because a black wash
+   simply disappears on a dark ground and `--ground` is exactly the "one
+   step back from paper" they wanted.
+
 ---
 
 ### Task 2: The vendored runtime, the import map, and the payload budget

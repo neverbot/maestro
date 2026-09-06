@@ -82,6 +82,31 @@ learn the metamodel from a skill bundle carrying worked examples per
 genre, so an agent arrives knowing how to declare types and seed a few
 hundred entities without being told twice.
 
+### The skill bundle
+
+The bundle is that teaching material: an entry point, reference pages,
+modelling judgement, worked genres and step-by-step recipes, embedded in
+the binary and versioned by its own content hash. An agent asks for it
+with the `skill.install` tool, which answers with a short-lived signed
+download URL rather than the files themselves, and compares the version
+`whoami` reports against the copy it already has before fetching
+anything.
+
+It teaches what spans calls — the order to declare things in, the
+decisions taken before any call exists, the consequences that only
+appear later — and it **never restates a tool's contract**. Every
+argument, admitted value, bound and refusal stays in the description the
+wire already carries; the bundle routes to it, or quotes it verbatim
+with attribution. That is enforced rather than encouraged: a page that
+reworded a description, or a description reworded underneath a page that
+quotes it, fails the build (`make skill-check`).
+
+The genre pages are examples, and they are **never an argument**. "The
+MMORPG template needs this" is not a justification for a change under
+`internal/` and may not be cited as one in review. If a genre cannot be
+expressed, the gap is in the metamodel and belongs in a metamodel spec,
+where it will be argued generically or not at all.
+
 ## Running it
 
 ```bash
@@ -238,8 +263,8 @@ as an unknown token.
 - [x] **Markdown.** Versioned prose, linked to entities.
 - [x] **Views.** The query language, saved views, layouts, coordinates.
 - [x] **Interface.** Maestro's own look, and the renderer catalogue.
-- [ ] **Analysis.** Cycles, unreachable content, orphans, routes.
-- [ ] **Skills.** The agent bundle and genre templates.
+- [x] **Analysis.** Cycles, unreachable content, orphans, routes.
+- [x] **Skills.** The agent bundle and genre templates.
 
 Design documents, one per sub-project as they land:
 

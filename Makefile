@@ -1,7 +1,7 @@
 GO ?= go
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: build test fmt vet lint check run tools sqlc sqlc-check dev dev-down dev-logs dev-psql
+.PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check dev dev-down dev-logs dev-psql
 
 build:
 	$(GO) build -ldflags "-X github.com/neverbot/maestro/internal/version.Version=$(VERSION)" -o bin/maestro ./cmd/maestro
@@ -31,6 +31,7 @@ check:
 	$(MAKE) vet
 	$(MAKE) lint
 	$(MAKE) sqlc-check
+	$(MAKE) skill-check
 	$(MAKE) test
 
 run: build
@@ -44,6 +45,21 @@ sqlc:
 
 sqlc-check:
 	sqlc diff
+
+# The skill bundle's guards: the generated tool index against the
+# registered tools, the anti-restatement scan, the vocabulary fences, the
+# page budgets, the routing table and the genre transcripts.
+#
+# It is the same shape of gate as sqlc-check above and exists for the same
+# reason: a generated artefact is committed, and a test fails when the
+# source moved and the artefact did not.
+#
+# **It is a subset of `make test`, not a substitute.** It exists for a
+# fast local loop while writing prose. The transcripts need a database,
+# so a run of this with no TEST_DATABASE_URL exported skips them and says
+# ok; `make test` is what runs everything.
+skill-check:
+	$(GO) test ./internal/skill/ ./internal/web/ -run 'Skill|Bundle|Genre|ToolReference|Vocab|RoutingTable|Transcript'
 
 # A local instance in Docker: the binary and its own Postgres, separate
 # from the container the Go tests use. `dev` rebuilds and waits for

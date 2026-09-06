@@ -43,9 +43,25 @@ type uuidValue = uuid.UUID
 // that migration — so this comment's claim is accurate again, not merely
 // aspirational.
 const (
+	// vocab:error_codes begin — the codes a game-content tool can return.
+	//
+	// This region is a delimited vocabulary, not a comment: the bundle's
+	// reference pages enumerate exactly these codes inside a
+	// ```vocab:error_codes``` fence, and TestBundleErrorCodesMatchTheSurface
+	// set-compares the two in both directions. A code added here without a
+	// recovery on that page fails the build, and so does a code on that
+	// page that no tool can produce.
+	//
+	// Membership is not a judgement call and is not maintained by hand:
+	// TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn parses this
+	// package for every constant handed to mcpErrorResult and requires
+	// that set to equal this region, in both directions. errCodeForbidden
+	// sits deliberately *below* the end marker — it is written by the HTTP
+	// admin handlers and no MCP tool can produce it, so a bundle page
+	// teaching an agent to recover from it would be teaching a recovery
+	// from an error that never arrives.
 	errCodeUnauthorized   = "unauthorized"
 	errCodeInternal       = "internal_error"
-	errCodeForbidden      = "forbidden"
 	errCodeNotFound       = "not_found"
 	errCodeBadRequest     = "bad_request"
 	errCodeScopeViolation = "scope_violation"
@@ -82,6 +98,11 @@ const (
 	errCodeRendererRequirements = "renderer_requirements"
 	errCodeLimitExceeded        = "limit_exceeded"
 	errCodeQueryStale           = "query_stale"
+	// vocab:error_codes end
+
+	// Below the region: codes only the HTTP surface writes. An agent
+	// never sees one of these, so the bundle never names one.
+	errCodeForbidden = "forbidden"
 
 	errCodeSlugTaken            = "slug_taken"
 	errCodeSlugInvalid          = "slug_invalid"

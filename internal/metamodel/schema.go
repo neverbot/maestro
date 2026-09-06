@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -23,6 +24,19 @@ const (
 	FieldEnum     FieldType = "enum"
 	FieldListText FieldType = "list<text>"
 )
+
+// FieldTypes is every declared field type, in the order the bundle, the
+// tool descriptions and Validate's own refusals print them.
+//
+// It is the list, and the constants above are its members.
+// TestFieldTypesListsEveryDeclaredFieldType parses this file and pins
+// both directions, so a seventh type cannot be declared without being
+// listed here, nor listed here without being declared — the shape a
+// closed vocabulary rots in is one copy growing while the other does
+// not.
+var FieldTypes = []FieldType{
+	FieldText, FieldLongText, FieldNumber, FieldBool, FieldEnum, FieldListText,
+}
 
 // Field is one declared field of an entity type or relation type.
 //
@@ -232,20 +246,21 @@ func (s Schema) Check() error {
 			seen[f.Key] = struct{}{}
 		}
 
+		// Membership is asked of FieldTypes rather than of a second list
+		// written here. A switch enumerating the constants by hand is a
+		// copy of the vocabulary, and a seventh type added to the list and
+		// forgotten here would be a type the bundle offers and Validate
+		// refuses as unknown.
 		typeOK := false
-		switch f.Type {
-		case "":
+		switch {
+		case f.Type == "":
 			problem("type is required")
-		case FieldText, FieldLongText, FieldNumber, FieldBool, FieldListText:
-			typeOK = true
-		case FieldEnum:
-			if len(f.Options) == 0 {
-				problem("an enum field needs options")
-			} else {
-				typeOK = true
-			}
-		default:
+		case !slices.Contains(FieldTypes, f.Type):
 			problem("unknown type " + string(f.Type))
+		case f.Type == FieldEnum && len(f.Options) == 0:
+			problem("an enum field needs options")
+		default:
+			typeOK = true
 		}
 
 		// Options and bounds are per-type facilities. Declaring one on a type

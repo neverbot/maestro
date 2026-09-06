@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,7 +51,21 @@ func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 		{"an endpoint of the wrong type", metamodel.ErrEndpointTypeMismatch, http.StatusUnprocessableEntity, errCodeEndpointTypeMismatch},
 		{"a type still in use", metamodel.ErrInUse, http.StatusConflict, errCodeInUse},
 		{"nothing there", metamodel.ErrNotFound, http.StatusNotFound, errCodeNotFound},
-		{"contention", &pgconn.PgError{Code: "40001", Message: "deadlock detected"}, http.StatusServiceUnavailable, errCodeRetryable},
+		{"contention", &pgconn.PgError{Code: "40001", Message: "could not serialize access"}, http.StatusServiceUnavailable, errCodeRetryable},
+		// A deadlock, wrapped the way every write path in
+		// internal/metamodel wraps a database failure — `errors.As` is
+		// what has to see through that, and a bare *pgconn.PgError would
+		// pass this row without ever exercising it. 40P01 earns its own
+		// row rather than riding on 40001's: it is the SQLSTATE two
+		// writers taking two locks in opposite orders actually produce,
+		// it was the one measured against RemoveEntityType(cascade), and
+		// the MCP side has pinned it since Task 7
+		// (TestMCPErrorForReportsContentionAsRetryable) while this side
+		// pinned only its neighbour. Reported as internal_error it tells
+		// a caller to give up on a call a retry would land.
+		{"a deadlock", fmt.Errorf("delete entity type: %w",
+			&pgconn.PgError{Code: "40P01", Message: "deadlock detected"}),
+			http.StatusServiceUnavailable, errCodeRetryable},
 		{"a refusal this layer made", NewMCPError(errCodeInvalidInput, "cursor is not a cursor"), http.StatusBadRequest, errCodeInvalidInput},
 		// The markdown domain's two own error types. Neither is caught
 		// by an arm above it: ConflictError is a different Go type from

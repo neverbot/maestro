@@ -9,49 +9,149 @@ Maestro records the **content design** of a game: what a player can be,
 where they can go, what they can do and what they unlock. It is not a
 task tracker and there is no kanban here.
 
-This page is a placeholder. It exists so the package, its hash and its
-budgets can be built and asserted before any prose is written — a budget
-added after the page it bounds is a budget that gets raised to fit.
+Maestro ships **no built-in game vocabulary**. There is no Quest, no
+Zone, no Class, no Circuit. A game declares its own, and that is the
+product rather than a gap. You will declare a vocabulary before you can
+write anything, and the shape you choose is the thing that is expensive
+to change later.
 
-## The one form a quote takes
+Every tool's full contract is in that tool's own description, which your
+client already holds. These pages teach what no single description can:
+the order, the judgement, and the consequence that only shows up two
+calls later.
 
-A tool's description is the contract for one call, and this bundle does
-not copy it. Where a page needs the description's own words, it quotes
-them, verbatim, attributed, in exactly this form — which the build
-checks against the live description on every run:
+## 1. Identify yourself
 
-> **From `entities.upsert`'s own description:**
-> Rows are idempotent by (type_key, key), so re-running a seed updates
-> in place
+Call `whoami` first. It says who you act for and which single game your
+token is bound to, and the slug it answers with is that game's address —
+the value the optional `game` argument on every other tool is checked
+against.
 
-Reword that description and this page goes red in the same commit.
-Everything a single call can say about itself is in its own description,
-which your client already has; what the pages here teach is what spans
-calls.
+One token, one game. A `scope_violation` is the answer to a request that
+names a different game, not a bug to route around. Ask the human for the
+right token.
 
-## The four closed vocabularies
+## 2. The four primitives
 
-These four lists are the only enumerations in this bundle. Everything
-else a single call can state about itself lives in that call's own
-description. They are here because you choose between them *before* a
-description is any use to you, and a round trip to discover what a field
-type may be is a round trip in the wrong place.
+| Primitive | What it is | Declared with |
+|---|---|---|
+| **EntityType** | a kind of thing this game contains | `types.upsert` |
+| **Entity** | one instance of a kind | `entities.upsert` |
+| **RelationType** | a kind of directed edge between things | `relation_types.upsert` |
+| **Relation** | one edge between two entities | `relations.upsert` |
 
-Each is compared against its Go declaration on every build, in both
-directions, so a word that appears in one and not the other is a failing
-build rather than a page that quietly went false.
+Everything else in Maestro — catalogues, place graphs, mission lists with
+their preconditions, progression trees — is a **view** over those four.
+There is no fifth primitive and no built-in notion of a quest.
 
-Field types, for a field in a type's schema:
+Every field an entity or an edge carries is one of these types, and there
+are exactly six:
 
 ```vocab:field_types
 text longtext number bool enum list<text>
 ```
 
-Semantic roles, for classifying what a relation type *means*:
+There is no reference type. That is law 1.
+
+## 3. The four laws
+
+Stated flat here because you need them before your first entity type
+exists. Argued, with what each costs when broken, in
+`modelling/deciding.md`.
+
+1. **A reference to another entity is a relation. Always.** A quest's
+   zone is not a `text` field holding a zone's key. It is an edge. The
+   day someone wants the map, a text field cannot be traversed and the
+   repair is one write per row.
+2. **Data that belongs to the connection goes on the connection.** Edges
+   carry their own declared fields. A door's required ability belongs on
+   the edge, not on either room.
+3. **Declare the direction when you declare the relation type, and name
+   the type so it reads source → target.** `takes_place_in`,
+   `available_to`, `unlocks`, `connects_to`. Queries take direction
+   literally and infer nothing.
+4. **Say what an edge means, and how it behaves, at the moment you
+   declare it.** Two separate declarations on a relation type, and
+   declaring one of them is not declaring the other: `semantic_role` is
+   the meaning a view reads, `analysis_traits` is the behaviour a graph
+   walk reads. Six months on, re-deriving what thirty relation types
+   meant is a job nobody does correctly.
+
+The meanings, chosen before any description is any use to you:
 
 ```vocab:semantic_roles
 prerequisite unlock containment spatial availability reward
 ```
+
+The behaviours are a different, longer list, enumerated in
+`relation_types.upsert`'s own description together with the
+combinations it rules out. Read it once before your first edge type.
+
+## 4. Keys are the API
+
+- Everything is addressed by **key**; a game is addressed by **slug**.
+- Keys are matched **without regard to case**. `Quest` and `quest` are
+  one key, and writing the second when the first is stored is refused,
+  naming both spellings, rather than quietly updating the row.
+- **An entity's own key is permanent.** Choose it from something that
+  will not change — not from a display name a writer will rewrite.
+- **An entity type's key and a relation type's key can be changed**, with
+  `types.rename` and `relation_types.rename`, addressed by the key each
+  has now. Saved views that named the old key go on running and report
+  what drifted, at the position in their own query document.
+- Two spelling rules, not one, and they differ because the mechanisms
+  differ: a **field** key is `^[a-z][a-z0-9_]*$`, a key that addresses a
+  **row** is `^[A-Za-z0-9][A-Za-z0-9_-]*$`. Both capped at 64, both
+  ASCII. `modelling/naming.md` has the reason and the rest of the rules.
+
+The choice of language for a game's keys is **the game's**: a Spanish
+studio's `mision` is as correct as `quest`. Both rules are ASCII, so
+`misión` is no key at all — the case-folding index talking, not a
+preference about language.
+
+## 5. The seeding loop
+
+In this order, because each step is what the next one is checked against:
+
+1. `types.upsert` — every entity type, with its field schema.
+2. `relation_types.upsert` — every relation type, with its endpoint type
+   keys, its meaning and its behaviour. An edge type whose endpoint
+   types are not declared yet cannot be declared.
+3. `entities.upsert` — in batches, per type.
+4. `relations.upsert` — in batches, once both endpoints exist.
+5. `games.counts` — read the shape back and check it is what you meant.
+
+**Every write is versioned.** Send `expected_version` on every update,
+matching the version you read. A mismatch is `version_conflict` and
+carries what is current: re-read, merge, retry. Do not retry blind.
+
+**A version claim is a claim about a row that exists.** Claiming one for
+a row this game does not have is `not_found`, and is never a quiet
+re-creation.
+
+**Batches are bounded, and a batch over the bound fails as a batch**
+rather than silently writing a prefix. Split it yourself, before sending.
+
+## 6. Response discipline
+
+Listings are slim by design — id, key, label, version. Ask for fields
+only when you will use them, and page rather than raising a limit. Do
+not re-read a page you already loaded this session: the surface has not
+changed under you unless you changed it.
+
+## 7. Where to go next
+
+| You are about to… | Read |
+|---|---|
+| find which of the tools exists | `reference/tools.md` |
+
+Nothing in this bundle is required, and a game none of its examples
+matches is the normal case.
+
+## Appendix: the closed vocabularies
+
+Two more lists you choose between before a description helps you, each
+compared against its Go declaration on every build in both directions.
 
 Renderers, for drawing a saved view:
 
@@ -60,8 +160,7 @@ graph layered nested map table timeline
 ```
 
 Error codes a game-content tool can answer with. Each one names a
-different recovery, and the recoveries are what the reference pages
-teach:
+different recovery:
 
 ```vocab:error_codes
 unauthorized internal_error not_found bad_request scope_violation

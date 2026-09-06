@@ -421,16 +421,14 @@ var notYetTaughtOutsideTheIndex = []string{
 	"docs.read", "docs.read_version", "docs.revert",
 	"docs.write", "docs.write_many", "entities.get",
 	"entities.list", "entities.remove", "entities.repair",
-	"games.counts", "games.get", "games.list",
-	"relation_types.get", "relation_types.list", "relation_types.remove",
-	"relation_types.rename", "relation_types.upsert", "relations.get",
+	"games.get", "games.list", "relation_types.get",
+	"relation_types.list", "relation_types.remove", "relations.get",
 	"relations.list", "relations.remove", "relations.repair",
-	"relations.upsert", "search", "types.get",
-	"types.list", "types.remove", "types.rename",
-	"types.upsert", "views.clear_positions", "views.get",
+	"search", "types.get", "types.list",
+	"types.remove", "views.clear_positions", "views.get",
 	"views.list", "views.list_assets", "views.remove",
 	"views.run", "views.set_background", "views.set_positions",
-	"views.upsert", "views.validate", "whoami",
+	"views.upsert", "views.validate",
 }
 
 // TestEveryRegisteredToolIsRoutedFromTheBundle asserts every registered

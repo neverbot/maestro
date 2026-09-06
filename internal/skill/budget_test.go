@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -304,4 +305,167 @@ func mentions(problems []budgetProblem, substring string) bool {
 		}
 	}
 	return false
+}
+
+// routedPages reads the paths named in skill.md's "Where to go next"
+// table — the second cell of every row, in backticks.
+//
+// It reads the shipped entry point rather than a fixture, and it reads
+// it out of Files() rather than from disk, so the table it judges is the
+// one that ships in the binary.
+func routedPages(fsys fs.FS) (map[string]int, error) {
+	body, err := fs.ReadFile(fsys, "skill.md")
+	if err != nil {
+		return nil, err
+	}
+	routed := map[string]int{}
+	inTable := false
+	for i, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			inTable = strings.Contains(trimmed, "Where to go next")
+			continue
+		}
+		if !inTable || !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+		for _, match := range routedPath.FindAllStringSubmatch(trimmed, -1) {
+			routed[match[1]] = i + 1
+		}
+	}
+	return routed, nil
+}
+
+// routedPath matches a backticked path with a slash and a markdown
+// extension: `reference/fields.md`. Anchored on the slash so a tool name
+// in the same cell is not read as a page, and on the extension so a
+// prose mention of a directory is not either.
+var routedPath = regexp.MustCompile("`([a-z_]+/[a-z0-9_-]+\\.md)`")
+
+// isTranscript is true for the machine-shaped genre files. They are the
+// one kind of bundle file the routing table does not name: a transcript
+// is executed by a test, never read by an agent, and its genre page is
+// what carries the routing.
+func isTranscript(p string) bool { return path.Ext(p) == ".json" }
+
+// TestTheRoutingTableNamesEveryPage is the "not carried one step along"
+// lesson pointed at the entry point itself, in both directions: a page
+// nothing routes to is a page nothing reads, and a row naming a page
+// that does not exist sends an agent at nothing.
+//
+// It walks Files() rather than a list, because the pages a contributor
+// adds and forgets to route are exactly the ones a list would not
+// mention either.
+func TestTheRoutingTableNamesEveryPage(t *testing.T) {
+	fsys := Files()
+	routed, err := routedPages(fsys)
+	if err != nil {
+		t.Fatalf("reading skill.md's routing table: %v", err)
+	}
+	if len(routed) == 0 {
+		t.Fatal("skill.md's \"Where to go next\" table names no page at all: both " +
+			"comparisons below would run over an empty set and pass")
+	}
+
+	seen := map[string]bool{}
+	err = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || p == "skill.md" || isTranscript(p) {
+			return nil
+		}
+		seen[p] = true
+		if _, ok := routed[p]; !ok {
+			t.Errorf("%s is in the bundle and skill.md's section 7 does not route to it: a "+
+				"page nothing routes to is a page nothing reads", p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking the bundle: %v", err)
+	}
+	if len(seen) == 0 {
+		t.Fatal("the walk found no routable pages: the check above passed by measuring nothing")
+	}
+	for p, line := range routed {
+		if !seen[p] {
+			t.Errorf("skill.md:%d routes to %s, which is not in the bundle: a dead link sends "+
+				"an agent to read nothing", line, p)
+		}
+	}
+}
+
+// TestTheRoutingGuardCatchesBothDirections is the mutation of the guard
+// above, run on every build rather than once by hand. Without it the
+// table reader could match nothing at all and every assertion in
+// TestTheRoutingTableNamesEveryPage would pass over two empty sets.
+func TestTheRoutingGuardCatchesBothDirections(t *testing.T) {
+	const table = "# 7. Where to go next\n\n| You are about to… | Read |\n|---|---|\n" +
+		"| find a tool | `reference/tools.md` |\n| name a key | `modelling/naming.md` |\n"
+
+	full := fstest.MapFS{
+		"skill.md":            &fstest.MapFile{Data: []byte(table)},
+		"reference/tools.md":  &fstest.MapFile{Data: []byte("# Tools\n")},
+		"modelling/naming.md": &fstest.MapFile{Data: []byte("# Naming\n")},
+		"genres/mmorpg.json":  &fstest.MapFile{Data: []byte("{}\n")},
+	}
+	routed, err := routedPages(full)
+	if err != nil {
+		t.Fatalf("reading the fixture table: %v", err)
+	}
+	if len(routed) != 2 || routed["reference/tools.md"] == 0 || routed["modelling/naming.md"] == 0 {
+		t.Fatalf("the table reader did not read both rows: %v", routed)
+	}
+
+	// Direction one: a page the table does not name. This is the
+	// mutation the plan asks for — delete the modelling/naming.md row —
+	// and it is the direction a contributor adding a page hits.
+	unrouted := fstest.MapFS{}
+	for name, file := range full {
+		unrouted[name] = file
+	}
+	unrouted["skill.md"] = &fstest.MapFile{Data: []byte(
+		"# 7. Where to go next\n\n| A | B |\n|---|---|\n| find a tool | `reference/tools.md` |\n")}
+	short, err := routedPages(unrouted)
+	if err != nil {
+		t.Fatalf("reading the shortened table: %v", err)
+	}
+	if _, ok := short["modelling/naming.md"]; ok {
+		t.Fatal("the shortened table still names modelling/naming.md")
+	}
+
+	// Direction two: a row naming a page that is not there.
+	if _, ok := full["modelling/does-not-exist.md"]; ok {
+		t.Fatal("the fixture already carries the dead link's target")
+	}
+	dead, err := routedPages(fstest.MapFS{"skill.md": &fstest.MapFile{Data: []byte(
+		table + "| nowhere | `modelling/does-not-exist.md` |\n")}})
+	if err != nil {
+		t.Fatalf("reading the dead-link table: %v", err)
+	}
+	if _, ok := dead["modelling/does-not-exist.md"]; !ok {
+		t.Fatalf("the reader did not see the dead link: %v", dead)
+	}
+
+	// And the precision cases that would otherwise get this reader
+	// quietly deleted: a routing row outside section 7 is not routing, a
+	// tool name in a routed cell is not a page, and a transcript is the
+	// one bundle file the table is not expected to name.
+	elsewhere, err := routedPages(fstest.MapFS{"skill.md": &fstest.MapFile{Data: []byte(
+		"# 2. The primitives\n\n| A | B |\n|---|---|\n| a thing | `modelling/mistakes.md` |\n\n" +
+			table + "| find a tool | `reference/tools.md` and `types.upsert` |\n")}})
+	if err != nil {
+		t.Fatalf("reading the mixed page: %v", err)
+	}
+	if _, ok := elsewhere["modelling/mistakes.md"]; ok {
+		t.Error("a table outside section 7 was read as routing")
+	}
+	if len(elsewhere) != 2 {
+		t.Errorf("a tool name in a routed cell was read as a page: %v", elsewhere)
+	}
+	if !isTranscript("genres/mmorpg.json") || isTranscript("genres/mmorpg.md") {
+		t.Error("the transcript exemption does not tell a transcript from a page, so either " +
+			"every genre page escapes the routing rule or every transcript is demanded in it")
+	}
 }

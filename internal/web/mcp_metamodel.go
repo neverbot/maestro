@@ -2239,7 +2239,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 // shipping without its operator table at all. A rule added to that table
 // is offered to agents here with no second edit, and a rule this text
 // promises that the table does not carry fails
-// TestTheTypesUpsertDescriptionNamesEveryRefusedCombination.
+// TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination.
 func traitRefusalDoc() string {
 	return strings.Join(metamodel.TraitConflictLines(), "; ")
 }

@@ -100,7 +100,7 @@ var AnalysisTraitConflicts = []TraitConflict{
 // Generated from the table the check runs on, so a rule added to the
 // table is offered to agents and a rule removed from it stops being
 // promised. internal/web's
-// TestTheTypesUpsertDescriptionNamesEveryRefusedCombination asserts that
+// TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination asserts that
 // in both directions.
 func TraitConflictLines() []string {
 	lines := make([]string, 0, len(AnalysisTraitConflicts))

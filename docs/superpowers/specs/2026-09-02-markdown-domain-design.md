@@ -408,6 +408,8 @@ stable and machine-readable.
 | `docs.write` | `path`, `content`, `kind`, `message`, `expected_version` (0 for a new document — see below), optional `links` |
 | `docs.write_many` | `mode` (`partial` \| `atomic`), `items` — each item is a `docs.write` and carries its own `expected_version` |
 | `docs.delete` | `path`, `expected_version` — soft |
+| `docs.move` | `from`, `to`, `expected_version`, `message` — changes a document's address, keeping the document |
+| `docs.kinds` | nothing but scope — the kinds this game's documents actually carry, with counts |
 | `docs.history` | `path`, cursor — version metadata only, newest first |
 | `docs.read_version` | `path`, `version` |
 | `docs.revert` | `path`, `to_version`, `expected_version`, `message` |
@@ -476,6 +478,104 @@ Five deliberate choices in that table:
   page**, and how an agent asked to "rewrite the Hogger dialogue"
   finds the document from the quest instead of guessing a path.
 
+### A document is moved, not re-written and deleted
+
+**Added 2026-09-06.** Until then there was no move at all. A document
+written to the wrong path could only be re-written at the right one and
+deleted at the old one, and that *forks its history*: the new path
+starts at version 1 holding none of what came before, while the old path
+keeps everything under a tombstone nobody thinks to look at. In a domain
+whose whole premise is that history is append-only and a path can be
+resurrected, losing a document's record to a typo in its address was the
+sharpest edge on the surface.
+
+`docs.move` is one `UPDATE documents SET path = …`, guarded by
+`expected_version` exactly as a write and a delete are, and it needs no
+maintenance anywhere else: every version row and every link row keys on
+`documents.id`, and the generated search vector does not include the
+path (§8). The version numbering continues, the id, the kind and the
+creator are unchanged, and every attachment stays attached.
+
+Three refusals, each with its own recovery:
+
+- **A case-only move is refused.** `documents_path_key` is
+  `UNIQUE (project_id, lower(path))`, so `lore/Duskwood` and
+  `lore/duskwood` are not two addresses — they are one address spelled
+  two ways, and every reader already finds the document under either. A
+  "move" between them changes no address; it rewrites a stored display
+  string. This repository has already decided that question twice, in
+  the same direction: `metamodel.keyRespellingError` refuses a case-only
+  respelling of a row key rather than silently updating the stored one,
+  and `markdown.pathRespellingError` refuses it for a document path on
+  the write path, both on the grounds that the stored spelling is the
+  handle other things refer to and a typo'd capital must not move it
+  under them. A move is the *stronger* case for the same answer, not a
+  weaker one: it is the call that would make the rewrite explicit and
+  durable, appending a version row and announcing a change of address
+  that no reader can observe. So the first spelling stored stands here
+  too, and the refusal names both spellings.
+- **An occupied destination is refused**, live or tombstoned. The unique
+  index has no `WHERE` clause, so a deleted path is still taken; a move
+  never merges two histories onto one path. The two cases carry
+  different remedies — bring the deleted document back, or delete the
+  live one — because they are different situations with the same
+  symptom.
+- **A deleted document cannot be moved.** Its tombstone and its history
+  stay where they are; write to the path to bring it back, then move it.
+
+**A version row now carries the path it was written at.** That is
+migration `0011_document_path_on_versions.sql`, and it is the half of
+the move that lives in the record rather than in the row: a history
+showing only today's address would show snapshots taken while the
+document was called something else, with nothing to say so. It also
+makes the move's own version row self-describing — that row's content
+equals its predecessor's and its path does not, so "this version is a
+move" is a comparison a reader makes rather than a flag it has to trust.
+`docs.history` and `docs.read_version` both publish it.
+
+The listing's keyset cursor sorts by path, so a move relocates a row
+inside an in-flight paged walk. That is the ordinary keyset behaviour
+over a mutable sort key rather than something this listing can fix, and
+it is what `document.moved` is for: the payload carries **both** ends,
+because a subscriber told only the new path cannot identify what moved
+and one told only the old path knows where to stop looking and not where
+to look.
+
+### The kinds a game uses are discoverable
+
+**Added 2026-09-06.** A document's `kind` is free text and **that
+stands**: the same rule that forbids a built-in `Quest` entity type
+forbids a built-in `Lore` kind, so an unknown kind is not a knowable
+state and both filters that take one answer an unrecognised value with
+an empty page rather than a refusal. What was missing was only the
+discovery half. Both `docs.list` and search filter by kind, and nothing
+told a caller which kinds exist — an agent had to already know the
+vocabulary to use it, and a designer had no way to see it at all.
+
+`docs.kinds` (REST: `GET /api/games/{game}/docs/kinds`) answers with the
+kinds this game's live documents actually carry and how many carry each,
+plus two totals. It is deliberately the same shape as the game summary's
+entity-type catalogue, which answers the identical question for the
+other half of a game.
+
+- **Kinds come back folded to lower case.** Both filters compare
+  `lower(kind)`, so `"Lore"` and `"lore"` select one set of documents
+  and must be one row; the folded spelling is the one value that, fed
+  back to either filter, selects exactly the rows the row counted.
+- **The kind-less documents are a total, not a row.** There is no
+  spelling of the `kind` filter that selects them (`ListFilter.Kind`'s
+  `""` means "no filter"), so listing `""` as a kind would offer a
+  filter value that does nothing. Published as `unkinded` beside
+  `documents`, it is instead the number that says how much of the game
+  is still unfiled.
+- **Deleted documents are not counted**: a kind kept alive by a
+  tombstone would be a filter value whose answer, under the default
+  listing and under search, is an empty page.
+- The answer's size grows with the number of kinds, never with the
+  number of documents, which is what makes it safe on a page load and in
+  an agent's context. The game page reads it and prints it above the
+  documents catalogue.
+
 ### Who wrote it, and when
 
 Every answer that names a document says when it changed and who changed
@@ -542,7 +642,7 @@ server-side and sanitised — the raw body is what MCP always gets) and
 side-by-side version comparison.
 
 `/events` gains `document.written`, `document.deleted`,
-`document.reverted` and `document.linked`, per game, so a designer
+`document.moved`, `document.reverted` and `document.linked`, per game, so a designer
 watching a mission page sees an agent's rewrite land.
 
 ## 8. Search

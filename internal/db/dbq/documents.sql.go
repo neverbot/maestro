@@ -12,6 +12,98 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countDocuments = `-- name: CountDocuments :one
+SELECT count(*) AS total,
+       count(*) FILTER (WHERE kind = '') AS unkinded
+FROM documents
+WHERE project_id = $1::uuid
+  AND deleted_at IS NULL
+`
+
+type CountDocumentsRow struct {
+	Total    int64
+	Unkinded int64
+}
+
+// The totals beside the catalogue: every live document, and how many of
+// them carry no kind at all. The second number is the one the catalogue
+// itself cannot carry -- ” is not a filter value -- and it is the
+// number that turns "these are the kinds" into "these are the kinds and
+// this is what is still unfiled".
+func (q *Queries) CountDocuments(ctx context.Context, projectID uuid.UUID) (CountDocumentsRow, error) {
+	row := q.db.QueryRow(ctx, countDocuments, projectID)
+	var i CountDocumentsRow
+	err := row.Scan(&i.Total, &i.Unkinded)
+	return i, err
+}
+
+const countDocumentsPerKind = `-- name: CountDocumentsPerKind :many
+SELECT lower(kind)::text AS kind, count(*) AS document_count
+FROM documents
+WHERE project_id = $1::uuid
+  AND deleted_at IS NULL
+  AND kind <> ''
+GROUP BY lower(kind)
+ORDER BY lower(kind)
+`
+
+type CountDocumentsPerKindRow struct {
+	Kind          string
+	DocumentCount int64
+}
+
+// The kind catalogue: one row per distinct kind a game's live documents
+// actually carry, with how many carry it. It is the prose half of what
+// CountEntitiesPerType does for the metamodel, and it exists for the
+// same reason -- a caller cannot filter by a vocabulary nobody will
+// tell it.
+//
+// Grouped by lower(kind), not by kind, because that is the identity
+// every other statement in this file uses: ListDocumentsPage and
+// SearchDocuments both compare lower(d.kind) = lower(@kind), so "Lore"
+// and "lore" are one filter result and must be one catalogue row. The
+// folded spelling is what comes back, for the same reason: it is the
+// value that, fed to either filter, selects exactly the rows this row
+// counted. Reporting one of the stored spellings instead would return a
+// value that happens to work and a count that belongs to a different
+// set. TestTwoSpellingsOfOneKindAreOneCatalogueRow pins it.
+//
+// The kind-less documents are excluded here and counted by
+// CountDocuments instead: ” is not a vocabulary entry, and there is no
+// spelling of the kind filter that selects it (ListFilter.Kind's own
+// comment), so listing it as a kind would offer a filter value that
+// does nothing.
+//
+// Soft-deleted documents are excluded. The catalogue describes what a
+// game holds, and the default listing and the search both hide deleted
+// rows, so a kind kept alive only by a tombstone would be a filter value
+// whose default answer is an empty page.
+//
+// There is no index on documents.kind and this deliberately does not add
+// one: the statement is one sequential pass over one game's documents,
+// answered once per page load, against a table whose per-game row count
+// is prose a human wrote. An index would be write cost on every document
+// write to serve a grouping that reads every row anyway.
+func (q *Queries) CountDocumentsPerKind(ctx context.Context, projectID uuid.UUID) ([]CountDocumentsPerKindRow, error) {
+	rows, err := q.db.Query(ctx, countDocumentsPerKind, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountDocumentsPerKindRow
+	for rows.Next() {
+		var i CountDocumentsPerKindRow
+		if err := rows.Scan(&i.Kind, &i.DocumentCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const deleteDocumentLink = `-- name: DeleteDocumentLink :execrows
 DELETE FROM document_links
 WHERE project_id = $1::uuid
@@ -181,7 +273,7 @@ func (q *Queries) GetDocumentByPathForUpdate(ctx context.Context, arg GetDocumen
 }
 
 const getDocumentVersion = `-- name: GetDocumentVersion :one
-SELECT id, project_id, document_id, version, title, summary, body_md, frontmatter, message, deleted, author_user_id, author_token_id, created_at FROM document_versions
+SELECT id, project_id, document_id, version, title, summary, body_md, frontmatter, message, deleted, author_user_id, author_token_id, created_at, path FROM document_versions
 WHERE project_id = $1::uuid
   AND document_id = $2::uuid
   AND version = $3::integer
@@ -216,6 +308,7 @@ func (q *Queries) GetDocumentVersion(ctx context.Context, arg GetDocumentVersion
 		&i.AuthorUserID,
 		&i.AuthorTokenID,
 		&i.CreatedAt,
+		&i.Path,
 	)
 	return i, err
 }
@@ -290,20 +383,22 @@ func (q *Queries) GetEntityTypeIDByKey(ctx context.Context, arg GetEntityTypeIDB
 }
 
 const insertDocumentVersion = `-- name: InsertDocumentVersion :one
-INSERT INTO document_versions (project_id, document_id, version, title, summary, body_md,
+INSERT INTO document_versions (project_id, document_id, version, path, title, summary, body_md,
                                frontmatter, message, deleted, author_user_id, author_token_id)
 VALUES ($1::uuid, $2::uuid,
-        $3::integer, $4::text, $5::text,
-        $6::text, $7::jsonb, $8::text,
-        $9::boolean,
-        $10::uuid, $11::uuid)
-RETURNING id, project_id, document_id, version, title, summary, body_md, frontmatter, message, deleted, author_user_id, author_token_id, created_at
+        $3::integer, $4::text,
+        $5::text, $6::text,
+        $7::text, $8::jsonb, $9::text,
+        $10::boolean,
+        $11::uuid, $12::uuid)
+RETURNING id, project_id, document_id, version, title, summary, body_md, frontmatter, message, deleted, author_user_id, author_token_id, created_at, path
 `
 
 type InsertDocumentVersionParams struct {
 	ProjectID     uuid.UUID
 	DocumentID    uuid.UUID
 	Version       int32
+	Path          string
 	Title         string
 	Summary       string
 	BodyMd        string
@@ -340,6 +435,7 @@ func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentV
 		arg.ProjectID,
 		arg.DocumentID,
 		arg.Version,
+		arg.Path,
 		arg.Title,
 		arg.Summary,
 		arg.BodyMd,
@@ -364,6 +460,7 @@ func (q *Queries) InsertDocumentVersion(ctx context.Context, arg InsertDocumentV
 		&i.AuthorUserID,
 		&i.AuthorTokenID,
 		&i.CreatedAt,
+		&i.Path,
 	)
 	return i, err
 }
@@ -534,7 +631,7 @@ func (q *Queries) ListDocumentLinksByEntity(ctx context.Context, arg ListDocumen
 }
 
 const listDocumentVersions = `-- name: ListDocumentVersions :many
-SELECT id, project_id, document_id, version, title, summary, message, deleted,
+SELECT id, project_id, document_id, version, path, title, summary, message, deleted,
        author_user_id, author_token_id, created_at
 FROM document_versions
 WHERE project_id = $1::uuid
@@ -557,6 +654,7 @@ type ListDocumentVersionsRow struct {
 	ProjectID     uuid.UUID
 	DocumentID    uuid.UUID
 	Version       int32
+	Path          string
 	Title         string
 	Summary       string
 	Message       string
@@ -608,6 +706,7 @@ func (q *Queries) ListDocumentVersions(ctx context.Context, arg ListDocumentVers
 			&i.ProjectID,
 			&i.DocumentID,
 			&i.Version,
+			&i.Path,
 			&i.Title,
 			&i.Summary,
 			&i.Message,
@@ -836,6 +935,88 @@ func (q *Queries) ListLinksForDocuments(ctx context.Context, arg ListLinksForDoc
 		return nil, err
 	}
 	return items, nil
+}
+
+const moveDocument = `-- name: MoveDocument :one
+UPDATE documents
+SET path                = $1::text,
+    current_version     = current_version + 1,
+    updated_by_user_id  = $2::uuid,
+    updated_by_token_id = $3::uuid
+WHERE project_id = $4::uuid
+  AND lower(path) = lower($5::text)
+  AND deleted_at IS NULL
+  AND current_version = $6::integer
+RETURNING id, project_id, path, kind, title, summary, body_md, frontmatter, current_version, deleted_at, search, created_at, updated_at, created_by_user_id, created_by_token_id, updated_by_user_id, updated_by_token_id
+`
+
+type MoveDocumentParams struct {
+	ToPath          string
+	ActorUserID     *uuid.UUID
+	ActorTokenID    *uuid.UUID
+	ProjectID       uuid.UUID
+	FromPath        string
+	ExpectedVersion int32
+}
+
+// The one statement in this file that writes the path column, and the
+// reason UpsertDocument's own comment about the path staying out of its
+// SET list is a statement about *writes* rather than about the column.
+//
+// It is guarded exactly as UpsertDocument and SoftDeleteDocument are, by
+// the caller's expected version, so a move cannot race an edit: the
+// loser matches no row and gets back no row, which Go turns into the
+// typed conflict. TestMovingWithAStaleVersionIsAConflict pins the guard.
+//
+// deleted_at IS NULL is part of the guard for the reason it is part of
+// SoftDeleteDocument's: a deleted document has no address to move, and
+// the recovery is to write to its path and bring it back first. Go
+// re-reads and says exactly that (moveRefusal) rather than leaving a
+// caller with a bare not_found.
+//
+// current_version advances and the caller appends the matching snapshot
+// in the same transaction, so current_version never disagrees with the
+// newest version row -- the invariant Delete's tombstone keeps, kept
+// here by the same means. That snapshot is what makes the move visible
+// in the history at all: its content equals its predecessor's and its
+// path does not.
+//
+// The destination is checked in Go, under its own row lock, before this
+// statement runs, so an occupied destination is refused by name rather
+// than as SQLSTATE 23505 over documents_path_key. Go still maps that
+// SQLSTATE, because two moves onto one free path can only be told apart
+// by the index: whichever loses arrives here with a destination its own
+// locked read found free.
+func (q *Queries) MoveDocument(ctx context.Context, arg MoveDocumentParams) (Document, error) {
+	row := q.db.QueryRow(ctx, moveDocument,
+		arg.ToPath,
+		arg.ActorUserID,
+		arg.ActorTokenID,
+		arg.ProjectID,
+		arg.FromPath,
+		arg.ExpectedVersion,
+	)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Path,
+		&i.Kind,
+		&i.Title,
+		&i.Summary,
+		&i.BodyMd,
+		&i.Frontmatter,
+		&i.CurrentVersion,
+		&i.DeletedAt,
+		&i.Search,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CreatedByUserID,
+		&i.CreatedByTokenID,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
 }
 
 const searchDocuments = `-- name: SearchDocuments :many
@@ -1132,7 +1313,11 @@ type UpsertDocumentParams struct {
 // and links refer to. That omission is also what lets Go refuse a
 // respelling *after* this statement runs -- the returned row still
 // carries the stored spelling -- which closes the creation race, where
-// there was nothing yet to lock.
+// there was nothing yet to lock. MoveDocument, below, is the one
+// statement in this file that does write the column, and it is not a
+// counter-example to any of that: it changes a document's *address*,
+// refuses a from/to pair that folds together for exactly the reason
+// stated here, and cannot be reached by a write.
 //
 // kind is in the SET list, but not unconditionally: it is COALESCEd
 // against the stored value rather than overwritten by excluded.kind,

@@ -579,6 +579,16 @@ func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 			})
 			return err
 		},
+		"docs.move": func() error {
+			_, err := web.MCPDocsMove(ctx, f.deps, f.caller, f.other, web.DocsMoveInput{
+				From: "lore/x.md", To: "lore/y.md", ExpectedVersion: int32Ptr(1),
+			})
+			return err
+		},
+		"docs.kinds": func() error {
+			_, err := web.MCPDocsKinds(ctx, f.deps, f.caller, f.other, web.DocsKindsInput{})
+			return err
+		},
 		"docs.history": func() error {
 			_, err := web.MCPDocsHistory(ctx, f.deps, f.caller, f.other, web.DocsHistoryInput{Path: "lore/x.md"})
 			return err

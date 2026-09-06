@@ -324,8 +324,8 @@ func TestAVersionRowCannotClaimAGameItsDocumentDoesNotBelongTo(t *testing.T) {
 		t.Fatalf("Read: %v", err)
 	}
 	_, err = pool.Exec(ctx,
-		`INSERT INTO document_versions (project_id, document_id, version, body_md, message)
-		 VALUES ($1, $2, 99, 'smuggled', 'from another game')`, outland, doc.ID)
+		`INSERT INTO document_versions (project_id, document_id, version, path, body_md, message)
+		 VALUES ($1, $2, 99, 'bible', 'smuggled', 'from another game')`, outland, doc.ID)
 	if err == nil {
 		t.Fatal("a version row naming another game's document must be refused")
 	}

@@ -634,6 +634,59 @@ function documentRow(slug, doc) {
   return item;
 }
 
+// describeDocKinds turns GET /api/games/{game}/docs/kinds into the one
+// line above the documents catalogue.
+//
+// **A kind is free text this game invented and Maestro ships no
+// vocabulary of them**, so this line is the only place a designer can
+// see which kinds their own prose is using — the same job the entity-type
+// catalogue above does for the types the game declared. The counts are
+// beside the names for the same reason they are there: "lore 42, script
+// 3" says something "lore, script" does not.
+//
+// The unkinded total is appended only when there is one. A permanent
+// "0 with no kind" would train a reader to ignore the number, which is
+// describeTotals' own rule for the invalid count.
+//
+// It returns the empty string when the game has no kinds at all —
+// including a game with prose that none of it is filed under — and the
+// caller hides the line rather than printing "no kinds", which reads as
+// a fault on a page whose documents are right underneath.
+function describeDocKinds(body) {
+  const kinds = Array.isArray(body.kinds) ? body.kinds : [];
+  if (kinds.length === 0) {
+    return "";
+  }
+  const parts = kinds.map((k) => `${k.kind} ${Number(k.document_count ?? 0)}`);
+  let line = `Kinds: ${parts.join(" · ")}`;
+  const unkinded = Number(body.unkinded ?? 0);
+  if (unkinded > 0) {
+    line += ` · ${unkinded} with no kind`;
+  }
+  return line;
+}
+
+// renderDocKinds draws that line. A failed request leaves it hidden
+// rather than showing a wrong vocabulary: the documents below are the
+// page's subject and a missing summary above them is a smaller lie than
+// a stale one.
+async function renderDocKinds(gameID) {
+  const el = document.getElementById("doc-kinds");
+  if (!el) {
+    return;
+  }
+  const result = await fetchAPI(`/api/games/${gameID}/docs/kinds`);
+  if (!result.ok) {
+    el.hidden = true;
+    return;
+  }
+  const line = describeDocKinds(result.body ?? {});
+  // textContent, like every other value on this page: a kind is game
+  // content an agent wrote.
+  el.textContent = line;
+  el.hidden = line === "";
+}
+
 // renderDocuments fills the game page's Documents catalogue from GET
 // /api/games/{game}/docs, one page at a time, and keeps the cursor the
 // server issued so "Show more documents" can ask for the next.
@@ -655,6 +708,10 @@ async function renderDocuments(gameID, slug, role) {
   if (actionEl) {
     actionEl.textContent = describeWhoWritesDocuments(role);
   }
+
+  // The vocabulary first, because it describes the list below it and a
+  // reader scanning down should meet it before the rows.
+  await renderDocKinds(gameID);
 
   let cursor = null;
   let rendered = 0;

@@ -121,11 +121,30 @@ func CheckPath(path string) error {
 // here rather than silently drop the problem, which is the right way
 // round for an invariant this package owns on both sides.
 func pathProblems(path string) []metamodel.FieldError {
+	return pathProblemsAt("path", path)
+}
+
+// pathProblemsAt is pathProblems for a call whose path argument is not
+// called "path".
+//
+// Move has two of them, `from` and `to`, and reporting both at "path"
+// would hand a caller two field errors with one name and leave it to
+// guess which end each belongs to — the exact discrimination
+// MissingError's own comment says a field path exists to provide. The
+// judgement is CheckPath's and is not duplicated; only the label moves.
+// TestEveryProblemWithOneMoveIsReportedAtItsOwnEnd pins that a call with
+// two bad paths hears about both, at "from" and at "to".
+func pathProblemsAt(field, path string) []metamodel.FieldError {
 	err := CheckPath(path)
 	if err == nil {
 		return nil
 	}
 	var v *metamodel.ValidationError
 	_ = errors.As(err, &v)
-	return v.Fields
+	fields := make([]metamodel.FieldError, len(v.Fields))
+	for i, f := range v.Fields {
+		f.Path = field
+		fields[i] = f
+	}
+	return fields
 }

@@ -340,9 +340,17 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 	// conflictAfterFailedUpsert answers. A check that cannot fire is a
 	// second claim about a race that only one place actually handles.
 	if _, err := q.InsertDocumentVersion(ctx, dbq.InsertDocumentVersionParams{
-		ProjectID:   projectID,
-		DocumentID:  row.ID,
-		Version:     row.CurrentVersion,
+		ProjectID:  projectID,
+		DocumentID: row.ID,
+		Version:    row.CurrentVersion,
+		// The *stored* spelling, off the row this statement just wrote,
+		// not in.Path: a write addressed under another casing reaches
+		// the existing document and UpsertDocument leaves the path
+		// column alone, so the caller's spelling is not this version's
+		// address. Recording it would put a spelling in the history that
+		// no reader of the document ever sees.
+		// TestAVersionRecordsTheStoredSpellingAndNotTheCallers pins it.
+		Path:        row.Path,
 		Title:       row.Title,
 		Summary:     row.Summary,
 		BodyMd:      row.BodyMd,
@@ -591,9 +599,12 @@ func (s *Service) Delete(ctx context.Context, projectID uuid.UUID, in DeleteInpu
 		// most wants to see what was lost.
 		// TestATombstonesBodyIsStillReadableAsAVersion pins all four.
 		if _, err := q.InsertDocumentVersion(ctx, dbq.InsertDocumentVersionParams{
-			ProjectID:     projectID,
-			DocumentID:    row.ID,
-			Version:       row.CurrentVersion,
+			ProjectID:  projectID,
+			DocumentID: row.ID,
+			Version:    row.CurrentVersion,
+			// The path the document was deleted at, which after Task
+			// 15's move is no longer "the path it has always been at".
+			Path:          row.Path,
 			Title:         row.Title,
 			Summary:       row.Summary,
 			BodyMd:        row.BodyMd,

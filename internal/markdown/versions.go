@@ -103,7 +103,21 @@ type HistoryPage struct {
 // information a caller could act on, and every surface unwrapped it
 // before publishing it anyway.
 type VersionSummary struct {
-	Version   int32
+	Version int32
+
+	// Path is the address this version was written at, which is not
+	// necessarily the address the document is at now.
+	//
+	// **It is here because a document can be moved** (Move), and a
+	// history that showed only the current path would show four
+	// snapshots of `lore/duskwood` that were taken while the document
+	// was called something else, with nothing to say so. It is also what
+	// makes the move's own version row legible: that row's content
+	// equals its predecessor's and its path does not, so "version 5 is
+	// where this moved" is a comparison a reader makes from the page it
+	// already has, rather than a second call.
+	// TestAHistoryShowsWhereEachVersionWasWritten pins it.
+	Path      string
 	Title     string
 	Summary   string
 	Message   string
@@ -177,7 +191,8 @@ func (s *Service) History(ctx context.Context, projectID uuid.UUID, f HistoryFil
 	page := HistoryPage{Versions: make([]VersionSummary, 0, len(rows))}
 	for i, row := range rows {
 		page.Versions = append(page.Versions, VersionSummary{
-			Version: row.Version, Title: row.Title, Summary: row.Summary,
+			Version: row.Version, Path: row.Path,
+			Title: row.Title, Summary: row.Summary,
 			Message: row.Message, Deleted: row.Deleted,
 			CreatedAt: row.CreatedAt.Time, Author: authors[i],
 		})

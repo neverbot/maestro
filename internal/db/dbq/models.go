@@ -64,6 +64,7 @@ type DocumentVersion struct {
 	AuthorUserID  *uuid.UUID
 	AuthorTokenID *uuid.UUID
 	CreatedAt     pgtype.Timestamptz
+	Path          string
 }
 
 type Entity struct {

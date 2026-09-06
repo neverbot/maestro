@@ -452,8 +452,8 @@ func TestNoDeletionIsAnnouncedWhenTheTombstoneCannotBeWritten(t *testing.T) {
 	// written. The document is at version 1, so the delete will try to
 	// insert version 2.
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO document_versions (project_id, document_id, version, body_md, message)
-		 SELECT $1, d.id, 2, 'squatter', 'in the way'
+		`INSERT INTO document_versions (project_id, document_id, version, path, body_md, message)
+		 SELECT $1, d.id, 2, d.path, 'squatter', 'in the way'
 		   FROM documents d WHERE d.project_id = $1 AND d.path = 'bible'`, game); err != nil {
 		t.Fatalf("seed the colliding version row: %v", err)
 	}

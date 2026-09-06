@@ -178,7 +178,7 @@ func TestADocumentVersionCannotCrossGames(t *testing.T) {
 	outland := seedDocumentGame(t, ctx, pool, "outland")
 	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
 
-	insert := `INSERT INTO document_versions (project_id, document_id, version, body_md) VALUES ($1, $2, $3, 'body')`
+	insert := `INSERT INTO document_versions (project_id, document_id, version, path, body_md) VALUES ($1, $2, $3, 'bible', 'body')`
 	_, err := pool.Exec(ctx, insert, outland.projectID, docID, 1)
 	assertForeignKeyViolation(t, err)
 
@@ -199,7 +199,7 @@ func TestADocumentVersionNumberIsUniquePerDocument(t *testing.T) {
 	docA := seedDocument(t, ctx, pool, azeroth.projectID, "lore/a")
 	docB := seedDocument(t, ctx, pool, azeroth.projectID, "lore/b")
 
-	insert := `INSERT INTO document_versions (project_id, document_id, version, body_md) VALUES ($1, $2, $3, 'body')`
+	insert := `INSERT INTO document_versions (project_id, document_id, version, path, body_md) VALUES ($1, $2, $3, 'bible', 'body')`
 	if _, err := pool.Exec(ctx, insert, azeroth.projectID, docA, 1); err != nil {
 		t.Fatalf("first version: %v", err)
 	}
@@ -267,8 +267,8 @@ func TestADocumentCannotRecordAnotherProjectsToken(t *testing.T) {
 		},
 		{
 			column: "document_versions.author_token_id",
-			sql: `INSERT INTO document_versions (project_id, document_id, version, author_token_id)
-			      VALUES ($1, $2, $3, $4)`,
+			sql: `INSERT INTO document_versions (project_id, document_id, version, path, author_token_id)
+			      VALUES ($1, $2, $3, 'bible', $4)`,
 			args: func(token string) []any {
 				// A distinct version number per case, so the unique key
 				// on (document_id, version) cannot be what fails.
@@ -308,8 +308,8 @@ func TestDeletingATokenClearsOnlyTheDocumentTokenColumn(t *testing.T) {
 		t.Fatalf("insert stamped document: %v", err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO document_versions (project_id, document_id, version, author_token_id)
-		 VALUES ($1, $2, 1, $3)`, azeroth.projectID, docID, tokenID); err != nil {
+		`INSERT INTO document_versions (project_id, document_id, version, path, author_token_id)
+		 VALUES ($1, $2, 1, 'bible', $3)`, azeroth.projectID, docID, tokenID); err != nil {
 		t.Fatalf("insert stamped version: %v", err)
 	}
 
@@ -383,7 +383,7 @@ func TestDeletingADocumentTakesItsVersionsAndLinks(t *testing.T) {
 	docID := seedDocument(t, ctx, pool, azeroth.projectID, "scripts/wanted-hogger")
 
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO document_versions (project_id, document_id, version, body_md) VALUES ($1, $2, 1, 'body')`,
+		`INSERT INTO document_versions (project_id, document_id, version, path, body_md) VALUES ($1, $2, 1, 'bible', 'body')`,
 		azeroth.projectID, docID); err != nil {
 		t.Fatalf("insert version: %v", err)
 	}

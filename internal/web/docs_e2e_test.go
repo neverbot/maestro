@@ -1053,6 +1053,17 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 			})
 			return err
 		},
+		"docs.move": func() error {
+			_, err := web.MCPDocsMove(ctx, w.deps, w.guest, w.game, web.DocsMoveInput{
+				From: e2eLeadScript, To: "scripts/moved-by-a-guest.md",
+				ExpectedVersion: int32Ptr(6),
+			})
+			return err
+		},
+		"docs.kinds": func() error {
+			_, err := web.MCPDocsKinds(ctx, w.deps, w.guest, w.game, web.DocsKindsInput{})
+			return err
+		},
 		"search": func() error {
 			_, err := web.MCPSearch(ctx, w.deps, w.guest, w.game, web.SearchInput{Query: e2eDialogueWord})
 			return err
@@ -1076,8 +1087,8 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 	if swept != len(calls) {
 		t.Fatalf("swept %d tools, the table has %d entries", swept, len(calls))
 	}
-	if swept != 13 {
-		t.Fatalf("swept %d tools; the twelve docs.* plus search is 13", swept)
+	if swept != 15 {
+		t.Fatalf("swept %d tools; the fourteen docs.* plus search is 15", swept)
 	}
 
 	// The document is untouched by all of that: the sweep must not have

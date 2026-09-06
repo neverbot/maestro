@@ -240,6 +240,40 @@ func (s *Server) handleWriteDocs(w http.ResponseWriter, r *http.Request, caller 
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleMoveDoc is the REST mirror of docs.move. It is a POST with a
+// body and not a PATCH on a path segment, for the reason this file's
+// header gives: a document path never occupies a URL segment, and a move
+// has two of them.
+func (s *Server) handleMoveDoc(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !s.requireProseService(w) {
+		return
+	}
+	var in DocsMoveInput
+	if !decodeContentBody(w, r, &in) || !checkStatedProject(w, scope, in) {
+		return
+	}
+	out, err := docsMove(r.Context(), s.deps(), caller, scope.ProjectID, in)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleDocKinds is the REST mirror of docs.kinds, and it is what the
+// game page reads to show a designer the vocabulary its own prose uses.
+func (s *Server) handleDocKinds(w http.ResponseWriter, r *http.Request, _ Caller, scope ProjectScope) {
+	if !s.requireProseService(w) {
+		return
+	}
+	out, err := docsKinds(r.Context(), s.deps(), scope.ProjectID)
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleReadDoc(w http.ResponseWriter, r *http.Request, _ Caller, scope ProjectScope) {
 	if !s.requireProseService(w) {
 		return

@@ -132,6 +132,31 @@ const (
 	// that a revert which never happened announces nothing.
 	eventDocumentReverted = "document.reverted"
 
+	// eventDocumentMoved fires from Move once its transaction has
+	// committed, with documentEventMinRole / documentEventHumanOnly —
+	// the pair eventDocumentWritten's comment argues, taken here for a
+	// reason that is sharper than for a write.
+	//
+	// **A move is the one change in this domain a subscriber cannot
+	// discover by re-reading what it holds.** Every other event names a
+	// path that still answers: a client told `lore/duskwood` changed
+	// re-reads `lore/duskwood` and gets the new content. A client told
+	// nothing, whose document has moved, re-reads `lore/duskwood` and is
+	// answered not_found — indistinguishable, from the outside, from a
+	// deletion. That is why the payload is a MoveEvent and not a
+	// DocumentEvent: From is what the subscriber is holding and To is
+	// where it has to look, and a payload carrying one path could only
+	// ever be half an instruction.
+	//
+	// The same argument is the whole reason this event has to exist at
+	// all rather than being folded into document.written. A move does
+	// not change a document's content, so a client that treated it as a
+	// write would re-fetch a path that is no longer there.
+	// TestAMoveIsAnnouncedWithBothEnds pins the kind and both paths;
+	// TestNoMoveIsAnnouncedWhenTheMoveIsRefused pins that a refused move
+	// announces nothing.
+	eventDocumentMoved = "document.moved"
+
 	// eventDocumentLinked fires from LinkAdd, LinkRemove and any Write
 	// that carried a links array, once the transaction has committed,
 	// with documentEventMinRole / documentEventHumanOnly — the pair
@@ -201,6 +226,30 @@ type DocumentEvent struct {
 // commit order, so a payload holding prose could stably tell a client
 // the wrong prose. FromVersion is the one thing a DocumentEvent could
 // not have said, and it is the whole reason for a second payload type.
+// MoveEvent is document.moved's payload: identity, both ends of the
+// change of address, and the version the move landed on.
+//
+// **Two paths, not one, and that is the reason for a third payload
+// type.** From is the address a subscriber is holding and To is the
+// address it must use from now on; a DocumentEvent carrying only the
+// new path would tell a client that something it cannot identify has
+// moved somewhere, and one carrying only the old path would tell it
+// where to stop looking and not where to look.
+//
+// To is the *stored* spelling, read back off the moved row, for the
+// reason DocumentEvent.Path is: it is the identity every other reader
+// sees. From is the caller's spelling of the old address, which is the
+// one thing here that cannot be read back — the row no longer carries
+// it — and it names the same address under the fold whatever the
+// capitalisation, which is all a subscriber matching against what it
+// holds needs.
+type MoveEvent struct {
+	ID      uuid.UUID `json:"id"`
+	From    string    `json:"from"`
+	To      string    `json:"to"`
+	Version int32     `json:"version"`
+}
+
 type RevertEvent struct {
 	ID          uuid.UUID `json:"id"`
 	Path        string    `json:"path"`

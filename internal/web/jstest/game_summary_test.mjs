@@ -108,7 +108,14 @@ function text(node) {
   return own + node.children.map(text).join(" ");
 }
 
-async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }], docsStatus = 200 }) {
+async function runCase({
+  summary,
+  summaryStatus = 200,
+  docPages = [{ items: [] }],
+  docsStatus = 200,
+  kinds = { kinds: [], documents: 0, unkinded: 0 },
+  kindsStatus = 200,
+}) {
   const elements = {
     "game-name": fakeElement("h1"),
     "game-summary": fakeElement("p"),
@@ -119,6 +126,7 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     "relation-types": fakeElement("ul"),
     "relation-types-empty": fakeElement("p"),
     docs: fakeElement("ul"),
+    "doc-kinds": fakeElement("p"),
     "docs-empty": fakeElement("p"),
     "docs-empty-action": fakeElement("span"),
     "docs-error": fakeElement("p"),
@@ -135,6 +143,8 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   // game.html ships the body hidden; the stub copies that and then
   // zeroes the write, so every write the assertions can see is app.js's.
   elements["game-content"].hidden = true;
+  // game.html ships the kind line hidden too, for the same reason.
+  elements["doc-kinds"].hidden = true;
   for (const el of Object.values(elements)) {
     if (el) el.hiddenWrites = 0;
   }
@@ -176,6 +186,17 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
         json: async () => summary,
       };
     }
+    // Before the /docs prefix below, which would otherwise swallow it.
+    if (url === `/api/games/${game.id}/docs/kinds`) {
+      if (kindsStatus !== 200) {
+        return {
+          ok: false,
+          status: kindsStatus,
+          json: async () => ({ error: "internal_error", message: "the kinds could not be counted" }),
+        };
+      }
+      return { ok: true, status: 200, json: async () => kinds };
+    }
     if (url.startsWith(`/api/games/${game.id}/docs`)) {
       if (docsStatus !== 200) {
         return {
@@ -212,6 +233,14 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
         ],
       },
     ],
+    kinds: {
+      kinds: [
+        { kind: "lore", document_count: 42 },
+        { kind: "<img src=x onerror=alert(1)>script", document_count: 3 },
+      ],
+      documents: 46,
+      unkinded: 1,
+    },
     summary: {
       entity_types: [
         { id: "a", key: "quest", label: "Quest", label_plural: "<img src=x onerror=alert(1)>Quests", entity_count: 400, invalid_count: 3 },
@@ -258,14 +287,16 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   assertVisible(elements["game-content"], "game-content", "the page body is still hidden after a successful summary");
   assertHidden(elements["types-empty"], "types-empty", "an empty state is showing on a game that has content");
   assertHidden(elements["relation-types-empty"], "relation-types-empty", "an empty state is showing on a game that has content");
-  // The whole page is three requests — the game list, the summary and
-  // the first page of documents — and none of them is an entity or
-  // relation listing: that is the property that keeps a game with four
-  // hundred entities rendering like a game with four. The documents
-  // *are* a listing, deliberately and boundedly: it is a keyset page
-  // with a cursor, not the whole game.
-  if (requested.length !== 3 || requested.some((url) => url.includes("/entities") || url.includes("/relations"))) {
-    fail(`the page fetched ${JSON.stringify(requested)}, want the game list, the summary and one page of documents`);
+  // The whole page is four requests — the game list, the summary, the
+  // document-kind catalogue and the first page of documents — and none
+  // of them is an entity or relation listing: that is the property that
+  // keeps a game with four hundred entities rendering like a game with
+  // four. The documents *are* a listing, deliberately and boundedly: it
+  // is a keyset page with a cursor, not the whole game. The kind
+  // catalogue is a grouped count whose size is the number of kinds, not
+  // the number of documents, which is why it can sit beside them here.
+  if (requested.length !== 4 || requested.some((url) => url.includes("/entities") || url.includes("/relations"))) {
+    fail(`the page fetched ${JSON.stringify(requested)}, want the game list, the summary, the kind catalogue and one page of documents`);
   }
 
   // The documents catalogue: a title reaches the page as text (the same
@@ -293,6 +324,21 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
   assertHidden(elements["docs-empty"], "docs-empty", "the documents empty state is showing on a game that has documents");
   assertHidden(elements["docs-error"], "docs-error", "the documents error line is showing after a successful listing");
   assertHidden(elements["docs-more"], "docs-more", "the paging button is offered when the server issued no cursor");
+
+  // The kind vocabulary above the list. It is the only place on this
+  // page a designer can learn which kinds their own prose uses, because
+  // Maestro ships none — so a missing line here is a missing feature,
+  // not a missing decoration. The counts are beside the names, the
+  // unkinded remainder is named, and a crafted kind reaches the page as
+  // text like every other value a game supplies.
+  const kindLine = elements["doc-kinds"].textContent;
+  if (!kindLine.includes("lore 42") || !kindLine.includes("1 with no kind")) {
+    fail(`the kind line reads ${JSON.stringify(kindLine)}`);
+  }
+  if (!kindLine.includes("<img src=x onerror=alert(1)>script 3")) {
+    fail(`a game's kind did not reach the page as text: ${JSON.stringify(kindLine)}`);
+  }
+  assertVisible(elements["doc-kinds"], "doc-kinds", "the kind line is hidden on a game that has kinds");
 }
 
 // Case 1b: paging. The listing issues a cursor whenever a page came back
@@ -381,6 +427,57 @@ async function runCase({ summary, summaryStatus = 200, docPages = [{ items: [] }
     "game-content",
     "the page body is hidden on an empty game, so its empty states are invisible",
   );
+  // A game with no kinds gets no line at all, rather than the words "no
+  // kinds": the documents empty state right below already says this game
+  // has no prose, and a second sentence saying it again in a vocabulary
+  // nobody has yet reads as a fault.
+  assertHidden(elements["doc-kinds"], "doc-kinds", "the kind line is showing on a game with no kinds");
+  if (elements["doc-kinds"].textContent !== "") {
+    fail(`the kind line on an empty game reads ${JSON.stringify(elements["doc-kinds"].textContent)}`);
+  }
+}
+
+// Case 2b: prose that is all unfiled. Every document has a kind of "",
+// which is not a kind: the catalogue is empty and there is nothing to
+// show, even though the game has documents. A line reading "Kinds:" with
+// nothing after it would be worse than none.
+{
+  const { elements } = await runCase({
+    docPages: [{ items: [{ id: "d1", path: "notes/a", title: "A note", version: 1 }] }],
+    kinds: { kinds: [], documents: 1, unkinded: 1 },
+    summary: {
+      entity_types: [],
+      relation_types: [],
+      totals: { entities: 0, relations: 0, invalid: 0 },
+      role: "owner",
+    },
+  });
+
+  assertHidden(elements["doc-kinds"], "doc-kinds", "the kind line is showing for a game whose prose is all unfiled");
+  assertHidden(elements["docs-empty"], "docs-empty", "the documents empty state is showing on a game with a document");
+}
+
+// Case 2c: the kind catalogue fails while the documents list succeeds.
+// The line stays hidden rather than showing a wrong vocabulary, and the
+// documents below still render: a missing summary above them is a
+// smaller lie than a stale one, and it must not take the list with it.
+{
+  const { elements } = await runCase({
+    docPages: [{ items: [{ id: "d1", path: "lore/a", title: "Some lore", kind: "lore", version: 1 }] }],
+    kindsStatus: 500,
+    summary: {
+      entity_types: [],
+      relation_types: [],
+      totals: { entities: 0, relations: 0, invalid: 0 },
+      role: "owner",
+    },
+  });
+
+  assertHidden(elements["doc-kinds"], "doc-kinds", "the kind line is showing after its request failed");
+  if (!text(elements.docs).includes("lore/a")) {
+    fail(`a failed kind catalogue took the documents list with it: ${JSON.stringify(text(elements.docs))}`);
+  }
+  assertHidden(elements["docs-error"], "docs-error", "a failed kind catalogue was reported as a documents failure");
 }
 
 // Case 3: the summary fails. The game's name stays, and the server's own

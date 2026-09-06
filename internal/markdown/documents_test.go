@@ -643,8 +643,8 @@ func TestACreationRacingACreateAndDeleteIsToldTheTombstone(t *testing.T) {
 		t.Fatalf("the other writer's insert: %v", err)
 	}
 	if _, err := other.Exec(ctx,
-		`INSERT INTO document_versions (project_id, document_id, version, body_md)
-		 VALUES ($1, $2, 1, 'theirs' || chr(10))`, game, docID); err != nil {
+		`INSERT INTO document_versions (project_id, document_id, version, path, body_md)
+		 VALUES ($1, $2, 1, 'bible', 'theirs' || chr(10))`, game, docID); err != nil {
 		t.Fatalf("the other writer's version 1: %v", err)
 	}
 	if _, err := other.Exec(ctx,
@@ -652,8 +652,8 @@ func TestACreationRacingACreateAndDeleteIsToldTheTombstone(t *testing.T) {
 		t.Fatalf("the other writer's soft delete: %v", err)
 	}
 	if _, err := other.Exec(ctx,
-		`INSERT INTO document_versions (project_id, document_id, version, body_md, deleted)
-		 VALUES ($1, $2, 2, 'theirs' || chr(10), true)`, game, docID); err != nil {
+		`INSERT INTO document_versions (project_id, document_id, version, path, body_md, deleted)
+		 VALUES ($1, $2, 2, 'bible', 'theirs' || chr(10), true)`, game, docID); err != nil {
 		t.Fatalf("the other writer's tombstone version: %v", err)
 	}
 

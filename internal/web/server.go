@@ -400,6 +400,11 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("GET /api/games/{game}/docs", s.handleListDocs)
 	s.registerContentRoute("POST /api/games/{game}/docs", s.handleWriteDoc)
 	s.registerContentRoute("POST /api/games/{game}/docs/batch", s.handleWriteDocs)
+	// A move is a POST with a body and not a PATCH on a path segment: a
+	// document path never occupies a URL segment (api_docs.go's header),
+	// and a move names two of them.
+	s.registerContentRoute("POST /api/games/{game}/docs/move", s.handleMoveDoc)
+	s.registerContentRoute("GET /api/games/{game}/docs/kinds", s.handleDocKinds)
 	s.registerContentRoute("GET /api/games/{game}/docs/one", s.handleReadDoc)
 	s.registerContentRoute("DELETE /api/games/{game}/docs/one", s.handleDeleteDoc)
 	s.registerContentRoute("GET /api/games/{game}/docs/history", s.handleDocHistory)

@@ -65,7 +65,11 @@
 -- and links refer to. That omission is also what lets Go refuse a
 -- respelling *after* this statement runs -- the returned row still
 -- carries the stored spelling -- which closes the creation race, where
--- there was nothing yet to lock.
+-- there was nothing yet to lock. MoveDocument, below, is the one
+-- statement in this file that does write the column, and it is not a
+-- counter-example to any of that: it changes a document's *address*,
+-- refuses a from/to pair that folds together for exactly the reason
+-- stated here, and cannot be reached by a write.
 --
 -- kind is in the SET list, but not unconditionally: it is COALESCEd
 -- against the stored value rather than overwritten by excluded.kind,
@@ -192,10 +196,11 @@ FOR UPDATE;
 -- History reads the true case back and Task 3's
 -- TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage the
 -- false one.
-INSERT INTO document_versions (project_id, document_id, version, title, summary, body_md,
+INSERT INTO document_versions (project_id, document_id, version, path, title, summary, body_md,
                                frontmatter, message, deleted, author_user_id, author_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('document_id')::uuid,
-        sqlc.arg('version')::integer, sqlc.arg('title')::text, sqlc.arg('summary')::text,
+        sqlc.arg('version')::integer, sqlc.arg('path')::text,
+        sqlc.arg('title')::text, sqlc.arg('summary')::text,
         sqlc.arg('body_md')::text, sqlc.arg('frontmatter')::jsonb, sqlc.arg('message')::text,
         sqlc.arg('deleted')::boolean,
         sqlc.narg('author_user_id')::uuid, sqlc.narg('author_token_id')::uuid)
@@ -237,6 +242,99 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND current_version = sqlc.arg('expected_version')::integer
 RETURNING *;
 
+-- name: MoveDocument :one
+-- The one statement in this file that writes the path column, and the
+-- reason UpsertDocument's own comment about the path staying out of its
+-- SET list is a statement about *writes* rather than about the column.
+--
+-- It is guarded exactly as UpsertDocument and SoftDeleteDocument are, by
+-- the caller's expected version, so a move cannot race an edit: the
+-- loser matches no row and gets back no row, which Go turns into the
+-- typed conflict. TestMovingWithAStaleVersionIsAConflict pins the guard.
+--
+-- deleted_at IS NULL is part of the guard for the reason it is part of
+-- SoftDeleteDocument's: a deleted document has no address to move, and
+-- the recovery is to write to its path and bring it back first. Go
+-- re-reads and says exactly that (moveRefusal) rather than leaving a
+-- caller with a bare not_found.
+--
+-- current_version advances and the caller appends the matching snapshot
+-- in the same transaction, so current_version never disagrees with the
+-- newest version row -- the invariant Delete's tombstone keeps, kept
+-- here by the same means. That snapshot is what makes the move visible
+-- in the history at all: its content equals its predecessor's and its
+-- path does not.
+--
+-- The destination is checked in Go, under its own row lock, before this
+-- statement runs, so an occupied destination is refused by name rather
+-- than as SQLSTATE 23505 over documents_path_key. Go still maps that
+-- SQLSTATE, because two moves onto one free path can only be told apart
+-- by the index: whichever loses arrives here with a destination its own
+-- locked read found free.
+UPDATE documents
+SET path                = sqlc.arg('to_path')::text,
+    current_version     = current_version + 1,
+    updated_by_user_id  = sqlc.narg('actor_user_id')::uuid,
+    updated_by_token_id = sqlc.narg('actor_token_id')::uuid
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND lower(path) = lower(sqlc.arg('from_path')::text)
+  AND deleted_at IS NULL
+  AND current_version = sqlc.arg('expected_version')::integer
+RETURNING *;
+
+-- name: CountDocumentsPerKind :many
+-- The kind catalogue: one row per distinct kind a game's live documents
+-- actually carry, with how many carry it. It is the prose half of what
+-- CountEntitiesPerType does for the metamodel, and it exists for the
+-- same reason -- a caller cannot filter by a vocabulary nobody will
+-- tell it.
+--
+-- Grouped by lower(kind), not by kind, because that is the identity
+-- every other statement in this file uses: ListDocumentsPage and
+-- SearchDocuments both compare lower(d.kind) = lower(@kind), so "Lore"
+-- and "lore" are one filter result and must be one catalogue row. The
+-- folded spelling is what comes back, for the same reason: it is the
+-- value that, fed to either filter, selects exactly the rows this row
+-- counted. Reporting one of the stored spellings instead would return a
+-- value that happens to work and a count that belongs to a different
+-- set. TestTwoSpellingsOfOneKindAreOneCatalogueRow pins it.
+--
+-- The kind-less documents are excluded here and counted by
+-- CountDocuments instead: '' is not a vocabulary entry, and there is no
+-- spelling of the kind filter that selects it (ListFilter.Kind's own
+-- comment), so listing it as a kind would offer a filter value that
+-- does nothing.
+--
+-- Soft-deleted documents are excluded. The catalogue describes what a
+-- game holds, and the default listing and the search both hide deleted
+-- rows, so a kind kept alive only by a tombstone would be a filter value
+-- whose default answer is an empty page.
+--
+-- There is no index on documents.kind and this deliberately does not add
+-- one: the statement is one sequential pass over one game's documents,
+-- answered once per page load, against a table whose per-game row count
+-- is prose a human wrote. An index would be write cost on every document
+-- write to serve a grouping that reads every row anyway.
+SELECT lower(kind)::text AS kind, count(*) AS document_count
+FROM documents
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND deleted_at IS NULL
+  AND kind <> ''
+GROUP BY lower(kind)
+ORDER BY lower(kind);
+
+-- name: CountDocuments :one
+-- The totals beside the catalogue: every live document, and how many of
+-- them carry no kind at all. The second number is the one the catalogue
+-- itself cannot carry -- '' is not a filter value -- and it is the
+-- number that turns "these are the kinds" into "these are the kinds and
+-- this is what is still unfiled".
+SELECT count(*) AS total,
+       count(*) FILTER (WHERE kind = '') AS unkinded
+FROM documents
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND deleted_at IS NULL;
+
 -- name: ListDocumentVersions :many
 -- Version metadata only, newest first. **No bodies**: prose is the
 -- largest payload in the system and agents are its main consumer, so a
@@ -261,7 +359,7 @@ RETURNING *;
 -- document_id filter, and TestTwoGamesSharingOnePathKeepSeparateHistories
 -- pins that a version row carries its own document's project id in the
 -- first place.
-SELECT id, project_id, document_id, version, title, summary, message, deleted,
+SELECT id, project_id, document_id, version, path, title, summary, message, deleted,
        author_user_id, author_token_id, created_at
 FROM document_versions
 WHERE project_id = sqlc.arg('project_id')::uuid

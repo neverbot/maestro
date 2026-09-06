@@ -48,7 +48,11 @@ const (
 // DocumentPage carries the contract.
 //
 // **Kind's zero value, "", means "no filter", and there is deliberately
-// no spelling of "documents with no kind" today.** A document's kind is
+// no spelling of "documents with no kind" today.** Kinds reports how
+// many there are (KindTotals.Unkinded) without offering a filter that
+// would select them, which is the honest half of this gap: a caller can
+// see that thirty documents are unfiled, and filing them is the only
+// thing it can then do about it. A document's kind is
 // optional (Write's own comment), so some rows in a real game are
 // expected to have none, and this filter cannot select them: Kind: ""
 // is indistinguishable from Kind unset. Recorded here as a decision Task
@@ -136,12 +140,20 @@ type DocumentSummary struct {
 // HistoryPage's is the version number and metamodel.EntityPage's the
 // row's name.
 //
-// **A document path is mutable in principle and immutable in practice**
-// -- UpsertDocument never writes the path column, so the only way a
-// row's sort key moves is a caller creating a document at a path that
-// sorts earlier, which a paged walk will simply not see. That is the
-// ordinary "a row inserted before the position is never seen" behaviour
-// paging.Cursor documents, not a special case.
+// **A document path is mutable, and Move is the one call that moves
+// it.** That sentence used to read "mutable in principle and immutable
+// in practice", on the grounds that UpsertDocument never writes the path
+// column; Move does, so the hazard paging.Cursor documents is real here
+// now and not hypothetical. A document moved to a path that sorts before
+// a walk's position is not seen again by that walk, and one moved to a
+// path that sorts after it is seen twice. Both are the ordinary keyset
+// behaviour over a mutable sort key rather than anything this listing
+// can fix -- the alternative is a snapshot, which paging.Cursor's own
+// contract refuses to be -- and both are announced: Move publishes
+// document.moved carrying the old path and the new, so a client walking
+// this listing has the one fact it needs to reconcile its page.
+// A creation at a path that sorts earlier stays what it always was, the
+// "a row inserted before the position is never seen" behaviour.
 //
 // Documents is never nil: an empty listing marshals as [] and not null,
 // the same decision LinksByDocument makes for a document with no
@@ -167,7 +179,13 @@ type DocumentPage struct {
 // same case, and answers with an empty page: neither is a key of a row
 // that has to exist. `kind` is free text a project attaches to a
 // document and Maestro ships no vocabulary of them, so there is no set
-// of known kinds to have missed; a prefix names a subtree, and a subtree
+// of known kinds to have missed. **That stands, and Kinds is what makes
+// it liveable**: an unrecognised kind is still an empty page rather than
+// a refusal, because it is still not a knowable state, but a caller no
+// longer has to guess the vocabulary to filter by it -- Kinds lists what
+// this game actually uses, with counts, the way the game summary lists
+// the entity types it declared. A prefix naming nothing is the other
+// half of the same rule; a prefix names a subtree, and a subtree
 // with nothing in it is an ordinary answer -- "no scripts yet" is what a
 // listing of `scripts/` in a new game means, not a mistake to report. An
 // entity is the only filter part that addresses a row, so it is the only

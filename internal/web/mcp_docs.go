@@ -167,6 +167,26 @@ type DocsDeleteInput struct {
 	ExpectedVersion *int32 `json:"expected_version"`
 }
 
+// DocsMoveInput changes one document's path.
+//
+// `from` and `to` are two paths and not a path plus a name: a move
+// changes the whole address, so `lore/duskwood` to `zones/duskwood/lore`
+// is one call and not a rename plus a reparent.
+type DocsMoveInput struct {
+	ScopedArgs
+	From            string `json:"from"`
+	To              string `json:"to"`
+	Message         string `json:"message,omitempty"`
+	ExpectedVersion *int32 `json:"expected_version"`
+}
+
+// DocsKindsInput takes nothing but the caller's own scope, exactly as
+// GameCountsInput does: the question is about the whole game, and there
+// is nothing to filter a vocabulary by.
+type DocsKindsInput struct {
+	ScopedArgs
+}
+
 // DocsHistoryInput pages one document's versions.
 type DocsHistoryInput struct {
 	ScopedArgs
@@ -401,7 +421,18 @@ type DocsListOutput struct {
 // columns rather than one. Both are empty on a version whose author is
 // no longer on file.
 type VersionOutput struct {
-	Version    int32      `json:"version"`
+	Version int32 `json:"version"`
+
+	// Path is the address this version was written at, which a moved
+	// document's older versions do not share with it.
+	//
+	// **It is not omitempty and it is required in the schema**, because
+	// a client reading a history has to be able to tell "this version was
+	// written here" from "this server did not say". It is also the only
+	// thing that makes the version a move appends legible as a move: that
+	// row's title, summary and message are its predecessor's and its path
+	// is not.
+	Path       string     `json:"path"`
 	Title      string     `json:"title"`
 	Summary    string     `json:"summary,omitempty"`
 	Message    string     `json:"message,omitempty"`
@@ -426,6 +457,32 @@ type VersionOutput struct {
 	// records nobody; with one, it records somebody this server could not
 	// name.
 	AuthorLabel string `json:"author_label,omitempty"`
+}
+
+// DocsKindCountOutput is one entry of a game's document-kind
+// vocabulary. It mirrors EntityTypeSummary's shape on the game summary —
+// the thing, then how many rows carry it — because the two answer the
+// same question about the two halves of a game.
+type DocsKindCountOutput struct {
+	Kind          string `json:"kind"`
+	DocumentCount int64  `json:"document_count"`
+}
+
+// DocsKindsOutput is a game's document-kind vocabulary with its totals.
+//
+// **Kinds is never nil**, so a game with no kinds yet marshals as [] and
+// not null — the rule every listing on this surface follows.
+//
+// Documents and Unkinded are both outside the list because neither is a
+// kind. Unkinded in particular is a count with no filter behind it:
+// there is no spelling of docs.list's `kind` that selects the documents
+// carrying none, so publishing it as a catalogue row would offer a value
+// that does nothing. Published as a total, it is the number that tells a
+// designer how much of the game is still unfiled.
+type DocsKindsOutput struct {
+	Kinds     []DocsKindCountOutput `json:"kinds"`
+	Documents int64                 `json:"documents"`
+	Unkinded  int64                 `json:"unkinded"`
 }
 
 // DocsHistoryOutput is one page of version metadata, newest first.
@@ -719,6 +776,64 @@ func documentAudit(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	return authorOutput(authors[0]), authorOutput(authors[1]), nil
 }
 
+// MCPDocsMove implements docs.move.
+func MCPDocsMove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	in DocsMoveInput) (DocumentSummaryOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return DocumentSummaryOutput{}, err
+	}
+	return docsMove(ctx, deps, caller, projectID, in)
+}
+
+// docsMove answers with a summary rather than a DocumentOutput, for the
+// reason docsDelete does: the caller supplied neither the body nor a
+// reason to want it echoed, and what it does need is the new path and
+// the version the move landed on — the version any following write must
+// pass as expected_version.
+func docsMove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	in DocsMoveInput) (DocumentSummaryOutput, error) {
+	row, err := deps.Markdown.Move(ctx, projectID, markdown.MoveInput{
+		From:            in.From,
+		To:              in.To,
+		Message:         in.Message,
+		ExpectedVersion: in.ExpectedVersion,
+		Actor:           actorOf(caller),
+	})
+	if err != nil {
+		return DocumentSummaryOutput{}, err
+	}
+	return documentSummaryOf(ctx, deps, projectID, row)
+}
+
+// MCPDocsKinds implements docs.kinds.
+func MCPDocsKinds(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
+	_ DocsKindsInput) (DocsKindsOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return DocsKindsOutput{}, err
+	}
+	return docsKinds(ctx, deps, projectID)
+}
+
+// docsKinds is the shared body both surfaces call, so the REST mirror
+// and the tool cannot disagree about what a vocabulary is.
+func docsKinds(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (DocsKindsOutput, error) {
+	catalogue, err := deps.Markdown.Kinds(ctx, projectID)
+	if err != nil {
+		return DocsKindsOutput{}, err
+	}
+	out := DocsKindsOutput{
+		Kinds:     make([]DocsKindCountOutput, 0, len(catalogue.Kinds)),
+		Documents: catalogue.Totals.Documents,
+		Unkinded:  catalogue.Totals.Unkinded,
+	}
+	for _, k := range catalogue.Kinds {
+		out.Kinds = append(out.Kinds, DocsKindCountOutput{
+			Kind: k.Kind, DocumentCount: k.DocumentCount,
+		})
+	}
+	return out, nil
+}
+
 // MCPDocsHistory implements docs.history.
 func MCPDocsHistory(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID,
 	in DocsHistoryInput) (DocsHistoryOutput, error) {
@@ -739,7 +854,8 @@ func docsHistory(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	items := make([]VersionOutput, 0, len(page.Versions))
 	for _, row := range page.Versions {
 		items = append(items, VersionOutput{
-			Version: row.Version, Title: row.Title, Summary: row.Summary,
+			Version: row.Version, Path: row.Path,
+			Title: row.Title, Summary: row.Summary,
 			Message: row.Message, Deleted: row.Deleted, CreatedAt: row.CreatedAt,
 			AuthorKind: row.Author.Kind, AuthorID: row.Author.ID,
 			AuthorLabel: row.Author.Label,
@@ -770,7 +886,16 @@ func docsReadVersion(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 		return DocsVersionOutput{}, err
 	}
 	return DocsVersionOutput{
-		Path:        in.Path,
+		// The path recorded *on the version row*, not in.Path. Those
+		// were the same value until documents could move: now, reading
+		// version 2 of a document that has since moved must answer with
+		// the address version 2 was written at, and echoing the caller's
+		// argument would report today's address for yesterday's
+		// snapshot. It also stops echoing a caller's own casing back at
+		// it as though it were the stored spelling.
+		// TestReadingAVersionOfAMovedDocumentAnswersWithItsOwnPath pins
+		// both halves.
+		Path:        row.Path,
 		Version:     row.Version,
 		Title:       row.Title,
 		Summary:     row.Summary,
@@ -1292,6 +1417,57 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "docs.move",
+		Description: fmt.Sprintf(
+			"Change one document's path, keeping the document. **This is the only way to "+
+				"fix a path, and writing the document at the new path and deleting the old "+
+				"one is not the same thing:** that forks the history in two, leaving the new "+
+				"path at version 1 with none of what came before and the old path holding "+
+				"everything under a tombstone. A move keeps the id, the kind, the creator, "+
+				"every past version and every attached entity, and continues the numbering. "+
+				"expected_version is required and must match the version you read, so a move "+
+				"cannot race an edit. message is recorded on the version the move appends, "+
+				"at most %d bytes. "+
+				"**Paths are matched without regard to case, so a move that only changes "+
+				"capitalisation is refused**: `lore/Duskwood` and `lore/duskwood` are one "+
+				"address, the spelling a document was first written under is the handle its "+
+				"history refers to, and it is not rewritten. **A destination that is taken "+
+				"is refused too**, including one whose document was deleted — a deleted path "+
+				"keeps its history and is still taken, so bring that document back or pick a "+
+				"free path; a move never merges two documents. A deleted document cannot be "+
+				"moved: write to its path to bring it back first. "+
+				"The answer is a summary, not a body: the new path and the version the move "+
+				"landed on. %s",
+			markdown.MaxMessageLen, retryAdvice),
+		OutputSchema: documentSummaryOutputSchema,
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsMoveInput) (DocumentSummaryOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPDocsMove(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "docs.kinds",
+		Description: "List the document kinds this game actually uses, with how many " +
+			"documents carry each. **This is how you learn the vocabulary docs.list and " +
+			"search filter by.** A kind is free text a project invents — Maestro ships no " +
+			"kinds, the same way it ships no entity types — so there is no fixed list to " +
+			"know, and filtering by a kind nobody used answers with an empty page rather " +
+			"than an error. Read this first and filter by what is here. " +
+			"Kinds come back folded to lower case, because that is how both filters match " +
+			"them: \"Lore\" and \"lore\" are one kind and one row. " +
+			"documents is every live document in the game and unkinded is how many of them " +
+			"carry no kind at all — that group is not in the list because there is no " +
+			"spelling of the kind filter that selects it. Deleted documents are not " +
+			"counted. The answer's size grows with the number of kinds, never with the " +
+			"number of documents. " + retryAdvice,
+		OutputSchema: docsKindsOutputSchema,
+		Annotations:  readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in DocsKindsInput) (DocsKindsOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPDocsKinds(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "docs.history",
 		Description: fmt.Sprintf(
 			"List one document's versions, newest first: version number, title, summary, the "+
@@ -1546,9 +1722,10 @@ var docsWriteManyOutputSchema = &jsonschema.Schema{
 
 var versionOutputSchema = &jsonschema.Schema{
 	Type:     "object",
-	Required: []string{"version", "title", "deleted", "created_at"},
+	Required: []string{"version", "path", "title", "deleted", "created_at"},
 	Properties: map[string]*jsonschema.Schema{
 		"version":      integerSchema(),
+		"path":         stringSchema(),
 		"title":        stringSchema(),
 		"summary":      stringSchema(),
 		"message":      stringSchema(),
@@ -1561,6 +1738,25 @@ var versionOutputSchema = &jsonschema.Schema{
 }
 
 var docsHistoryOutputSchema = listEnvelopeSchema(versionOutputSchema)
+
+var docsKindCountSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"kind", "document_count"},
+	Properties: map[string]*jsonschema.Schema{
+		"kind":           stringSchema(),
+		"document_count": integerSchema(),
+	},
+}
+
+var docsKindsOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"kinds", "documents", "unkinded"},
+	Properties: map[string]*jsonschema.Schema{
+		"kinds":     arrayOf(docsKindCountSchema),
+		"documents": integerSchema(),
+		"unkinded":  integerSchema(),
+	},
+}
 
 var docsVersionOutputSchema = &jsonschema.Schema{
 	Type: "object",

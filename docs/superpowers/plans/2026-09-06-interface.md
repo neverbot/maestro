@@ -1246,7 +1246,8 @@ the twin is what a designer falls back to below tablet width (§9).
   watch `everyNodeInTheEnvelopeHasARow` fail with a count difference;
   remove `aria-hidden` from the canvas and watch its test fail.
 
-- [ ] Hand check (**left for a person; it cannot be done yet**): open a
+- [x] Hand check (performed at Task 15, both halves pass — see its
+  corrections, hand check 1): open a
   view whose game holds a node named with markup
   and read the twin in a real browser. Two questions a test cannot ask:
   whether the name shows as characters on the screen (the harness proves
@@ -1505,8 +1506,10 @@ explicit *re-arrange* or when the retained set is under half the new one.
   separation pass by insertion order and watch its test fail on the
   shuffled run.
 
-- [ ] Hand check: a 500-node graph in a browser. Does the ranked drawing
-  read as structure? The engine choice (§5.2) rests on a claim — that a
+- [x] Hand check (performed at Task 15 — see its corrections, hand check
+  2: it reads as structure, layout is 85–101 ms against a 2000 ms budget,
+  and there is no residual overlap at all): a 500-node graph in a
+  browser. Does the ranked drawing read as structure? The engine choice (§5.2) rests on a claim — that a
   game's content graph is directional enough for a ranked layout to beat
   a force one — and this is the first moment anybody can see whether that
   is true.
@@ -2054,7 +2057,9 @@ designer learns the difference.
   the node; put the ambiguity mark on the slot and watch its assertion
   find a per-slot mark.
 
-- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+- [x] Hand check (performed at Task 15 — see its corrections, hand check
+  4: the eight hues read, the dashed absence reads, and the tail is not
+  hatched at all and reads as a ninth colour):
   a hundred nodes coloured by an eleven-value slot. Do eight hues plus a
   hatch read at 11px, and is the hatched tail legible as *a tail* rather
   than as a ninth colour?
@@ -2329,7 +2334,9 @@ by reversing edges, and the interface must not hide that.
   `layerCaptionsAreTheFieldValueForANumericRankBy` fail while the other
   caption test stays green — the pair is what makes the mutation visible.
 
-- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+- [x] Hand check (performed at Task 15 — see its corrections, hand check
+  5: the double-slash is 0.6px at the zoom that fits the progression and
+  is not findable; the frame's banner is what finds it):
   a progression with a genuine cycle. Is the double-slash findable
   without being told it is there?
 
@@ -2503,7 +2510,9 @@ no legible text.
   loud; draw the orphan of the cap identically to a root and watch its
   test name the dash.
 
-- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+- [x] Hand check (performed at Task 15 — see its corrections, hand check
+  6: the nesting is legible and the chip reads as "more here"; the dashed
+  top-level box was not exercised):
   four levels deep with tinted headers. Is the nesting legible, or does
   it need the fills the design refuses?
 
@@ -2694,7 +2703,9 @@ impressive feature meeting a designer for the first time.
   fresh map through the generic empty state and watch its test find the
   wrong sentence; drop the halo and watch its test count zero.
 
-- [ ] Hand check: two hundred pins over a real image. Are labels readable
+- [x] Hand check (performed at Task 15 — see its corrections, hand check
+  7: the halo holds over the darkest, lightest and busiest regions; the
+  hollow anchor was not exercised): two hundred pins over a real image. Are labels readable
   over both the darkest and lightest regions of the picture? This is the
   one legibility question the halo exists for and arithmetic cannot
   answer it, because the background is the designer's file.
@@ -3255,7 +3266,11 @@ treatment and not a spinner.
   indefinitely; enable dragging in `auto` and watch its test find a
   request; send `pinned: false` on a drag and watch its test fail.
 
-- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+- [ ] Hand check, **still not performable** (attempted at Task 15 — see
+  its corrections, hand check 10: a marquee could not be driven
+  synthetically and the snap is a judgement about motion; the
+  pinned/unpinned half was answered from the drawing and the answer is
+  that no such mark is drawn):
   drag a marquee of forty nodes on a thousand-node view
   and watch for stutter. The frame budget is measured in Task 18; what a
   human is judging here is whether the *snap* and the pinned/unpinned
@@ -3476,7 +3491,7 @@ click opens this page in a **side panel over the canvas**, with the full
 page one click further: losing an arrangement to read a field would make
 reading fields feel expensive.
 
-- [ ] Tests (Go, `static_pages_test.go`):
+- [x] Tests (Go, `static_pages_test.go`):
   `TestEveryShellIsReachableByItsRoute` — enumerate the shells on disk
   and assert each has a registered `GET` route, so a shell added without
   a route fails here rather than 404ing in a browser;
@@ -3486,7 +3501,7 @@ reading fields feel expensive.
   template literal or `game.id` in a path position, asserting none: the
   product is addressed by slug on every route and in every confirmation;
   `TestEveryShellCarriesTheImportMapAndTheStylesheet`.
-- [ ] Tests (Node, `pages_test.mjs`): `theHomeMakesOneSummaryCall` —
+- [x] Tests (Node, `pages_test.mjs`): `theHomeMakesOneSummaryCall` —
   assert exactly one call for the counts, so a later edit that fetches
   per type fails; `theHomeLanesAreViewsCatalogueProseInThatOrder`;
   `aGameWithNoViewsGetsTheAgentSentenceAndNoCreateButton` — assert the
@@ -3507,10 +3522,17 @@ reading fields feel expensive.
   line, since it is deliberately close in appearance to the `table`
   renderer; `theCataloguePagesOverTheExistingCursor`.
 
-- [ ] See red: fetch counts per type on the home and watch
+- [x] See red: fetch counts per type on the home and watch
   `theHomeMakesOneSummaryCall` report N; hide declared-but-unset fields
   and watch its test find the missing row; add a *New view* button and
-  watch the onboarding test fail.
+  watch the onboarding test fail. All three were run. Quoted:
+  `theHomeMakesOneSummaryCall: the home asked for the counts more than
+  once: got 3, want 1`; `theEntityShowsDeclaredButUnsetFields: the
+  declared field repeatable is missing from the page` (and, from the same
+  patch, `theEntityShowsDeclaredFieldsInDeclaredOrder: … got
+  "level|summary", want "level|repeatable|summary"`);
+  `aGameWithNoViewsGetsTheAgentSentenceAndNoCreateButton: the views lane
+  offers "new view" on a page that cannot create a view`.
 
 ```bash
 git add internal/web/static internal/web/server.go \
@@ -3518,6 +3540,400 @@ git add internal/web/static internal/web/server.go \
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): three destinations, addressed by slug, with an entity page that reads a relation's own fields"
 ```
+
+#### Corrections made during implementation
+
+1. **`default-src 'self'` was silently switching off the import map, and
+   four tasks' worth of components had been unreachable in a browser
+   since Task 2.** The map is an *inline* script. A policy carrying no
+   hash, nonce or `'unsafe-inline'` makes a browser refuse to apply it —
+   and refusing to apply an import map is not a visible failure. The
+   element stays in the DOM with its text intact, `document.querySelector`
+   still finds it, nothing throws and nothing is logged; the only symptom
+   is that the first page to import a bare specifier resolves nothing at
+   all. Task 2 shipped the map, Task 15 is the first route that mounts a
+   page importing `lit`, and opening that page is what found it. **No
+   test in the package could have**: none parsed the policy, and the
+   map's own tests read the shell off disk rather than the header.
+
+   Confirmed in Firefox against a throwaway server serving the shipped
+   `vendor/` tree under two policies and nothing else different. Under
+   `default-src 'self'; frame-ancestors 'none'`: `IMPORT MAP BLOCKED:
+   TypeError: The specifier "lit" was a bare specifier, but was not
+   remapped to anything`, with `document.querySelector("script[type=
+   importmap]")` still returning the element and its JSON still intact.
+   Under the same policy plus `script-src 'self' 'sha256-…'` of the map's
+   exact bytes: `IMPORT MAP APPLIED`.
+
+   The fix computes one `'sha256-…'` source per *distinct* map from the
+   bytes actually embedded (`static.go`'s `importMapHashes`) and joins
+   them into a `script-src` that repeats `'self'`, because naming the
+   directive at all replaces `default-src` for scripts. **A hash and not
+   a nonce or `'unsafe-inline'`**: `'unsafe-inline'` would re-admit every
+   injected script the policy exists to refuse, and a nonce would have to
+   be minted per response and threaded into the shell, which stops the
+   shells being static files. The map ships in the binary and changes
+   only with a deploy, so the hash is computable once at startup from the
+   served bytes — which is the property that matters, because a map
+   edited without the policy being updated cannot happen when there is
+   nothing to update.
+
+   **The guard that now catches it** is
+   `TestThePolicyAdmitsEveryShellsImportMap`: it hashes the map out of
+   every shell **on disk** and asserts the served policy carries that
+   source, rather than asking `static.go` for the answer it computed —
+   a test that asked the code under test for its own answer would agree
+   with any answer. It fails on an empty shell list and on a shell tree
+   that declares no map, so it cannot pass vacuously. Mutations, each
+   verified applied: dropping the hashes from the policy —
+   `assets.html ships an import map the policy does not admit
+   ('sha256-M0YG…'); a browser silently ignores it and every bare
+   specifier on that page fails to resolve`, once per shell; making the
+   hash builder skip one shell and giving that shell a different map —
+   the same failure, naming `entity.html` and its own hash. Adding a new
+   shell with a new map is caught one step earlier, by Task 15's own
+   `TestEveryShellIsReachableByItsRoute`.
+
+2. **`TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes` now
+   asserts the property its name claims instead of transcribing a
+   string.** It spelled the whole policy by hand, so it failed on a
+   correct change and would fail on every future one, and what it was
+   really checking — that this response is not an exception — was not
+   what it said. It now reads the same three headers off a plain page
+   from the same server and asserts this response carries the same
+   values, and fails loudly if the plain page carries no policy at all.
+   `TestSecurityHeadersArePresentOnEveryResponse` likewise asserts the
+   policy's *parts* — that it carries `default-src 'self'`,
+   `frame-ancestors 'none'` and a `script-src 'self' …`, and that it
+   never carries `unsafe-inline`.
+
+3. **The import map was not the only thing the policy was switching off:
+   the canvas's own stylesheet was blocked too, and had been since Task
+   7.** `mst-canvas` gave itself `CANVAS_CSS` by building a `<style>`
+   element and appending it to its shadow root. A style element built in
+   script is inline style to a policy, so a browser left it in the tree,
+   left its `textContent` intact, and applied none of it. Measured on the
+   first mounted view: `shadowRoot.querySelector("style").sheet` was
+   `null`, `getComputedStyle(canvas).position` was `static` instead of
+   `absolute`, and the surface drew at an SVG's default 300×150 inside a
+   686×641 frame. A probe in the same page confirmed the general rule:
+   under this policy a script-built `<style>` is refused in the light DOM
+   and in a shadow root alike, an inline `style` attribute written with
+   `setAttribute` is refused, and `new CSSStyleSheet().replaceSync(…)`
+   is not — which is exactly why every Lit component beside this one was
+   unaffected, since `static styles` takes that path.
+
+   The fix adopts a constructible stylesheet, and ships **no `<style>`
+   fallback**: a fallback this policy cannot execute is a mechanism
+   nothing reads. `TestNoShippedAssetCarriesInlineStyleThePolicyBlocks`
+   is the guard — it walks every shipped `.html` and `.js` outside
+   `vendor/` and refuses `<style`, a `style="` attribute,
+   `createElement("style")` and `setAttribute("style"`, reading JS with
+   comments stripped by `static_layout_test.go`'s existing stripper so
+   that the reason a component does not build one can stay written above
+   the code that does not build one. Mutation, verified applied: putting
+   the `<style>` element back — `static/components/mst-canvas.js carries
+   "createElement(\"style\")": a <style> built in script is inline
+   style to a policy; adopt a constructible stylesheet instead`.
+   `theCanvasStylesheetIsAdoptedAndNeverAnElement` and
+   `aShadowRootWithoutConstructibleSheetsGetsNoStyleElementFallback`
+   pin the same rule from the JS side; `canvas_test.mjs`'s existing
+   shell-order check asserted a stylesheet child and now asserts there
+   is none.
+
+4. **The fit that opens a view fitted measured a canvas the frame had
+   not laid out yet, got 0×0, and recorded the view as fitted anyway.**
+   Every view in the product opened at the origin at 1×: a 500-node graph
+   showed four boxes in a corner. Found by mounting a view and reading
+   `canvas.view` afterwards — `{x: 0, y: 0, k: 1}` with a scene whose
+   bounds were `{x: 24, y: 24, width: 425, height: 216}` and a measured
+   box of `{width: 0, height: 0}`. `fitView` returning `null` is
+   indistinguishable from a fit nobody wanted, which is why nothing said
+   so. `fitOnce` now **answers whether it fitted**: it measures, lets the
+   frame lay out (`updateComplete`, then one animation frame) and
+   measures again, and reports `false` rather than recording itself, so
+   the next draw tries again. Mutations, each verified applied:
+   returning `true` after the first attempt —
+   `aViewOpensFittedEvenWhenTheFrameHasNotLaidOutYet: and it panned off
+   the origin` and `aFitThatCouldNotMeasureSaysSoRatherThanRecording
+   Itself: … got true, want false`; fitting to the top-left corner
+   instead of centring — `aFitCentresTheWholePictureAndNeverZoomsPastThe
+   Cap: the picture's centre lands on the canvas's centre in x`.
+
+5. **The drawing's enclosure moved off the frame and onto the drawing,
+   because the frame slots a table into the same box.** The 70vh
+   positioned box a `position: absolute; inset: 0` canvas needs was put
+   on `mst-view-frame`'s `.canvas` wrapper — and that wrapper also holds
+   `mst-table`, so a thousand-row table was forced into a 70vh block it
+   overflowed, and its sticky header stuck to a box that scrolled off the
+   page with everything else. The height now lives on `mst-canvas`'s own
+   `:host`.
+
+6. **`mst-table` was `overflow: auto` with no height, which is a scroll
+   container that never scrolls.** Its column header and its group
+   sub-headers are `position: sticky` in the stylesheet and stuck to
+   nothing on the screen: the box grew to its content, so the sticky
+   elements were pinned to a 30 000px-tall container that left the
+   viewport with the page. Measured before: at `scrollY = 3000` the
+   header's `getBoundingClientRect().top` was `-3785`. After bounding the
+   host at `max-height: 70vh`: scrolling the table's own container to
+   9000px leaves the header at the container's top and two group
+   sub-headers stacked under it.
+
+7. **A view that named a background drew no background, and said nothing
+   about it.** `backgroundOf(row, asset)` takes the view row *and* the
+   asset, because the row carries the reference and only the asset
+   carries the URL and the pixel size. `pages/view.js` passed
+   `undefined` on every draw, so `backgroundOf` answered an entry with an
+   empty href — which is this page's own spelling of *the image is gone*
+   — and a correctly placed ground drew nothing. Found by opening a map
+   view with two hundred pins over an uploaded image: the `layer-image`
+   group existed and held no `<image>`. `backgroundAssetFor` now resolves
+   the reference by walking the asset listing (the per-id route answers
+   image *bytes*; the width and height live only in the listing) and
+   short-circuits on an unchanged ground.
+
+8. **A timeline over an enum axis silently became a number axis.**
+   `render/timeline.js`'s `axisFor` says in its own comment that the
+   declaration "arrives from the caller because it is not in the
+   envelope" — the answer carries the values a query found, and an axis
+   is what the *type* says exists, which is why a declared option with no
+   node still gets a tick. Nothing supplied it. With no declaration
+   `axisFor` has only a number axis to fall back on, and on a number axis
+   every enum value is off-axis: a championship over six declared stages
+   drew four lanes, **one** tick captioned `0`, and all eighty-two of its
+   events piled into the region left of the origin captioned *no value
+   for stage*. Nothing complained, because that region is a picture the
+   renderer draws on purpose. `axisDeclarationFor` now reads the
+   declaration off the types the query puts in scope — `from[].type` and
+   `traverse[].to_type` — and the first one found wins, which is sound
+   because the renderer catalogue refuses to save a timeline whose
+   `axis_field` is not declared identically by all of them. After the
+   fix the same view draws six ticks (Prologue … Finale), the off-axis
+   column keeps only the events that really carry no stage, and four
+   `+N` chips appear where a lane's stack is deeper than three.
+
+9. **Both of those are the same defect twice, and both were correct
+   everywhere except at the join.** `backgroundAssetFor` and
+   `axisDeclarationFor` are each driven from four angles in
+   `pages_test.mjs`, and the first mutation — reverting the *call site*
+   to what it was — left all of those passing. So each has a source-shape
+   guard over the call site itself:
+   `TestTheViewPageResolvesAGroundBeforeItDrawsOne` reads the second
+   argument `backgroundOf` is actually given and asserts the page assigns
+   that expression from `backgroundAssetFor`, and
+   `TestTheViewPageResolvesAnAxisBeforeItDrawsOne` does the same for the
+   `axis:` a renderer is handed. Mutations, each verified applied:
+   `state.background = undefined` — `backgroundOf is given
+   "state.background" as the asset and nothing in view.js assigns
+   "state.background" from backgroundAssetFor`; `backgroundOf(state.row,
+   null)` — the same, naming `null`; deleting the `axis:` member —
+   `view.js hands no axis to any renderer: a timeline with no declaration
+   falls back to a number axis and puts every enum value off it`;
+   `state.axis = null` — `a renderer is handed "state.axis" as its axis
+   and nothing in view.js assigns "state.axis" from axisDeclarationFor`.
+
+10. **A backtick inside a Lit `css` template silently breaks the whole
+    module**, and it happened twice while writing the comments above: the
+    component's stylesheet terminates at the backtick and the file stops
+    parsing, so the page renders its shell and nothing else. It is
+    already caught — `pages_test.mjs` imports `pages/view.js`, which
+    imports every component, and a broken one fails six checks at once
+    (`Unexpected identifier 'backtick'`) — so no new guard was added; the
+    prose in those files names CSS properties without backticks.
+
+11. **Links wore the browser's blue, and the three-lane home is almost
+    entirely links.** Task 1's rule is an achromatic chrome with exactly
+    two chromatic exemptions, `--danger` and `--focus`; a default
+    `#0000EE` is a third arriving by omission. Links now take `--ink`
+    and keep the underline — with the hue gone, the underline is the only
+    thing left that says a word is a link — and `--focus` on hover.
+    Found by opening the home.
+
+12. **A three-lane grid track's default minimum is its content**, so a
+    catalogue row holding a long key pushed past its lane and overlapped
+    the one beside it, and a label was set one character per line.
+    `minmax(0, …)` on all three columns, `min-width: 0` on the lanes, and
+    a catalogue row inside a lane wraps rather than holding three
+    columns. `overflow-wrap: anywhere` on the key, which is the one cell
+    that is arbitrarily long with nothing to break at. Found by opening
+    the home.
+
+#### The nine hand checks Tasks 5–14 left for this task
+
+Performed against a throwaway instance seeded for the purpose (a
+throwaway database, never the dev one), in Firefox. Each is recorded with
+what was actually looked at; the ones that could not be performed say so
+and say why.
+
+1. **Task 5 — a node named with markup, read in a real browser; and the
+   number of tabs to the twin. Done, both halves pass.** A quest named
+   `<b>Bold</b> & <script>alert(1)</script> — Hogger's <em>Head</em>`
+   reaches the SVG label and the twin's cells as *characters*: the twin's
+   shadow root contains no `b`, `em` or `script` element and its text
+   node carries the literal string. The twin's first row is the **eighth
+   tab stop** from the top of the page (Views, Catalogue, Prose, Maestro,
+   Sign out, Back to the views, the `class_key` input, then the first
+   twin row), and the drawing holds no tab stop of its own. **One thing
+   this check found**: `mst-canvas` is slotted into the frame's
+   `aria-hidden="true"` wrapper and its shadow root holds two focusable
+   buttons (*Unpin*, *Clear the saved position*), so a keyboard user tabs
+   onto controls no screen reader announces — focusable content inside
+   `aria-hidden` is a WCAG failure. The same wrapper hides `mst-table`,
+   so the `table` renderer's own output is invisible to assistive
+   technology and only its twin is read. Both are left for Task 18's
+   browser pass rather than fixed here: the second is a deliberate design
+   position ("one accessible representation and one that says it is
+   decoration") that a mounted table now calls into question.
+
+2. **Task 6 — a 500-node graph: does the ranked drawing read as
+   structure? Done. Yes.** The picture is roughly fifty legible ranks
+   running top to bottom; the direction of the content graph is plainly
+   the picture's organising idea, and it is not a hairball. §5.2's choice
+   of a ranked engine over a force one is supported by what a designer
+   actually sees. **The number to record (O10): the real layout is 85–101
+   ms** for 500 nodes / 499 edges, over six consecutive runs through the
+   real worker path (median ≈ 88 ms; the frame's own footer reported
+   *layout 100 ms* on the first, cold run). `LAYOUT_BUDGET_MS` is 2000,
+   so the plan's own reference size costs about **4.4% of the budget**.
+   Scaling the same graph by stitched copies, still through the worker:
+   500 → 144 ms, 1000 → 262 ms, 2000 → 360 ms, 4000 → 677 ms — close to
+   linear, which puts the 2000 ms budget at roughly twelve thousand
+   nodes. The guess is conservative by more than an order of magnitude at
+   the sizes this product limits itself to; it does not need raising and
+   could be lowered if a faster first refusal were ever wanted.
+
+   **The second number — is the separation pass's residual overlap
+   visible at that size? No, and nothing overlaps at all.** Measured over
+   all 500 drawn boxes: **zero overlapping pairs**, worst overlap area 0,
+   and a minimum gap of 40 scene units between the two closest boxes. The
+   residual the design allows for is not merely invisible here, it is
+   absent. **What *is* visible at that density is label collision, and it
+   is a different mechanism**: labels are held at constant screen size
+   while the picture zooms out, so at the fitted zoom (k = 0.096) the
+   40-unit gap is 3.8 screen pixels and 11px labels run through each
+   other (`NodeNode346847`). The boxes are correct and the text is
+   unreadable — which is a legibility question about label scaling, not
+   about separation, and belongs to whoever revisits it.
+
+3. **Task 7 — paint order and occlusion. Done at 1:1; one half not
+   performable.** At 1× a node is a `--paper` box with a hairline border
+   and its label sits on top of it, fully legible: the fill does not
+   swallow its own text at 11px and the label is not behind the node.
+   The map label's 2px `--ground` halo **does** survive a busy
+   background: over the near-black band of a generated terrain image the
+   labels read as light text on dark, over the light band as dark on
+   light, and over the deliberately busy moiré band they stay readable
+   though that is where the halo works hardest. **Not performable: the
+   drag layer's appearance while moving** — whether its contents look
+   attached to the picture or noticeably brighter. Synthetic
+   `PointerEvent`s dispatched into the surface did not start a drag (the
+   drag layer stayed empty), and this half is a judgement about motion
+   that needs a hand on a real pointer. Left unticked.
+
+   **What this check did find, on every view opened:** the arrangement
+   menu is rendered unconditionally into the floating panel slot, so a
+   400×200 panel of three explanatory paragraphs sits permanently over
+   the top-left of every picture — on the 500-node graph and on the
+   nested view it covers a substantial part of the drawing. It is Task
+   14's panel behaving as written; mounting is what makes the cost
+   visible.
+
+4. **Task 8 — a hundred nodes over an eleven-value slot. Done. The hues
+   read; the tail does not read as a tail.** Eight hues are clearly
+   distinguishable at 11px and a dashed unfilled box reads unmistakably
+   as *an absence* beside seven filled ones — that distinction works.
+   **The hatched tail is not hatched.** `palette.js` calls the
+   ninth-and-beyond row a "hatched tail" and gives it
+   `css: "var(--line-strong)"`; the drawn scene contains **no `<pattern>`
+   element at all**, and the twenty-five tail nodes are painted a flat
+   dark grey. To a reader who did not write the legend it is a ninth
+   colour, which is precisely the failure this check was written to look
+   for. **Also visible**: node labels are dark ink on every fill,
+   including the saturated crimsons and purples, where the contrast is
+   poor. The stub's hollow ring was not exercised — this fixture's
+   out-of-set nodes did not produce stubs.
+
+5. **Task 9 — a progression with a genuine cycle: is the double-slash
+   findable without being told? Done. No.** The reversal is drawn:
+   `line.reversed` appears exactly twice, on the one edge that runs
+   against the ranking, among 402 lines. But the marks are two 1px
+   strokes about 9 units long, and a 100-step progression fits the window
+   at k = 0.065, where they render at **0.6 pixels**. At the zoom where
+   the progression is legible as a progression the glyph is invisible;
+   finding it means already knowing it is there. What actually tells a
+   designer is the frame's own banner, which is unmissable and counts
+   them: *"1 edge runs against the ranking; this graph has a cycle"*.
+   The ranked drawing itself reads well — captioned bands, edges running
+   down, an upward edge would read as deliberate against them.
+
+6. **Task 10 — four levels deep with tinted headers. Done; two of the
+   three questions answered.** The nesting **is** legible without the
+   fills the design refuses: four `--paper` boxes each with its own
+   tinted header strip read as four levels of containment. The `+N` chip
+   reads as *"there is more here"* and not as a badge on the container —
+   it is a plain plate with a hairline drawn *inside* the box and below
+   the header strip, where a badge would sit on the strip. **Not
+   exercised: the dashed top-level box.** Cutting the picture with
+   `max_depth: 2` produced three chips (`+23`, `+12`, `+12`) and **zero**
+   dashed rectangles; truncated children are collapsed into a chip rather
+   than orphaned, so this fixture never produced the "this thing's parent
+   did not fit" case and I could not find an input that does.
+
+7. **Task 11 — two hundred pins over a real image. Done for the halo;
+   one half not exercised.** Answered above under Task 7: the halo holds
+   over the darkest and the lightest regions, and over the busiest. **Not
+   exercised: whether a hollow anchor reads as *"nobody put this here"*.**
+   `pointMarks` draws hollow for a coordinate the *client* chose, and in
+   `manual` mode unplaced nodes go to the shelf instead — every drawn pin
+   in every fixture I could build was solid. **The shelf was exercised**
+   and reads as a place things are waiting rather than as a legend: 125
+   `chip absent` plates under a captioned band separated from the map.
+
+8. **Task 12 — a thousand rows, grouped, sticky header and sticky
+   sub-headers. Done, after the fix in correction 6.** Hairline rules and
+   no zebra striping do still separate rows at that length — the rows
+   read cleanly and the group band, tinted and full width, is obviously
+   not a row. A sticky sub-header replacing another reads as a change of
+   group and not as a scroll glitch: the outgoing group's band is pushed
+   up by the incoming one and both are briefly visible, which is what
+   makes the change legible rather than sudden. **One artefact**: while
+   the two bands are stacked, the data row directly beneath them is
+   partly occluded. Note also that the twin below the table renders all
+   thousand rows again, so the page is ~27 000px tall even though the
+   table itself is now 70vh.
+
+9. **Task 13 — four lanes and a stage axis, one lane dense enough to
+   collapse. Done, after the fix in correction 8.** A `+N` chip reads as
+   *"there are more marks here"* rather than as a mark of its own: the
+   marks are 3.5px discs and the chip is a captioned plate below the
+   third of a stack, a different shape entirely. The region before the
+   axis reads as *"these have no value"* and not as the axis's first
+   stop: it is captioned in words (*no value for stage*) and separated
+   from the origin by a visible gap. **One artefact**: at a dense lane
+   the chip is drawn over the axis caption row, so `+26` collides with
+   *Round 2*.
+
+10. **Task 14 — drag a marquee of forty nodes across a thousand-node
+    view in `manual` mode with a grid and a background image. Not
+    performable as written; one half answered from the drawing.** The
+    marquee could not be driven: synthetic `PointerEvent`s dispatched at
+    the surface did not begin a drag, and whether a node *visibly lands
+    on a cell rather than merely stopping* — and whether *adjust ground*
+    reads as the image moving under the nodes — are judgements about
+    motion that need a hand on a real pointer. Left unticked.
+
+    **The other half is answered, and the answer is no.** Over a manual
+    map view whose 251 nodes were written with `pinned` alternating true
+    and false — the envelope confirms 126 pinned and 125 unpinned — every
+    drawn anchor is identical: the same `fill: var(--ink)`, the same
+    `stroke: var(--line)`, the same `r: 3.5`. The pinned/unpinned
+    distinction is written, stored, returned in `positions[]` **and never
+    drawn**. `render/marks.js`'s hollow-versus-solid pair encodes a
+    different distinction — a coordinate a designer chose versus one the
+    client chose — so the plan's phrase "the pinned and unpinned anchor
+    marks" names a mark that does not exist. Whoever owns Task 14's
+    vocabulary has to decide whether it should.
 
 ---
 

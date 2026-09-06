@@ -2886,7 +2886,7 @@ clicking a header — client-side, because the server returned everything.
 `group_by` renders a sticky sub-header with a count. Built-in columns get
 defaults: `@name` serif, `@key` mono, `@type` muted.
 
-- [ ] Tests: `anAbsentValueIsAnEmDashNotAnEmptyCell` — an empty cell is
+- [x] Tests: `anAbsentValueIsAnEmDashNotAnEmptyCell` — an empty cell is
   indistinguishable from a rendering bug; `theEmptyStringIsNotAnEmDash` —
   the control that makes the previous test mean something;
   `theHeaderRowSurvivesZeroRows`;
@@ -2900,7 +2900,7 @@ defaults: `@name` serif, `@key` mono, `@type` muted.
   colour is a **column** here, which is the honest form of the same
   information; `groupSubheadersCarryTheirCount`.
 
-- [ ] See red: render an absent value as `""` and watch the em-dash test
+- [x] See red: render an absent value as `""` and watch the em-dash test
   fail while `theEmptyStringIsNotAnEmDash` stays green — the pair is the
   assertion; drop "capped" from the pager and watch its test fail on the
   truncated fixture only.
@@ -2910,6 +2910,111 @@ git add internal/web/static/render/table.js internal/web/jstest/render_table_tes
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the table renderer, where an absent value is a dash and a page is not a count"
 ```
+
+#### Corrections made during implementation
+
+1. **The cell is the twin's cell, because this renderer and the text
+   twin are the same table drawn twice.** render/twin.js now exports
+   `valueCell`, `presentCell` and `absentCell`, and `table.js` builds
+   every cell with them. Two implementations of "what a value looks like
+   in a row" would be two places for the em dash, the `absent` flag and
+   the palette's own text rule to drift — and the whole point of that
+   rule is that one reader meets it twice and sees the same thing. The
+   mutation proves the join: writing `""` for an absence in twin.js
+   turns **four** checks red across two harnesses.
+
+2. **And `ABSENT_TEXT`'s statement was widened, exactly as Task 9 had to
+   widen the dash's.** It was written as "what a projection slot that
+   found nothing looks like" — the twin's instance of the rule and not
+   the rule. It now states it for both: *there was nothing here*,
+   wherever this product writes an answer in rows, with each writer's
+   instance named. Without that, the second table would have had to
+   invent a second treatment for the same fact.
+
+3. **The cell grew a `value` beside its `text`, and that is what makes a
+   number column sort as a number.** A table ordered by the rendered
+   text puts 10 before 9 — invisible in a screenshot, wrong in every
+   row, in the renderer designers use most. The twin never reads the
+   field; it is there for the one caller that has to *order* rows.
+   Mutation: *"9, 10, 80 — and not 10, 80, 9: got ["b","c","a"]"*.
+
+4. **This renderer emits no marks, and not an empty list of them.** A
+   table has no coordinate in it, and `marks: []` would be a mechanism
+   nothing reads pretending to be a drawing — which would also have a
+   route mounting a canvas over a document. `theTableDrawsNoMarksAtAll`
+   asserts the absence rather than the emptiness. It is the one place
+   the six renderers' return shapes deliberately differ, and the
+   module's header says so where a reader coming from `graph` will look.
+
+5. **A row with nothing in the sort column goes last in *both*
+   directions, and ties keep the answer's order by construction.**
+   Neither is in the plan's list and both are wrong-answer-shaped:
+   reversing the direction must reverse the rows that have an answer,
+   not promote the ones that have none to the top where they read as the
+   column's extreme; and a table whose equal rows reshuffled between two
+   runs of one view is a document that changes when nothing changed.
+   Stability is `index`, compared last, rather than a reliance on the
+   engine's sort being stable.
+
+6. **A declared column no node carries is still a column.**
+   internal/views' `column` checker refuses one the query cannot produce
+   at *save* time, so a client that silently dropped it would hide a view
+   the server already judged and leave a designer with a table missing a
+   column and saying nothing about it. Every cell of it is absent, which
+   is the honest answer and one a reader can act on.
+
+7. **The absent group is the last group**, which is `layered`'s trailing
+   unranked band applied to rows: a group of "the ones we know nothing
+   about" at the top reads as the leading group of the answer. It is
+   captioned with the palette's own `UNSET_LABEL`, called rather than
+   restated, so a designer meets one word for one fact. And grouping is a
+   second **axis** and not a second sort — within a group the rows keep
+   the order the sort gave them, which is what "sorted by level and
+   grouped by zone" means.
+
+8. **A single page of an untruncated answer says nothing.** *"showing
+   1–7 of 7"* under a table of seven rows is a machine talking to
+   itself, and render/scene.js's own first rule is that there is no
+   sentence for the absence of a thing. A capped answer always speaks,
+   whatever its page count, because the count is the one number a reader
+   must not take at face value.
+
+9. **The built-ins' faces are names in the model, not fonts.**
+   `STYLE_SERIF`, `STYLE_MONO`, `STYLE_MUTED` are what §4.7 asks for,
+   carried as data for the stylesheet Task 15 writes — for the reason
+   every other decision in this layer is data: a test can read it, and
+   the three faces stay styles.css's `--serif`, `--mono` and `--muted`
+   rather than three values retyped in a renderer. A projection slot is
+   the game's own value and gets no face of ours.
+
+**Mutations run, all red.** An absent value written as the empty string
+(*"a slot that found nothing is an em dash: got "", want "—""*, plus
+`theEmptyStringIsNotAnEmDash` and **two** checks in the twin's own
+harness, which is the shared cell proving it is shared); `capped` dropped
+from the pager (*"a truncated answer says so: got "showing 1–50 of
+1000""*, on the truncated fixture only, while the untruncated one stayed
+green); the pager speaking on one whole page (*"seven rows on one page
+need no sentence: got "showing 1–7 of 7""*); the columns sorted rather
+than kept in the view's order (*"the columns are drawn in the order the
+view declares: got ["@key","@name","level","zone"]"*); sorting by the
+cell's text (*"9, 10, 80 — and not 10, 80, 9"*); an absence promoted to
+the top when descending (*"descending, it is still last: got
+["gap","b","a"]"*); a tie broken by the key instead of kept (*"equal keys
+keep the answer's own order: got ["a","b","c","d"], want
+["d","a","c","b"]"*); the absent group put first (*"got [["not
+set",1,0],["Elwynn",2,1],…]"*); a group subheader counting one
+(*"got [["Elwynn",1,0],…], want [["Elwynn",2,0],…]"*); and the header
+row dropped when there are no rows (*"and every declared column is still
+a header: got []"*).
+
+**The hand check this task leaves**, to be performed at Task 15: **a
+thousand rows, grouped, with a sticky header and sticky sub-headers.**
+Do hairline rules and no zebra striping still separate rows at that
+length, and does a sticky sub-header replacing another read as a change
+of group rather than as a scroll glitch? Nothing automated can answer
+either — the model carries the group, its caption and its count, and
+says nothing about whether a reader scrolling fast can tell which group
+they are in.
 
 ---
 

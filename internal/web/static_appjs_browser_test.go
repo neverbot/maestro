@@ -526,3 +526,50 @@ func TestTheMapRenderer(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_map_test.mjs")
 }
+
+// TestTheTableRenderer drives internal/web/jstest/render_table_test.mjs.
+//
+// What it holds that no Go test can, and what is this renderer's alone.
+//
+// That **an absent value and the empty string stay two answers**, in the
+// one picture where a reader meets them side by side. An absent value is
+// an em dash and the empty string is a blank cell, and the two tests are
+// one assertion: a renderer that wrote `""` for both passes either alone.
+// That distinction is internal/views/execute.go's, kept end to end
+// through the projection, the palette's `unset` row and the text twin,
+// and a table is the last place it could be thrown away.
+//
+// That **a page count is never a content count**. views.run has no
+// cursor — a page of a graph is not a graph — so `page_size` pages the
+// rows the client already holds, and the pager says `capped` beside the
+// count when the answer itself hit a cap. Both fixtures are asserted,
+// because a word that is always there is as useless as one that is never
+// there; and a single page of an untruncated answer says nothing at all,
+// which is render/scene.js's own rule about the absence of a thing.
+//
+// That **sorting asks the server for nothing**, over a stubbed global
+// `fetch` that counts, and that **a number column sorts as numbers** —
+// comparing the text puts 10 before 9, which is invisible in a
+// screenshot, wrong in every row, and in the renderer designers reach
+// for most. Ties keep the answer's own order by construction rather than
+// by the engine's sort happening to be stable, and a row with nothing in
+// the sort column goes last in **both** directions, where it reads as an
+// absence rather than as the extreme of the column.
+//
+// That **`color_by` is neither offered nor honoured**: the catalogue
+// does not give this renderer one, and §4.7 says why — a slot another
+// renderer would colour is a *column* here, which is the honest form of
+// the same information and the one a reader who cannot separate two hues
+// can still read.
+//
+// And that this renderer **emits no marks at all**, not even an empty
+// list of them: a table has no coordinate anywhere in it, and a
+// `marks: []` would be a mechanism nothing reads pretending to be a
+// drawing. Its rows are the twin's rows — the same cells, from the same
+// function — with the three differences a designer asked for: the
+// columns the view declared in its order, a pager over the rows already
+// here, and no edges.
+func TestTheTableRenderer(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/render_table_test.mjs")
+}

@@ -47,12 +47,22 @@ import { labelFor } from "../palette.js";
 // it would fail that join silently.
 import { addressOf } from "../address.js";
 
-// ABSENT_TEXT is what a projection slot that found nothing looks like.
+// ABSENT_TEXT is what a value that was not there looks like **in a
+// table**, and it is the text half of render/marks.js's absent dash.
+//
+// One spelling, one meaning, wherever this product writes an answer in
+// rows: *there was nothing here*. The twin below writes it for a
+// projection slot a node does not carry; render/table.js writes it for
+// every column of the renderer whose whole picture is a table, where §4.7
+// says in as many words that an empty cell is indistinguishable from a
+// rendering bug. Stating the rule for one of the two and letting the
+// other invent its own is the drift this module is shared to prevent —
+// the same correction render/marks.js's ABSENT_DASH already carries.
 //
 // An em dash, and never a blank cell: a blank cell is what the *empty
 // string* looks like, and folding the two together at the last step
 // would discard end to end what the envelope, the palette's `unset`
-// legend row and this table all keep apart. A reader sees a mark where
+// legend row and both tables keep apart. A reader sees a mark where
 // there is no answer and nothing where the answer is nothing.
 //
 // Because a game may legitimately hold an em dash as a value, the mark
@@ -134,7 +144,7 @@ function nodeTable(nodes) {
       present(COLUMN_NAME, text(node.name)),
       present(COLUMN_TYPE, text(node.type)),
       present(COLUMN_KEY, text(node.key)),
-      ...slots.map((slot) => slotCell(node, slot)),
+      ...slots.map((slot) => valueCell(node, slot)),
     ],
   }));
   return { caption: count(rows.length, "node", "nodes"), columns, rows };
@@ -158,21 +168,43 @@ function slotsOf(nodes) {
   return seen.has(LABEL_SLOT) ? [LABEL_SLOT, ...rest] : rest;
 }
 
-// slotCell is where absent and empty stay two answers.
+// valueCell is where absent and empty stay two answers, and it is
+// **exported because render/table.js draws the same cell**.
 //
-// `hasOwnProperty` and not `attrs[slot] === undefined`, the same test
+// A table's columns are the twin's columns with a declared order and a
+// pager around them; two implementations of "what does a value look like
+// in a row" would be two places for the em dash, the `absent` flag and
+// the palette's own text rule to drift apart, and the whole point of
+// that rule is that one reader meets it twice and sees the same thing.
+//
+// `hasOwnProperty` and not `attrs[key] === undefined`, the same test
 // palette.js's legend makes, because the envelope's distinction is
 // presence: a slot present with a null value is a value the game means,
 // and it reads as `null` rather than as a blank.
-function slotCell(node, slot) {
-  const attrs = isObject(node.attrs) ? node.attrs : {};
-  if (!Object.prototype.hasOwnProperty.call(attrs, slot)) return absent(slot);
-  // labelFor is the palette's own rule, called rather than restated: a
-  // string shows as the game wrote it, anything else as its JSON text,
-  // so the twin cell of a coloured node is character for character the
-  // legend row that names its hue.
-  return present(slot, labelFor(JSON.stringify(attrs[slot])));
+//
+// It reads `attrs` and then `fields`: a projection slot lands in the
+// first and a declared field key a run carried lands in the second
+// (internal/views/execute.go), and a table may name either
+// (internal/views/renderers.go's `column`). The twin's own columns are
+// only ever slots, so the second lookup changes nothing here and is the
+// one place a table column could otherwise have needed its own rule.
+export function valueCell(node, key) {
+  for (const bag of [node && node.attrs, node && node.fields]) {
+    if (!isObject(bag) || !Object.prototype.hasOwnProperty.call(bag, key)) continue;
+    // labelFor is the palette's own rule, called rather than restated: a
+    // string shows as the game wrote it, anything else as its JSON text,
+    // so the twin cell of a coloured node is character for character the
+    // legend row that names its hue.
+    return present(key, labelFor(JSON.stringify(bag[key])), bag[key]);
+  }
+  return absent(key);
 }
+
+// present and absent are the two cell shapes, exported for valueCell's
+// reason: a caller building a cell of its own — a table's built-in
+// column, which is the node's own identity and never a slot — builds the
+// same shape, so `absent` cannot come to mean two things.
+export { present as presentCell, absent as absentCell };
 
 function edgeTable(edges, byID) {
   const columns = [
@@ -209,15 +241,20 @@ function edgeTable(edges, byID) {
 function endpointCell(column, id, byID) {
   const node = typeof id === "string" ? byID.get(id) : undefined;
   if (node) return present(column, text(node.name));
-  return { column, text: text(id), absent: false, outside: true, note: OUTSIDE_NOTE };
+  return { column, text: text(id), value: undefined, absent: false, outside: true, note: OUTSIDE_NOTE };
 }
 
-function present(column, value) {
-  return { column, text: value, absent: false, outside: false, note: "" };
+// `value` is the cell's underlying value, carried beside its text so a
+// caller that has to *order* rows can compare 9 with 10 as numbers
+// rather than as strings — a table sorted by a number column as text is
+// a wrong answer that looks like a right one. The twin itself never
+// reads it; it is undefined for the cells that have no such thing.
+function present(column, value, raw) {
+  return { column, text: value, value: raw, absent: false, outside: false, note: "" };
 }
 
 function absent(column) {
-  return { column, text: ABSENT_TEXT, absent: true, outside: false, note: "" };
+  return { column, text: ABSENT_TEXT, value: undefined, absent: true, outside: false, note: "" };
 }
 
 function isObject(value) {

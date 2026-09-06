@@ -193,6 +193,7 @@ var rendererModules = []struct {
 	{"layered.js", views.RendererLayered},
 	{"nested.js", views.RendererNested},
 	{"map.js", views.RendererMap},
+	{"table.js", views.RendererTable},
 }
 
 // TestARenderersControlsAreTheCataloguesParameters is the join.

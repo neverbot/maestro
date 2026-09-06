@@ -114,3 +114,27 @@ func TestTheDocumentPageRendersADocument(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/document_page_test.mjs")
 }
+
+// TestPaletteRules drives internal/web/jstest/palette_test.mjs, which
+// imports the real internal/web/static/palette.js and asserts over the
+// plain data it returns.
+//
+// It sits with the browser-behaviour harnesses rather than beside the
+// token arithmetic in static_tokens_test.go because it is the same kind
+// of test as the four above — the product code is JavaScript, and the
+// only honest way to test JavaScript is to run it. What it holds is the
+// half of the palette a Go test cannot see: which slot a value gets
+// (hashed from the value's text, never from its rank in the result, so
+// that adding a zone does not recolour a saved view), and that a slot
+// absent from `attrs` and a slot holding the empty string stay two
+// legend rows — the guarantee internal/views/execute.go goes out of its
+// way to provide and the one the legend is most likely to spend.
+//
+// static_tokens_test.go holds the other half — that the tokens this
+// module names exist in both themes and are far enough apart to be told
+// apart — and TestThePaletteModuleAndTheStylesheetAgreeOnEight is the
+// seam that stops the two halves drifting.
+func TestPaletteRules(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/palette_test.mjs")
+}

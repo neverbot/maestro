@@ -1,17 +1,144 @@
+/* The token layer of the interface design (spec §2.3, §2.5).
+ *
+ * One rule holds this file together, and it is mechanical rather than
+ * aesthetic: **the chrome is achromatic, and every hue on screen belongs
+ * to the game.** `color_by` is a renderer parameter a designer assigns in
+ * a saved query, so colour is a channel the product has already given
+ * away; an interface that also spends it on a primary button or a
+ * success tint is competing for a channel it does not own. Where
+ * something here needs to mean something, it means it with weight, size,
+ * a rule-line or space.
+ *
+ * Two colours are exempt and there are no others: --danger, which means
+ * "this needs your attention", and --focus, the one accent, which means
+ * focus, selection and the current item and nothing else.
+ *
+ * Every colour token is declared twice — once here for the warm paper
+ * ground and once in the dark block at the end of this file — and
+ * internal/web/static_tokens_test.go holds that the two sets are the same
+ * set, that every declared token is referenced somewhere and every
+ * referenced token is declared, and that the contrast and colour-blind
+ * separation of both sets are what they claim to be. None of that is a
+ * matter of taste, so none of it is left to one.
+ */
 :root {
   color-scheme: light dark;
-  --ink: #1a1a1a;
-  --paper: #fafafa;
-  --line: #d4d4d4;
-  --accent: #2b2b2b;
-  --accent-ink: #ffffff;
-  --muted: #666666;
+
+  /* Surfaces. --ground is *darker* than --paper on purpose: the diagram
+     is a thing lying on the desk and the reading panels around it are
+     the paper. It also keeps a white node fill legible against it
+     without a border, which matters at a thousand nodes. */
+  --paper: #faf8f5;
+  --ground: #f2efe9;
+
+  --ink: #14140f;
+  --muted: #6b6459;
+
+  /* Two rules, because they do two jobs. --line is the decorative
+     hairline: a table rule, a panel edge, the underline of a header.
+     --line-strong is for a stroke that *is* the signal — the dashed
+     outline of a node whose colour_by slot found nothing, the hatch of
+     the palette's tail — and it is the one held to 3:1 against the
+     canvas, because a hairline at 3:1 is not a hairline, it is a box. */
+  --line: #ded7cb;
+  --line-strong: #857e72;
+
+  /* The one accent. It was called --accent and it is called --focus now:
+     a token named "accent" invites a second accent, and one accent used
+     for focus, selection and current is a system where four are a
+     palette nobody can learn. */
+  --focus: #2f4a8a;
+  --focus-ink: #ffffff;
+
   /* The one colour that means "this needs your attention": the forms'
-     error text and the home page's invalid-row line are the same
-     statement to a reader, so they are the same token rather than the
-     same hex typed twice. */
+     error text, the home page's invalid-row line and a destructive
+     confirmation are the same statement to a reader, so they are the
+     same token rather than the same hex typed three times. */
   --danger: #a4262c;
-  font-family: system-ui, sans-serif;
+
+  /* A node whose colour_by slot is *absent from attrs* gets no fill at
+     all and is told apart by a dashed --line-strong outline. The
+     envelope guarantees absent and empty-string are distinguishable, so
+     they get two legend rows and never one. */
+  --unset: transparent;
+
+  /* The eight categorical hues (spec §2.5), assigned to a value by
+     hashing its text — internal/web/static/palette.js is the only thing
+     that reads them, and its doc comment carries that argument.
+     Chosen by search rather than by eye, under three simultaneous
+     constraints the test file re-checks on every run: at least 3:1
+     against --ground, at least 28° apart on the hue wheel, and pairwise
+     separated under both deuteranopia and protanopia. Adjacent indices
+     are interleaved across the wheel, so a view that only uses three
+     hues uses three that are far apart. */
+  --data-1: #96311d;
+  --data-2: #1086d3;
+  --data-3: #bf7101;
+  --data-4: #6e4fe9;
+  --data-5: #4e925a;
+  --data-6: #7a358c;
+  --data-7: #028f95;
+  --data-8: #8e3256;
+
+  /* Three stacks, no web fonts, nothing downloaded (spec §2.4): the
+     game's words in a serif, the tool's words in system-ui, and machine
+     text — keys, pointers, versions — in mono, because a JSON pointer is
+     a thing to be copied and monospace is what says so. These are not
+     redeclared in the dark block: a font stack does not have a theme. */
+  --serif: ui-serif, Georgia, "Times New Roman", serif;
+  --sans: system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  font-family: var(--sans);
+}
+
+/* Dark is not an inversion. The ground is a warm near-black rather than
+   a blue-black, and the data palette is a second, separately tuned set
+   of the same eight hues at the lightness a dark ground needs, in the
+   same order — so a legend read in one theme reads the same in the
+   other. Eight hues inverted mechanically produce two that vanish and
+   two that glow, which is the whole reason this set exists rather than a
+   filter. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1c1a14;
+    --ground: #16150f;
+
+    --ink: #ece5d8;
+    --muted: #9c948a;
+
+    --line: #34302a;
+    --line-strong: #7d7668;
+
+    --focus: #90b0e8;
+    --focus-ink: #14140f;
+
+    --danger: #ef9a9e;
+
+    --unset: transparent;
+
+    --data-1: #c5684f;
+    --data-2: #6bc3fe;
+    --data-3: #c86c00;
+    --data-4: #9c7cfd;
+    --data-5: #95d79e;
+    --data-6: #a56fad;
+    --data-7: #78d7d5;
+    --data-8: #b67080;
+  }
+}
+
+/* The one accent's three jobs, in the two places that exist today: the
+   focus ring every keyboard reader lands on, and the text selection a
+   designer drags across a name they are about to rename. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--focus);
+  color: var(--focus-ink);
 }
 
 body {
@@ -59,12 +186,17 @@ input {
   font: inherit;
 }
 
+/* The primary button is ink on paper, not accent on accent-ink. The
+   token this rule used to name was renamed to --focus, and a button
+   filled with --focus is a coloured button — which is the one thing the
+   identity's central rule forbids, since it would spend the accent on a
+   fourth meaning and spend a hue the game is entitled to. */
 button {
   padding: 0.6rem 1rem;
   border: 0;
   border-radius: 4px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--ink);
+  color: var(--paper);
   font: inherit;
   cursor: pointer;
   justify-self: start;
@@ -94,11 +226,14 @@ button:disabled {
 
 .error { color: var(--danger); min-height: 1.2em; }
 
+/* --ground rather than a translucent black: "one step back from paper"
+   is exactly what a recessed panel is, and a black wash disappears
+   against a dark ground. */
 .notice {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.75rem 1rem;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--ground);
 }
 
 [hidden] { display: none !important; }
@@ -130,10 +265,10 @@ ul.catalogue li {
   border-radius: 4px;
 }
 
-.catalogue-label { font-weight: 600; }
+.catalogue-label { font-weight: 600; font-family: var(--serif); }
 
 .catalogue-key {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 0.85rem;
   color: var(--muted);
 }
@@ -159,7 +294,10 @@ ul.catalogue li {
    can actually emit are styled here — goldmark with no html.WithUnsafe
    emits no raw HTML at all, so this list is the whole vocabulary a
    document body can reach, not a subset of one. */
-.prose { line-height: 1.6; }
+/* The game's own words, in the serif. This is the one place the identity
+   is expressive and it is expressive about the right thing: a document
+   body is prose somebody wrote because they cared about it. */
+.prose { line-height: 1.6; font-family: var(--serif); }
 .prose h1, .prose h2, .prose h3 { color: var(--ink); font-weight: 600; }
 .prose h1 { font-size: 1.35rem; margin: 1.8rem 0 0.6rem; letter-spacing: 0; }
 .prose h2 { font-size: 1.15rem; margin: 1.6rem 0 0.5rem; letter-spacing: 0; }
@@ -171,7 +309,7 @@ ul.catalogue li {
   color: var(--muted);
 }
 .prose code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 0.9em;
 }
 .prose pre {
@@ -211,7 +349,7 @@ ul.history li {
    carries a border or a weight as well as a colour: a diff that can only
    be read in colour cannot be read by everyone. */
 .diff {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 0.85rem;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -220,7 +358,7 @@ ul.history li {
 }
 .diff > div { padding: 0.1rem 0.6rem; white-space: pre; }
 .diff-file { color: var(--muted); font-weight: 600; }
-.diff-hunk { color: var(--muted); background: rgba(0, 0, 0, 0.05); }
+.diff-hunk { color: var(--muted); background: var(--ground); }
 .diff-context { color: var(--ink); }
 .diff-added { color: #14532d; background: rgba(22, 101, 52, 0.12); border-left: 3px solid #166534; }
 .diff-removed { color: var(--danger); background: rgba(164, 38, 44, 0.1); border-left: 3px solid var(--danger); }

@@ -190,6 +190,26 @@ func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, in ResolveIn
 		return s.resolveCallerSupplied(rows, in.RelationTypeKeys)
 	}
 
+	resolved := catalogueSemantics(rows)
+	if len(resolved.ByType) == 0 {
+		return Semantics{}, undeclared(rows)
+	}
+	return resolved, nil
+}
+
+// catalogueSemantics is steps 2 and 3 alone: declared traits, then
+// traits derived from a semantic_role, and **no refusal**.
+//
+// It is separated from Resolve because one analysis reads a game's
+// traits without needing them: the orphan aggregate asks the vocabulary
+// for exactly one thing -- which relation types are `annotation` -- and a
+// game with no traits and no roles has no annotation type, which is a
+// perfectly meaningful input rather than an engine with nothing to read.
+// Resolve's refusal is right for the three analyses that walk edges and
+// wrong for the one that counts them, so the refusal sits in Resolve and
+// the reading sits here. orphans.go's own comment names the asymmetry
+// from the other side.
+func catalogueSemantics(rows []dbqRelationType) Semantics {
 	resolved := Semantics{ByType: make(map[uuid.UUID]TypeSemantics, len(rows))}
 	for _, row := range rows {
 		if len(row.AnalysisTraits) > 0 {
@@ -214,10 +234,24 @@ func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, in ResolveIn
 			ID: row.ID, Key: row.Key, Traits: traits, Source: SourceDerivedFromRole,
 		}
 	}
-	if len(resolved.ByType) == 0 {
-		return Semantics{}, undeclared(rows)
+	return resolved
+}
+
+// ResolveWithoutRefusing reads a game's relation types the way Resolve
+// does and **answers an empty reading rather than semantics_undeclared**.
+//
+// It has exactly one caller, analysis.orphans, and the argument for the
+// asymmetry is that analysis's own: see catalogueSemantics above and
+// Orphans' doc comment, which names the three analyses that do refuse so
+// the difference reads as a decision rather than as an oversight.
+func (s *Service) ResolveWithoutRefusing(ctx context.Context, projectID uuid.UUID) (
+	Semantics, error,
+) {
+	rows, err := s.meta.ListRelationTypes(ctx, projectID)
+	if err != nil {
+		return Semantics{}, fmt.Errorf("read the relation type catalogue: %w", err)
 	}
-	return resolved, nil
+	return catalogueSemantics(rows), nil
 }
 
 // resolveCallerSupplied is step 1: the caller's list is the set.

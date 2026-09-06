@@ -11,6 +11,32 @@ import (
 	"github.com/google/uuid"
 )
 
+const countConsideredEntities = `-- name: CountConsideredEntities :one
+SELECT count(*) AS considered
+FROM entities e
+WHERE e.project_id = $1 AND e.entity_type_id = ANY($2::uuid[])
+`
+
+type CountConsideredEntitiesParams struct {
+	ProjectID   uuid.UUID
+	EntityTypes []uuid.UUID
+}
+
+// CountConsideredEntities is the denominator of an orphan report: how
+// many entities this run looked at.
+//
+// It exists because an empty findings list means one of two entirely
+// different things -- nothing is orphaned, or nothing was considered --
+// and those are the same JSON without a count beside them. Ignored
+// entity types are subtracted from the id list before it gets here, so a
+// total cannot count what the report excludes.
+func (q *Queries) CountConsideredEntities(ctx context.Context, arg CountConsideredEntitiesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countConsideredEntities, arg.ProjectID, arg.EntityTypes)
+	var considered int64
+	err := row.Scan(&considered)
+	return considered, err
+}
+
 const listNormalisedInEdges = `-- name: ListNormalisedInEdges :many
 SELECT dependent, needed, kind
 FROM (
@@ -101,6 +127,124 @@ func (q *Queries) ListNormalisedInEdges(ctx context.Context, arg ListNormalisedI
 	for rows.Next() {
 		var i ListNormalisedInEdgesRow
 		if err := rows.Scan(&i.Dependent, &i.Needed, &i.Kind); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrphansPage = `-- name: ListOrphansPage :many
+SELECT e.id, e.key, e.name, et.key AS entity_type_key,
+       ind.n::bigint AS in_degree, outd.n::bigint AS out_degree
+FROM entities e
+JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1
+LEFT JOIN LATERAL (
+    SELECT count(*) AS n FROM relations r
+    WHERE r.project_id = $1 AND r.target_id = e.id
+      AND NOT (r.relation_type_id = ANY($2::uuid[]))
+) ind ON true
+LEFT JOIN LATERAL (
+    SELECT count(*) AS n FROM relations r
+    WHERE r.project_id = $1 AND r.source_id = e.id
+      AND NOT (r.relation_type_id = ANY($2::uuid[]))
+) outd ON true
+WHERE e.project_id = $1
+  AND e.entity_type_id = ANY($3::uuid[])
+  AND CASE $4::text
+        WHEN 'sink'   THEN ind.n > 0 AND outd.n = 0
+        WHEN 'source' THEN ind.n = 0 AND outd.n > 0
+        ELSE ind.n = 0 AND outd.n = 0
+      END
+  AND ($5::uuid IS NULL
+       OR (et.key, lower(e.key), e.id) > ($6::text,
+                                          $7::text,
+                                          $5::uuid))
+ORDER BY et.key, lower(e.key), e.id
+LIMIT $8::int
+`
+
+type ListOrphansPageParams struct {
+	ProjectID            uuid.UUID
+	IgnoredRelationTypes []uuid.UUID
+	EntityTypes          []uuid.UUID
+	Mode                 string
+	AfterID              *uuid.UUID
+	AfterEntityType      *string
+	AfterKey             *string
+	Limit                int32
+}
+
+type ListOrphansPageRow struct {
+	ID            uuid.UUID
+	Key           string
+	Name          string
+	EntityTypeKey string
+	InDegree      int64
+	OutDegree     int64
+}
+
+// ListOrphansPage is the orphan analysis, and it is **an aggregate with
+// no recursion anywhere in it**.
+//
+// That is stated because three analyses of runtime-built recursive SQL
+// in a row make this one look like it should be a fourth. It is not: an
+// orphan is an entity with no edges, which is a degree, and a degree is
+// a count. So this is static SQL and goes through sqlc like every other
+// statement in this repository.
+//
+// **It reads `relations` regardless of `invalid`**, which is the
+// decision analysis.Params argues in full and the place it is most
+// likely to be forgotten: an entity whose only edge is flagged invalid
+// **is not an orphan**, and calling it one would send a designer to
+// delete content that has edges. `invalid` describes whether a row's
+// own fields still fit its type's field_schema; it says nothing about
+// the row's endpoints, and endpoints are the only thing this statement
+// reads. Adding `AND r.invalid = false` below is the one-line "tidy"
+// TestAnEntityWhoseOnlyEdgeIsInvalidIsNotAnOrphan exists to make loud.
+//
+// ignored_relation_types is the annotation types, and it is a
+// **subtraction** rather than a list of types to count, deliberately: an
+// orphan is an entity nothing points at, so every type counts unless a
+// designer has said in the metamodel that this one is decoration. An
+// empty array excludes nothing, which is what a game that declared no
+// traits gets -- and which is a perfectly meaningful input rather than a
+// refusal, unlike the other three analyses.
+//
+// The keyset is (entity type key, folded entity key, id), which is a
+// total order, so a cursor can neither skip nor repeat a row. Keys are
+// folded because every key in Maestro is matched without regard to case,
+// and a sort that disagreed with the fold would order two spellings of
+// one key inconsistently between pages.
+func (q *Queries) ListOrphansPage(ctx context.Context, arg ListOrphansPageParams) ([]ListOrphansPageRow, error) {
+	rows, err := q.db.Query(ctx, listOrphansPage,
+		arg.ProjectID,
+		arg.IgnoredRelationTypes,
+		arg.EntityTypes,
+		arg.Mode,
+		arg.AfterID,
+		arg.AfterEntityType,
+		arg.AfterKey,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrphansPageRow
+	for rows.Next() {
+		var i ListOrphansPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Key,
+			&i.Name,
+			&i.EntityTypeKey,
+			&i.InDegree,
+			&i.OutDegree,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

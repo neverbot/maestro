@@ -177,23 +177,31 @@ func TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage(t *testing.T) 
 		t.Fatalf("version row derived values = (%q, %q), want the document's own",
 			meta.Title, meta.Summary)
 	}
-	if meta.AuthorUserID == nil || *meta.AuthorUserID != user ||
-		meta.AuthorTokenID == nil || *meta.AuthorTokenID != token {
-		t.Fatalf("author = %v/%v, want %v/%v",
-			meta.AuthorUserID, meta.AuthorTokenID, user, token)
+	// A history row names its author rather than carrying two raw
+	// columns: an actor holding both is a token acting on a user's
+	// behalf, and a token is what the version was written by. The label
+	// is the token's own, resolved by the domain — the read path that did
+	// not exist until this run, and the reason the reading view called
+	// every agent "an agent".
+	if meta.Author.Kind != "token" || meta.Author.ID == nil || *meta.Author.ID != token {
+		t.Fatalf("author = %+v, want the token %v", meta.Author, token)
+	}
+	if meta.Author.Label != "seeding agent" {
+		t.Fatalf("author label = %q, want the token's own label", meta.Author.Label)
 	}
 	if meta.Deleted {
 		t.Fatal("deleted = true on an ordinary write: only a tombstone carries it")
 	}
-	if !meta.CreatedAt.Valid {
+	if meta.CreatedAt.IsZero() {
 		t.Fatal("a version records when it was written")
 	}
-	// document_versions.project_id was written by InsertDocumentVersion
-	// and asserted by nothing at all until this read (Task 3's
-	// correction 15 recorded it for Task 6's isolation tests).
-	if meta.ProjectID != game {
-		t.Fatalf("ProjectID = %v, want the game the write was made in (%v)", meta.ProjectID, game)
-	}
+	// document_versions.project_id is no longer on this listing's own
+	// type — a history page has no use for it and VersionSummary says so
+	// — and it is pinned where it can actually be violated:
+	// TestAVersionRowCannotClaimAGameItsDocumentDoesNotBelongTo inserts a
+	// row naming another game's document and watches the composite key
+	// refuse it, and TestTwoGamesSharingOnePathKeepSeparateHistories
+	// pins that this listing filters on it.
 
 	// The body and the frontmatter are the half a history row
 	// deliberately does not carry, so they come back through ReadVersion.

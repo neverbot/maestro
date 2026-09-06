@@ -699,6 +699,148 @@ func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 	}
 }
 
+// TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt drives the
+// three findings of the audit run over the real transport, in the JSON a
+// client parses.
+//
+// **The point is the sweep, not any one field.** The domain records who
+// and when on every write and the surface returned none of it, so
+// answering "what changed lately" — the first question a designer opens
+// a game bible to ask — cost one docs.history call per document. Each
+// of the three answers below is one place that fact was dropped: the
+// document itself, a row of a listing, and an entry of a history. The
+// fourth is the conflict, which echoed the body to merge onto and not
+// who wrote it.
+func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
+	f := newMetamodelFixture(t)
+	httpSrv := httptest.NewServer(f.srv)
+	defer httpSrv.Close()
+	ctx := context.Background()
+	session := connectMCP(t, httpSrv.URL, f.token)
+
+	// Everything below is written by the fixture's own token, whose
+	// label is "agent" and whose minting user is "Designer".
+	type author struct {
+		Kind  string `json:"kind"`
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	var doc struct {
+		CreatedAt string  `json:"created_at"`
+		UpdatedAt string  `json:"updated_at"`
+		CreatedBy *author `json:"created_by"`
+		UpdatedBy *author `json:"updated_by"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.write", map[string]any{
+		"path": "lore/duskwood.md", "content": "# Duskwood\n", "expected_version": 0,
+	}), &doc)
+	if doc.CreatedAt == "" || doc.UpdatedAt == "" {
+		t.Fatalf("a document that does not say when it changed: %+v", doc)
+	}
+	if doc.CreatedBy == nil || doc.CreatedBy.Kind != "token" || doc.CreatedBy.Label != "agent" {
+		t.Fatalf("created_by = %+v, want the writing token named", doc.CreatedBy)
+	}
+	if doc.UpdatedBy == nil || doc.UpdatedBy.Label != "agent" {
+		t.Fatalf("updated_by = %+v, want the writing token named", doc.UpdatedBy)
+	}
+
+	var listing struct {
+		Items []struct {
+			Path      string  `json:"path"`
+			CreatedAt string  `json:"created_at"`
+			UpdatedAt string  `json:"updated_at"`
+			CreatedBy *author `json:"created_by"`
+			UpdatedBy *author `json:"updated_by"`
+		} `json:"items"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.list", map[string]any{}), &listing)
+	if len(listing.Items) != 1 {
+		t.Fatalf("%d rows, want the one document", len(listing.Items))
+	}
+	row := listing.Items[0]
+	if row.UpdatedAt != doc.UpdatedAt || row.CreatedAt != doc.CreatedAt {
+		t.Fatalf("the listing row disagrees with the document: %+v vs %+v", row, doc)
+	}
+	if row.UpdatedBy == nil || row.UpdatedBy.Label != "agent" {
+		t.Fatalf("a listing row that does not say who changed the document: %+v", row)
+	}
+	if row.CreatedBy == nil || row.CreatedBy.ID != doc.CreatedBy.ID {
+		t.Fatalf("the listing row's author disagrees with the document's: %+v", row)
+	}
+
+	var history struct {
+		Items []struct {
+			Version     int32  `json:"version"`
+			AuthorKind  string `json:"author_kind"`
+			AuthorID    string `json:"author_id"`
+			AuthorLabel string `json:"author_label"`
+			CreatedAt   string `json:"created_at"`
+		} `json:"items"`
+	}
+	decodeStructured(t, callOK(t, session, "docs.history",
+		map[string]any{"path": "lore/duskwood.md"}), &history)
+	if len(history.Items) != 1 {
+		t.Fatalf("%d versions, want 1", len(history.Items))
+	}
+	entry := history.Items[0]
+	if entry.AuthorKind != "token" || entry.AuthorID == "" {
+		t.Fatalf("history entry = %+v, want the author pair", entry)
+	}
+	if entry.AuthorLabel != "agent" {
+		t.Fatalf("author_label = %q: a history that cannot name a token makes every agent "+
+			"read as \"an agent\"", entry.AuthorLabel)
+	}
+
+	// A conflict names who wrote the version to merge onto, with the body
+	// and without it: the author is what decides whether to merge or ask,
+	// so include_current does not gate it.
+	for _, include := range []bool{true, false} {
+		stale, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name: "docs.write",
+			Arguments: map[string]any{
+				"path": "lore/duskwood.md", "content": "stale\n",
+				"expected_version": 0, "include_current": include,
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool(docs.write): %v", err)
+		}
+		if !stale.IsError {
+			t.Fatal("writing onto a version that moved must fail")
+		}
+		var conflict struct {
+			Error   string `json:"error"`
+			Details struct {
+				CurrentVersion     int32  `json:"current_version"`
+				CurrentBody        string `json:"current_body"`
+				CurrentAuthorKind  string `json:"current_author_kind"`
+				CurrentAuthorID    string `json:"current_author_id"`
+				CurrentAuthorLabel string `json:"current_author_label"`
+				CurrentUpdatedAt   string `json:"current_updated_at"`
+			} `json:"details"`
+		}
+		decodeToolText(t, stale, &conflict)
+		if conflict.Error != "version_conflict" {
+			t.Fatalf("error = %q, want version_conflict", conflict.Error)
+		}
+		if conflict.Details.CurrentAuthorKind != "token" ||
+			conflict.Details.CurrentAuthorLabel != "agent" ||
+			conflict.Details.CurrentAuthorID == "" {
+			t.Fatalf("include_current %v: the conflict does not say who wrote the version "+
+				"to merge onto: %+v", include, conflict.Details)
+		}
+		if conflict.Details.CurrentUpdatedAt == "" {
+			t.Fatalf("include_current %v: the conflict does not say when: %+v",
+				include, conflict.Details)
+		}
+		// The body is the half include_current does gate, and this loop
+		// is what tells the two rules apart.
+		if hasBody := conflict.Details.CurrentBody != ""; hasBody != include {
+			t.Fatalf("include_current %v echoed a body: %q", include, conflict.Details.CurrentBody)
+		}
+	}
+}
+
 // TestTheLinkListingPagesOnBothSides drives docs.links.list over the
 // real transport with a limit and a cursor, from each end of the join.
 //

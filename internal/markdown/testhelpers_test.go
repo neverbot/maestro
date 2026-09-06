@@ -81,6 +81,19 @@ func requireMissing(t *testing.T, err error, wantPath, wantMessage string) {
 	}
 }
 
+// requireConflict is requireFieldError for a *markdown.ConflictError,
+// which is neither a ValidationError nor a MissingError. It returns the
+// conflict so a caller can go on to assert the version, the author and
+// the payload it publishes.
+func requireConflict(t *testing.T, err error) *markdown.ConflictError {
+	t.Helper()
+	var conflict *markdown.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("want a *markdown.ConflictError, got %#v", err)
+	}
+	return conflict
+}
+
 func ptrInt32(v int32) *int32 { return &v }
 
 func ptrString(v string) *string { return &v }

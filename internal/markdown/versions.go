@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -73,8 +74,42 @@ type HistoryFilter struct {
 // hazard paging.Cursor documents cannot arise here. Versions are only
 // ever appended, at the *newest* end, which the page walks away from.
 type HistoryPage struct {
-	Versions   []dbq.ListDocumentVersionsRow
+	Versions   []VersionSummary
 	NextCursor string
+}
+
+// VersionSummary is one row of a history: what changed, when, and who
+// changed it.
+//
+// **It is this package's own type and not dbq.ListDocumentVersionsRow**,
+// which is what it used to be. The reason is Author: a version's author
+// arrived as a pair of raw uuids and nothing that resolved them, so
+// every reader that wanted to say who wrote something either printed an
+// id or invented a category — the reading view rendered every token as
+// "an agent" because it had no other choice. Resolving that belongs in
+// the domain, once, and a generated row type has nowhere to put it. The
+// type also stops a query's select list from being this listing's
+// public shape, which is what let ProjectID and DocumentID leak out of
+// a history page that has no use for either.
+//
+// **No body and no frontmatter**, which is a fact about the type rather
+// than a promise about the query — TestAHistoryRowCarriesNoBodyAtAll
+// checks the absence over every field, and now checks it over a field
+// list this package controls. A version's body is returned by
+// ReadVersion and by Diff and by nothing else.
+//
+// CreatedAt is a time.Time and not the generated pgtype.Timestamptz: a
+// version row's created_at is NOT NULL, so the Valid flag carries no
+// information a caller could act on, and every surface unwrapped it
+// before publishing it anyway.
+type VersionSummary struct {
+	Version   int32
+	Title     string
+	Summary   string
+	Message   string
+	Deleted   bool
+	CreatedAt time.Time
+	Author    Author
 }
 
 // History returns one page of a document's version metadata, newest
@@ -127,7 +162,26 @@ func (s *Service) History(ctx context.Context, projectID uuid.UUID, f HistoryFil
 	if err != nil {
 		return HistoryPage{}, fmt.Errorf("list document versions: %w", err)
 	}
-	page := HistoryPage{Versions: rows}
+	// One round trip for the whole page: fifty versions of one document
+	// written by one agent are fifty copies of one token id, and a label
+	// call per row would be the N+1 that answering "who changed this"
+	// cost before this listing carried an author at all.
+	actors := make([]Actor, 0, len(rows))
+	for _, row := range rows {
+		actors = append(actors, Actor{UserID: row.AuthorUserID, TokenID: row.AuthorTokenID})
+	}
+	authors, err := s.authorsWith(ctx, s.q, projectID, actors)
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	page := HistoryPage{Versions: make([]VersionSummary, 0, len(rows))}
+	for i, row := range rows {
+		page.Versions = append(page.Versions, VersionSummary{
+			Version: row.Version, Title: row.Title, Summary: row.Summary,
+			Message: row.Message, Deleted: row.Deleted,
+			CreatedAt: row.CreatedAt.Time, Author: authors[i],
+		})
+	}
 	if len(rows) == int(limit) {
 		last := rows[len(rows)-1]
 		page.NextCursor = paging.Encode(paging.Cursor{
@@ -394,7 +448,7 @@ func (s *Service) Revert(ctx context.Context, projectID uuid.UUID, in RevertInpu
 		// applied to all three of these guards rather than argued for
 		// one of them.
 		if *in.ExpectedVersion != existing.CurrentVersion {
-			return conflictOn(existing, in.IncludeCurrent)
+			return s.conflictOn(ctx, q, projectID, existing, in.IncludeCurrent)
 		}
 
 		// Read the version to restore **before** anything is written, so

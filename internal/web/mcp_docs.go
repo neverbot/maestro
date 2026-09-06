@@ -276,6 +276,16 @@ type DocumentOutput struct {
 	Deleted     bool            `json:"deleted"`
 	Links       []LinkedRef     `json:"links"`
 
+	// CreatedAt, UpdatedAt, CreatedBy and UpdatedBy say when this
+	// document changed and who changed it. See DocumentSummaryOutput,
+	// which carries the same four for the same reason: a fact that is on
+	// a listing row and missing from the document itself is a fact a
+	// caller has to go somewhere else for.
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+	CreatedBy *AuthorOutput `json:"created_by,omitempty"`
+	UpdatedBy *AuthorOutput `json:"updated_by,omitempty"`
+
 	// LinksTruncated says the attachments above are one page and not the
 	// whole set: ask docs.links.list, which pages.
 	//
@@ -301,6 +311,64 @@ type DocumentSummaryOutput struct {
 	Summary string    `json:"summary,omitempty"`
 	Version int32     `json:"version"`
 	Deleted bool      `json:"deleted"`
+
+	// CreatedAt, UpdatedAt, CreatedBy and UpdatedBy are what make "what
+	// changed lately" answerable from one call.
+	//
+	// **They cost nothing new to publish and everything to withhold.**
+	// The columns have been on documents since the schema landed and on
+	// this listing's select list since it was written; withholding them
+	// meant the first question a designer opens a game bible to ask —
+	// what moved this week, and who moved it — took a docs.history call
+	// per document, fifty for a page of fifty. That is the shape of an
+	// answer nobody asks for twice.
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+	CreatedBy *AuthorOutput `json:"created_by,omitempty"`
+	UpdatedBy *AuthorOutput `json:"updated_by,omitempty"`
+}
+
+// AuthorOutput is who wrote something, in the one shape every answer on
+// this surface uses for that fact.
+//
+// **Kind and Label are both here and neither replaces the other.** Kind
+// ("user" or "token") is what tells a designer's edit from an agent's,
+// and it is machine-readable; Label is the name a page prints. A client
+// that had only the kind would render "an agent" ten times for ten
+// versions written by three agents, which is what the reading view did
+// before this type existed, and one that had only the label could not
+// tell a person from a token with the same name.
+//
+// **A revoked token still comes back with its label**, which is decided
+// rather than incidental — ResolveAuthors' own comment carries the
+// argument: revoking a token changes what it may do next, not who wrote
+// the prose, and this surface's tokens listing already includes revoked
+// rows for exactly that reason.
+//
+// The whole object is absent — a nil *AuthorOutput — when the row
+// records nobody, which is what both audit columns being NULL means and
+// what ON DELETE SET NULL leaves behind when a user or a token is really
+// gone. A client says what it says about that; the reading view's
+// existing answer is "a former member". An object with a kind naming
+// nothing would be worse than no object.
+//
+// Label is omitempty because "present and nameless" is a third case: the
+// row names somebody this server could not resolve. A client falls back
+// to its own wording there rather than printing an empty name.
+type AuthorOutput struct {
+	Kind  string     `json:"kind"`
+	ID    *uuid.UUID `json:"id,omitempty"`
+	Label string     `json:"label,omitempty"`
+}
+
+// authorOutput publishes one resolved author, or nothing at all for a
+// row that records nobody. One converter, so every answer on this
+// surface spells the fact the same way.
+func authorOutput(a markdown.Author) *AuthorOutput {
+	if a.Kind == "" {
+		return nil
+	}
+	return &AuthorOutput{Kind: a.Kind, ID: a.ID, Label: a.Label}
 }
 
 // DocsWriteManyOutput is what a batch of writes answers with: what
@@ -341,6 +409,23 @@ type VersionOutput struct {
 	AuthorKind string     `json:"author_kind,omitempty"`
 	AuthorID   *uuid.UUID `json:"author_id,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
+
+	// AuthorLabel is the name that goes with the pair above: a user's
+	// display name, a token's label.
+	//
+	// **Without it a history is a list of uuids.** The pair said which
+	// *kind* of author wrote a version and gave an id that nothing on
+	// this surface could resolve — there was no read path from a token id
+	// to its label at all, though the label exists and the tokens listing
+	// already returns it — so the reading view called every token "an
+	// agent", and a designer looking at ten versions by three agents saw
+	// "an agent" ten times.
+	//
+	// It is omitempty, and empty means two different things that a client
+	// tells apart by the pair beside it: with no author_kind, the version
+	// records nobody; with one, it records somebody this server could not
+	// name.
+	AuthorLabel string `json:"author_label,omitempty"`
 }
 
 // DocsHistoryOutput is one page of version metadata, newest first.
@@ -552,6 +637,8 @@ func docsList(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 		items = append(items, DocumentSummaryOutput{
 			ID: row.ID, Path: row.Path, Kind: row.Kind, Title: row.Title,
 			Summary: row.Summary, Version: row.CurrentVersion, Deleted: row.Deleted,
+			CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+			CreatedBy: authorOutput(row.CreatedBy), UpdatedBy: authorOutput(row.UpdatedBy),
 		})
 	}
 	out := DocsListOutput{Items: items}
@@ -590,10 +677,46 @@ func docsDelete(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid
 	if err != nil {
 		return DocumentSummaryOutput{}, err
 	}
+	return documentSummaryOf(ctx, deps, projectID, row)
+}
+
+// documentSummaryOf builds a listing-shaped answer for one document row,
+// audit columns included. docsDelete is its only caller today and the
+// listing builds its own rows from markdown.DocumentSummary, which
+// already carries resolved authors; this exists so the two shapes cannot
+// disagree about what a summary carries.
+func documentSummaryOf(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
+	row dbq.Document) (DocumentSummaryOutput, error) {
+	created, updated, err := documentAudit(ctx, deps, projectID, row)
+	if err != nil {
+		return DocumentSummaryOutput{}, err
+	}
 	return DocumentSummaryOutput{
 		ID: row.ID, Path: row.Path, Kind: row.Kind, Title: row.Title,
 		Summary: row.Summary, Version: row.CurrentVersion, Deleted: row.DeletedAt.Valid,
+		CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time,
+		CreatedBy: created, UpdatedBy: updated,
 	}, nil
+}
+
+// documentAudit resolves one document row's two audit pairs to labels,
+// in one round trip.
+//
+// **The order of the two actors is the whole contract here** — created
+// first, updated second — and it is unpacked in the same order it is
+// packed, three lines apart, so the pairing cannot drift. The listing
+// does the same thing over fifty rows (markdown.Service.List) and states
+// the same rule.
+func documentAudit(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
+	row dbq.Document) (created, updated *AuthorOutput, err error) {
+	authors, err := deps.Markdown.Authors(ctx, projectID, []markdown.Actor{
+		{UserID: row.CreatedByUserID, TokenID: row.CreatedByTokenID},
+		{UserID: row.UpdatedByUserID, TokenID: row.UpdatedByTokenID},
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return authorOutput(authors[0]), authorOutput(authors[1]), nil
 }
 
 // MCPDocsHistory implements docs.history.
@@ -615,12 +738,12 @@ func docsHistory(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	}
 	items := make([]VersionOutput, 0, len(page.Versions))
 	for _, row := range page.Versions {
-		item := VersionOutput{
+		items = append(items, VersionOutput{
 			Version: row.Version, Title: row.Title, Summary: row.Summary,
-			Message: row.Message, Deleted: row.Deleted, CreatedAt: row.CreatedAt.Time,
-		}
-		item.AuthorKind, item.AuthorID = authorOf(row.AuthorUserID, row.AuthorTokenID)
-		items = append(items, item)
+			Message: row.Message, Deleted: row.Deleted, CreatedAt: row.CreatedAt,
+			AuthorKind: row.Author.Kind, AuthorID: row.Author.ID,
+			AuthorLabel: row.Author.Label,
+		})
 	}
 	out := DocsHistoryOutput{Items: items}
 	if page.NextCursor != "" {
@@ -851,6 +974,10 @@ func documentWithLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 	if err != nil {
 		return DocumentOutput{}, err
 	}
+	created, updated, err := documentAudit(ctx, deps, projectID, row)
+	if err != nil {
+		return DocumentOutput{}, err
+	}
 	body, truncated, length := row.BodyMd, false, len(row.BodyMd)
 	if headOnly {
 		body, truncated, length = headOf(row.BodyMd)
@@ -867,6 +994,10 @@ func documentWithLinks(ctx context.Context, deps MCPDeps, projectID uuid.UUID,
 		Truncated:      truncated,
 		BodyLength:     length,
 		Deleted:        row.DeletedAt.Valid,
+		CreatedAt:      row.CreatedAt.Time,
+		UpdatedAt:      row.UpdatedAt.Time,
+		CreatedBy:      created,
+		UpdatedBy:      updated,
 		Links:          linkedRefsOf(page.Links),
 		LinksTruncated: page.NextCursor != "",
 	}, nil
@@ -943,21 +1074,6 @@ func frontmatterOf(raw []byte) json.RawMessage {
 	return json.RawMessage(raw)
 }
 
-// authorOf labels a version's author. Exactly one of the two columns is
-// set on a version written through this surface; both nil is a version
-// whose author is no longer on file, and it answers with neither a kind
-// nor an id rather than with a kind naming nothing.
-func authorOf(userID, tokenID *uuid.UUID) (string, *uuid.UUID) {
-	switch {
-	case tokenID != nil:
-		return "token", tokenID
-	case userID != nil:
-		return "user", userID
-	default:
-		return "", nil
-	}
-}
-
 // headOf builds the preview a head_only read answers with.
 //
 // A head is the first previewBytes of the body, cut back off any rune
@@ -1010,9 +1126,13 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"exist yet, or the version you read to update the one that is there.** "+
 				"Omitting it is invalid_input, not a guess: a mistyped path with no version "+
 				"would silently become a second document. A mismatch is version_conflict, "+
-				"and it carries the current version *and the current body* so you can merge "+
+				"and it carries the current version, *who wrote it and when* "+
+				"(current_author_kind, current_author_id, current_author_label, "+
+				"current_updated_at — always, so you can tell a retry from a conversation) "+
+				"*and the current body* so you can merge "+
 				"without a second call — pass include_current false to turn that echo off "+
-				"for a large document. If the conflict's details say deleted, the version it "+
+				"for a large document, which drops the body and keeps the author. If the "+
+				"conflict's details say deleted, the version it "+
 				"names is a tombstone and writing with that expected_version brings the "+
 				"document back. "+
 				"content is the whole document: optional YAML frontmatter between --- "+
@@ -1100,7 +1220,10 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"and is always valid text. **A truncated body is not the document** — do not "+
 				"write it back. "+
 				"A soft-deleted document is not found here: list it with include_deleted, or "+
-				"read one of its versions with docs.read_version. %s",
+				"read one of its versions with docs.read_version. "+
+				"The answer says when the document was created and last changed "+
+				"(created_at, updated_at) and by whom (created_by, updated_by, each with a "+
+				"kind of \"user\" or \"token\", an id and a label). %s",
 			previewBytes, retryAdvice),
 		OutputSchema: documentOutputSchema,
 		Annotations:  readOnlyTool(),
@@ -1127,7 +1250,11 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 				"absent. Pass the previous answer's next_cursor for the next page; a cursor "+
 				"belongs to the game and the filter it was issued for and is refused against "+
 				"any other. limit defaults to %d and is capped at %d — asking for more gets "+
-				"the cap, asking for less than one gets the default. %s",
+				"the cap, asking for less than one gets the default. "+
+				"**Every row says when it changed and who changed it** — created_at, "+
+				"updated_at, created_by and updated_by, each author carrying a kind of "+
+				"\"user\" or \"token\", an id and a label — so \"what moved this week, and "+
+				"who moved it\" is one call and not one call per document. %s",
 			markdown.MaxKindLen, markdown.DefaultDocumentPage, markdown.MaxDocumentPage,
 			retryAdvice),
 		OutputSchema: docsListOutputSchema,
@@ -1167,8 +1294,13 @@ func (s *Server) addDocsTools(srv *mcp.Server, deps MCPDeps) {
 			"List one document's versions, newest first: version number, title, summary, the "+
 				"message its author left, whether it is the tombstone of a deletion, and who "+
 				"wrote it — author_kind is \"user\" or \"token\", so a designer's edit and an "+
-				"agent's are told apart. **Metadata only — no bodies.** Read one version's "+
-				"body with docs.read_version, or compare two with docs.diff. "+
+				"agent's are told apart, and author_label is that person's display name or "+
+				"that token's label, so you can say who without a second call. A revoked "+
+				"token still comes back with its label: revoking it changes what it may do "+
+				"next, not who wrote this. An entry with no author_kind at all records "+
+				"nobody — the user or the token is gone. **Metadata only — no bodies.** "+
+				"Read one version's body with docs.read_version, or compare two with "+
+				"docs.diff. "+
 				"History is append-only: a revert writes a new version rather than removing "+
 				"one, so there is no state in which version 9 exists and version 8 does not. "+
 				"Pass the previous answer's next_cursor for the next page. limit defaults to "+
@@ -1319,7 +1451,8 @@ func integerSchema() *jsonschema.Schema { return &jsonschema.Schema{Type: "integ
 var documentOutputSchema = &jsonschema.Schema{
 	Type: "object",
 	Required: []string{"id", "path", "title", "version", "frontmatter", "body",
-		"truncated", "body_length", "deleted", "links", "links_truncated"},
+		"truncated", "body_length", "deleted", "links", "links_truncated",
+		"created_at", "updated_at"},
 	Properties: map[string]*jsonschema.Schema{
 		"id":              stringSchema(),
 		"path":            stringSchema(),
@@ -1332,22 +1465,52 @@ var documentOutputSchema = &jsonschema.Schema{
 		"truncated":       boolSchema(),
 		"body_length":     integerSchema(),
 		"deleted":         boolSchema(),
+		"created_at":      stringSchema(),
+		"updated_at":      stringSchema(),
+		"created_by":      authorOutputSchema(),
+		"updated_by":      authorOutputSchema(),
 		"links":           arrayOf(linkedRefOutputSchema),
 		"links_truncated": boolSchema(),
 	},
 }
 
+// authorOutputSchema is AuthorOutput's wire shape, shared by every
+// answer that names who wrote something.
+//
+// **A function and not a var**, like integerSchema and stringSchema
+// beside it and unlike the row schemas above: the SDK requires a tool's
+// output schema to form a tree, so one shared pointer used for both
+// created_by and updated_by panics at registration. It is caught the
+// moment a server is built (TestEveryMCPToolGoesThroughAddScopedTool),
+// which is why this is a note rather than a hazard.
+func authorOutputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:     "object",
+		Required: []string{"kind"},
+		Properties: map[string]*jsonschema.Schema{
+			"kind":  stringSchema(),
+			"id":    stringSchema(),
+			"label": stringSchema(),
+		},
+	}
+}
+
 var documentSummaryOutputSchema = &jsonschema.Schema{
-	Type:     "object",
-	Required: []string{"id", "path", "title", "version", "deleted"},
+	Type: "object",
+	Required: []string{"id", "path", "title", "version", "deleted",
+		"created_at", "updated_at"},
 	Properties: map[string]*jsonschema.Schema{
-		"id":      stringSchema(),
-		"path":    stringSchema(),
-		"kind":    stringSchema(),
-		"title":   stringSchema(),
-		"summary": stringSchema(),
-		"version": integerSchema(),
-		"deleted": boolSchema(),
+		"id":         stringSchema(),
+		"path":       stringSchema(),
+		"kind":       stringSchema(),
+		"title":      stringSchema(),
+		"summary":    stringSchema(),
+		"version":    integerSchema(),
+		"deleted":    boolSchema(),
+		"created_at": stringSchema(),
+		"updated_at": stringSchema(),
+		"created_by": authorOutputSchema(),
+		"updated_by": authorOutputSchema(),
 	},
 }
 
@@ -1382,14 +1545,15 @@ var versionOutputSchema = &jsonschema.Schema{
 	Type:     "object",
 	Required: []string{"version", "title", "deleted", "created_at"},
 	Properties: map[string]*jsonschema.Schema{
-		"version":     integerSchema(),
-		"title":       stringSchema(),
-		"summary":     stringSchema(),
-		"message":     stringSchema(),
-		"deleted":     boolSchema(),
-		"author_kind": stringSchema(),
-		"author_id":   stringSchema(),
-		"created_at":  stringSchema(),
+		"version":      integerSchema(),
+		"title":        stringSchema(),
+		"summary":      stringSchema(),
+		"message":      stringSchema(),
+		"deleted":      boolSchema(),
+		"author_kind":  stringSchema(),
+		"author_id":    stringSchema(),
+		"author_label": stringSchema(),
+		"created_at":   stringSchema(),
 	},
 }
 

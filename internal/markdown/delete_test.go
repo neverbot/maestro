@@ -638,11 +638,11 @@ func TestTheActorOfADeletionIsRecorded(t *testing.T) {
 	if page.Versions[0].Version != 2 {
 		t.Fatalf("newest version = %d, want the tombstone at 2", page.Versions[0].Version)
 	}
-	if got := page.Versions[0].AuthorUserID; got == nil || *got != remover {
-		t.Fatalf("tombstone author_user_id = %v, want the remover %v", got, remover)
+	if got := page.Versions[0].Author; got.Kind != "user" || got.ID == nil || *got.ID != remover {
+		t.Fatalf("tombstone author = %+v, want the remover %v", got, remover)
 	}
-	if got := page.Versions[1].AuthorUserID; got == nil || *got != author {
-		t.Fatalf("version 1's author = %v, want it unchanged at %v", got, author)
+	if got := page.Versions[1].Author; got.ID == nil || *got.ID != author {
+		t.Fatalf("version 1's author = %+v, want it unchanged at %v", got, author)
 	}
 }
 

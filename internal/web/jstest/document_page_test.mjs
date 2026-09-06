@@ -689,8 +689,86 @@ async function runCase({
   }
 }
 
+// A history whose entries carry author_label: the label is what the page
+// prints, for a token as well as for a user, and it wins over both
+// fallbacks. This is the case the surface could not answer at all before
+// the server resolved labels — every token read as "an agent", however
+// many agents there were.
+{
+  const { elements } = await runCase({
+    rendered: {
+      path: "lore/duskwood",
+      title: "Duskwood",
+      version: 3,
+      html: "<p>x</p>",
+      links: [],
+      updated_at: "2026-09-02T10:00:00Z",
+      updated_by: { kind: "token", id: "irrelevant", label: "the lore agent" },
+    },
+    history: {
+      items: [
+        {
+          version: 3,
+          message: "rewrite",
+          author_kind: "token",
+          author_id: "irrelevant",
+          author_label: "the lore agent",
+          created_at: "2026-09-02T10:00:00Z",
+        },
+        {
+          version: 2,
+          message: "notes",
+          author_kind: "token",
+          author_id: "another",
+          author_label: "the quest agent",
+          created_at: "2026-09-01T10:00:00Z",
+        },
+        // A label wins over the member map too, and not only over the
+        // "an agent" fallback: one rule, both kinds.
+        {
+          version: 1,
+          message: "first draft",
+          author_kind: "user",
+          author_id: ANA,
+          author_label: "Ana Ruiz",
+          created_at: "2026-08-31T10:00:00Z",
+        },
+      ],
+    },
+    members: { members: [{ id: ANA, display_name: "Ana", role: "editor" }] },
+  });
+
+  // The meta line answers "when did this last change, and who changed
+  // it" without a history call, which is what the reading view could not
+  // do at all before the document's own answer carried the pair.
+  const meta = elements["doc-meta"].textContent;
+  if (!meta.includes("changed") || !meta.includes("the lore agent")) {
+    fail(`the meta line does not say when the document changed or who changed it: ${JSON.stringify(meta)}`);
+  }
+  if (meta.includes("irrelevant")) {
+    fail(`a raw id reached the meta line: ${JSON.stringify(meta)}`);
+  }
+
+  const history = text(elements["doc-history"]);
+  for (const label of ["the lore agent", "the quest agent", "Ana Ruiz"]) {
+    if (!history.includes(label)) {
+      fail(`the history does not name ${JSON.stringify(label)}: ${JSON.stringify(history)}`);
+    }
+  }
+  if (history.includes("an agent")) {
+    fail(`a named agent was still described as "an agent": ${JSON.stringify(history)}`);
+  }
+  if (history.includes("Ana Ruiz") && history.includes("· Ana\n")) {
+    fail(`the member map overrode the server's own label: ${JSON.stringify(history)}`);
+  }
+  if (history.includes(ANA) || history.includes("irrelevant")) {
+    fail(`a raw id reached the screen: ${JSON.stringify(history)}`);
+  }
+}
+
 console.log(
-  "ok: the reading view renders markup only from a rendered view, names authors, " +
+  "ok: the reading view renders markup only from a rendered view, names authors by " +
+    "the label the server resolves and falls back only when it cannot, " +
     "compare-and-sets its reverts, states a comparison's bounds in its own voice rather than the error line, " +
     "refuses to guess on a failure and offers a viewer nothing it cannot do",
 );

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -272,7 +273,7 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		// rolled back. Two identical arguments, stated once rather than
 		// applied to one case and left silent on the other.
 		if expected != existing.CurrentVersion {
-			return dbq.Document{}, conflictOn(existing, in.IncludeCurrent)
+			return dbq.Document{}, s.conflictOn(ctx, q, projectID, existing, in.IncludeCurrent)
 		}
 	case errors.Is(err, pgx.ErrNoRows):
 		// Creation. A caller that expected a version of a document that
@@ -420,11 +421,12 @@ func (s *Service) conflictAfterFailedUpsert(ctx context.Context, q *dbq.Queries,
 	if row.Path != in.Path {
 		return pathRespellingError(in.Path, row.Path)
 	}
-	return conflictOn(row, in.IncludeCurrent)
+	return s.conflictOn(ctx, q, projectID, row, in.IncludeCurrent)
 }
 
 // conflictOn builds the conflict a caller must merge onto, carrying the
-// current document when the caller asked for it.
+// current document when the caller asked for it and *who wrote it*
+// whether or not it did.
 //
 // Deleted is read off the row rather than passed in, so no call site can
 // forget it: every path that reaches here has already re-read the
@@ -435,15 +437,36 @@ func (s *Service) conflictAfterFailedUpsert(ctx context.Context, q *dbq.Queries,
 // back. Both directions are pinned:
 // TestAStaleVersionCannotSilentlyResurrectADocument and
 // TestAnOrdinaryConflictDoesNotClaimTheDocumentWasDeleted.
-func conflictOn(row dbq.Document, include bool) error {
-	return &ConflictError{
+func (s *Service) conflictOn(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
+	row dbq.Document, include bool,
+) error {
+	conflict := &ConflictError{
 		Current:     row.CurrentVersion,
 		Include:     include,
 		Deleted:     row.DeletedAt.Valid,
 		Title:       row.Title,
 		BodyMD:      row.BodyMd,
 		Frontmatter: json.RawMessage(row.Frontmatter),
+		UpdatedAt:   row.UpdatedAt.Time,
 	}
+	// Resolved through the same queries handle the caller is already
+	// holding, so a conflict raised inside a write's transaction does not
+	// leave it to answer "who wrote the version you have to merge onto".
+	authors, err := s.authorsWith(ctx, q, projectID, []Actor{
+		{UserID: row.UpdatedByUserID, TokenID: row.UpdatedByTokenID},
+	})
+	if err != nil {
+		// The conflict is the answer and the label is a detail of it, so
+		// a failure to resolve one name must not turn a refusal the
+		// caller can act on into an internal_error it cannot. The caller
+		// is told the version to merge onto either way; what it loses is
+		// the name beside it.
+		slog.WarnContext(ctx, "could not resolve the author of a conflicting document",
+			"project_id", projectID, "path", row.Path, "error", err)
+		return conflict
+	}
+	conflict.Author = authors[0]
+	return conflict
 }
 
 // Read returns one document in full, by path.
@@ -639,5 +662,5 @@ func (s *Service) deleteRefusal(ctx context.Context, q *dbq.Queries,
 	// respelling because it would otherwise overwrite content under a
 	// handle the caller did not mean; a delete overwrites nothing and
 	// removes exactly the document the caller named.
-	return conflictOn(row, false)
+	return s.conflictOn(ctx, q, projectID, row, false)
 }

@@ -368,11 +368,16 @@ func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
 		t.Fatalf("rendered = %d: %s", rec.Code, rec.Body.String())
 	}
 	var rendered struct {
-		Path    string `json:"path"`
-		Title   string `json:"title"`
-		Version int32  `json:"version"`
-		HTML    string `json:"html"`
-		Body    string `json:"body"`
+		Path      string `json:"path"`
+		Title     string `json:"title"`
+		Version   int32  `json:"version"`
+		HTML      string `json:"html"`
+		Body      string `json:"body"`
+		UpdatedAt string `json:"updated_at"`
+		UpdatedBy *struct {
+			Kind  string `json:"kind"`
+			Label string `json:"label"`
+		} `json:"updated_by"`
 	}
 	decodeBody(t, rec, &rendered)
 	if !strings.Contains(rendered.HTML, "<h1>Duskwood</h1>") || !strings.Contains(rendered.HTML, "<em>worgen</em>") {
@@ -383,6 +388,16 @@ func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
 	}
 	if rendered.Path != "lore/duskwood" || rendered.Title != "Duskwood" || rendered.Version != 1 {
 		t.Fatalf("rendered answered %+v", rendered)
+	}
+	// The reading view's meta line says when the document last changed
+	// and who changed it, which is what the page could not say without a
+	// history call of its own.
+	if rendered.UpdatedAt == "" {
+		t.Fatal("the reading view does not say when the document last changed")
+	}
+	if rendered.UpdatedBy == nil || rendered.UpdatedBy.Kind != "user" ||
+		rendered.UpdatedBy.Label == "" {
+		t.Fatalf("updated_by = %+v, want the session designer named", rendered.UpdatedBy)
 	}
 
 	// The same document through the tool an agent calls.

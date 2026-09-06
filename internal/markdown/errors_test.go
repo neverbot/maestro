@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -88,22 +91,75 @@ func TestAConflictErrorWithNoFrontmatterStillPublishesAnObject(t *testing.T) {
 	}
 }
 
-func TestAConflictErrorWithoutIncludeEchoesOnlyTheVersion(t *testing.T) {
+func TestAConflictErrorWithoutIncludeEchoesTheVersionAndItsAuthorAndNoProse(t *testing.T) {
 	// include_current: false is what a caller writing a 200 KB document
-	// sends to stop the echo, so the echoed fields must be absent, not
+	// sends to stop the echo, so the *prose* fields must be absent, not
 	// merely empty.
+	//
+	// **The author and the timestamp survive it**, deliberately, and this
+	// test is where that decision is pinned: they are two short strings
+	// and they are the pair that decides whether the caller merges or
+	// asks — a version an agent wrote two seconds ago is a retry and one
+	// a designer wrote this morning is a conversation. See
+	// ConflictError.Author.
+	writer := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	when := time.Date(2026, 9, 2, 10, 30, 0, 0, time.UTC)
 	details := (&markdown.ConflictError{
-		Current: 3,
-		Include: false,
-		Title:   "Duskwood",
-		BodyMD:  "The worgen came at dusk.\n",
+		Current:   3,
+		Include:   false,
+		Title:     "Duskwood",
+		BodyMD:    "The worgen came at dusk.\n",
+		UpdatedAt: when,
+		Author: markdown.Author{
+			Kind: "token", ID: &writer, Label: "the lore agent",
+		},
 	}).Details()
 
-	if len(details) != 1 {
-		t.Fatalf("details = %#v, want the version alone", details)
+	for _, absent := range []string{"current_title", "current_body", "current_frontmatter"} {
+		if _, ok := details[absent]; ok {
+			t.Fatalf("details carries %s with include_current false", absent)
+		}
 	}
 	if details["current_version"] != int32(3) {
 		t.Fatalf("details[current_version] = %#v, want int32(3)", details["current_version"])
+	}
+	if details["current_updated_at"] != when {
+		t.Fatalf("details[current_updated_at] = %#v, want %v", details["current_updated_at"], when)
+	}
+	if details["current_author_kind"] != "token" {
+		t.Fatalf("details[current_author_kind] = %#v, want token", details["current_author_kind"])
+	}
+	if details["current_author_id"] != &writer {
+		t.Fatalf("details[current_author_id] = %#v, want the writer", details["current_author_id"])
+	}
+	if details["current_author_label"] != "the lore agent" {
+		t.Fatalf("details[current_author_label] = %#v, want the token's label",
+			details["current_author_label"])
+	}
+}
+
+// TestAConflictErrorNamesNoAuthorItCannotResolve is the other half:
+// an empty label would read as somebody called nothing, and a version
+// whose author is gone must carry no author keys at all rather than a
+// kind naming nobody.
+func TestAConflictErrorNamesNoAuthorItCannotResolve(t *testing.T) {
+	details := (&markdown.ConflictError{Current: 1}).Details()
+	for _, absent := range []string{
+		"current_author_kind", "current_author_id", "current_author_label",
+	} {
+		if _, ok := details[absent]; ok {
+			t.Fatalf("details carries %s for a document that records nobody", absent)
+		}
+	}
+	nameless := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	details = (&markdown.ConflictError{
+		Current: 1, Author: markdown.Author{Kind: "user", ID: &nameless},
+	}).Details()
+	if details["current_author_kind"] != "user" {
+		t.Fatal("a document that records somebody must say so even when the name is gone")
+	}
+	if _, ok := details["current_author_label"]; ok {
+		t.Fatal("an unresolvable author must carry no label rather than an empty one")
 	}
 }
 

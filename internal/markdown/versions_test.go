@@ -298,9 +298,9 @@ func TestTwoGamesSharingOnePathKeepSeparateHistories(t *testing.T) {
 	if len(page.Versions) != 1 {
 		t.Fatalf("%d versions in outland, want 1: azeroth's three are not its own", len(page.Versions))
 	}
-	if page.Versions[0].ProjectID != outland {
-		t.Fatalf("ProjectID = %v, want %v", page.Versions[0].ProjectID, outland)
-	}
+	// The project id itself is not on VersionSummary — see that type —
+	// and what this test pins is the filter that uses it: outland's one
+	// version and not azeroth's three.
 	if _, err := svc.ReadVersion(ctx, outland, "bible", 3); !errors.Is(err, markdown.ErrNotFound) {
 		t.Fatalf("outland's document has no version 3, got %v", err)
 	}
@@ -808,10 +808,10 @@ func TestARevertRecordsWhoMadeIt(t *testing.T) {
 		t.Fatalf("History: %v", err)
 	}
 	got := page.Versions[0]
-	if got.AuthorUserID == nil || *got.AuthorUserID != reverter {
-		t.Fatalf("AuthorUserID = %v, want the reverter %v", got.AuthorUserID, reverter)
+	if got.Author.Kind != "user" || got.Author.ID == nil || *got.Author.ID != reverter {
+		t.Fatalf("author = %+v, want the reverter %v", got.Author, reverter)
 	}
-	if page.Versions[2].AuthorUserID == nil || *page.Versions[2].AuthorUserID != author {
-		t.Fatalf("version 1's author moved: %v", page.Versions[2].AuthorUserID)
+	if first := page.Versions[2].Author; first.ID == nil || *first.ID != author {
+		t.Fatalf("version 1's author moved: %+v", first)
 	}
 }

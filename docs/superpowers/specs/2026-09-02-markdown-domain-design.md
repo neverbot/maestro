@@ -476,12 +476,37 @@ Five deliberate choices in that table:
   page**, and how an agent asked to "rewrite the Hogger dialogue"
   finds the document from the quest instead of guessing a path.
 
+### Who wrote it, and when
+
+Every answer that names a document says when it changed and who changed
+it, and the two facts travel together. A document's detail and a listing
+row carry `created_at`, `updated_at`, `created_by` and `updated_by`; a
+history entry carries `author_kind`, `author_id` and `author_label`; the
+reading view carries the last-changed pair for its meta line. An author
+is `{kind, id, label}` — the kind is what tells a designer's edit from an
+agent's, and the label is what stops a page printing a uuid or a bare
+category.
+
+**A revoked token still comes back with its label.** Revoking a token
+changes what it may do next, not who wrote the prose, and the token
+listing already keeps revoked rows on purpose because it is the audit
+trail for what happened. The category answer — the reading view's
+"a former member" — is reserved for an actor nobody can name at all,
+which is what the `ON DELETE SET NULL` audit columns leave behind when a
+user or a token is really gone: no id, no author object, and the client
+says what it says. A user is resolved globally rather than through the
+member list, because a designer who has left the game still wrote what
+they wrote; a token is resolved inside its own project.
+
 ### Error shapes
 
 The core spec's set, reused verbatim: `not_found`,
-`version_conflict` (carries `current_version`, and for documents also
-the current body unless `include_current: false`), `scope_violation`,
-`in_use`. Two additions specific to this domain:
+`version_conflict` (carries `current_version`, **who wrote that version
+and when** — `current_author_kind`, `current_author_id`,
+`current_author_label`, `current_updated_at`, always, because they are
+what decides whether to merge or to ask — and for documents also the
+current body unless `include_current: false`, which gates the prose and
+not the author), `scope_violation`, `in_use`. Two additions specific to this domain:
 
 - `invalid_path` — empty, or containing characters reserved for the
   path grammar.

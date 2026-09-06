@@ -47,6 +47,7 @@ func TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack(t *testing.T) {
 	svc, _, _, pool := newService(t)
 	ctx := context.Background()
 	game := newGame(t, pool, "azeroth")
+	designer := newUser(t, pool, "designer@example.test")
 
 	// Written in reverse path order on purpose: with the two writes in
 	// path order, an ORDER BY that sorted by creation time instead would
@@ -56,6 +57,7 @@ func TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack(t *testing.T) {
 		Content:         "Hogger says hello.\n",
 		Kind:            ptrString("script"),
 		ExpectedVersion: ptrInt32(0),
+		Actor:           markdown.Actor{UserID: &designer},
 	}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -64,6 +66,7 @@ func TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack(t *testing.T) {
 		Content:         "# Duskwood\n\nA haunted forest.\n",
 		Kind:            ptrString("lore"),
 		ExpectedVersion: ptrInt32(0),
+		Actor:           markdown.Actor{UserID: &designer},
 	})
 	if err != nil {
 		t.Fatalf("write: %v", err)
@@ -81,6 +84,19 @@ func TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack(t *testing.T) {
 			page.Documents[0].Path, page.Documents[1].Path)
 	}
 	got := page.Documents[0]
+	// The two timestamps and the two authors are compared against the
+	// row the write itself answered with, not against "not zero": a
+	// listing that invented a plausible time would pass the weaker check,
+	// and these four are exactly the fields that were selected by this
+	// query and dropped on the floor before this run.
+	//
+	// The two authors come out of the struct comparison first, because
+	// Author carries a *uuid.UUID and == on a pointer compares addresses
+	// rather than ids: two authors naming the same user would fail an
+	// equality that reads correct in the failure message, which is worse
+	// than no test. They are asserted by value immediately below.
+	gotCreatedBy, gotUpdatedBy := got.CreatedBy, got.UpdatedBy
+	got.CreatedBy, got.UpdatedBy = markdown.Author{}, markdown.Author{}
 	want := markdown.DocumentSummary{
 		ID:             written.ID,
 		Path:           "lore/duskwood",
@@ -89,9 +105,25 @@ func TestAListingIsSummariesInPathOrderAndEveryFieldReadsBack(t *testing.T) {
 		Summary:        "A haunted forest.",
 		CurrentVersion: 1,
 		Deleted:        false,
+		CreatedAt:      written.CreatedAt.Time,
+		UpdatedAt:      written.UpdatedAt.Time,
 	}
 	if got != want {
 		t.Fatalf("summary = %+v, want %+v", got, want)
+	}
+	for name, author := range map[string]markdown.Author{
+		"created_by": gotCreatedBy, "updated_by": gotUpdatedBy,
+	} {
+		if author.Kind != "user" || author.ID == nil || *author.ID != designer {
+			t.Fatalf("%s = %+v, want the designer %v", name, author, designer)
+		}
+		if author.Label != "designer@example.test" {
+			t.Fatalf("%s label = %q, want the designer's display name", name, author.Label)
+		}
+	}
+	if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
+		t.Fatal("a listing row that says nothing about when the document changed " +
+			"makes \"what moved this week\" a call per document")
 	}
 }
 

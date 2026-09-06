@@ -63,19 +63,26 @@ function showFailure(message) {
   }
 }
 
-// describeAuthor turns a version's author_kind and author_id into a
-// sentence a designer can read. VersionOutput carries no name — only a
-// kind and an id — so a user is resolved against the member list this
-// page already loads, and a token is not resolved at all: its label
-// lives behind GET /api/games/{game}/tokens, which only an admin may
-// read, so calling every token "an agent" is what this page can say to
-// every reader without asking for a permission it does not need.
+// describeAuthor turns a version's author into a sentence a designer can
+// read.
 //
-// A raw uuid never reaches the screen. A designer reading a history does
-// not know what one is, and a user id that is not in the member list is
-// somebody who has since left the game, which is a sentence rather than
-// a hex string.
+// **author_label is the answer whenever the server gives one**, and it
+// is what this function was missing. VersionOutput used to carry only a
+// kind and an id, so a token could not be resolved at all — its label
+// lives on api_tokens and nothing published it — and every agent's work
+// read as "an agent", ten times over for ten versions by three agents.
+// The server resolves both kinds now, in one query per page, and a
+// revoked token still comes back named: revoking it changed what it may
+// do next, not who wrote this.
+//
+// The member map stays as the fallback for a user the server could not
+// name, which is the older of the two paths and still the right answer
+// there. A raw uuid never reaches the screen either way: a designer
+// reading a history does not know what one is.
 function describeAuthor(version, membersByID) {
+  if (version.author_label) {
+    return version.author_label;
+  }
   if (version.author_kind === "token") {
     return "an agent";
   }
@@ -198,6 +205,10 @@ async function renderDocument(gameID, docPath) {
 
   const doc = rendered.body ?? {};
   const version = Number(doc.version ?? 0);
+  // Loaded before the meta line rather than after the body, because the
+  // meta line names the document's last author and describeAuthor falls
+  // back to this map for a user the server could not resolve.
+  const membersByID = await loadMembers(gameID);
   if (titleEl) titleEl.textContent = doc.title || doc.path || docPath;
   if (metaEl) {
     // The kind is optional on the wire, so the line is assembled from
@@ -206,6 +217,22 @@ async function renderDocument(gameID, docPath) {
     const parts = [doc.path ?? docPath];
     if (doc.kind) parts.push(doc.kind);
     parts.push(`version ${version}`);
+    // When it last changed and who changed it, which is the question a
+    // designer opens a document to ask and which used to take a
+    // docs.history call to answer. describeAuthor takes a version-shaped
+    // object, so the document's own author is handed to it in that
+    // shape rather than duplicating its four cases here.
+    if (doc.updated_at) {
+      const who = describeAuthor(
+        {
+          author_kind: doc.updated_by?.kind,
+          author_id: doc.updated_by?.id,
+          author_label: doc.updated_by?.label,
+        },
+        membersByID,
+      );
+      parts.push(`changed ${describeTime(doc.updated_at)} · ${who}`);
+    }
     metaEl.textContent = parts.join(" · ");
   }
   if (bodyEl) {
@@ -215,7 +242,6 @@ async function renderDocument(gameID, docPath) {
 
   fillEntities(Array.isArray(doc.links) ? doc.links : []);
 
-  const membersByID = await loadMembers(gameID);
   const role = await loadRole(gameID);
   await renderHistory(gameID, docPath, version, membersByID, role);
 
@@ -242,11 +268,17 @@ function fillEntities(links) {
   if (emptyEl) emptyEl.hidden = links.length > 0;
 }
 
-// loadMembers maps a user id to a display name. A failure is not the
-// page's failure: the history still renders, with "a former member"
-// where a name would have been, which is the same sentence a departed
-// author gets and is honest in both cases — the page genuinely does not
-// know who that id is.
+// loadMembers maps a user id to a display name.
+//
+// It is the *fallback* for describeAuthor now that the server resolves
+// author_label itself, and it is kept rather than deleted because the
+// server answers no label for a user it could not resolve, where this
+// page can still know the name from the member list it loads anyway.
+//
+// A failure is not the page's failure: the history still renders, with
+// "a former member" where a name would have been, which is the same
+// sentence a departed author gets and is honest in both cases — the page
+// genuinely does not know who that id is.
 async function loadMembers(gameID) {
   const result = await fetchAPI(`/api/games/${gameID}/members`);
   const byID = new Map();

@@ -687,6 +687,78 @@ func (q *Queries) MarkInviteRedeemed(ctx context.Context, arg MarkInviteRedeemed
 	return result.RowsAffected(), nil
 }
 
+const resolveAuthors = `-- name: ResolveAuthors :many
+SELECT u.id, 'user'::text AS kind, u.display_name AS label
+FROM users u
+WHERE u.id = ANY($1::uuid[])
+UNION ALL
+SELECT t.id, 'token'::text AS kind, t.label
+FROM api_tokens t
+WHERE t.project_id = $2::uuid
+  AND t.id = ANY($3::uuid[])
+`
+
+type ResolveAuthorsParams struct {
+	UserIds   []uuid.UUID
+	ProjectID uuid.UUID
+	TokenIds  []uuid.UUID
+}
+
+type ResolveAuthorsRow struct {
+	ID    uuid.UUID
+	Kind  string
+	Label string
+}
+
+// Turns the audit columns of a batch of rows -- a page of documents, a
+// page of versions, the one document a caller has to merge onto -- into
+// labels a reader can actually name. Written once and read from
+// internal/markdown, because a row's author is the same question
+// whatever kind of row it is, and a second copy of this join per domain
+// is how two domains end up disagreeing about who wrote something.
+//
+// **Both ids are looked up in one round trip and never one row at a
+// time.** A history page is fifty versions and a listing is fifty
+// documents with two audit pairs each; resolving those a row at a time
+// is the N+1 that made "who changed this" cost a call per document in
+// the first place.
+//
+// **A revoked token still resolves, and that is the decision rather than
+// an oversight.** There is no `revoked_at IS NULL` here, exactly as
+// there is none in ListAPITokens and for the same reason: this is the
+// audit trail for what happened, not a list of what is still live. The
+// version was written by that agent, and revoking its token afterwards
+// changes what the token may do next, not who wrote the prose. Telling a
+// designer "an agent" about a version whose author is on file would hide
+// the one fact that decides whether to trust it. The answer reserved for
+// an author nobody can name is the one the reading view already gives --
+// no id at all, which is what the ON DELETE SET NULL audit columns leave
+// behind when a user or a token is really gone.
+//
+// A user is looked up globally and not through project_members, because
+// a designer who has left the game still wrote what they wrote; a token
+// is looked up inside the project, because api_tokens rows are
+// project-scoped and one game must not resolve another's labels.
+func (q *Queries) ResolveAuthors(ctx context.Context, arg ResolveAuthorsParams) ([]ResolveAuthorsRow, error) {
+	rows, err := q.db.Query(ctx, resolveAuthors, arg.UserIds, arg.ProjectID, arg.TokenIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ResolveAuthorsRow
+	for rows.Next() {
+		var i ResolveAuthorsRow
+		if err := rows.Scan(&i.ID, &i.Kind, &i.Label); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPIToken = `-- name: RevokeAPIToken :exec
 UPDATE api_tokens SET revoked_at = now()
 WHERE id = $1::uuid AND project_id = $2::uuid

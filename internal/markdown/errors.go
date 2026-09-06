@@ -12,6 +12,7 @@ package markdown
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/neverbot/maestro/internal/metamodel"
 )
@@ -146,6 +147,26 @@ type ConflictError struct {
 	Title       string
 	BodyMD      string
 	Frontmatter json.RawMessage
+
+	// Author and UpdatedAt are who wrote the version being merged onto,
+	// and when.
+	//
+	// **They are outside the Include gate on purpose**, unlike the title,
+	// the body and the frontmatter. include_current exists because a
+	// 200 KB body is a payload a caller may not want; a name and a
+	// timestamp are two short strings, and they are the pair that decides
+	// what the caller does next. Merging onto a version an agent wrote
+	// two seconds ago and merging onto one a designer wrote this morning
+	// are different acts — the first is a retry and the second is a
+	// conversation — and a caller that only learns "version 4" has to
+	// spend a history call to tell them apart, on the one answer that
+	// already re-read the row.
+	//
+	// Author is the zero Author when the row records nobody, which is
+	// what its own doc comment says the absence means. UpdatedAt is
+	// always set: documents.updated_at is NOT NULL.
+	Author    Author
+	UpdatedAt time.Time
 }
 
 func (e *ConflictError) Error() string {
@@ -171,6 +192,19 @@ func (e *ConflictError) Details() map[string]any {
 	// deletion has to do with it.
 	if e.Deleted {
 		details["deleted"] = true
+	}
+	// Before the Include gate, because these two are not what
+	// include_current is about: see the field comments.
+	details["current_updated_at"] = e.UpdatedAt
+	if e.Author.Kind != "" {
+		details["current_author_kind"] = e.Author.Kind
+		details["current_author_id"] = e.Author.ID
+		// Present only when it resolved. An empty name would read as a
+		// person called nothing, where an absent key reads as "this
+		// server cannot name the author", which is the true statement.
+		if e.Author.Label != "" {
+			details["current_author_label"] = e.Author.Label
+		}
 	}
 	if !e.Include {
 		return details

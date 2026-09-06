@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/neverbot/maestro/internal/markdown"
 )
@@ -108,6 +109,22 @@ type DocRenderedOutput struct {
 	// reading page that quietly showed two hundred of a document's
 	// attachments would be the same wrong answer through a second route.
 	LinksTruncated bool `json:"links_truncated"`
+
+	// UpdatedAt and UpdatedBy say when the document last changed and who
+	// changed it, which is what the page's meta line prints beside the
+	// version.
+	//
+	// **Only the "last changed" half, not the "created" pair**, and that
+	// is the one place this view narrows DocumentOutput rather than
+	// mirroring it. The meta line is one line under a title and it is
+	// read at a glance; "created by Ana on Tuesday and last changed by
+	// the lore agent this morning" is two facts where the page has room
+	// for the one a reader acts on. The other half is a call away
+	// (/docs/one, docs.read), which is where a client that wants it
+	// looks — and doc.js's meta line is what reads these two, so they
+	// are not a third pair of fields nobody looks at.
+	UpdatedAt time.Time     `json:"updated_at"`
+	UpdatedBy *AuthorOutput `json:"updated_by,omitempty"`
 }
 
 // DocComparisonOutput is the comparison view: the diff docs.diff would
@@ -485,6 +502,8 @@ func (s *Server) handleRenderDoc(w http.ResponseWriter, r *http.Request, _ Calle
 		HTML:           rendered,
 		Links:          doc.Links,
 		LinksTruncated: doc.LinksTruncated,
+		UpdatedAt:      doc.UpdatedAt,
+		UpdatedBy:      doc.UpdatedBy,
 	})
 }
 

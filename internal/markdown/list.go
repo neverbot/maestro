@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -91,6 +92,30 @@ type DocumentSummary struct {
 	Summary        string
 	CurrentVersion int32
 	Deleted        bool
+
+	// CreatedAt, UpdatedAt, CreatedBy and UpdatedBy are what make "what
+	// changed lately" answerable from a listing.
+	//
+	// **They were selected by this query and dropped on the floor before
+	// this**: 0007_documents.sql has carried both timestamps and both
+	// audit pairs since Task 1, ListDocumentsPage has selected all six
+	// since Task 8, and none of them reached a caller — so answering the
+	// first question a designer opens a game bible to ask cost one
+	// history call per document, fifty for a page of fifty. A column the
+	// database keeps and the surface withholds is a write-only column,
+	// which this project has now shipped twice.
+	//
+	// **Both pairs, not only the recent one.** "Who last touched this"
+	// is the question a listing is usually read for, and "who wrote this
+	// in the first place" is the one asked about a document nobody has
+	// edited since — where the two answers are the same row and
+	// carrying only one of them would say nothing about which. They cost
+	// one query between them for the whole page (Service.Authors), so
+	// the choice is which facts are true rather than which are cheap.
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	CreatedBy Author
+	UpdatedBy Author
 }
 
 // DocumentPage is one page of summaries plus the cursor for the next.
@@ -222,14 +247,32 @@ func (s *Service) List(ctx context.Context, projectID uuid.UUID, f ListFilter) (
 	}
 
 	page := DocumentPage{Documents: make([]DocumentSummary, 0, len(rows))}
+	// Two audit pairs per row, resolved to labels in one round trip for
+	// the whole page rather than one per row: see Service.Authors. The
+	// order is (created, updated) per row and is unpacked the same way
+	// below, which is the one thing this pairing has to get right.
+	actors := make([]Actor, 0, 2*len(rows))
 	for _, row := range rows {
+		actors = append(actors,
+			Actor{UserID: row.CreatedByUserID, TokenID: row.CreatedByTokenID},
+			Actor{UserID: row.UpdatedByUserID, TokenID: row.UpdatedByTokenID})
+	}
+	authors, err := s.authorsWith(ctx, s.q, projectID, actors)
+	if err != nil {
+		return DocumentPage{}, err
+	}
+	for i, row := range rows {
 		page.Documents = append(page.Documents, DocumentSummary{
 			ID: row.ID, Path: row.Path, Kind: row.Kind, Title: row.Title,
 			Summary: row.Summary, CurrentVersion: row.CurrentVersion,
 			// pgtype.Timestamptz, not a pointer: a nil test does not
 			// compile against the generated model (Task 4's correction
 			// 2).
-			Deleted: row.DeletedAt.Valid,
+			Deleted:   row.DeletedAt.Valid,
+			CreatedAt: row.CreatedAt.Time,
+			UpdatedAt: row.UpdatedAt.Time,
+			CreatedBy: authors[2*i],
+			UpdatedBy: authors[2*i+1],
 		})
 	}
 	// paging.Size never returns a limit below one, so a full page is

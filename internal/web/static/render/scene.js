@@ -371,7 +371,9 @@ export function runAction(action, client, options = {}) {
 // every one of the six renderers reports — so it arrives the way
 // `layoutMs` does, from the caller, and is absent when nobody counted.
 // A count of zero says nothing, for this module's first rule: there is
-// no band, and no clause, for the absence of a thing.
+// no band, and no clause, for the absence of a thing. `against` is the
+// fourth number and follows the same rule for the same reason: a picture
+// with nothing running backwards through it says nothing about ranking.
 export function footerFor(envelope, options = {}) {
   const layoutMs = options.layoutMs === undefined || options.layoutMs === null
     ? null
@@ -379,6 +381,20 @@ export function footerFor(envelope, options = {}) {
   const outside = options.outside === undefined || options.outside === null
     ? null
     : countOf(options.outside);
+  // `against` and `cyclic` are `layered`'s pair, and they are two
+  // numbers rather than one sentence because they are two statements
+  // that come apart. An edge running against the ranking is a **drawing**
+  // fact: with `rank_by` naming a number field, a relation from level 5
+  // to level 2 runs backwards up the picture and the graph is perfectly
+  // acyclic. A cycle is a fact about the answer, found by the traversal
+  // that had to break one to rank at all. §4.4 writes them as one
+  // sentence — *"3 edges run against the ranking; this graph has a
+  // cycle"* — and that sentence is only true when both hold, so the
+  // clause is attached to the flag rather than to the count.
+  const against = options.against === undefined || options.against === null
+    ? null
+    : countOf(options.against);
+  const cyclic = options.cyclic === true;
   // A refused run measured nothing. The strip stays — it is always
   // present — and it says nothing, because "0 nodes, 0 edges" beside a
   // refusal reads exactly like an answer that matched nothing, which is
@@ -393,6 +409,8 @@ export function footerFor(envelope, options = {}) {
       durationMs: null,
       layoutMs,
       outside,
+      against,
+      cyclic,
       css: "var(--muted)",
       text: "",
     };
@@ -411,6 +429,12 @@ export function footerFor(envelope, options = {}) {
   if (outside !== null && outside > 0) {
     parts.push(`${count(outside, "edge", "edges")} lead outside this picture`);
   }
+  if (against !== null && against > 0) {
+    parts.push(
+      `${count(against, "edge runs", "edges run")} against the ranking` +
+        (cyclic ? "; this graph has a cycle" : ""),
+    );
+  }
   return {
     nodes,
     edges,
@@ -418,6 +442,8 @@ export function footerFor(envelope, options = {}) {
     durationMs,
     layoutMs,
     outside,
+    against,
+    cyclic,
     css: "var(--muted)",
     text: parts.join(" · "),
   };

@@ -165,9 +165,20 @@ export const NODE_STROKE_WIDTH = 1;
 // nobody asked about.
 export const NODE_PLAIN_FILL = "var(--paper)";
 
-// The dash of a node whose colour slot found nothing. A second,
-// non-colour carrier for an absence, exactly as the twin's `absent`
-// class is beside its em dash.
+// The dash of a box that is missing something the picture needed.
+//
+// One spelling, one meaning, across the six: **something this box needs
+// is not here.** In `graph` that is its colour slot; in `layered` it is
+// its numeric rank, so the node goes to the trailing unranked band and
+// is dashed there; in `nested` it is its container, truncated away, so
+// the box sits at the top level dashed rather than looking like a root.
+// A renderer that spelled the dash differently, or that used it for
+// "this is unusual" rather than for "this is missing", would tell a
+// designer something different with the same picture.
+//
+// A second, non-colour carrier for an absence, exactly as the twin's
+// `absent` class is beside its em dash — and never the *only* carrier:
+// each renderer above pairs it with a position, a legend row or a count.
 export const ABSENT_DASH = "4 3";
 
 export const EDGE_STROKE = "var(--muted)";
@@ -570,4 +581,111 @@ function attrOf(node, slot) {
 
 function number(value, fallback) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// --- The rank band ---------------------------------------------------
+//
+// `layered` draws a muted rule and a caption per rank when `layer_labels`
+// is on, and `timeline` draws a hairline and a caption per lane (§4.8).
+// They are the same two marks — a rule across the picture and a word at
+// the end of it — so they are one function here rather than two that
+// agree today.
+//
+// The rule is `--muted` and 1px: it is chrome, and a band boundary that
+// competed with an edge would read as a relation.
+export const CLASS_BAND_RULE = "band-rule";
+export const CLASS_BAND_CAPTION = "band-caption";
+export const BAND_RULE_STROKE = "var(--muted)";
+export const BAND_CAPTION_FILL = "var(--muted)";
+export const BAND_CAPTION_GAP = 6;
+
+// bandMarks is one band's rule and its caption.
+//
+// The caption's position and anchor are the caller's, because a band's
+// caption sits above a horizontal rule and beside a vertical one, and a
+// function that guessed which from the geometry would guess wrong the
+// first time a picture was square.
+//
+// A band with no caption draws its rule alone: an empty string is not a
+// caption, and a label with no text is an element a reader cannot see
+// and a test can.
+export function bandMarks(band) {
+  const { x1, y1, x2, y2, caption, captionX, captionY, anchor, baseline } = band;
+  const marks = [
+    {
+      kind: MARK_LINE,
+      class: CLASS_BAND_RULE,
+      layer: LAYER_IMAGE,
+      x1,
+      y1,
+      x2,
+      y2,
+      stroke: BAND_RULE_STROKE,
+      strokeWidth: EDGE_STROKE_WIDTH,
+    },
+  ];
+  if (typeof caption === "string" && caption !== "") {
+    marks.push({
+      kind: MARK_LABEL,
+      class: CLASS_BAND_CAPTION,
+      x: Number.isFinite(captionX) ? captionX : x1,
+      y: Number.isFinite(captionY) ? captionY : y1 - BAND_CAPTION_GAP,
+      text: caption,
+      fill: BAND_CAPTION_FILL,
+      size: LABEL_SIZE,
+      anchor: typeof anchor === "string" ? anchor : "start",
+      baseline: typeof baseline === "string" ? baseline : "auto",
+    });
+  }
+  return marks;
+}
+
+// --- The edge the ranking had to break --------------------------------
+//
+// A ranked drawing of a graph with a cycle is only possible because the
+// engine reverses an edge, and §4.4 refuses to let the interface hide
+// that: the arrowhead stays in the relation's **true** direction and the
+// line carries a small double-slash, the map-maker's mark for a break.
+//
+// Two short parallel strokes, at 45° to the line so they are legible
+// whatever direction it runs, drawn at its midpoint.
+export const CLASS_REVERSED = "reversed";
+export const REVERSAL_LENGTH = 9;
+export const REVERSAL_GAP = 5;
+
+// reversalMarks carries **no endpoint keys**, for edgeLabelMarks's
+// reason and not by omission: it sits at the middle of a line, and an
+// edge whose one end moved has a new middle, which no translation of a
+// pair of strokes can produce. It stands still during a drag and is
+// redrawn with the picture on the drop that writes.
+export function reversalMarks(at, direction) {
+  const { x: ux, y: uy } = direction;
+  // The stroke direction: the edge's own, turned by 45°.
+  const c = Math.SQRT1_2;
+  const sx = (ux - uy) * c;
+  const sy = (ux + uy) * c;
+  const half = REVERSAL_LENGTH / 2;
+  const offset = REVERSAL_GAP / 2;
+  return [-offset, offset].map((along) => ({
+    kind: MARK_LINE,
+    class: CLASS_REVERSED,
+    layer: LAYER_EDGES,
+    x1: at.x + ux * along - sx * half,
+    y1: at.y + uy * along - sy * half,
+    x2: at.x + ux * along + sx * half,
+    y2: at.y + uy * along + sy * half,
+    stroke: EDGE_STROKE,
+    strokeWidth: EDGE_STROKE_WIDTH,
+  }));
+}
+
+// midpointOf is the middle of a drawn edge, so a caller that has to
+// decorate one does not restate the arithmetic edgeMarks uses.
+export function midpointOf(source, target) {
+  return midpoint(borderPoint(source, target), borderPoint(target, source));
+}
+
+// directionOf is the unit vector from one box's centre to another's.
+export function directionOf(source, target) {
+  return unit(target.x - source.x, target.y - source.y);
 }

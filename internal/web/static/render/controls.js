@@ -32,6 +32,10 @@ export const CONTROL_BOOL = "bool";
 export const CONTROL_ENUM = "enum";
 export const CONTROL_NUMBER = "number";
 export const CONTROL_TEXT = "text";
+// `layered`'s `rank_by`: the literal "edges", or a declared number field
+// key. Neither an enum nor a slot, and the server spells it as its own
+// kind for that reason.
+export const CONTROL_RANK_BY = "rank_by";
 
 // control is one knob.
 //

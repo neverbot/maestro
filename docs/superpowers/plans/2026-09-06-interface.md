@@ -2305,7 +2305,7 @@ exists. `align` positions a node within its band.
 consumption note says "expected mostly acyclic", the engine breaks cycles
 by reversing edges, and the interface must not hide that.
 
-- [ ] Tests: `aReversedEdgeKeepsItsTrueArrowhead` — a three-node cycle,
+- [x] Tests: `aReversedEdgeKeepsItsTrueArrowhead` — a three-node cycle,
   assert the arrowhead of the reversed edge points at its real target and
   that the mark carries the double-slash;
   `aCycleIsCountedInTheFrame` — assert the sentence names 3 and says the
@@ -2322,21 +2322,148 @@ by reversing edges, and the interface must not hide that.
   start, center and end all asserted, since two of the three would pass a
   test written for one.
 
-- [ ] See red: sort the reversed edge's endpoints instead of marking it
+- [x] See red: sort the reversed edge's endpoints instead of marking it
   and watch `aReversedEdgeKeepsItsTrueArrowhead` fail; place unranked
   nodes at rank zero and watch its test find them first; caption every
   rank with its index and watch
   `layerCaptionsAreTheFieldValueForANumericRankBy` fail while the other
   caption test stays green — the pair is what makes the mutation visible.
 
-- [ ] Hand check: a progression with a genuine cycle. Is the
-  double-slash findable without being told it is there?
+- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+  a progression with a genuine cycle. Is the double-slash findable
+  without being told it is there?
 
 ```bash
 git add internal/web/static/render/layered.js internal/web/jstest/render_layered_test.mjs \
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the layered renderer, which reports the cycle it had to break"
 ```
+
+#### Corrections made during implementation
+
+1. **Everything this renderer draws that is not a rank went into the
+   shared vocabulary, and the two new marks are written for the
+   renderers that follow.** `render/marks.js` gained `bandMarks` (a
+   muted rule and a caption, which §4.8 asks `timeline` for again, per
+   lane), `reversalMarks` (the double-slash), and `midpointOf` /
+   `directionOf` so a renderer decorating an edge does not restate the
+   arithmetic `edgeMarks` already does. `layered.js` chooses and
+   arranges; it copies no geometry out of `graph.js`. The three things a
+   reader would expect to find copied — the box, the arrowhead, the stub
+   — are the same functions Task 8 wrote, called.
+
+2. **The dash's rule was stated once and had not been carried one step
+   along.** Task 8 wrote it as "the dash of a node whose colour slot
+   found nothing", which is `graph`'s instance of it and not the rule.
+   `layered` has no colour parameter at all and still has an absence to
+   draw — a node whose numeric `rank_by` field is missing — so the
+   constant's own comment now states the rule for the six: *something
+   this box needs is not here*, with each renderer's instance named
+   (`graph`: its colour slot; `layered`: its rank; `nested`: its
+   container). Without that the second renderer would have had to invent
+   a second treatment for the same fact, which is exactly the drift
+   `marks.js` exists to prevent.
+
+3. **The frame's sentence is two facts, not one, and §4.4's own wording
+   conflates them.** The spec writes *"3 edges run against the ranking;
+   this graph has a cycle."* as one line. Those come apart the moment
+   `rank_by` names a number field: a relation from level 5 to level 2
+   runs backwards up the picture through a graph that is perfectly
+   acyclic, and a footer that appended the second clause to the first
+   would report an analysis nobody ran. So `footerFor` takes `against`
+   (a count, the drawing's own fact) and `cyclic` (a flag, found by the
+   traversal that had to break a cycle to rank at all), and the clause
+   hangs off the flag. `aCycleIsCountedInTheFrame` asserts both arms.
+
+4. **The plan asks the sentence to name 3 and a three-node cycle
+   produces 1.** A cycle of three has three edges and exactly one of them
+   runs against the ranking — the walk breaks one edge, not three. The
+   number in the spec's sentence counts *edges against the ranking*, so
+   the fixture for that test carries three of them (a chain of four with
+   three relations pointing back up it) and the three-node cycle keeps
+   its own test, where the count is 1. Reading "3" as a node count was
+   the alternative and would have made the sentence say something the
+   drawing does not know.
+
+5. **The engine is asked for the arrangement across the ranks and this
+   module decides the ranks.** `rank_by` naming a number field means the
+   *game* states the layer, and no graph algorithm can be asked for it;
+   the order of nodes *within* a layer, which is what keeps edges
+   straight, is exactly what dagre is good at. So `layeredLayoutRequest`
+   passes `rankdir` and the real edges, and `layeredScene` keeps the
+   engine's cross-axis coordinates and replaces its along-axis ones with
+   its own bands. A renderer that took dagre's ranks wholesale could not
+   have implemented the parameter at all.
+
+6. **`align` unset is not `align: "center"`.** Left alone, the boxes keep
+   the coordinates the engine worked for, which is what makes an edge
+   between two ranks straight; recentring every band would throw that
+   away to line the bands up. So the parameter is an *override* and the
+   default is the engine's answer — which is also why
+   `alignPositionsWithinTheBand` asserts all three spellings and then
+   asserts they are three different pictures: an implementation that
+   honoured one and ignored the rest satisfies any single-value
+   assertion, and the fixture is deliberately lopsided (one node over
+   three) because a picture whose bands are the same width answers all
+   three the same way.
+
+7. **The Go guard is now a table over renderers rather than a test about
+   `graph`.** Task 8's join between a module's controls and the
+   catalogue's parameters was written with `graph.js` spelled into its
+   name and its body; the second renderer would have been a second copy
+   of it, and the sixth a sixth. It is one test over
+   `rendererModules` — the row is one line per renderer — and every
+   reader it uses is scoped through `rendererSectionOf`, because two
+   renderers declaring a parameter of the same name is exactly what an
+   unscoped scan would conflate.
+
+8. **And it grew a second arm the first enum made necessary.**
+   `layered` is the first renderer with an `enum` parameter, and a name
+   join alone admits a control offering `"LTR"` for a parameter whose
+   only admitted spellings are `"TB"` and `"LR"`: the module would be
+   internally consistent, its own harness would assert its own
+   constants, and the document a designer composed would be refused by
+   `views.upsert` with a message about a value the interface itself put
+   there. `TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits`
+   resolves the module's own constants — it reads
+   `export const DIRECTIONS = [DIRECTION_TB, DIRECTION_LR]` rather than
+   a literal retyped in the test — and holds them against the
+   catalogue's printed spellings, in order.
+
+9. **The double-slash carries no endpoint keys**, which is
+   `edgeLabelMarks`'s decision carried one step along rather than
+   re-argued: it sits at the middle of a line, and an edge whose one end
+   moved has a new middle, which no translation of a pair of strokes can
+   produce. It stands still during a drag and is redrawn with the
+   picture on the drop that writes. `aReversalMarkStandsStillDuringADrag`
+   is the check, and it is the mark's own property rather than a comment.
+
+**Mutations run, all red.** Sorting the reversed edge's endpoints
+(*"the chevron at quest/a is two strokes: got 0, want 2"*, and the
+double-slash gone with it, *"each of the three carries a slash: got 0,
+want 6"*, and the twin test's own fixture guard, *"the fixture really has
+a broken edge"*); unranked nodes placed at rank zero (*"two ranked bands
+and one for the absence: got 2, want 3"*) and the unranked band created
+but put **first** (*"the last band is the unranked one"*, which is the
+mutation the count assertion alone would have missed); captioning every
+rank with its index (*"a numeric rank_by captions each band with the
+field's value: got ["0","1","2"], want ["10","20","30"]"* — while
+`layerCaptionsAreTheIndexForRankByEdges` stayed green, which is what
+makes the pair worth having); ignoring `align` (*"start puts the lone
+node flush with the picture's near side: got 137, want 24"*); and the
+double-slash keyed to the edge's ends (*"a double-slash belongs to no
+node: got "x", want undefined"*).
+
+**The hand check this task leaves**, to be performed at Task 15: **a
+progression with a genuine cycle.** Is the double-slash findable without
+being told it is there? Nothing automated can answer it — the harness
+asserts the mark is on the right line, at the right place, and says
+nothing about whether a designer scanning a hundred-node progression
+notices two 9px strokes on one edge among ninety-nine unmarked ones. Two
+more things to look at while that picture is open, both of them this
+task's own: whether an edge running *up* the picture reads as
+deliberate rather than as a layout bug, and whether the trailing
+unranked band reads as "these have no rank" rather than as a last rank.
 
 ---
 

@@ -395,3 +395,45 @@ func TestTheGraphRenderer(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_graph_test.mjs")
 }
+
+// TestTheLayeredRenderer drives internal/web/jstest/render_layered_test.mjs.
+//
+// What it holds that no Go test can, and what is this renderer's alone.
+//
+// That **a broken edge is marked rather than hidden**. `layered`'s
+// consumption note says "expected mostly acyclic"; a ranked drawing of a
+// graph with a cycle is only possible because something ran an edge
+// backwards, and a picture that quietly reversed an arrow would show a
+// prerequisite chain the wrong way round while looking perfectly
+// correct. So the arrowhead is asserted to sit on the relation's **true**
+// target and to face back up the picture, the double-slash is asserted
+// to straddle the middle of that line, and every other edge is asserted
+// to carry neither.
+//
+// That **the frame's sentence stays a drawing report**. It counts the
+// edges running against the ranking and says the graph has a cycle only
+// when the traversal actually found one — the two come apart the moment
+// `rank_by` names a number field, where a relation from level 5 to level
+// 2 runs backwards through a perfectly acyclic graph. It never names the
+// nodes and never says "unreachable": sub-project 6 owns that answer,
+// and a renderer that guessed would publish a result nobody computed.
+//
+// That **the two ranking policies produce two captions**, which is the
+// entire reason `rank_by` takes a field: ranking by the edges captions
+// each band with its index, ranking by `level` captions it with the
+// value. One fixture cannot tell those apart, so there are two, and the
+// mutation that captions everything with its index turns exactly one of
+// them red.
+//
+// And the negative half: a node whose numeric rank is absent goes to a
+// **trailing** band, captioned, dashed, and never to rank zero where it
+// would read as the start of a progression; an edge that leaves the
+// picture is a stub; a relation to itself is counted rather than
+// silently dropped; a node with no position is named rather than drawn
+// at the origin; a truncated answer draws exactly what a clean one
+// draws; and the twin and the picture agree about every node and edge of
+// one answer.
+func TestTheLayeredRenderer(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/render_layered_test.mjs")
+}

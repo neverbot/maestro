@@ -1,0 +1,378 @@
+{
+  "genre": "mmorpg",
+  "note": "A worked example, executed on every build. Read genres/mmorpg.md for why each decision was taken.",
+  "calls": [
+    {"tool": "types.upsert", "args": {
+      "key": "class", "label": "Class", "label_plural": "Classes",
+      "field_schema": [
+        {"key": "resource", "type": "enum", "label": "Resource",
+         "options": ["mana", "rage", "energy"], "default": "mana"},
+        {"key": "role", "type": "enum", "label": "Party role",
+         "options": ["tank", "healer", "damage"], "default": "damage"},
+        {"key": "armour", "type": "enum", "label": "Heaviest armour",
+         "options": ["cloth", "leather", "mail", "plate"], "default": "cloth"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "race", "label": "Race", "label_plural": "Races",
+      "field_schema": [
+        {"key": "faction", "type": "enum", "label": "Faction",
+         "options": ["alliance", "horde"], "default": "alliance"},
+        {"key": "starting_zone_name", "type": "text", "label": "Starting zone, as written"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "profession", "label": "Profession", "label_plural": "Professions",
+      "field_schema": [
+        {"key": "kind", "type": "enum", "label": "Kind",
+         "options": ["gathering", "crafting"], "default": "crafting"},
+        {"key": "max_skill", "type": "number", "label": "Skill ceiling", "min": 1, "max": 600}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "zone", "label": "Zone", "label_plural": "Zones",
+      "field_schema": [
+        {"key": "level_min", "type": "number", "label": "Minimum level", "min": 1, "max": 60},
+        {"key": "level_max", "type": "number", "label": "Maximum level", "min": 1, "max": 60},
+        {"key": "faction_control", "type": "enum", "label": "Controlled by",
+         "options": ["alliance", "horde", "contested"], "default": "contested"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "dungeon", "label": "Dungeon", "label_plural": "Dungeons",
+      "field_schema": [
+        {"key": "level_min", "type": "number", "label": "Minimum level", "min": 1, "max": 60},
+        {"key": "level_max", "type": "number", "label": "Maximum level", "min": 1, "max": 60},
+        {"key": "party_size", "type": "number", "label": "Party size", "min": 1, "max": 40}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "quest", "label": "Quest", "label_plural": "Quests",
+      "field_schema": [
+        {"key": "min_level", "type": "number", "label": "Minimum level", "min": 1, "max": 60},
+        {"key": "kind", "type": "enum", "label": "Kind",
+         "options": ["kill", "gather", "escort", "delivery"], "default": "kill"},
+        {"key": "summary", "type": "text", "label": "One-line summary"},
+        {"key": "repeatable", "type": "bool", "label": "Repeatable"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "talent", "label": "Talent", "label_plural": "Talents",
+      "field_schema": [
+        {"key": "tier", "type": "number", "label": "Tier", "min": 1, "max": 7},
+        {"key": "tree", "type": "text", "label": "Tree, as the class sheet names it"},
+        {"key": "max_ranks", "type": "number", "label": "Ranks", "min": 1, "max": 5}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "faction", "label": "Faction", "label_plural": "Factions",
+      "field_schema": [
+        {"key": "alignment", "type": "enum", "label": "Alignment",
+         "options": ["alliance", "horde", "neutral"], "default": "neutral"},
+        {"key": "hostile_at_start", "type": "bool", "label": "Hostile at start"}
+      ]}},
+
+    {"tool": "relation_types.upsert", "args": {
+      "key": "connects_to", "label": "Connects to",
+      "source_type_keys": ["zone"], "target_type_keys": ["zone", "dungeon"],
+      "semantic_role": "spatial", "analysis_traits": ["symmetric"],
+      "field_schema": [
+        {"key": "travel", "type": "enum", "label": "How the player crosses",
+         "options": ["walk", "boat", "portal"], "default": "walk"}
+      ]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "takes_place_in", "label": "Takes place in",
+      "source_type_keys": ["quest"], "target_type_keys": ["zone", "dungeon"],
+      "semantic_role": "containment", "analysis_traits": ["containment"]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "requires", "label": "Requires",
+      "source_type_keys": ["quest", "talent"], "target_type_keys": ["quest", "talent"],
+      "semantic_role": "prerequisite", "analysis_traits": ["prerequisite_of"]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "available_to", "label": "Available to",
+      "source_type_keys": ["quest", "talent"], "target_type_keys": ["class", "race"],
+      "semantic_role": "availability"}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "rewards", "label": "Rewards",
+      "source_type_keys": ["quest"], "target_type_keys": ["faction", "profession"],
+      "semantic_role": "reward", "analysis_traits": ["unlocks"],
+      "field_schema": [
+        {"key": "standing", "type": "number", "label": "Standing granted", "min": 0, "max": 1000}
+      ]}},
+
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "class", "key": "warrior", "name": "Warrior",
+       "fields": {"resource": "rage", "role": "tank", "armour": "plate"}},
+      {"type_key": "class", "key": "paladin", "name": "Paladin",
+       "fields": {"resource": "mana", "role": "healer", "armour": "plate"}},
+      {"type_key": "class", "key": "mage", "name": "Mage",
+       "fields": {"resource": "mana", "role": "damage", "armour": "cloth"}},
+      {"type_key": "class", "key": "priest", "name": "Priest",
+       "fields": {"resource": "mana", "role": "healer", "armour": "cloth"}},
+      {"type_key": "class", "key": "rogue", "name": "Rogue",
+       "fields": {"resource": "energy", "role": "damage", "armour": "leather"}},
+      {"type_key": "class", "key": "druid", "name": "Druid",
+       "fields": {"resource": "mana", "role": "healer", "armour": "leather"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "race", "key": "human", "name": "Human",
+       "fields": {"faction": "alliance", "starting_zone_name": "Elwynn Forest"}},
+      {"type_key": "race", "key": "dwarf", "name": "Dwarf",
+       "fields": {"faction": "alliance", "starting_zone_name": "Coldridge Valley"}},
+      {"type_key": "race", "key": "night_elf", "name": "Night Elf",
+       "fields": {"faction": "alliance", "starting_zone_name": "Shadowglen"}},
+      {"type_key": "race", "key": "orc", "name": "Orc",
+       "fields": {"faction": "horde", "starting_zone_name": "Valley of Trials"}},
+      {"type_key": "race", "key": "troll", "name": "Troll",
+       "fields": {"faction": "horde", "starting_zone_name": "Valley of Trials"}},
+      {"type_key": "race", "key": "undead", "name": "Undead",
+       "fields": {"faction": "horde", "starting_zone_name": "Deathknell"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "profession", "key": "blacksmithing", "name": "Blacksmithing",
+       "fields": {"kind": "crafting", "max_skill": 300}},
+      {"type_key": "profession", "key": "alchemy", "name": "Alchemy",
+       "fields": {"kind": "crafting", "max_skill": 300}},
+      {"type_key": "profession", "key": "enchanting", "name": "Enchanting",
+       "fields": {"kind": "crafting", "max_skill": 300}},
+      {"type_key": "profession", "key": "tailoring", "name": "Tailoring",
+       "fields": {"kind": "crafting", "max_skill": 300}},
+      {"type_key": "profession", "key": "herbalism", "name": "Herbalism",
+       "fields": {"kind": "gathering", "max_skill": 300}},
+      {"type_key": "profession", "key": "mining", "name": "Mining",
+       "fields": {"kind": "gathering", "max_skill": 300}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "zone", "key": "elwynn_forest", "name": "Elwynn Forest",
+       "fields": {"level_min": 1, "level_max": 10, "faction_control": "alliance"}},
+      {"type_key": "zone", "key": "westfall", "name": "Westfall",
+       "fields": {"level_min": 10, "level_max": 20, "faction_control": "alliance"}},
+      {"type_key": "zone", "key": "duskwood", "name": "Duskwood",
+       "fields": {"level_min": 18, "level_max": 30, "faction_control": "contested"}},
+      {"type_key": "zone", "key": "durotar", "name": "Durotar",
+       "fields": {"level_min": 1, "level_max": 10, "faction_control": "horde"}},
+      {"type_key": "zone", "key": "the_barrens", "name": "The Barrens",
+       "fields": {"level_min": 10, "level_max": 25, "faction_control": "horde"}},
+      {"type_key": "zone", "key": "ashenvale", "name": "Ashenvale",
+       "fields": {"level_min": 19, "level_max": 30, "faction_control": "contested"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "dungeon", "key": "the_deadmines", "name": "The Deadmines",
+       "fields": {"level_min": 17, "level_max": 26, "party_size": 5}},
+      {"type_key": "dungeon", "key": "wailing_caverns", "name": "Wailing Caverns",
+       "fields": {"level_min": 17, "level_max": 24, "party_size": 5}},
+      {"type_key": "dungeon", "key": "shadowfang_keep", "name": "Shadowfang Keep",
+       "fields": {"level_min": 22, "level_max": 30, "party_size": 5}},
+      {"type_key": "dungeon", "key": "blackfathom_deeps", "name": "Blackfathom Deeps",
+       "fields": {"level_min": 20, "level_max": 27, "party_size": 5}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "quest", "key": "wolves_across_the_border", "name": "Wolves Across the Border",
+       "fields": {"min_level": 3, "kind": "kill", "summary": "Thin the wolf packs east of the abbey.", "repeatable": true}},
+      {"type_key": "quest", "key": "a_bundle_of_trouble", "name": "A Bundle of Trouble",
+       "fields": {"min_level": 5, "kind": "gather", "summary": "Recover the stolen supply bundles.", "repeatable": false}},
+      {"type_key": "quest", "key": "wanted_hogger", "name": "Wanted: Hogger",
+       "fields": {"min_level": 8, "kind": "kill", "summary": "The gnoll leader south of the road.", "repeatable": false}},
+      {"type_key": "quest", "key": "westfall_stew", "name": "Westfall Stew",
+       "fields": {"min_level": 12, "kind": "gather", "summary": "Four ingredients for the innkeeper.", "repeatable": false}},
+      {"type_key": "quest", "key": "the_defias_brotherhood", "name": "The Defias Brotherhood",
+       "fields": {"min_level": 16, "kind": "escort", "summary": "Follow the conspiracy to the coast.", "repeatable": false}},
+      {"type_key": "quest", "key": "the_deadmines_run", "name": "Into the Deadmines",
+       "fields": {"min_level": 18, "kind": "kill", "summary": "End the Brotherhood in its own mine.", "repeatable": false}},
+      {"type_key": "quest", "key": "the_night_watch", "name": "The Night Watch",
+       "fields": {"min_level": 20, "kind": "delivery", "summary": "Carry the watch commander's orders.", "repeatable": false}},
+      {"type_key": "quest", "key": "arcane_apprentice", "name": "Arcane Apprentice",
+       "fields": {"min_level": 10, "kind": "delivery", "summary": "A mage's first errand for the tower.", "repeatable": false}},
+      {"type_key": "quest", "key": "lost_in_the_barrens", "name": "Lost in the Barrens",
+       "fields": {"min_level": 14, "kind": "escort", "summary": "Walk the caravan south.", "repeatable": false}},
+      {"type_key": "quest", "key": "the_deep_wail", "name": "The Deep Wail",
+       "fields": {"min_level": 19, "kind": "kill", "summary": "Silence what sings under the Barrens.", "repeatable": false}},
+      {"type_key": "quest", "key": "ashenvale_scouting", "name": "Ashenvale Scouting",
+       "fields": {"min_level": 21, "kind": "delivery", "summary": "Map the felwood road.", "repeatable": true}},
+      {"type_key": "quest", "key": "a_hammer_of_ones_own", "name": "A Hammer of One's Own",
+       "fields": {"min_level": 11, "kind": "gather", "summary": "Bring the smith what a smith needs.", "repeatable": false}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "talent", "key": "improved_heroic_strike", "name": "Improved Heroic Strike",
+       "fields": {"tier": 1, "tree": "Arms", "max_ranks": 3}},
+      {"type_key": "talent", "key": "deflection", "name": "Deflection",
+       "fields": {"tier": 1, "tree": "Arms", "max_ranks": 5}},
+      {"type_key": "talent", "key": "impale", "name": "Impale",
+       "fields": {"tier": 3, "tree": "Arms", "max_ranks": 2}},
+      {"type_key": "talent", "key": "mortal_strike", "name": "Mortal Strike",
+       "fields": {"tier": 7, "tree": "Arms", "max_ranks": 1}},
+      {"type_key": "talent", "key": "improved_fireball", "name": "Improved Fireball",
+       "fields": {"tier": 1, "tree": "Fire", "max_ranks": 5}},
+      {"type_key": "talent", "key": "ignite", "name": "Ignite",
+       "fields": {"tier": 2, "tree": "Fire", "max_ranks": 5}},
+      {"type_key": "talent", "key": "combustion", "name": "Combustion",
+       "fields": {"tier": 5, "tree": "Fire", "max_ranks": 1}},
+      {"type_key": "talent", "key": "improved_healing", "name": "Improved Healing",
+       "fields": {"tier": 2, "tree": "Holy", "max_ranks": 3}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "faction", "key": "stormwind", "name": "Stormwind",
+       "fields": {"alignment": "alliance", "hostile_at_start": false}},
+      {"type_key": "faction", "key": "orgrimmar", "name": "Orgrimmar",
+       "fields": {"alignment": "horde", "hostile_at_start": false}},
+      {"type_key": "faction", "key": "the_defias", "name": "The Defias Brotherhood",
+       "fields": {"alignment": "neutral", "hostile_at_start": true}},
+      {"type_key": "faction", "key": "argent_dawn", "name": "Argent Dawn",
+       "fields": {"alignment": "neutral", "hostile_at_start": false}}
+    ]}},
+
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "elwynn_forest"},
+       "target": {"type_key": "zone", "key": "westfall"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "elwynn_forest"},
+       "target": {"type_key": "zone", "key": "duskwood"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "westfall"},
+       "target": {"type_key": "zone", "key": "duskwood"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "durotar"},
+       "target": {"type_key": "zone", "key": "the_barrens"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "the_barrens"},
+       "target": {"type_key": "zone", "key": "ashenvale"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "elwynn_forest"},
+       "target": {"type_key": "zone", "key": "durotar"}, "fields": {"travel": "boat"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "westfall"},
+       "target": {"type_key": "dungeon", "key": "the_deadmines"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "the_barrens"},
+       "target": {"type_key": "dungeon", "key": "wailing_caverns"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "duskwood"},
+       "target": {"type_key": "dungeon", "key": "shadowfang_keep"}, "fields": {"travel": "walk"}},
+      {"type_key": "connects_to", "source": {"type_key": "zone", "key": "ashenvale"},
+       "target": {"type_key": "dungeon", "key": "blackfathom_deeps"}, "fields": {"travel": "walk"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "wolves_across_the_border"},
+       "target": {"type_key": "zone", "key": "elwynn_forest"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "a_bundle_of_trouble"},
+       "target": {"type_key": "zone", "key": "elwynn_forest"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "wanted_hogger"},
+       "target": {"type_key": "zone", "key": "elwynn_forest"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "arcane_apprentice"},
+       "target": {"type_key": "zone", "key": "elwynn_forest"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "westfall_stew"},
+       "target": {"type_key": "zone", "key": "westfall"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "the_defias_brotherhood"},
+       "target": {"type_key": "zone", "key": "westfall"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "a_hammer_of_ones_own"},
+       "target": {"type_key": "zone", "key": "westfall"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "the_deadmines_run"},
+       "target": {"type_key": "dungeon", "key": "the_deadmines"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "the_night_watch"},
+       "target": {"type_key": "zone", "key": "duskwood"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "lost_in_the_barrens"},
+       "target": {"type_key": "zone", "key": "the_barrens"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "the_deep_wail"},
+       "target": {"type_key": "dungeon", "key": "wailing_caverns"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "quest", "key": "ashenvale_scouting"},
+       "target": {"type_key": "zone", "key": "ashenvale"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "requires", "source": {"type_key": "quest", "key": "a_bundle_of_trouble"},
+       "target": {"type_key": "quest", "key": "wolves_across_the_border"}},
+      {"type_key": "requires", "source": {"type_key": "quest", "key": "wanted_hogger"},
+       "target": {"type_key": "quest", "key": "a_bundle_of_trouble"}},
+      {"type_key": "requires", "source": {"type_key": "quest", "key": "the_defias_brotherhood"},
+       "target": {"type_key": "quest", "key": "westfall_stew"}},
+      {"type_key": "requires", "source": {"type_key": "quest", "key": "the_deadmines_run"},
+       "target": {"type_key": "quest", "key": "the_defias_brotherhood"}},
+      {"type_key": "requires", "source": {"type_key": "quest", "key": "the_night_watch"},
+       "target": {"type_key": "quest", "key": "the_deadmines_run"}},
+      {"type_key": "requires", "source": {"type_key": "quest", "key": "the_deep_wail"},
+       "target": {"type_key": "quest", "key": "lost_in_the_barrens"}},
+      {"type_key": "requires", "source": {"type_key": "talent", "key": "impale"},
+       "target": {"type_key": "talent", "key": "improved_heroic_strike"}},
+      {"type_key": "requires", "source": {"type_key": "talent", "key": "mortal_strike"},
+       "target": {"type_key": "talent", "key": "impale"}},
+      {"type_key": "requires", "source": {"type_key": "talent", "key": "ignite"},
+       "target": {"type_key": "talent", "key": "improved_fireball"}},
+      {"type_key": "requires", "source": {"type_key": "talent", "key": "combustion"},
+       "target": {"type_key": "talent", "key": "ignite"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "arcane_apprentice"},
+       "target": {"type_key": "class", "key": "mage"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "a_hammer_of_ones_own"},
+       "target": {"type_key": "class", "key": "warrior"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "the_night_watch"},
+       "target": {"type_key": "class", "key": "paladin"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "wolves_across_the_border"},
+       "target": {"type_key": "race", "key": "human"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "lost_in_the_barrens"},
+       "target": {"type_key": "race", "key": "orc"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "the_deep_wail"},
+       "target": {"type_key": "race", "key": "troll"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "ashenvale_scouting"},
+       "target": {"type_key": "race", "key": "night_elf"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "westfall_stew"},
+       "target": {"type_key": "race", "key": "dwarf"}},
+      {"type_key": "available_to", "source": {"type_key": "quest", "key": "the_deadmines_run"},
+       "target": {"type_key": "race", "key": "undead"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "improved_heroic_strike"},
+       "target": {"type_key": "class", "key": "warrior"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "deflection"},
+       "target": {"type_key": "class", "key": "warrior"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "impale"},
+       "target": {"type_key": "class", "key": "warrior"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "mortal_strike"},
+       "target": {"type_key": "class", "key": "warrior"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "improved_fireball"},
+       "target": {"type_key": "class", "key": "mage"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "ignite"},
+       "target": {"type_key": "class", "key": "mage"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "combustion"},
+       "target": {"type_key": "class", "key": "mage"}},
+      {"type_key": "available_to", "source": {"type_key": "talent", "key": "improved_healing"},
+       "target": {"type_key": "class", "key": "priest"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "wanted_hogger"},
+       "target": {"type_key": "faction", "key": "stormwind"}, "fields": {"standing": 250}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "the_defias_brotherhood"},
+       "target": {"type_key": "faction", "key": "stormwind"}, "fields": {"standing": 350}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "lost_in_the_barrens"},
+       "target": {"type_key": "faction", "key": "orgrimmar"}, "fields": {"standing": 250}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "ashenvale_scouting"},
+       "target": {"type_key": "faction", "key": "argent_dawn"}, "fields": {"standing": 75}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "the_deadmines_run"},
+       "target": {"type_key": "faction", "key": "the_defias"}, "fields": {"standing": 0}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "a_hammer_of_ones_own"},
+       "target": {"type_key": "profession", "key": "blacksmithing"}, "fields": {"standing": 0}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "westfall_stew"},
+       "target": {"type_key": "profession", "key": "alchemy"}, "fields": {"standing": 0}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "arcane_apprentice"},
+       "target": {"type_key": "profession", "key": "enchanting"}, "fields": {"standing": 0}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "a_bundle_of_trouble"},
+       "target": {"type_key": "profession", "key": "tailoring"}, "fields": {"standing": 0}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "wolves_across_the_border"},
+       "target": {"type_key": "profession", "key": "herbalism"}, "fields": {"standing": 0}},
+      {"type_key": "rewards", "source": {"type_key": "quest", "key": "the_deep_wail"},
+       "target": {"type_key": "profession", "key": "mining"}, "fields": {"standing": 0}}
+    ]}},
+
+    {"tool": "views.validate", "args": {
+      "renderer": "graph",
+      "query": {
+        "v": 1,
+        "from": [{"type": "zone", "as": "z"}],
+        "traverse": [
+          {"from": "z", "via": "takes_place_in", "direction": "in", "to_type": "quest",
+           "depth": 1, "as": "quests"}
+        ],
+        "nodes": [{"set": "z", "role": "seed"}, {"set": "quests"}],
+        "edges": [{"from_step": "quests"}, {"via": "requires", "between": ["quests", "quests"], "direction": "out"}],
+        "project": {"label": "@name", "fields": ["min_level"]},
+        "limits": {"max_nodes": 300}
+      }}},
+    {"tool": "views.upsert", "args": {
+      "key": "quests_by_zone", "name": "Quests by zone",
+      "renderer": "graph", "expected_version": 0,
+      "query": {
+        "v": 1,
+        "from": [{"type": "zone", "as": "z"}],
+        "traverse": [
+          {"from": "z", "via": "takes_place_in", "direction": "in", "to_type": "quest",
+           "depth": 1, "as": "quests"}
+        ],
+        "nodes": [{"set": "z", "role": "seed"}, {"set": "quests"}],
+        "edges": [{"from_step": "quests"}, {"via": "requires", "between": ["quests", "quests"], "direction": "out"}],
+        "project": {"label": "@name", "fields": ["min_level"]},
+        "limits": {"max_nodes": 300}
+      }}}
+  ]
+}

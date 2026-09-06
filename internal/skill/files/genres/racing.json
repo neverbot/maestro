@@ -1,0 +1,304 @@
+{
+  "genre": "racing",
+  "note": "A worked example, executed on every build. Read genres/racing.md for why each decision was taken.",
+  "calls": [
+    {"tool": "types.upsert", "args": {
+      "key": "driver", "label": "Driver", "label_plural": "Drivers",
+      "field_schema": [
+        {"key": "nationality", "type": "text", "label": "Nationality"},
+        {"key": "pace", "type": "number", "label": "Pace", "min": 1, "max": 100},
+        {"key": "consistency", "type": "number", "label": "Consistency", "min": 1, "max": 100},
+        {"key": "team_name", "type": "text", "label": "Team, as written on the entry list"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "car", "label": "Car", "label_plural": "Cars",
+      "field_schema": [
+        {"key": "category", "type": "enum", "label": "Category",
+         "options": ["touring", "gt3", "lmp2", "formula"], "default": "gt3"},
+        {"key": "power_bhp", "type": "number", "label": "Power (bhp)", "min": 60, "max": 1200},
+        {"key": "weight_kg", "type": "number", "label": "Weight (kg)", "min": 400, "max": 2000},
+        {"key": "drivetrain", "type": "enum", "label": "Drivetrain",
+         "options": ["fwd", "rwd", "awd"], "default": "rwd"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "upgrade", "label": "Upgrade", "label_plural": "Upgrades",
+      "field_schema": [
+        {"key": "slot", "type": "enum", "label": "Slot",
+         "options": ["engine", "aero", "tyres", "gearbox", "brakes"], "default": "engine"},
+        {"key": "cost", "type": "number", "label": "Cost in credits", "min": 0, "max": 500000},
+        {"key": "stage", "type": "number", "label": "Stage", "min": 1, "max": 3}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "circuit", "label": "Circuit", "label_plural": "Circuits",
+      "field_schema": [
+        {"key": "country", "type": "text", "label": "Country"},
+        {"key": "length_km", "type": "number", "label": "Lap length (km)", "min": 1, "max": 30},
+        {"key": "turns", "type": "number", "label": "Turns", "min": 2, "max": 40},
+        {"key": "surface", "type": "enum", "label": "Surface",
+         "options": ["asphalt", "gravel", "mixed"], "default": "asphalt"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "race", "label": "Race", "label_plural": "Races",
+      "field_schema": [
+        {"key": "laps", "type": "number", "label": "Laps", "min": 1, "max": 200},
+        {"key": "weather", "type": "enum", "label": "Weather",
+         "options": ["dry", "wet", "mixed"], "default": "dry"},
+        {"key": "prize", "type": "number", "label": "Winner's prize", "min": 0, "max": 1000000},
+        {"key": "night", "type": "bool", "label": "Run at night"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "championship", "label": "Championship", "label_plural": "Championships",
+      "field_schema": [
+        {"key": "tier", "type": "enum", "label": "Tier",
+         "options": ["club", "national", "continental", "world"], "default": "club"},
+        {"key": "season_length", "type": "number", "label": "Rounds", "min": 2, "max": 24}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "licence", "label": "Licence", "label_plural": "Licences",
+      "field_schema": [
+        {"key": "grade", "type": "enum", "label": "Grade",
+         "options": ["d", "c", "b", "a", "super"], "default": "d"},
+        {"key": "tests", "type": "number", "label": "Tests to pass", "min": 1, "max": 12}
+      ]}},
+
+    {"tool": "relation_types.upsert", "args": {
+      "key": "contains", "label": "Contains",
+      "source_type_keys": ["championship", "car"], "target_type_keys": ["race", "upgrade"],
+      "semantic_role": "containment", "analysis_traits": ["containment"],
+      "field_schema": [
+        {"key": "round", "type": "number", "label": "Round number", "min": 1, "max": 24}
+      ]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "takes_place_in", "label": "Takes place in",
+      "source_type_keys": ["race"], "target_type_keys": ["circuit"],
+      "semantic_role": "spatial", "analysis_traits": ["containment"]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "requires", "label": "Requires",
+      "source_type_keys": ["race", "championship", "driver", "upgrade"],
+      "target_type_keys": ["licence", "upgrade"],
+      "semantic_role": "prerequisite", "analysis_traits": ["prerequisite_of"]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "unlocks", "label": "Unlocks",
+      "source_type_keys": ["race", "championship"],
+      "target_type_keys": ["car", "licence", "upgrade"],
+      "semantic_role": "unlock", "analysis_traits": ["unlocks"]}},
+
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "driver", "key": "a_rossi", "name": "Alba Rossi",
+       "fields": {"nationality": "Italy", "pace": 92, "consistency": 78, "team_name": "Scuderia Verde"}},
+      {"type_key": "driver", "key": "k_novak", "name": "Karel Novak",
+       "fields": {"nationality": "Czechia", "pace": 84, "consistency": 88, "team_name": "Scuderia Verde"}},
+      {"type_key": "driver", "key": "m_okafor", "name": "Mina Okafor",
+       "fields": {"nationality": "Nigeria", "pace": 89, "consistency": 82, "team_name": "Kestrel Racing"}},
+      {"type_key": "driver", "key": "j_haugen", "name": "Jonas Haugen",
+       "fields": {"nationality": "Norway", "pace": 76, "consistency": 91, "team_name": "Kestrel Racing"}},
+      {"type_key": "driver", "key": "s_tanaka", "name": "Sora Tanaka",
+       "fields": {"nationality": "Japan", "pace": 95, "consistency": 70, "team_name": "Hoshi Works"}},
+      {"type_key": "driver", "key": "p_alonso", "name": "Pilar Alonso",
+       "fields": {"nationality": "Spain", "pace": 81, "consistency": 85, "team_name": "Hoshi Works"}},
+      {"type_key": "driver", "key": "d_moreau", "name": "Denis Moreau",
+       "fields": {"nationality": "France", "pace": 73, "consistency": 74, "team_name": "Privateer"}},
+      {"type_key": "driver", "key": "r_silva", "name": "Rafa Silva",
+       "fields": {"nationality": "Brazil", "pace": 87, "consistency": 79, "team_name": "Privateer"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "car", "key": "hatch_cup", "name": "Cup Hatchback",
+       "fields": {"category": "touring", "power_bhp": 180, "weight_kg": 1150, "drivetrain": "fwd"}},
+      {"type_key": "car", "key": "touring_evo", "name": "Touring Evo",
+       "fields": {"category": "touring", "power_bhp": 320, "weight_kg": 1250, "drivetrain": "awd"}},
+      {"type_key": "car", "key": "gt3_falcon", "name": "Falcon GT3",
+       "fields": {"category": "gt3", "power_bhp": 550, "weight_kg": 1300, "drivetrain": "rwd"}},
+      {"type_key": "car", "key": "gt3_kestrel", "name": "Kestrel GT3",
+       "fields": {"category": "gt3", "power_bhp": 540, "weight_kg": 1280, "drivetrain": "rwd"}},
+      {"type_key": "car", "key": "lmp2_orion", "name": "Orion LMP2",
+       "fields": {"category": "lmp2", "power_bhp": 600, "weight_kg": 950, "drivetrain": "rwd"}},
+      {"type_key": "car", "key": "formula_zero", "name": "Formula Zero",
+       "fields": {"category": "formula", "power_bhp": 780, "weight_kg": 760, "drivetrain": "rwd"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "upgrade", "key": "engine_stage_1", "name": "Engine, stage 1",
+       "fields": {"slot": "engine", "cost": 12000, "stage": 1}},
+      {"type_key": "upgrade", "key": "engine_stage_2", "name": "Engine, stage 2",
+       "fields": {"slot": "engine", "cost": 34000, "stage": 2}},
+      {"type_key": "upgrade", "key": "engine_stage_3", "name": "Engine, stage 3",
+       "fields": {"slot": "engine", "cost": 71000, "stage": 3}},
+      {"type_key": "upgrade", "key": "aero_kit", "name": "Aero kit",
+       "fields": {"slot": "aero", "cost": 26000, "stage": 1}},
+      {"type_key": "upgrade", "key": "slick_tyres", "name": "Slick tyres",
+       "fields": {"slot": "tyres", "cost": 8000, "stage": 1}},
+      {"type_key": "upgrade", "key": "sequential_box", "name": "Sequential gearbox",
+       "fields": {"slot": "gearbox", "cost": 19000, "stage": 2}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "circuit", "key": "brands_valley", "name": "Brands Valley",
+       "fields": {"country": "United Kingdom", "length_km": 3.9, "turns": 12, "surface": "asphalt"}},
+      {"type_key": "circuit", "key": "monte_alto", "name": "Monte Alto",
+       "fields": {"country": "Portugal", "length_km": 4.6, "turns": 15, "surface": "asphalt"}},
+      {"type_key": "circuit", "key": "lakeside_ring", "name": "Lakeside Ring",
+       "fields": {"country": "Finland", "length_km": 5.2, "turns": 18, "surface": "mixed"}},
+      {"type_key": "circuit", "key": "harbour_street", "name": "Harbour Street",
+       "fields": {"country": "Monaco", "length_km": 3.3, "turns": 19, "surface": "asphalt"}},
+      {"type_key": "circuit", "key": "desert_mile", "name": "Desert Mile",
+       "fields": {"country": "Morocco", "length_km": 6.1, "turns": 9, "surface": "gravel"}},
+      {"type_key": "circuit", "key": "north_bowl", "name": "North Bowl",
+       "fields": {"country": "Canada", "length_km": 4.1, "turns": 11, "surface": "asphalt"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "race", "key": "valley_sprint", "name": "Valley Sprint",
+       "fields": {"laps": 8, "weather": "dry", "prize": 4000, "night": false}},
+      {"type_key": "race", "key": "monte_alto_cup", "name": "Monte Alto Cup",
+       "fields": {"laps": 12, "weather": "mixed", "prize": 9000, "night": false}},
+      {"type_key": "race", "key": "lakeside_endurance", "name": "Lakeside Endurance",
+       "fields": {"laps": 60, "weather": "wet", "prize": 42000, "night": true}},
+      {"type_key": "race", "key": "harbour_grand_prix", "name": "Harbour Grand Prix",
+       "fields": {"laps": 40, "weather": "dry", "prize": 65000, "night": false}},
+      {"type_key": "race", "key": "desert_rally_stage", "name": "Desert Rally Stage",
+       "fields": {"laps": 2, "weather": "dry", "prize": 15000, "night": false}},
+      {"type_key": "race", "key": "north_bowl_500", "name": "North Bowl 500",
+       "fields": {"laps": 120, "weather": "dry", "prize": 88000, "night": true}},
+      {"type_key": "race", "key": "valley_night_race", "name": "Valley Night Race",
+       "fields": {"laps": 20, "weather": "wet", "prize": 21000, "night": true}},
+      {"type_key": "race", "key": "monte_alto_finale", "name": "Monte Alto Finale",
+       "fields": {"laps": 30, "weather": "dry", "prize": 120000, "night": false}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "championship", "key": "club_series", "name": "Club Series",
+       "fields": {"tier": "club", "season_length": 3}},
+      {"type_key": "championship", "key": "national_gt", "name": "National GT",
+       "fields": {"tier": "national", "season_length": 3}},
+      {"type_key": "championship", "key": "world_endurance", "name": "World Endurance",
+       "fields": {"tier": "world", "season_length": 2}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "licence", "key": "licence_d", "name": "Licence D",
+       "fields": {"grade": "d", "tests": 3}},
+      {"type_key": "licence", "key": "licence_c", "name": "Licence C",
+       "fields": {"grade": "c", "tests": 4}},
+      {"type_key": "licence", "key": "licence_b", "name": "Licence B",
+       "fields": {"grade": "b", "tests": 5}},
+      {"type_key": "licence", "key": "licence_a", "name": "Licence A",
+       "fields": {"grade": "a", "tests": 6}},
+      {"type_key": "licence", "key": "licence_super", "name": "Super Licence",
+       "fields": {"grade": "super", "tests": 8}}
+    ]}},
+
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "club_series"},
+       "target": {"type_key": "race", "key": "valley_sprint"}, "fields": {"round": 1}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "club_series"},
+       "target": {"type_key": "race", "key": "monte_alto_cup"}, "fields": {"round": 2}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "club_series"},
+       "target": {"type_key": "race", "key": "valley_night_race"}, "fields": {"round": 3}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "national_gt"},
+       "target": {"type_key": "race", "key": "harbour_grand_prix"}, "fields": {"round": 1}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "national_gt"},
+       "target": {"type_key": "race", "key": "desert_rally_stage"}, "fields": {"round": 2}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "national_gt"},
+       "target": {"type_key": "race", "key": "monte_alto_finale"}, "fields": {"round": 3}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "world_endurance"},
+       "target": {"type_key": "race", "key": "lakeside_endurance"}, "fields": {"round": 1}},
+      {"type_key": "contains", "source": {"type_key": "championship", "key": "world_endurance"},
+       "target": {"type_key": "race", "key": "north_bowl_500"}, "fields": {"round": 2}},
+      {"type_key": "contains", "source": {"type_key": "car", "key": "gt3_falcon"},
+       "target": {"type_key": "upgrade", "key": "aero_kit"}},
+      {"type_key": "contains", "source": {"type_key": "car", "key": "gt3_falcon"},
+       "target": {"type_key": "upgrade", "key": "slick_tyres"}},
+      {"type_key": "contains", "source": {"type_key": "car", "key": "touring_evo"},
+       "target": {"type_key": "upgrade", "key": "engine_stage_1"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "valley_sprint"},
+       "target": {"type_key": "circuit", "key": "brands_valley"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "valley_night_race"},
+       "target": {"type_key": "circuit", "key": "brands_valley"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "monte_alto_cup"},
+       "target": {"type_key": "circuit", "key": "monte_alto"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "monte_alto_finale"},
+       "target": {"type_key": "circuit", "key": "monte_alto"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "lakeside_endurance"},
+       "target": {"type_key": "circuit", "key": "lakeside_ring"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "harbour_grand_prix"},
+       "target": {"type_key": "circuit", "key": "harbour_street"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "desert_rally_stage"},
+       "target": {"type_key": "circuit", "key": "desert_mile"}},
+      {"type_key": "takes_place_in", "source": {"type_key": "race", "key": "north_bowl_500"},
+       "target": {"type_key": "circuit", "key": "north_bowl"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "requires", "source": {"type_key": "race", "key": "valley_sprint"},
+       "target": {"type_key": "licence", "key": "licence_d"}},
+      {"type_key": "requires", "source": {"type_key": "race", "key": "monte_alto_cup"},
+       "target": {"type_key": "licence", "key": "licence_d"}},
+      {"type_key": "requires", "source": {"type_key": "race", "key": "harbour_grand_prix"},
+       "target": {"type_key": "licence", "key": "licence_b"}},
+      {"type_key": "requires", "source": {"type_key": "race", "key": "north_bowl_500"},
+       "target": {"type_key": "licence", "key": "licence_a"}},
+      {"type_key": "requires", "source": {"type_key": "championship", "key": "national_gt"},
+       "target": {"type_key": "licence", "key": "licence_c"}},
+      {"type_key": "requires", "source": {"type_key": "championship", "key": "world_endurance"},
+       "target": {"type_key": "licence", "key": "licence_super"}},
+      {"type_key": "requires", "source": {"type_key": "driver", "key": "s_tanaka"},
+       "target": {"type_key": "licence", "key": "licence_super"}},
+      {"type_key": "requires", "source": {"type_key": "driver", "key": "a_rossi"},
+       "target": {"type_key": "licence", "key": "licence_super"}},
+      {"type_key": "requires", "source": {"type_key": "driver", "key": "d_moreau"},
+       "target": {"type_key": "licence", "key": "licence_c"}},
+      {"type_key": "requires", "source": {"type_key": "upgrade", "key": "engine_stage_2"},
+       "target": {"type_key": "upgrade", "key": "engine_stage_1"}},
+      {"type_key": "requires", "source": {"type_key": "upgrade", "key": "engine_stage_3"},
+       "target": {"type_key": "upgrade", "key": "engine_stage_2"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "unlocks", "source": {"type_key": "race", "key": "valley_sprint"},
+       "target": {"type_key": "car", "key": "hatch_cup"}},
+      {"type_key": "unlocks", "source": {"type_key": "race", "key": "monte_alto_cup"},
+       "target": {"type_key": "upgrade", "key": "slick_tyres"}},
+      {"type_key": "unlocks", "source": {"type_key": "race", "key": "harbour_grand_prix"},
+       "target": {"type_key": "car", "key": "gt3_kestrel"}},
+      {"type_key": "unlocks", "source": {"type_key": "race", "key": "desert_rally_stage"},
+       "target": {"type_key": "upgrade", "key": "aero_kit"}},
+      {"type_key": "unlocks", "source": {"type_key": "championship", "key": "club_series"},
+       "target": {"type_key": "licence", "key": "licence_c"}},
+      {"type_key": "unlocks", "source": {"type_key": "championship", "key": "national_gt"},
+       "target": {"type_key": "licence", "key": "licence_a"}},
+      {"type_key": "unlocks", "source": {"type_key": "championship", "key": "national_gt"},
+       "target": {"type_key": "car", "key": "lmp2_orion"}},
+      {"type_key": "unlocks", "source": {"type_key": "championship", "key": "world_endurance"},
+       "target": {"type_key": "car", "key": "formula_zero"}}
+    ]}},
+
+    {"tool": "views.validate", "args": {
+      "renderer": "graph",
+      "query": {
+        "v": 1,
+        "from": [{"type": "championship", "as": "champs"}],
+        "traverse": [
+          {"from": "champs", "via": "contains", "direction": "out", "to_type": "race",
+           "depth": 1, "as": "rounds"},
+          {"from": "rounds", "via": "takes_place_in", "direction": "out", "to_type": "circuit",
+           "depth": 1, "as": "circuits"}
+        ],
+        "nodes": [{"set": "champs", "role": "seed"}, {"set": "rounds"}, {"set": "circuits"}],
+        "edges": [{"from_step": "rounds"}, {"from_step": "circuits"}],
+        "project": {"label": "@name", "fields": ["laps"]},
+        "limits": {"max_nodes": 300}
+      }}},
+    {"tool": "views.upsert", "args": {
+      "key": "season_calendar", "name": "Season calendar",
+      "renderer": "graph", "expected_version": 0,
+      "query": {
+        "v": 1,
+        "from": [{"type": "championship", "as": "champs"}],
+        "traverse": [
+          {"from": "champs", "via": "contains", "direction": "out", "to_type": "race",
+           "depth": 1, "as": "rounds"},
+          {"from": "rounds", "via": "takes_place_in", "direction": "out", "to_type": "circuit",
+           "depth": 1, "as": "circuits"}
+        ],
+        "nodes": [{"set": "champs", "role": "seed"}, {"set": "rounds"}, {"set": "circuits"}],
+        "edges": [{"from_step": "rounds"}, {"from_step": "circuits"}],
+        "project": {"label": "@name", "fields": ["laps"]},
+        "limits": {"max_nodes": 300}
+      }}}
+  ]
+}

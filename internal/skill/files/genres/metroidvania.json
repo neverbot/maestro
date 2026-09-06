@@ -1,0 +1,215 @@
+{
+  "genre": "metroidvania",
+  "note": "A worked example, executed on every build. Read genres/metroidvania.md for why each decision was taken, and for the soft reference this game keeps consistent itself.",
+  "calls": [
+    {"tool": "types.upsert", "args": {
+      "key": "room", "label": "Room", "label_plural": "Rooms",
+      "field_schema": [
+        {"key": "region", "type": "enum", "label": "Region",
+         "options": ["surface", "caverns", "foundry", "spire", "depths"], "default": "surface"},
+        {"key": "save_point", "type": "bool", "label": "Has a save point"},
+        {"key": "notes", "type": "longtext", "label": "Layout notes"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "ability", "label": "Ability", "label_plural": "Abilities",
+      "field_schema": [
+        {"key": "kind", "type": "enum", "label": "Kind",
+         "options": ["movement", "combat", "utility"], "default": "movement"},
+        {"key": "button", "type": "text", "label": "Default button"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "boss", "label": "Boss", "label_plural": "Bosses",
+      "field_schema": [
+        {"key": "health", "type": "number", "label": "Health", "min": 1, "max": 10000},
+        {"key": "phases", "type": "number", "label": "Phases", "min": 1, "max": 5},
+        {"key": "optional", "type": "bool", "label": "Optional"}
+      ]}},
+    {"tool": "types.upsert", "args": {
+      "key": "item", "label": "Item", "label_plural": "Items",
+      "field_schema": [
+        {"key": "kind", "type": "enum", "label": "Kind",
+         "options": ["health", "currency", "key", "lore"], "default": "health"},
+        {"key": "consumable", "type": "bool", "label": "Consumable"}
+      ]}},
+
+    {"tool": "relation_types.upsert", "args": {
+      "key": "connects_to", "label": "Connects to",
+      "source_type_keys": ["room"], "target_type_keys": ["room"],
+      "semantic_role": "spatial",
+      "field_schema": [
+        {"key": "requires_ability", "type": "text", "label": "Ability the door needs"},
+        {"key": "passage", "type": "enum", "label": "Passage",
+         "options": ["door", "shaft", "gate", "breakable"], "default": "door"}
+      ]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "located_in", "label": "Located in",
+      "source_type_keys": ["boss", "item"], "target_type_keys": ["room"],
+      "semantic_role": "containment", "analysis_traits": ["containment"]}},
+    {"tool": "relation_types.upsert", "args": {
+      "key": "drops", "label": "Drops",
+      "source_type_keys": ["boss"], "target_type_keys": ["ability", "item"],
+      "semantic_role": "reward", "analysis_traits": ["unlocks"]}},
+
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "room", "key": "landing_site", "name": "Landing Site",
+       "fields": {"region": "surface", "save_point": true, "notes": "Where the player wakes up."}},
+      {"type_key": "room", "key": "broken_lift", "name": "Broken Lift",
+       "fields": {"region": "surface", "save_point": false, "notes": "The shaft is the first vertical gate."}},
+      {"type_key": "room", "key": "west_gallery", "name": "West Gallery",
+       "fields": {"region": "surface", "save_point": false, "notes": ""}},
+      {"type_key": "room", "key": "cavern_mouth", "name": "Cavern Mouth", 
+       "fields": {"region": "caverns", "save_point": true, "notes": ""}},
+      {"type_key": "room", "key": "drip_hall", "name": "Drip Hall",
+       "fields": {"region": "caverns", "save_point": false, "notes": ""}},
+      {"type_key": "room", "key": "flooded_stair", "name": "Flooded Stair",
+       "fields": {"region": "caverns", "save_point": false, "notes": "Underwater until the pumps run."}},
+      {"type_key": "room", "key": "foundry_floor", "name": "Foundry Floor",
+       "fields": {"region": "foundry", "save_point": true, "notes": ""}},
+      {"type_key": "room", "key": "crucible", "name": "Crucible",
+       "fields": {"region": "foundry", "save_point": false, "notes": "First boss arena."}},
+      {"type_key": "room", "key": "spire_base", "name": "Spire Base",
+       "fields": {"region": "spire", "save_point": true, "notes": ""}},
+      {"type_key": "room", "key": "spire_crown", "name": "Spire Crown",
+       "fields": {"region": "spire", "save_point": false, "notes": "Second boss arena."}},
+      {"type_key": "room", "key": "sunken_vault", "name": "Sunken Vault",
+       "fields": {"region": "depths", "save_point": false, "notes": "Optional, and easy to miss."}},
+      {"type_key": "room", "key": "heart_chamber", "name": "Heart Chamber",
+       "fields": {"region": "depths", "save_point": true, "notes": "Final arena."}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "ability", "key": "double_jump", "name": "Double Jump",
+       "fields": {"kind": "movement", "button": "A"}},
+      {"type_key": "ability", "key": "dash", "name": "Dash",
+       "fields": {"kind": "movement", "button": "RB"}},
+      {"type_key": "ability", "key": "rebreather", "name": "Rebreather",
+       "fields": {"kind": "utility", "button": ""}},
+      {"type_key": "ability", "key": "heat_shield", "name": "Heat Shield",
+       "fields": {"kind": "utility", "button": "LB"}},
+      {"type_key": "ability", "key": "charge_shot", "name": "Charge Shot",
+       "fields": {"kind": "combat", "button": "X"}},
+      {"type_key": "ability", "key": "wall_cling", "name": "Wall Cling",
+       "fields": {"kind": "movement", "button": "LT"}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "boss", "key": "slag_warden", "name": "Slag Warden",
+       "fields": {"health": 900, "phases": 2, "optional": false}},
+      {"type_key": "boss", "key": "spire_keeper", "name": "Spire Keeper",
+       "fields": {"health": 1600, "phases": 3, "optional": false}},
+      {"type_key": "boss", "key": "drowned_choir", "name": "Drowned Choir",
+       "fields": {"health": 1200, "phases": 2, "optional": true}},
+      {"type_key": "boss", "key": "the_heart", "name": "The Heart",
+       "fields": {"health": 3000, "phases": 4, "optional": false}}
+    ]}},
+    {"tool": "entities.upsert", "args": {"items": [
+      {"type_key": "item", "key": "vial_fragment", "name": "Vial Fragment",
+       "fields": {"kind": "health", "consumable": false}},
+      {"type_key": "item", "key": "foundry_key", "name": "Foundry Key",
+       "fields": {"kind": "key", "consumable": false}},
+      {"type_key": "item", "key": "old_coin", "name": "Old Coin",
+       "fields": {"kind": "currency", "consumable": true}},
+      {"type_key": "item", "key": "warden_journal", "name": "Warden's Journal",
+       "fields": {"kind": "lore", "consumable": false}},
+      {"type_key": "item", "key": "spire_sigil", "name": "Spire Sigil",
+       "fields": {"kind": "key", "consumable": false}},
+      {"type_key": "item", "key": "depth_charm", "name": "Depth Charm",
+       "fields": {"kind": "health", "consumable": false}}
+    ]}},
+
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "landing_site"},
+       "target": {"type_key": "room", "key": "west_gallery"},
+       "fields": {"requires_ability": "", "passage": "door"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "west_gallery"},
+       "target": {"type_key": "room", "key": "broken_lift"},
+       "fields": {"requires_ability": "", "passage": "door"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "broken_lift"},
+       "target": {"type_key": "room", "key": "cavern_mouth"},
+       "fields": {"requires_ability": "double_jump", "passage": "shaft"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "cavern_mouth"},
+       "target": {"type_key": "room", "key": "drip_hall"},
+       "fields": {"requires_ability": "", "passage": "door"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "drip_hall"},
+       "target": {"type_key": "room", "key": "flooded_stair"},
+       "fields": {"requires_ability": "rebreather", "passage": "gate"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "drip_hall"},
+       "target": {"type_key": "room", "key": "foundry_floor"},
+       "fields": {"requires_ability": "dash", "passage": "breakable"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "foundry_floor"},
+       "target": {"type_key": "room", "key": "crucible"},
+       "fields": {"requires_ability": "heat_shield", "passage": "gate"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "foundry_floor"},
+       "target": {"type_key": "room", "key": "spire_base"},
+       "fields": {"requires_ability": "", "passage": "door"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "spire_base"},
+       "target": {"type_key": "room", "key": "spire_crown"},
+       "fields": {"requires_ability": "wall_cling", "passage": "shaft"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "flooded_stair"},
+       "target": {"type_key": "room", "key": "sunken_vault"},
+       "fields": {"requires_ability": "double_jump", "passage": "shaft"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "flooded_stair"},
+       "target": {"type_key": "room", "key": "heart_chamber"},
+       "fields": {"requires_ability": "charge_shot", "passage": "breakable"}},
+      {"type_key": "connects_to", "source": {"type_key": "room", "key": "spire_crown"},
+       "target": {"type_key": "room", "key": "heart_chamber"},
+       "fields": {"requires_ability": "", "passage": "door"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "located_in", "source": {"type_key": "boss", "key": "slag_warden"},
+       "target": {"type_key": "room", "key": "crucible"}},
+      {"type_key": "located_in", "source": {"type_key": "boss", "key": "spire_keeper"},
+       "target": {"type_key": "room", "key": "spire_crown"}},
+      {"type_key": "located_in", "source": {"type_key": "boss", "key": "drowned_choir"},
+       "target": {"type_key": "room", "key": "sunken_vault"}},
+      {"type_key": "located_in", "source": {"type_key": "boss", "key": "the_heart"},
+       "target": {"type_key": "room", "key": "heart_chamber"}},
+      {"type_key": "located_in", "source": {"type_key": "item", "key": "vial_fragment"},
+       "target": {"type_key": "room", "key": "west_gallery"}},
+      {"type_key": "located_in", "source": {"type_key": "item", "key": "foundry_key"},
+       "target": {"type_key": "room", "key": "drip_hall"}},
+      {"type_key": "located_in", "source": {"type_key": "item", "key": "old_coin"},
+       "target": {"type_key": "room", "key": "landing_site"}},
+      {"type_key": "located_in", "source": {"type_key": "item", "key": "warden_journal"},
+       "target": {"type_key": "room", "key": "foundry_floor"}},
+      {"type_key": "located_in", "source": {"type_key": "item", "key": "spire_sigil"},
+       "target": {"type_key": "room", "key": "spire_base"}},
+      {"type_key": "located_in", "source": {"type_key": "item", "key": "depth_charm"},
+       "target": {"type_key": "room", "key": "sunken_vault"}}
+    ]}},
+    {"tool": "relations.upsert", "args": {"items": [
+      {"type_key": "drops", "source": {"type_key": "boss", "key": "slag_warden"},
+       "target": {"type_key": "ability", "key": "heat_shield"}},
+      {"type_key": "drops", "source": {"type_key": "boss", "key": "slag_warden"},
+       "target": {"type_key": "item", "key": "warden_journal"}},
+      {"type_key": "drops", "source": {"type_key": "boss", "key": "spire_keeper"},
+       "target": {"type_key": "ability", "key": "wall_cling"}},
+      {"type_key": "drops", "source": {"type_key": "boss", "key": "drowned_choir"},
+       "target": {"type_key": "ability", "key": "charge_shot"}},
+      {"type_key": "drops", "source": {"type_key": "boss", "key": "drowned_choir"},
+       "target": {"type_key": "item", "key": "depth_charm"}},
+      {"type_key": "drops", "source": {"type_key": "boss", "key": "the_heart"},
+       "target": {"type_key": "item", "key": "spire_sigil"}}
+    ]}},
+
+    {"tool": "views.validate", "args": {
+      "renderer": "graph",
+      "query": {
+        "v": 1,
+        "from": [{"type": "room", "as": "rooms"}],
+        "nodes": [{"set": "rooms", "role": "seed"}],
+        "edges": [{"via": "connects_to", "between": ["rooms", "rooms"], "direction": "out"}],
+        "project": {"label": "@name", "color_by": "region"},
+        "limits": {"max_nodes": 300}
+      }}},
+    {"tool": "views.upsert", "args": {
+      "key": "the_map", "name": "The map",
+      "renderer": "graph", "expected_version": 0,
+      "query": {
+        "v": 1,
+        "from": [{"type": "room", "as": "rooms"}],
+        "nodes": [{"set": "rooms", "role": "seed"}],
+        "edges": [{"via": "connects_to", "between": ["rooms", "rooms"], "direction": "out"}],
+        "project": {"label": "@name", "color_by": "region"},
+        "limits": {"max_nodes": 300}
+      }}}
+  ]
+}

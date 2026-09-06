@@ -2358,12 +2358,13 @@ func (q *Queries) UpsertRelation(ctx context.Context, arg UpsertRelationParams) 
 const upsertRelationType = `-- name: UpsertRelationType :one
 INSERT INTO relation_types (project_id, key, label, description,
                             source_type_ids, target_type_ids, semantic_role, field_schema,
+                            analysis_traits,
                             updated_by_user_id, updated_by_token_id)
 VALUES ($1::uuid, $2::text, $3::text,
         $4::text, $5::uuid[],
         $6::uuid[], $7::text,
-        $8::jsonb,
-        $9::uuid, $10::uuid)
+        $8::jsonb, $9::text[],
+        $10::uuid, $11::uuid)
 ON CONFLICT (project_id, lower(key)) DO UPDATE
 SET label               = excluded.label,
     description         = excluded.description,
@@ -2371,10 +2372,11 @@ SET label               = excluded.label,
     target_type_ids     = excluded.target_type_ids,
     semantic_role       = excluded.semantic_role,
     field_schema        = excluded.field_schema,
+    analysis_traits     = excluded.analysis_traits,
     version             = relation_types.version + 1,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
-WHERE relation_types.version = $11::integer
+WHERE relation_types.version = $12::integer
 RETURNING id, project_id, key, label, description, source_type_ids, target_type_ids, semantic_role, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id, analysis_traits
 `
 
@@ -2387,6 +2389,7 @@ type UpsertRelationTypeParams struct {
 	TargetTypeIds    []uuid.UUID
 	SemanticRole     *string
 	FieldSchema      []byte
+	AnalysisTraits   []string
 	UpdatedByUserID  *uuid.UUID
 	UpdatedByTokenID *uuid.UUID
 	ExpectedVersion  int32
@@ -2399,6 +2402,14 @@ type UpsertRelationTypeParams struct {
 // owns it, and key is not in the SET list, so the stored spelling stands
 // and the returned row is what lets Go refuse a respelling after the
 // write.
+//
+// analysis_traits is nullable and is written on both arms, so clearing a
+// type's traits is sending an empty list: NULL is *undeclared* and the
+// column's own CHECK refuses an empty array, which is what keeps
+// "nothing to say about this type" and "deliberately inert"
+// ({annotation}) from being spelled the same way. Leaving it out of the
+// DO UPDATE SET list would have made it the one field an upsert cannot
+// take back.
 func (q *Queries) UpsertRelationType(ctx context.Context, arg UpsertRelationTypeParams) (RelationType, error) {
 	row := q.db.QueryRow(ctx, upsertRelationType,
 		arg.ProjectID,
@@ -2409,6 +2420,7 @@ func (q *Queries) UpsertRelationType(ctx context.Context, arg UpsertRelationType
 		arg.TargetTypeIds,
 		arg.SemanticRole,
 		arg.FieldSchema,
+		arg.AnalysisTraits,
 		arg.UpdatedByUserID,
 		arg.UpdatedByTokenID,
 		arg.ExpectedVersion,

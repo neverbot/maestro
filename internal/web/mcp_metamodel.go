@@ -232,6 +232,7 @@ type RelationTypesUpsertInput struct {
 	SourceTypeKeys  []string     `json:"source_type_keys,omitempty"`
 	TargetTypeKeys  []string     `json:"target_type_keys,omitempty"`
 	SemanticRole    string       `json:"semantic_role,omitempty"`
+	AnalysisTraits  []string     `json:"analysis_traits,omitempty"`
 	Schema          []FieldInput `json:"field_schema,omitempty"`
 	ExpectedVersion *int32       `json:"expected_version,omitempty"`
 }
@@ -483,10 +484,18 @@ type RelationTypeOutput struct {
 // rules, its semantic role and its field schema.
 type RelationTypeDetailOutput struct {
 	RelationTypeOutput
-	Description    string           `json:"description"`
-	SourceTypeKeys []string         `json:"source_type_keys"`
-	TargetTypeKeys []string         `json:"target_type_keys"`
-	SemanticRole   string           `json:"semantic_role,omitempty"`
+	Description    string   `json:"description"`
+	SourceTypeKeys []string `json:"source_type_keys"`
+	TargetTypeKeys []string `json:"target_type_keys"`
+	SemanticRole   string   `json:"semantic_role,omitempty"`
+	// AnalysisTraits is omitted when the type has never declared any,
+	// which is what NULL means in the column: **undeclared**, and not the
+	// same as `[]`. A type that deliberately does nothing in a walk
+	// declares `["annotation"]` and reads back as that. Answering `[]`
+	// for an undeclared type would erase the one distinction the column
+	// exists to carry, so this field is omitempty where
+	// source_type_keys is not.
+	AnalysisTraits []string         `json:"analysis_traits,omitempty"`
 	Schema         metamodel.Schema `json:"field_schema"`
 }
 
@@ -959,6 +968,7 @@ func relationTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, proje
 		SourceTypeKeys:  in.SourceTypeKeys,
 		TargetTypeKeys:  in.TargetTypeKeys,
 		SemanticRole:    in.SemanticRole,
+		AnalysisTraits:  in.AnalysisTraits,
 		Schema:          schema,
 		ExpectedVersion: in.ExpectedVersion,
 		Actor:           actorOf(caller),
@@ -1525,6 +1535,12 @@ func relationTypeDetailOf(row dbq.RelationType, names map[uuid.UUID]string) (Rel
 	if row.SemanticRole != nil {
 		out.SemanticRole = *row.SemanticRole
 	}
+	// Read back on the same call that writes it. This is the
+	// write-only-field defect nine rounds of metamodel review missed —
+	// relations.upsert accepted `fields`, the database stored them, and no
+	// read path anywhere returned them — so the field is put in the
+	// detail answer by the same change that puts it in the input.
+	out.AnalysisTraits = row.AnalysisTraits
 	return out, nil
 }
 
@@ -1873,13 +1889,26 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"you read back is what you can send again. semantic_role is what a view uses to know what the edge means: it is "+
 				"optional, and when given it is one of %s — anything else is invalid_input at "+
 				"path `semantic_role`, listing these same values. "+
+				"analysis_traits is a different question asked of the same edge: not what it "+
+				"means but how it **behaves** in a graph walk, which is what the analysis "+
+				"engine reads and the only thing that lets it say anything about a game whose "+
+				"vocabulary it was never taught. Declaring a semantic_role does not declare "+
+				"behaviour. It is optional, and when given it is a combination of %s — "+
+				"anything else, or a word repeated, is invalid_schema at path "+
+				"`analysis_traits`. Some combinations contradict each other and are refused "+
+				"by name: %s. `prerequisite_of`, `unlocks`, `ordering` and `containment` each "+
+				"already imply `acyclic`, so declaring it as well is redundant and accepted "+
+				"unchanged rather than stripped. Omitting analysis_traits, or sending an "+
+				"empty list, leaves the type **undeclared** — which is not the same as "+
+				"declaring `[\"annotation\"]`, the way to say a type is deliberately inert. "+
 				"field_schema declares the fields every edge of the type carries and is what "+
 				"edge values are judged against; changing it re-checks every existing edge "+
 				"and marks the ones that no longer fit as invalid rather than deleting them "+
 				"or filling in the missing values, exactly as types.upsert does for "+
 				"entities. relations.list's `invalid` filter is how to find them. "+
 				"Idempotent by key; expected_version is required to update an existing type. %s",
-			quotedList(metamodel.SemanticRoles), versionClaimDoc),
+			quotedList(metamodel.SemanticRoles), quotedList(metamodel.AnalysisTraits),
+			traitRefusalDoc(), versionClaimDoc),
 		OutputSchema: relationTypeDetailOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesUpsertInput) (RelationTypeDetailOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -2200,6 +2229,21 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	})
 }
 
+// traitRefusalDoc renders the incoherent trait combinations
+// relation_types.upsert refuses, one clause each, **from the table the
+// coherence check itself runs on** (metamodel.AnalysisTraitConflicts).
+//
+// Generating the agent-facing text from the structure it describes, and
+// asserting it back in both directions, is the first thing the views
+// sub-project named as worth copying: it is what caught `views.run`
+// shipping without its operator table at all. A rule added to that table
+// is offered to agents here with no second edit, and a rule this text
+// promises that the table does not carry fails
+// TestTheTypesUpsertDescriptionNamesEveryRefusedCombination.
+func traitRefusalDoc() string {
+	return strings.Join(metamodel.TraitConflictLines(), "; ")
+}
+
 // retryAdvice is what every *read* tool says about the `retryable`
 // code, and it exists because "resend the same call" is not always the
 // whole recovery on a read.
@@ -2337,6 +2381,7 @@ var relationTypeDetailOutputSchema = &jsonschema.Schema{
 		"source_type_keys": arrayOf(stringSchema()),
 		"target_type_keys": arrayOf(stringSchema()),
 		"semantic_role":    stringSchema(),
+		"analysis_traits":  arrayOf(stringSchema()),
 		"field_schema":     arrayOf(fieldSchemaItemSchema),
 	},
 }

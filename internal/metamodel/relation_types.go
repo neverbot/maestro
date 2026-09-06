@@ -26,6 +26,15 @@ import (
 //
 // SemanticRole is optional and, when set, must be one of SemanticRoles.
 //
+// AnalysisTraits is optional and, when set, must be a coherent
+// combination drawn from AnalysisTraits (the package-level slice). It is
+// a different question from SemanticRole asked of the same edge — what
+// the edge *means* to a designer, and how it *behaves* in a graph walk —
+// and declaring a role does not declare behaviour. An empty or nil list
+// is stored as NULL, which is *undeclared*; a type that is deliberately
+// inert declares {"annotation"}, and the column refuses an empty array
+// precisely so those two cannot be spelled the same way.
+//
 // ExpectedVersion carries the same meaning and the same insert-path
 // caveat as EntityTypeInput.ExpectedVersion; see it.
 type RelationTypeInput struct {
@@ -35,6 +44,7 @@ type RelationTypeInput struct {
 	SourceTypeKeys  []string
 	TargetTypeKeys  []string
 	SemanticRole    string
+	AnalysisTraits  []string
 	Schema          Schema
 	ExpectedVersion *int32
 	Actor           Actor
@@ -118,6 +128,12 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 	if len(problems) > 0 {
 		return dbq.RelationType{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 	}
+	// After the invalid_input pass and beside the schema check, because
+	// it is the same kind of fault as that one: a declaration that cannot
+	// stand, reported as invalid_schema. See checkAnalysisTraits.
+	if err := checkAnalysisTraits(in.AnalysisTraits); err != nil {
+		return dbq.RelationType{}, err
+	}
 	if err := in.Schema.Check(); err != nil {
 		return dbq.RelationType{}, err
 	}
@@ -198,6 +214,14 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 		if in.SemanticRole != "" {
 			role := in.SemanticRole
 			params.SemanticRole = &role
+		}
+		// An empty list reaches the column as NULL, not as `{}`: NULL is
+		// "this type has never been given an opinion", the check
+		// constraint refuses `{}` outright, and pgx encodes a nil slice
+		// as SQL NULL. So clearing a type's traits is sending an empty
+		// list, and what comes back is undeclared rather than inert.
+		if len(in.AnalysisTraits) > 0 {
+			params.AnalysisTraits = in.AnalysisTraits
 		}
 
 		row, err = q.UpsertRelationType(ctx, params)

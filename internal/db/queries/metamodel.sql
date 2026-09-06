@@ -513,13 +513,22 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 -- owns it, and key is not in the SET list, so the stored spelling stands
 -- and the returned row is what lets Go refuse a respelling after the
 -- write.
+--
+-- analysis_traits is nullable and is written on both arms, so clearing a
+-- type's traits is sending an empty list: NULL is *undeclared* and the
+-- column's own CHECK refuses an empty array, which is what keeps
+-- "nothing to say about this type" and "deliberately inert"
+-- ({annotation}) from being spelled the same way. Leaving it out of the
+-- DO UPDATE SET list would have made it the one field an upsert cannot
+-- take back.
 INSERT INTO relation_types (project_id, key, label, description,
                             source_type_ids, target_type_ids, semantic_role, field_schema,
+                            analysis_traits,
                             updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('label')::text,
         sqlc.arg('description')::text, sqlc.arg('source_type_ids')::uuid[],
         sqlc.arg('target_type_ids')::uuid[], sqlc.narg('semantic_role')::text,
-        sqlc.arg('field_schema')::jsonb,
+        sqlc.arg('field_schema')::jsonb, sqlc.narg('analysis_traits')::text[],
         sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, lower(key)) DO UPDATE
 SET label               = excluded.label,
@@ -528,6 +537,7 @@ SET label               = excluded.label,
     target_type_ids     = excluded.target_type_ids,
     semantic_role       = excluded.semantic_role,
     field_schema        = excluded.field_schema,
+    analysis_traits     = excluded.analysis_traits,
     version             = relation_types.version + 1,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id

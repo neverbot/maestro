@@ -401,6 +401,9 @@ export function layeredScene(envelope, layout, params = {}) {
 
   let against = 0;
   let loops = 0;
+  // See the push below: these are added to the scene last, over
+  // everything they would otherwise hide under.
+  const reversals = [];
   for (const { source, target } of drawn) {
     const from = boxes.get(addressOf(source));
     const to = boxes.get(addressOf(target));
@@ -416,7 +419,17 @@ export function layeredScene(envelope, layout, params = {}) {
     marks.push(...edgeMarks({ source: from, target: to, arrows: true, edgeLabels: false }));
     if (from.band > to.band) {
       against++;
-      marks.push(...reversalMarks(midpointOf(from, to), directionOf(from, to)));
+      // Held back and pushed **last**, which is a paint-order decision
+      // and not tidiness. Scene order is document order is paint order
+      // (render/scene.js), and every node label in this picture is
+      // emitted after this loop into the same layer — so a reversal mark
+      // pushed here is drawn under a hundred names. On the picture this
+      // mark exists for, a hundred-step progression, that is exactly
+      // what happened: the mark was there, at a readable size, with a
+      // node label painted over its middle. Measured in Firefox with
+      // elementFromPoint. It is the last mark in the scene because it is
+      // the one thing in a ranked drawing that a reader must not miss.
+      reversals.push(...reversalMarks(midpointOf(from, to), directionOf(from, to)));
     }
   }
 
@@ -459,6 +472,9 @@ export function layeredScene(envelope, layout, params = {}) {
       }),
     );
   }
+
+  // Last, over the node labels: see the reversals array above.
+  marks.push(...reversals);
 
   return {
     marks,

@@ -33,7 +33,7 @@
 // internal/web/static_appjs_browser_test.go shells out to it too.
 
 import { addressOf } from "../static/address.js";
-import { MARK_ELEMENTS, MARK_ORIGINS, footerFor, joinEdges } from "../static/render/scene.js";
+import { MARK_ELEMENTS, MARK_LABEL, MARK_ORIGINS, footerFor, joinEdges } from "../static/render/scene.js";
 import { twinFor } from "../static/render/twin.js";
 import { layoutGraph } from "../static/layout/engine.js";
 import { controlNamed } from "../static/render/controls.js";
@@ -49,8 +49,10 @@ import {
   CLASS_REVERSED,
   CLASS_STUB,
   CLASS_STUB_RING,
+  LABEL_SIZE,
   NODE_PLAIN_FILL,
-  REVERSAL_GAP,
+  REVERSAL_SIZE,
+  REVERSAL_TEXT,
   borderPoint,
   boxFor,
 } from "../static/render/marks.js";
@@ -213,24 +215,67 @@ check("aReversedEdgeKeepsItsTrueArrowhead", () => {
   // in the reversing: three edges, two strokes each.
   assertEqual(marksOfClass(result, CLASS_ARROW).length, 6, "all three edges are still headed");
 
-  // And the line itself carries the break, twice: one double-slash, on
-  // the one edge that runs against the ranking.
+  // And the line itself carries the break: one double-slash, on the one
+  // edge that runs against the ranking, at its middle.
+  //
+  // **It is a glyph and not a pair of strokes, which is a correction
+  // made in a browser**: two nine-unit lines inside the zoomed world
+  // render at 0.43 px on the picture this mark exists for. See
+  // render/marks.js's reversalMarks, and the check below, which is the
+  // one that would have caught it.
   const slashes = marksOfClass(result, CLASS_REVERSED);
-  assertEqual(slashes.length, 2, "the double-slash is two strokes and there is one of it");
+  assertEqual(slashes.length, 1, "the double-slash is one mark and there is one of it");
+  assertEqual(slashes[0].text, REVERSAL_TEXT, "and it is a double slash");
   const tail = borderPoint(c, a);
   const mid = { x: (tail.x + tip.x) / 2, y: (tail.y + tip.y) / 2 };
-  const centres = slashes.map((slash) => ({
-    x: (slash.x1 + slash.x2) / 2,
-    y: (slash.y1 + slash.y2) / 2,
-  }));
-  assertClose((centres[0].x + centres[1].x) / 2, mid.x, "the pair straddles the broken line's middle");
-  assertClose((centres[0].y + centres[1].y) / 2, mid.y, "in both axes");
-  for (const centre of centres) {
-    assert(
-      Math.hypot(centre.x - mid.x, centre.y - mid.y) < REVERSAL_GAP,
-      "and each stroke is a hair's breadth from it, not off at an endpoint",
-    );
-  }
+  assertClose(slashes[0].x, mid.x, "it sits at the broken line's middle");
+  assertClose(slashes[0].y, mid.y, "in both axes");
+  assertEqual(slashes[0].anchor, "middle", "centred on it horizontally");
+  assertEqual(slashes[0].baseline, "middle", "and vertically, so the middle is the glyph's and not its corner's");
+});
+
+// **The mark a reader can actually find**, which is the whole of this
+// renderer's negative half: a layered picture that silently reverses an
+// arrow is the wrong picture that looks right.
+//
+// A hand check on a hundred-step progression fitted the drawing at
+// k = 0.058 and measured the two strokes at 0.43 × 0.43 CSS pixels — at
+// the zoom where the progression reads as a progression, the mark was
+// invisible. The property that fixes it is not "the mark is bigger": it
+// is that the mark is drawn by the one mechanism in this front end that
+// holds a size in *screen* terms while the world scales, which is the
+// label band (mst-canvas.js's labelScale / labelFontSize). So the
+// assertion is that the mark is a label at all — a line, of any length,
+// scales with the picture and disappears again.
+check("theReversalMarkKeepsItsSizeWhileThePictureShrinks", () => {
+  const result = scene(cycleOfThree(), {});
+  const slashes = marksOfClass(result, CLASS_REVERSED);
+  assertEqual(slashes.length, 1, "one edge runs against the ranking");
+  const slash = slashes[0];
+  assertEqual(slash.kind, MARK_LABEL, "the mark is a label, which is what the zoom band re-sizes");
+  assert(slash.size > 0, "and it declares the size the band re-derives from");
+  assert(slash.size > LABEL_SIZE, "larger than a name: it is not a label *on* anything");
+
+  // What the canvas then does with it — the actual screen size at the
+  // zoom the hand check measured — is asserted in
+  // internal/web/jstest/canvas_test.mjs, which owns the label band and
+  // can import it without dragging a DOM into this harness.
+
+  // And it is legible over the edges it sits on, which is what a halo is
+  // for: the mark's whole job is to be found among four hundred lines.
+  assert(typeof slash.halo === "string" && slash.halo !== "", "the glyph carries a halo");
+  assert(slash.haloWidth > 0, "of a real width");
+
+  // **And nothing is painted over it.** Scene order is document order is
+  // paint order, and every node label in this picture goes into the same
+  // layer as this mark. Emitted where it is computed, it landed under a
+  // hundred names — on the hundred-step progression the browser check
+  // used, `elementFromPoint` at the mark's own centre answered a
+  // `node-label`, not the mark. So it is the last mark in the scene.
+  const at = result.marks.indexOf(slash);
+  assertEqual(at, result.marks.length - 1, "the reversal mark is the last mark in the scene");
+  const labelsAfter = result.marks.slice(at + 1).filter((mark) => mark.kind === MARK_LABEL);
+  assertEqual(labelsAfter.length, 0, "so no label is painted over it");
 });
 
 check("aReversalMarkStandsStillDuringADrag", () => {
@@ -241,9 +286,12 @@ check("aReversalMarkStandsStillDuringADrag", () => {
   // layer, and is redrawn with the picture on the drop that writes. A
   // mark that named one end would ride half a drag and land wrong.
   const result = scene(cycleOfThree(), {});
-  for (const slash of marksOfClass(result, CLASS_REVERSED)) {
+  const found = marksOfClass(result, CLASS_REVERSED);
+  assert(found.length > 0, "there is a mark to check");
+  for (const slash of found) {
     assertEqual(slash.source, undefined, "a double-slash belongs to no node");
     assertEqual(slash.target, undefined, "at either end");
+    assertEqual(slash.key, undefined, "and to no entity, so the drag layer never carries it");
   }
 });
 
@@ -265,7 +313,7 @@ check("aCycleIsCountedInTheFrame", () => {
   const result = scene(envelope, {});
   assertEqual(result.against, 3, "three edges run backwards through the ranking");
   assert(result.cyclic, "and the graph really has a cycle");
-  assertEqual(marksOfClass(result, CLASS_REVERSED).length, 6, "each of the three carries a slash");
+  assertEqual(marksOfClass(result, CLASS_REVERSED).length, 3, "each of the three carries a slash");
 
   const footer = footerFor(envelope, { against: result.against, cyclic: result.cyclic });
   assert(

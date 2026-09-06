@@ -14,6 +14,10 @@
 
 import {
   DATA_SLOTS,
+  HATCH_FILL,
+  HATCH_GROUND,
+  HATCH_PATTERN_ID,
+  HATCH_STROKE,
   UNSET_LABEL,
   fillFor,
   hueFor,
@@ -223,7 +227,17 @@ check("fillForNamesATokenAndNeverAHexValue", () => {
   for (const row of rows) {
     const fill = fillFor(row);
     seen.add(fill.kind);
-    assert(fill.css.startsWith("var(--"), `${row.label} paints through a token: ${fill.css}`);
+    // The tail is the one paint that is not a colour, and that is the
+    // whole of it: a flat fill among eight flat fills is a ninth colour.
+    // It names a paint server, and the pattern that server resolves to
+    // is drawn in tokens — asserted below and in canvas_test.mjs, which
+    // is where the pattern is emitted.
+    if (row.kind === "hatch") {
+      assertEqual(fill.css, HATCH_FILL, `${row.label} paints through the hatch`);
+      assert(fill.css.includes(HATCH_PATTERN_ID), "and names the pattern the emitter defines");
+    } else {
+      assert(fill.css.startsWith("var(--"), `${row.label} paints through a token: ${fill.css}`);
+    }
     if (row.kind === "hue") {
       assertEqual(fill.css, `var(--data-${row.index + 1})`, `token for ${row.label}`);
       assert(row.index >= 0 && row.index < DATA_SLOTS, "the slot is within the palette");
@@ -231,6 +245,22 @@ check("fillForNamesATokenAndNeverAHexValue", () => {
   }
   assertEqual([...seen].sort().join(","), "hatch,hue,unset", "all three kinds were exercised");
   assertEqual(fillFor(null).css, "var(--unset)", "an unknown row paints as unset, not as data");
+
+  // **The tail is not one of the eight, and the assertion is that it is
+  // not *any* of them.** This is the check the browser round added: the
+  // tail was `var(--line-strong)`, which passes every "names a token"
+  // test ever written and reads as a ninth colour on screen.
+  const hatch = fillFor({ kind: "hatch" });
+  for (let i = 1; i <= DATA_SLOTS; i += 1) {
+    assert(hatch.css !== `var(--data-${i})`, "the tail wears one of the eight hues");
+  }
+  assert(!hatch.css.startsWith("var(--"), "the tail is a flat colour, which is a ninth category to a reader");
+  assert(hatch.css.startsWith("url(#"), "the tail names a paint server, which is what makes it a texture");
+  // The hatch's own colours are tokens, so both themes stay the
+  // stylesheet's business.
+  for (const token of [HATCH_STROKE, HATCH_GROUND]) {
+    assert(token.startsWith("var(--"), `the hatch paints through a token: ${token}`);
+  }
 });
 
 if (failures > 0) {

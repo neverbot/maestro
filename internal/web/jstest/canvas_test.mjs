@@ -78,6 +78,11 @@ const { ACTION_RETRY_LAYOUT, BANNER_LAYOUT_BUDGET, runWithBudget } = await impor
   "../static/layout/budget.js"
 );
 
+const { HATCH_FILL, HATCH_GROUND, HATCH_PATTERN_ID, HATCH_STROKE, fillFor } = await import(
+  "../static/palette.js"
+);
+const { CLASS_REVERSED, REVERSAL_SIZE } = await import("../static/render/marks.js");
+
 let failures = 0;
 const pending = [];
 
@@ -375,7 +380,12 @@ check("theEmitterWritesOnlyTheAttributesTheContractNames", () => {
   // A kind nobody declared is reported rather than drawn or thrown.
   const odd = emitScene({ marks: [{ kind: "hexagon", x: 0, y: 0 }] }, { document: dom.document });
   assertEqual(odd.skipped.length, 1, "a mark of an unknown kind is skipped");
-  assertEqual(walk(odd.root).length, 7, "and nothing was emitted for it: the svg, the world and five layers");
+  assertEqual(
+    walk(odd.root).length,
+    11,
+    "and nothing was emitted for it: the svg, the hatch definition (defs, pattern, its ground and its " +
+      "stripe), the world and five layers",
+  );
 });
 
 check("anHrefTheInstanceCannotServeIsRefused", () => {
@@ -545,6 +555,164 @@ check("labelsStopScalingOutsideTheBand", () => {
   assertClose(apparent(), 11 * 1.2, "inside the band the label scales with the zoom");
   assertClose(labelFontSize(11, 1.2), 11, "which is the authored size, unchanged");
   assertEqual(labelFontSize(undefined, 1), DEFAULT_LABEL_SIZE, "a mark with no size gets the default");
+});
+
+// --- What a reader can actually see ----------------------------------
+//
+// Three properties found by opening this front end in a browser for the
+// first time (Task 15's hand checks). Each was a case where the scene
+// was right and the screen was not, and none of them could have failed a
+// test that only read the scene.
+
+// **The tail is a texture, and the texture exists.**
+//
+// palette.js paints the ninth-and-beyond values with a paint server so
+// they are visibly not one of the eight hues. A fill naming a pattern
+// nobody defined is the worst of both: SVG resolves it to *nothing*, so
+// the node is drawn invisible and no error is raised anywhere. So the
+// two halves are joined here — the paint the palette names, and the
+// definition the emitter emits.
+check("theHatchTheTailIsPaintedWithIsReallyEmitted", () => {
+  const tree = emitScene({ marks: [{ kind: MARK_RECT, x: 0, y: 0, w: 10, h: 10, fill: HATCH_FILL }] }, {
+    document: dom.document,
+  });
+  const patterns = walk(tree.root).filter((el) => el.tagName === "pattern");
+  assertEqual(patterns.length, 1, "the drawing defines exactly one hatch");
+  assertEqual(patterns[0].getAttribute("id"), HATCH_PATTERN_ID, "under the id the palette's fill names");
+  assertSame(patterns[0].parentNode.tagName === "defs" ? patterns[0] : null, patterns[0], "inside a <defs>");
+
+  // The fill on the mark and the id of the pattern are the same string,
+  // read from the two files rather than typed here twice.
+  const painted = tree.layers.get(LAYER_NODES).childNodes[0];
+  assertEqual(painted.getAttribute("fill"), HATCH_FILL, "and the tail's mark wears it");
+  assert(HATCH_FILL.includes(HATCH_PATTERN_ID), "the fill names the pattern");
+  assertEqual(fillFor({ kind: "hatch" }).css, HATCH_FILL, "which is what the palette paints a tail with");
+
+  // Both themes: the hatch is drawn in tokens, like everything else.
+  const stripe = walk(patterns[0]).find((el) => el.tagName === "line");
+  const ground = walk(patterns[0]).find((el) => el.tagName === "rect");
+  assertEqual(stripe.getAttribute("stroke"), HATCH_STROKE, "the stripes are a token");
+  assertEqual(ground.getAttribute("fill"), HATCH_GROUND, "and so is what they are drawn on");
+  assert(Number.parseFloat(stripe.getAttribute("stroke-width")) > 0, "and a stripe has a width");
+
+  // The definition is emitted for every drawing, not only one with a
+  // tail in it: a definition emitted on a condition is a fill that
+  // resolves to nothing the first time the condition is wrong.
+  const plain = emitScene({ marks: [] }, { document: dom.document });
+  assertEqual(
+    walk(plain.root).filter((el) => el.getAttribute("id") === HATCH_PATTERN_ID).length,
+    1,
+    "a drawing with no tail still defines the hatch",
+  );
+});
+
+// **The cycle mark survives the zoom the picture is read at.**
+//
+// The mark that says a ranked drawing had to reverse an edge was two 1px
+// strokes nine units long, drawn inside the world group. On a
+// hundred-step progression the drawing fits at k = 0.058, where those
+// strokes measured 0.43 CSS pixels in Firefox — the whole of this
+// renderer's negative half, invisible. It is a label now, so the label
+// band keeps it at a constant apparent size, and this is the assertion
+// that a line would fail.
+check("theCycleMarkIsStillThereWhenTheWholePictureFits", () => {
+  const canvas = newCanvas();
+  canvas.draw({
+    marks: [
+      { kind: MARK_LINE, x1: 0, y1: 0, x2: 4000, y2: 6000, stroke: "var(--muted)" },
+      {
+        kind: MARK_LABEL,
+        class: CLASS_REVERSED,
+        x: 2000,
+        y: 3000,
+        text: "//",
+        size: REVERSAL_SIZE,
+        anchor: "middle",
+        baseline: "middle",
+      },
+    ],
+  });
+  const mark = walk(canvas.tree.root).find((el) => el.getAttribute("class") === CLASS_REVERSED);
+  assert(mark !== undefined, "the mark is in the drawing");
+
+  // The zoom the hand check measured, on the picture this mark exists
+  // for. The old mark was 0.43 px across; a number below is what it
+  // would be again.
+  const fitted = 0.058;
+  canvas.zoomTo(fitted);
+  const drawn = Number.parseFloat(mark.getAttribute("font-size")) * fitted;
+  assert(drawn > 8, `the cycle mark is ${drawn.toFixed(2)} px at the zoom a hundred-step progression fits at`);
+
+  // And it is not simply enormous when the picture is read close up:
+  // the band holds it at the top as well as at the bottom.
+  canvas.zoomTo(4);
+  const close = Number.parseFloat(mark.getAttribute("font-size")) * 4;
+  assert(close < REVERSAL_SIZE * LABEL_SCALE_MAX + 1, `and ${close.toFixed(2)} px at 4x, not four times bigger`);
+});
+
+// **No control a keyboard can reach is hidden from a screen reader.**
+//
+// The drawing is aria-hidden because the twin is the accessible content
+// of an answer. For one round the attribute sat on the box the canvas is
+// *slotted into*, which also holds the arrangement menu, the ground
+// panel and the table's sort headers — so every one of those buttons was
+// reachable by tab and announced to nobody, which is worse than either
+// alone. Found by reading the frame's shadow tree in Firefox.
+//
+// The assertion is the general rule rather than the two buttons that
+// were found: anything focusable, anywhere under the canvas, with an
+// aria-hidden ancestor.
+check("noControlIsBothReachableByKeyboardAndHiddenFromAScreenReader", () => {
+  const canvas = newCanvas();
+  canvas.draw(mapScene());
+  canvas.showArrangement({
+    pending: false,
+    band: null,
+    menu: () => ({
+      actions: [
+        { id: "unpin", label: "Unpin" },
+        { id: "clear", label: "Clear the saved position" },
+      ],
+      notes: [],
+    }),
+  });
+
+  const hiddenUnder = (element) => {
+    for (let at = element; at; at = at.parentNode) {
+      if (at.getAttribute && at.getAttribute("aria-hidden") === "true") return at;
+    }
+    return null;
+  };
+
+  const focusable = walk(canvas.shell.root).filter(
+    (el) => el.tagName === "button" || el.tagName === "a" || el.getAttribute("tabindex") !== null,
+  );
+  assert(focusable.length > 0, "the fixture put controls on the canvas: a scan with nothing in it guards nothing");
+  for (const control of focusable) {
+    const hidden = hiddenUnder(control);
+    assertEqual(
+      hidden,
+      null,
+      `a ${control.tagName} a keyboard can reach ("${control.textContent}") is inside an aria-hidden element`,
+    );
+  }
+
+  // And the drawing itself still says it is decoration, which is the
+  // half that must not be lost while fixing the other one.
+  assertEqual(
+    canvas.tree.root.getAttribute("aria-hidden"),
+    "true",
+    "the svg is hidden from assistive technology; the twin is the answer",
+  );
+  assertEqual(
+    canvas.shell.surfaceHost.getAttribute("aria-hidden"),
+    null,
+    "and the box that takes the keyboard is not, because it is a control",
+  );
+  assert(
+    typeof canvas.shell.surfaceHost.getAttribute("aria-label") === "string",
+    "and it has a name: a focusable element with none is announced as nothing at all",
+  );
 });
 
 // --- The drag layer --------------------------------------------------

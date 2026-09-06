@@ -543,26 +543,45 @@ check("everyAnswerHasATwinAndNoRefusalDoes", () => {
   assertEqual(refusal.twin, null, "a refusal has none: there is no answer to describe");
 });
 
-check("theCanvasIsAriaHiddenAndTheTwinIsNot", () => {
+// **The drawing is hidden and the box it is slotted into is not**, which
+// is a correction and not a preference.
+//
+// The frame used to hide the whole wrapper, and what arrives through
+// that slot is not only the picture: the canvas brings the arrangement
+// menu and the ground panel with it, and the `table` renderer brings its
+// sort headers. Every one of those buttons was reachable by tab and
+// announced to nobody — a keyboard user can reach a control a screen
+// reader will not read out, which is worse than either alone. Found by
+// reading this component's shadow tree in Firefox: two tabbable buttons,
+// "Unpin" and "Clear the saved position", inside the hidden div.
+//
+// So the attribute moved onto the thing that is actually decoration: the
+// `<svg>`, marked by mst-canvas.js's emitScene, where
+// internal/web/jstest/canvas_test.mjs asserts it — together with the
+// general rule that nothing focusable anywhere under the canvas has an
+// aria-hidden ancestor.
+check("theDrawingIsHiddenAndTheControlsBesideItAreNot", () => {
   const frame = new MstViewFrame();
   frame.frame = frameFor({ view: { key: "world", name: "The world", renderer: "graph" }, envelope: answer });
   const markup = markupOf(renderComponent(frame));
 
   assert(markup.includes("<slot></slot>"), "the drawing is slotted into the frame");
-  const hidden = markup.indexOf('aria-hidden="true"');
-  assert(hidden >= 0, "and the element it is slotted into is hidden from assistive technology");
   const slot = markup.indexOf("<slot>");
   const close = markup.indexOf("</div>", slot);
-  assert(hidden < slot && slot < close, "the slot is inside the hidden element, not beside it");
+  assertEqual(
+    markup.indexOf("aria-hidden"),
+    -1,
+    "nothing in the frame's own tree is hidden: the slot carries controls as well as the picture, " +
+      "and hiding them here is how a button becomes reachable and unannounced",
+  );
 
   const twinAt = markup.indexOf("<mst-twin");
-  assert(twinAt > close, "and the twin is outside it");
-  assertEqual(markup.indexOf('aria-hidden', twinAt), -1, "the twin is hidden from nobody");
+  assert(twinAt > close, "and the twin is outside the slot's box");
 
   const twin = new MstTwin();
   twin.twin = twinFor(answer);
   const twinMarkup = markupOf(renderComponent(twin));
-  assertEqual(twinMarkup.includes("aria-hidden"), false, "and hides nothing of its own");
+  assertEqual(twinMarkup.includes("aria-hidden"), false, "the twin hides nothing of its own");
   assert(twinMarkup.includes("<table"), "it is a table a screen reader can navigate");
 });
 

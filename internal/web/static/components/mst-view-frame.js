@@ -121,7 +121,24 @@ export class MstViewFrame extends LitElement {
        not. Nothing about an SVG scene is navigable without sight, and a
        canvas decorated with ARIA roles would be a second, worse twin
        that nobody can read; the honest arrangement is one accessible
-       representation and one that says it is decoration. */
+       representation and one that says it is decoration.
+
+       **The hiding is on the drawing and not on this box, which is a
+       correction.** aria-hidden="true" used to sit on the wrapper
+       below — and what is slotted into it is not only the picture: the
+       arrangement menu, the ground panel and the table's sort headers
+       all arrive through the same slot. Every one of their buttons was
+       therefore a control a keyboard could reach and a screen reader
+       would never announce, which is worse than either alone: a reader
+       who cannot see the page tabs into something that is not there.
+       Found by reading this component's shadow tree in a browser: two
+       tabbable buttons, "Unpin" and "Clear the saved position", inside
+       the hidden div. So mst-canvas.js's emitScene marks the svg
+       itself, which is the thing that is decoration, and the controls
+       beside it are announced like any other controls. The table
+       renderer's own table is announced too, and is a second reading of
+       what the twin already says — redundancy, where the alternative was
+       a sortable table nobody could hear. */
     /* No height here. The drawing needs an enclosure with one and gives
        itself that enclosure (mst-canvas's own :host rule), because this
        slot holds the *table* renderer too and a table in a 70vh box
@@ -224,7 +241,7 @@ export class MstViewFrame extends LitElement {
     if (frame.kind === KIND_DIAGNOSTICS) return this.panel(frame);
     if (frame.kind === KIND_UNBOUND) return nothing;
     if (frame.kind === KIND_EMPTY) return html`${this.emptyAnswer(frame)}${this.twin(frame)}`;
-    return html`<div class="canvas" aria-hidden="true"><slot></slot></div>${this.twin(frame)}`;
+    return html`<div class="canvas"><slot></slot></div>${this.twin(frame)}`;
   }
 
   // The twin is rendered for every answer, in the same place, whichever

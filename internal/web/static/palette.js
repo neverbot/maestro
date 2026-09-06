@@ -182,6 +182,51 @@ export function labelFor(jsonText) {
   return jsonText.startsWith('"') ? JSON.parse(jsonText) : jsonText;
 }
 
+// The tail's paint, and **the whole of why it is a paint server and not
+// a colour.**
+//
+// The tail exists to be visibly *not one of the eight*: it is where the
+// ninth-and-beyond values go precisely because a ninth hue would not be
+// distinguishable from its neighbours. For one round it was painted a
+// flat `var(--line-strong)`, and a flat fill among eight flat fills is a
+// ninth colour — a reader who did not write the legend counts nine
+// categories, which is the exact failure the tail was invented to
+// prevent. Found by drawing a hundred nodes over eleven values in a
+// browser (Task 15's hand checks), where twenty-five tail nodes read as
+// "the dark grey faction".
+//
+// So the tail is *textured*: a hatch, which is a difference of kind
+// rather than of hue and is therefore still legible to a reader who
+// cannot tell two of the eight apart. `url(#…)` names an SVG paint
+// server, and the pattern it names is emitted once per drawing by
+// mst-canvas.js's `emitScene` — this module still says only what the
+// paint is called, exactly as it says `var(--data-1)` and leaves the
+// colour to the stylesheet. The pattern itself is drawn in
+// `var(--line-strong)` on `var(--paper)`, so both themes remain the
+// stylesheet's business.
+//
+// The id is spelled here because the paint and its definition have to
+// agree and there is only one honest place for the agreement to live:
+// `internal/web/jstest/palette_test.mjs` and `canvas_test.mjs` join the
+// two, and a drawing whose hatch fill names a pattern the emitter never
+// defined is a fill the browser resolves to *nothing at all* — an
+// invisible node, silently.
+export const HATCH_PATTERN_ID = "mst-hatch";
+export const HATCH_FILL = `url(#${HATCH_PATTERN_ID})`;
+// The token the hatch's own strokes are drawn in, and the ground behind
+// them. Named here rather than in the emitter so that "what colour is
+// the tail" has one answer, in the module that owns every other answer
+// to that question.
+export const HATCH_STROKE = "var(--line-strong)";
+export const HATCH_GROUND = "var(--paper)";
+// The hatch's geometry, in the drawing's own coordinates: a stripe every
+// PITCH units, WIDTH units thick, at 45°. The pitch is a fraction of a
+// node's height (render/marks.js's NODE_H is 44), so a tail node carries
+// several stripes rather than one, and a node too small to show a stripe
+// is a node too small to show a hue either.
+export const HATCH_PITCH = 7;
+export const HATCH_WIDTH = 2.5;
+
 // fillFor turns a legend row into the paint a mark wears.
 //
 // `css` names a custom property rather than a hex value: the light and
@@ -200,7 +245,7 @@ export function fillFor(row) {
     case "hue":
       return { kind: "hue", index: row.index, css: DATA_TOKENS[row.index] };
     case "hatch":
-      return { kind: "hatch", index: null, css: "var(--line-strong)" };
+      return { kind: "hatch", index: null, css: HATCH_FILL };
     default:
       return { kind: "unset", index: null, css: "var(--unset)" };
   }

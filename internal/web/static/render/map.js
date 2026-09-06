@@ -201,8 +201,10 @@ export const CONTROLS = [
 //   shelf     — `{key, label}` per node with no coordinate, in address
 //               order, which is also the order the chips are drawn in.
 //   automatic — how many pins are at a coordinate this client chose
-//               rather than a designer, for the frame's *"n new nodes
-//               were placed automatically"*.
+//               because the arrangement had no row for the node, for the
+//               frame's *"n new nodes were placed automatically"*. It is
+//               **not** the number of hollow anchors: a stored row that
+//               nobody is holding draws hollow and is not new.
 //   firstRun  — the sentence, or null. Not a mark; see the header.
 //   background — `{drawn, missing}`.
 //   grid      — `{spacing, drawn}`, so a test and the canvas read one
@@ -233,7 +235,7 @@ export function mapScene(envelope, params = {}, options = {}) {
       shelf.push({ key, label: labelOf(node) });
       continue;
     }
-    if (!at.placed) automatic++;
+    if (at.automatic) automatic++;
     pins.set(key, {
       key,
       node,
@@ -375,7 +377,31 @@ function coordinatesFor(nodes, envelope, config, options) {
     if (!inPicture.has(row.key)) continue;
     saved.set(row.key, row);
   }
-  for (const [key, row] of saved) out.set(key, { x: row.x, y: row.y, placed: true });
+  // **`pinned`, not merely `stored`, is what makes an anchor solid**,
+  // and that is a correction made in a browser. A row is stored the
+  // moment anything writes a coordinate for it; it is *pinned* only when
+  // a designer put it there and is holding it. Reading presence alone
+  // drew all of them solid — over a manual map whose 251 rows alternated
+  // pinned true and false, every one of the 105 drawn anchors came out
+  // `fill: var(--ink)`, `r: 3.5`, identical — so the one distinction the
+  // mixed layout mode is entirely about, *which nodes did I place and
+  // which did the engine*, was written, stored, returned in `positions[]`
+  // and never drawn.
+  //
+  // It collapses into the hollow ring rather than inventing a third
+  // mark, because the two facts are one fact from a designer's side: a
+  // coordinate the client computed and a stored coordinate nobody is
+  // holding are both *nobody put this here*. Unpinning already promises
+  // to change no pixel until the position is cleared
+  // (mst-canvas.js's NOTE_UNPIN_NEEDS_CLEAR) — it changes the ring, and
+  // that is the promise made visible rather than broken.
+  for (const [key, row] of saved) {
+    // `automatic: false` whatever the pin looks like: this node has a
+    // row, so it is not one of the *new* ones the band counts. The ring
+    // and the band answer two different questions and must not be read
+    // off one field — see the count below.
+    out.set(key, { x: row.x, y: row.y, placed: row.pinned === true, automatic: false });
+  }
 
   // **A fresh map is every node on the shelf**, whatever a composition
   // computed for it. §4.6 asks for exactly that, and it is also the only
@@ -391,7 +417,21 @@ function coordinatesFor(nodes, envelope, config, options) {
     out.set(placement.key, {
       x: placement.x,
       y: placement.y,
-      placed: placement.source === SOURCE_STORED,
+      // The same rule as above, read off a composition instead of a row:
+      // a placement is solid when a designer is holding it, and
+      // compose() only ever answers `pinned: true` for a stored row that
+      // says so.
+      placed: placement.pinned === true,
+      // And this is the *band's* question: is this node new to the
+      // arrangement — one the client had to place because nothing was
+      // stored for it. Kept apart from the mark deliberately. When the
+      // ring came to mean "the engine put this here" it also came to
+      // cover a stored row nobody is holding, and a band counting rings
+      // would have announced *"53 new nodes were placed automatically"*
+      // over an arrangement in which nothing was new. Seen on screen,
+      // one browser reload after the ring was fixed: the rule was right
+      // and had not been carried one step along.
+      automatic: placement.source !== SOURCE_STORED,
     });
   }
   return out;

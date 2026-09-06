@@ -3935,6 +3935,139 @@ and say why.
     marks" names a mark that does not exist. Whoever owns Task 14's
     vocabulary has to decide whether it should.
 
+### The four marks that did not read on screen
+
+The hand checks above found four places where the scene assertions were
+right and the screen was not — a right answer a designer cannot read.
+None of them could have failed a test that only read the scene, which is
+what the browser round was for. They are fixed here, in the renderers
+they belong to, each with a check that goes red for the shape that
+shipped.
+
+1. **The hatched tail was not hatched, so the tail read as a ninth
+   colour.** `palette.js` gave the ninth-and-beyond row
+   `css: "var(--line-strong)"` and the drawing contained no `<pattern>`
+   at all; twenty-five tail nodes were a flat dark grey among eight flat
+   hues, which is precisely what the tail exists not to be.
+
+   *Changed:* `fillFor` paints the tail with `HATCH_FILL`
+   (`url(#mst-hatch)`), and `emitScene` emits the pattern it names —
+   unconditionally, once per drawing, because a fill naming a pattern
+   nobody defined resolves to **nothing** and draws an invisible node
+   with no error anywhere. The pattern's two colours are tokens
+   (`var(--line-strong)` on `var(--paper)`), so both themes stay the
+   stylesheet's business.
+
+   *Seen:* a hundred quests over eleven factions, in Firefox. Nine
+   hatched nodes, `fill: url(#mst-hatch)` on every one, the stripe's
+   token resolving to `rgb(133, 126, 114)`. At 2.5× a *Murk 2* beside a
+   *Thorn 2* reads as a different **material**, not a different colour,
+   and its label stays legible on it. Before: the same nodes flat grey.
+
+2. **The cycle mark was 0.6 px and could not be found — and then, once
+   it could, it was painted over.** Two 1px strokes nine units long,
+   inside the zoomed world group. Measured in Firefox at the fitted zoom
+   of a hundred-step progression (k = 0.058): **0.43 × 0.43 CSS pixels**.
+
+   *Changed:* the mark is a `MARK_LABEL` carrying the glyph `//` at 1.6×
+   a name's size, with a halo. Not a second scaling mechanism — the
+   canvas already holds labels at a constant apparent size through the
+   label band, so a mark that *is* a label gets that for free, in the one
+   place the rule is written. **And a second finding on the way:** the
+   mark was emitted where it is computed, before every node label, into
+   the same layer — so at the fitted zoom `elementFromPoint` at the
+   mark's own centre answered `text.node-label`. It is now the last mark
+   in the scene.
+
+   *Seen:* the same view, same zoom. 14.2 × 18.1 px, `elementFromPoint`
+   at its centre answers the mark itself, and on a twenty-four-step
+   progression (where the pre-existing label collision does not swamp the
+   picture) the `//` is plainly visible at *Step 14*, at the fitted zoom,
+   without being told where to look.
+
+3. **Pinned and unpinned anchors were drawn identically.** Over a manual
+   map whose stored rows alternated `pinned: true` and `pinned: false`,
+   all 105 anchors came back `class="point"`, `fill: var(--ink)`,
+   `r: 3.5`. The one distinction the mixed layout mode is about was
+   written, stored, returned in `positions[]` and never drawn.
+
+   *Changed:* the hollow ring is reused rather than a third mark
+   invented, and its meaning is sharpened to **the engine put this here**
+   — which now covers both a coordinate the client computed and a stored
+   row nobody is holding. Solid means *a designer pinned this*. The two
+   facts are one fact from a designer's side, and unpinning already
+   promises to change no pixel until the position is cleared: it changes
+   the ring, which is that promise made visible rather than broken.
+
+   *And the rule carried one step along, which it was not at first:* the
+   band that says *"n new nodes were placed automatically"* counted
+   hollow anchors, so one reload after the ring was fixed the screen
+   announced **"53 new nodes were placed automatically"** over an
+   arrangement in which nothing was new. The mark and the band answer
+   different questions and now read different fields — `placed` for the
+   ring, `automatic` for the band.
+
+   *Seen:* 52 solid, 53 hollow, in the classes and in the fills; at 3×,
+   *Murk 2* is a filled disc between two rings and the difference is
+   unmissable; and the false band is gone.
+
+4. **Focusable buttons sat inside the wrapper hidden from assistive
+   technology.** `aria-hidden="true"` was on the box the canvas is
+   slotted into, and what arrives through that slot is not only the
+   picture: the canvas brings the arrangement menu and the ground panel,
+   and the `table` renderer brings its sort headers. Read in Firefox:
+   two tabbable buttons, *Unpin* and *Clear the saved position*, inside
+   the hidden div.
+
+   *Changed:* the hiding moved onto the thing that is actually
+   decoration — the `<svg>`, marked in `emitScene`. The box that takes
+   the keyboard got a name (`SURFACE_LABEL`), because a focusable element
+   with none is announced as nothing at all. The `table` renderer's own
+   table is announced now too, a second reading of what the twin already
+   says — redundancy, where the alternative was a sortable table nobody
+   could hear.
+
+   *Seen:* on a map view and on a table view, 115 focusable elements and
+   **zero** with an `aria-hidden` ancestor, walked across every shadow
+   root; the `<svg>` still carries `aria-hidden="true"`; the surface host
+   carries its name.
+
+**Which of these has only a scene assertion behind it.** Marks 1, 2 and 3
+are judgements about appearance, and a scene assertion is necessary and
+not sufficient for any of them: the tests hold that the tail names a
+paint server no hue names, that the cycle mark is a label of more than a
+name's size and the last mark in the scene, and that a pinned anchor and
+an unpinned one are two marks. **That the hatch is legible as a texture,
+that the `//` is findable without being told, and that a filled disc
+reads as "mine" — those are the browser's half, recorded above, and they
+have no test.** Mark 4 is the exception: "nothing focusable has an
+aria-hidden ancestor" is a property, not a judgement, and it is asserted
+twice — over a real tree in `canvas_test.mjs`, and over every component's
+source by `TestNoComponentHidesASlotFromAssistiveTechnology`.
+
+**Mutations run, each verified applied and then reverted.**
+
+- The tail back to a flat `var(--line-strong)` → **red**:
+  `fillForNamesATokenAndNeverAHexValue`,
+  `theHatchTheTailIsPaintedWithIsReallyEmitted`.
+- The hatch defined only when a mark uses it → **red**: the same check
+  ("the drawing defines exactly one hatch: got 0"), plus
+  `theEmitterWritesOnlyTheAttributesTheContractNames`, which counts the
+  elements a drawing is made of.
+- The cycle mark back to two world-space strokes → **red**:
+  `theReversalMarkKeepsItsSizeWhileThePictureShrinks` ("got line, want
+  label") and `theCycleMarkIsStillThereWhenTheWholePictureFits`.
+- A stored row solid whether or not anybody is holding it → **red**:
+  `aStoredPositionThatIsNotPinnedIsDrawnAsTheEnginesAndNotAsADesignersOwn`.
+- The band counting rings again → **red**: the same check's second half
+  ("nothing here is new: got 1, want 0").
+- `aria-hidden="true"` back on the frame's wrapper → **red**:
+  `theDrawingIsHiddenAndTheControlsBesideItAreNot` and
+  `TestNoComponentHidesASlotFromAssistiveTechnology`, which quotes the
+  offending source.
+- The `<svg>` no longer saying it is decoration → **red**:
+  `noControlIsBothReachableByKeyboardAndHiddenFromAScreenReader`.
+
 ---
 
 ### Task 16: "Save as" — the only view a human can make

@@ -82,6 +82,10 @@ import {
   SVG_NS,
   isDrawableHref,
 } from "../render/scene.js";
+// The tail's texture. Its *name* is palette.js's, for the reason that
+// module gives: the paint and its definition have to agree, and there is
+// one place that owns what a value's paint is called.
+import { HATCH_GROUND, HATCH_PATTERN_ID, HATCH_PITCH, HATCH_STROKE, HATCH_WIDTH } from "../palette.js";
 
 // --- Zoom, pan, and the label band -----------------------------------
 
@@ -143,6 +147,10 @@ export function translateFor(dx, dy) {
 // rather than by matching a string it also wrote.
 export const CLASS_ROOT = "canvas full-bleed";
 export const CLASS_SURFACE_HOST = "surface-host";
+// What the box that takes the keyboard is called. The drawing inside it
+// is aria-hidden and the twin is the accessible content of the answer,
+// so this names the *control*: what the arrow keys do here.
+export const SURFACE_LABEL = "The drawing. Arrow keys move the selected nodes.";
 export const CLASS_SURFACE = "surface";
 export const CLASS_WORLD = "world";
 export const CLASS_PANELS = "panels floating";
@@ -228,6 +236,19 @@ export function emitScene(scene, options = {}) {
 
   const root = doc.createElementNS(SVG_NS, "svg");
   root.setAttribute("class", CLASS_SURFACE);
+  // **The drawing is what is hidden from assistive technology, and it is
+  // hidden here rather than one element up.** The text twin is the
+  // accessible content of an answer and nothing about an SVG scene is
+  // navigable without sight, so the surface says it is decoration. It
+  // used to be said by the frame, on the div this component is slotted
+  // into — which also holds the arrangement menu, the ground panel and
+  // the table's sort headers, so every one of those was a control a
+  // keyboard could reach and a screen reader would never announce, which
+  // is worse than either alone. Found by reading the frame's shadow tree
+  // in a browser. The picture is decoration; the controls beside it are
+  // not.
+  root.setAttribute("aria-hidden", "true");
+  root.appendChild(hatchPattern(doc));
   const world = doc.createElementNS(SVG_NS, "g");
   world.setAttribute("class", CLASS_WORLD);
   root.appendChild(world);
@@ -286,6 +307,51 @@ export function emitScene(scene, options = {}) {
   return { root, world, layers, nodes, edges, edgesByNode, labels, skipped };
 }
 
+// hatchPattern is the one paint server this emitter defines: the texture
+// palette.js's tail is painted with.
+//
+// **A tail painted a flat colour is a ninth colour**, which is the whole
+// of what the tail exists not to be — see palette.js's HATCH_FILL for
+// the finding. A hatch is a difference of *kind*, so it survives a
+// reader who cannot tell two of the eight hues apart, and it survives
+// both themes because its two colours are tokens.
+//
+// It is emitted unconditionally, once per drawing, rather than only when
+// some mark uses it: a `<defs>` costs nothing to a renderer that draws
+// no tail, and a definition emitted conditionally is a fill that
+// resolves to nothing the first time a condition is wrong — and an
+// unresolved paint server draws an **invisible** shape, with no error
+// anywhere.
+//
+// `userSpaceOnUse` and not `objectBoundingBox`: the stripes are in the
+// drawing's own coordinates, so two tail nodes of different sizes wear
+// the same texture rather than the same *number* of stripes, which is
+// what makes it read as one material.
+function hatchPattern(doc) {
+  const defs = doc.createElementNS(SVG_NS, "defs");
+  const pattern = doc.createElementNS(SVG_NS, "pattern");
+  pattern.setAttribute("id", HATCH_PATTERN_ID);
+  pattern.setAttribute("patternUnits", "userSpaceOnUse");
+  pattern.setAttribute("width", String(HATCH_PITCH));
+  pattern.setAttribute("height", String(HATCH_PITCH));
+  pattern.setAttribute("patternTransform", "rotate(45)");
+  const ground = doc.createElementNS(SVG_NS, "rect");
+  ground.setAttribute("width", String(HATCH_PITCH));
+  ground.setAttribute("height", String(HATCH_PITCH));
+  ground.setAttribute("fill", HATCH_GROUND);
+  const stripe = doc.createElementNS(SVG_NS, "line");
+  stripe.setAttribute("x1", "0");
+  stripe.setAttribute("y1", "0");
+  stripe.setAttribute("x2", "0");
+  stripe.setAttribute("y2", String(HATCH_PITCH));
+  stripe.setAttribute("stroke", HATCH_STROKE);
+  stripe.setAttribute("stroke-width", String(HATCH_WIDTH));
+  pattern.appendChild(ground);
+  pattern.appendChild(stripe);
+  defs.appendChild(pattern);
+  return defs;
+}
+
 function index(map, key, value) {
   const list = map.get(key);
   if (list) list.push(value);
@@ -323,6 +389,13 @@ export function buildShell(doc) {
 
   const surfaceHost = doc.createElement("div");
   surfaceHost.setAttribute("class", CLASS_SURFACE_HOST);
+  // This box takes the keyboard (pages/view.js gives it `tabindex="0"`,
+  // which is how the arrow keys nudge a selection), so it needs a name:
+  // a focusable element with no accessible name is announced as nothing
+  // at all. It is a control's name and not a description of the answer —
+  // the twin is the answer — which is this component's standing
+  // exception for the words it carries.
+  surfaceHost.setAttribute("aria-label", SURFACE_LABEL);
   root.appendChild(surfaceHost);
 
   const panels = doc.createElement("div");

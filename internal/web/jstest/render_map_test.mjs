@@ -376,6 +376,72 @@ check("aNewEntityInASavedArrangementIsPlacedUnpinnedAndCounted", () => {
   assertEqual(band.text, "12 new nodes were placed automatically.", "and counted");
 });
 
+// **A pinned anchor and an unpinned one are two different marks**, which
+// is the one distinction the mixed layout mode is entirely about and
+// which the drawing did not carry.
+//
+// Found by opening a manual map in a browser whose stored rows
+// alternated `pinned: true` and `pinned: false`: all 105 drawn anchors
+// came back identical — `class="point"`, `fill: var(--ink)`, `r: 3.5` —
+// so *which nodes did I place and which did the engine* was written,
+// stored, returned in `positions[]` and never drawn. The check that
+// existed (above) only ever fed pinned rows, so it could not fail.
+//
+// The ring is reused rather than a third mark invented, because the two
+// facts are one fact from a designer's side: a coordinate the client
+// computed and a stored coordinate nobody is holding are both *nobody
+// put this here*.
+check("aStoredPositionThatIsNotPinnedIsDrawnAsTheEnginesAndNotAsADesignersOwn", () => {
+  const nodes = [node("held"), node("released")];
+  const envelope = envelopeOf(nodes, [], {
+    positions: [position("held", 10, 10, true), position("released", 60, 10, false)],
+  });
+  const result = mapScene(envelope, {}, {});
+
+  assertEqual(result.placed.length, 2, "both are on the map: unpinning moves nothing");
+  assertDeepEqual(result.shelf, [], "and neither is shelved");
+
+  const solid = marksOfClass(result, CLASS_POINT);
+  const hollow = marksOfClass(result, CLASS_POINT_UNPLACED);
+  assertEqual(solid.length, 1, "one anchor is a designer's own");
+  assertEqual(hollow.length, 1, "and one is the engine's");
+  assertEqual(solid[0].key, address("held"), "the pinned row is the solid one");
+  assertEqual(hollow[0].key, address("released"), "and the unpinned row is the ring");
+  assertEqual(solid[0].fill, POINT_FILL, "a designer's anchor is filled");
+  assertEqual(hollow[0].fill, UNFILLED, "and the engine's has nothing in it");
+  assert(solid[0].stroke !== hollow[0].stroke, "and the two are told apart by more than the fill");
+
+  // **And the band is not the rings.** The mark answers "who put this
+  // here"; the band answers "how many nodes are new to this
+  // arrangement", and they are different questions about different
+  // sets. Reading one off the other announced *"53 new nodes were placed
+  // automatically"* over an arrangement in which nothing was new — seen
+  // on screen one reload after the ring was fixed, which is this
+  // repository's most repeated defect: a rule established correctly and
+  // not carried one step along.
+  assertEqual(result.automatic, 0, "nothing here is new: both nodes have a stored row");
+  assertEqual(
+    bannersFor(envelope, { placedAutomatically: result.automatic }).find(
+      (banner) => banner.code === BANNER_PLACED,
+    ),
+    undefined,
+    "so no band claims anything was placed automatically",
+  );
+
+  // The control: with both rows pinned there is no ring at all, so a
+  // change that drew every anchor hollow would fail here rather than
+  // pass both directions of the assertion above.
+  const bothHeld = mapScene(
+    envelopeOf(nodes, [], {
+      positions: [position("held", 10, 10, true), position("released", 60, 10, true)],
+    }),
+    {},
+    {},
+  );
+  assertEqual(marksOfClass(bothHeld, CLASS_POINT).length, 2, "two pinned rows are two solid anchors");
+  assertEqual(marksOfClass(bothHeld, CLASS_POINT_UNPLACED).length, 0, "and no rings");
+});
+
 // --- The ground ------------------------------------------------------
 
 check("aRemovedBackgroundKeepsEveryCoordinate", () => {

@@ -230,3 +230,80 @@ func TestTheTemplateTextScanReadsWhatItClaimsTo(t *testing.T) {
 		t.Errorf("the css skip ate the templates after it, or the selector was read as prose: %q", got)
 	}
 }
+
+// hidesASlot finds a template that hides a slot from assistive
+// technology: an `aria-hidden="true"` followed, in the same template
+// expression, by a `<slot>`.
+//
+// It is a substring rule and not a parser, deliberately — there is no
+// HTML parser in this package and adding one to hold one property would
+// be a second, worse browser — so it is bounded by the end of the
+// template literal, which is what makes "in the same template" mean
+// anything at all.
+var hidesASlot = regexp.MustCompile("(?s)aria-hidden=\"true\"[^`]*<slot")
+
+// TestNoComponentHidesASlotFromAssistiveTechnology is the source-shape
+// half of the fourth screen finding.
+//
+// The drawing is hidden from assistive technology because the text twin
+// is the accessible content of an answer — that is settled and right.
+// What was wrong is *where* it was said: `aria-hidden="true"` sat on the
+// box the canvas is slotted into, and what arrives through that slot is
+// not only the picture. The canvas brings the arrangement menu and the
+// ground panel; the `table` renderer brings its sort headers. Every one
+// of those buttons was reachable by tab and announced to nobody, which
+// is worse than either alone — a reader who cannot see the page tabs
+// into something that is not there.
+//
+// So the hiding moved onto the `<svg>` itself, in mst-canvas.js's
+// emitScene, where internal/web/jstest/canvas_test.mjs asserts it along
+// with the general rule that nothing focusable under the canvas has an
+// aria-hidden ancestor. This test holds the thing a harness cannot see
+// without a real browser and a real slot: that no component ever hides a
+// slot again. A slot's contents are somebody else's, and hiding them is
+// a decision about elements this file has never seen.
+func TestNoComponentHidesASlotFromAssistiveTechnology(t *testing.T) {
+	scanned := 0
+	for _, path := range componentFiles(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		scanned++
+		if hit := hidesASlot.FindString(string(raw)); hit != "" {
+			t.Errorf("%s hides a slot from assistive technology:\n\t%q\n"+
+				"what arrives through a slot is not only the drawing — the canvas brings the arrangement "+
+				"menu and the ground panel, the table renderer brings its sort headers — so every control "+
+				"in it becomes reachable by keyboard and announced to nobody. Mark the drawing itself "+
+				"(mst-canvas.js's emitScene marks the <svg>), never the box it is slotted into",
+				path, hit)
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("scanned no component: a walk that reads nothing guards nothing")
+	}
+	t.Logf("the slot-hiding scan read %d component(s)", scanned)
+}
+
+// TestTheSlotHidingScanReadsWhatItClaimsTo is the guard on the guard, in
+// both directions: a pattern that matched nothing would pass the test
+// above on the very source it was written against.
+func TestTheSlotHidingScanReadsWhatItClaimsTo(t *testing.T) {
+	for name, planted := range map[string]string{
+		"the shape that shipped": "return html`<div class=\"canvas\" aria-hidden=\"true\"><slot></slot></div>`;",
+		"the attribute last":     "html`<div><span aria-hidden=\"true\"></span><slot></slot></div>`",
+		"across a line":          "html`<div aria-hidden=\"true\">\n  <slot></slot>\n</div>`",
+	} {
+		if !hidesASlot.MatchString(planted) {
+			t.Errorf("the scan missed %s: %q", name, planted)
+		}
+	}
+	for name, allowed := range map[string]string{
+		"a slot with nothing hidden":         "html`<div class=\"canvas\"><slot></slot></div>`",
+		"a hidden thing in another template": "html`<span aria-hidden=\"true\">x</span>`;\nhtml`<slot></slot>`",
+	} {
+		if hidesASlot.MatchString(allowed) {
+			t.Errorf("the scan objects to %s, which is fine: %q", name, allowed)
+		}
+	}
+}

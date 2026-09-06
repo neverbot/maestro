@@ -656,36 +656,69 @@ export function bandMarks(band) {
 // that: the arrowhead stays in the relation's **true** direction and the
 // line carries a small double-slash, the map-maker's mark for a break.
 //
-// Two short parallel strokes, at 45° to the line so they are legible
-// whatever direction it runs, drawn at its midpoint.
+// The double-slash, drawn at the edge's midpoint.
+//
+// **It is a glyph and not a pair of strokes, and that is a correction
+// made in a browser.** It was two 1px lines about nine units long,
+// drawn inside the zoomed world group and scaled with it — so on the
+// picture this mark exists for, a hundred-step progression with one back
+// edge, the drawing fits the window at k = 0.058 and the mark renders at
+// **0.43 × 0.43 CSS pixels**. Measured, not estimated: two
+// `getBoundingClientRect`s in Firefox at the fitted zoom. At the zoom
+// where the progression is legible as a progression the mark is
+// invisible, and finding it means already knowing it is there — which is
+// exactly the defect it was written to prevent, because a ranked drawing
+// that silently reversed an arrow is the wrong picture that looks right.
+//
+// A label is the fix rather than a second scaling mechanism, because the
+// canvas already has one: every MARK_LABEL is re-sized on zoom against
+// mst-canvas.js's label band (LABEL_SCALE_MIN, labelFontSize), so a mark
+// that *is* a label keeps a constant apparent size for free, at every
+// zoom, in the one place that rule is written. Two short strokes at 45°
+// is what the glyph `//` already is, so the vocabulary §4.4 asks for is
+// unchanged — what changes is that a reader can see it.
+//
+// It carries a halo for haloLabelMarks's reason: it sits *on* an edge,
+// among as many other edges as the picture has, and `paint-order: stroke`
+// (styles.css) puts the halo under the glyphs rather than through them.
 export const CLASS_REVERSED = "reversed";
-export const REVERSAL_LENGTH = 9;
-export const REVERSAL_GAP = 5;
+export const REVERSAL_TEXT = "//";
+// Larger than a name. A mark that means "the drawing had to break a
+// cycle to exist" is not a label on something, and at the same size as
+// every node's name it reads as one more name.
+export const REVERSAL_SIZE = LABEL_SIZE * 1.6;
 
 // reversalMarks carries **no endpoint keys**, for edgeLabelMarks's
 // reason and not by omission: it sits at the middle of a line, and an
 // edge whose one end moved has a new middle, which no translation of a
-// pair of strokes can produce. It stands still during a drag and is
+// mark at that middle can produce. It stands still during a drag and is
 // redrawn with the picture on the drop that writes.
-export function reversalMarks(at, direction) {
-  const { x: ux, y: uy } = direction;
-  // The stroke direction: the edge's own, turned by 45°.
-  const c = Math.SQRT1_2;
-  const sx = (ux - uy) * c;
-  const sy = (ux + uy) * c;
-  const half = REVERSAL_LENGTH / 2;
-  const offset = REVERSAL_GAP / 2;
-  return [-offset, offset].map((along) => ({
-    kind: MARK_LINE,
-    class: CLASS_REVERSED,
-    layer: LAYER_EDGES,
-    x1: at.x + ux * along - sx * half,
-    y1: at.y + uy * along - sy * half,
-    x2: at.x + ux * along + sx * half,
-    y2: at.y + uy * along + sy * half,
-    stroke: EDGE_STROKE,
-    strokeWidth: EDGE_STROKE_WIDTH,
-  }));
+//
+// `direction` is taken and not used: the glyph is the same slanted pair
+// of strokes whichever way its edge runs, so there is nothing left to
+// rotate — and rotation is not in the emitter's contract anyway. The
+// argument stays in the signature because every caller has it and the
+// day this mark needs to lean with its edge is the day the contract
+// grows a transform.
+export function reversalMarks(at, _direction) {
+  return [
+    {
+      kind: MARK_LABEL,
+      class: CLASS_REVERSED,
+      // No layer: a label's default is the labels layer, which is over
+      // the edges it decorates, and naming what the contract already
+      // says is a second place for it to disagree.
+      x: at.x,
+      y: at.y,
+      text: REVERSAL_TEXT,
+      fill: EDGE_STROKE,
+      size: REVERSAL_SIZE,
+      anchor: "middle",
+      baseline: "middle",
+      halo: LABEL_HALO,
+      haloWidth: LABEL_HALO_WIDTH,
+    },
+  ];
 }
 
 // midpointOf is the middle of a drawn edge, so a caller that has to
@@ -944,6 +977,16 @@ export const LABEL_HALO_WIDTH = 2;
 // one spelling of "there is less here than there looks". A designer who
 // has dragged nothing sees a map of rings and knows the arrangement is
 // not theirs yet.
+//
+// **`placed` is "somebody chose this coordinate on purpose", which is
+// narrower than "a row exists".** On a map that means the position is
+// *pinned*: a stored row that nobody is holding — one the engine placed
+// and recorded, or one a designer unpinned — is the engine's coordinate
+// wearing a designer's row, and it gets the ring. render/map.js's
+// pinsFor is where that is read, and its comment carries the finding
+// that made it necessary. On a timeline it means the value the game
+// itself wrote, which is chosen by the content and by no engine, so
+// those points are solid.
 export function pointMarks(pin) {
   const { key, label, x, y, fill, placed, ambiguous } = pin;
   const marks = [

@@ -111,6 +111,62 @@ func (q *Queries) ListNormalisedInEdges(ctx context.Context, arg ListNormalisedI
 	return items, nil
 }
 
+const listRelationsByIDs = `-- name: ListRelationsByIDs :many
+SELECT r.id, r.relation_type_id, r.source_id, r.target_id, r.invalid
+FROM relations r
+WHERE r.project_id = $1 AND r.id = ANY($2::uuid[])
+`
+
+type ListRelationsByIDsParams struct {
+	ProjectID uuid.UUID
+	Ids       []uuid.UUID
+}
+
+type ListRelationsByIDsRow struct {
+	ID             uuid.UUID
+	RelationTypeID uuid.UUID
+	SourceID       uuid.UUID
+	TargetID       uuid.UUID
+	Invalid        bool
+}
+
+// ListRelationsByIDs reads the edges of a cycle back, so a finding can
+// name the relation *type* of every one of them -- which is the field
+// Task 4's widening of internal/graph exists for, because the first
+// thing a designer does with a reported loop is ask whether the type
+// should have been declared gating at all.
+//
+// The ids come out of a walk this game's own project id already bounded,
+// so the project filter here is redundant today. It is written anyway,
+// for the reason every statement in this file carries one: isolation is
+// a property of the statement and not of the caller that happens to feed
+// it, and the next caller of this statement will not be that walk.
+func (q *Queries) ListRelationsByIDs(ctx context.Context, arg ListRelationsByIDsParams) ([]ListRelationsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listRelationsByIDs, arg.ProjectID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRelationsByIDsRow
+	for rows.Next() {
+		var i ListRelationsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RelationTypeID,
+			&i.SourceID,
+			&i.TargetID,
+			&i.Invalid,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteStepsByRouteKey = `-- name: ListRouteStepsByRouteKey :many
 
 SELECT s.position, s.entity_id, s.entity_type_key, s.entity_key

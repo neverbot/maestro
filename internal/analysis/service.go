@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
@@ -196,11 +198,11 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 
 	rows, err := tx.Query(ctx, statement, args...)
 	if err != nil {
-		return err
+		return timedOut(err, timeout)
 	}
 	defer rows.Close()
 	if err := scan(rows); err != nil {
-		return err
+		return timedOut(err, timeout)
 	}
 	// Closed here rather than only by the defer, because pgx settles a
 	// failure into rows.Err() when the result is finished with, not when
@@ -212,8 +214,55 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 	// above. internal/views found this the hard way and this package does
 	// not get to find it again.
 	rows.Close()
-	return rows.Err()
+	return timedOut(rows.Err(), timeout)
 }
+
+// timedOut is the one place a statement that exhausted its budget
+// becomes the answer errors.go argues for.
+//
+// **No `analysis_timeout` code.** SQLSTATE 57014 is already in
+// metamodel's retryableSQLStates and metamodel.IsRetryable already
+// answers for it, so the error that comes back is already `retryable`,
+// whose recovery is "change nothing and resend" -- and what this adds is
+// the half a bare cancellation does not carry: the budget it exhausted
+// and the four arguments that narrow a run. internal/views extended a
+// message rather than adding a code four days before this package
+// existed; adding one here would be the standing defect in its purest
+// form. errors.go carries the argument at length.
+//
+// It wraps rather than replaces, so metamodel.IsRetryable -- which reads
+// the *pgconn.PgError through errors.As -- still answers true however
+// many layers of fmt.Errorf a path adds above it. A test that only
+// asserted the sentence would pass over an error that had stopped being
+// retryable, so TestATimedOutAnalysisIsRetryableAndSaysWhichBoundToLower
+// asserts both.
+//
+// **It sits in runInTx and not in one analysis**, because every analysis
+// in this package reads through that one function and a per-analysis
+// wrap is the shape this repository forgets on the fourth call site.
+func timedOut(err error, budget time.Duration) error {
+	if err == nil || !metamodel.IsRetryable(err) {
+		return err
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != statementTimeoutSQLState {
+		// Retryable for another reason -- a serialisation failure, a
+		// deadlock -- and those recover by resending unchanged, with no
+		// bound to lower. Passed through rather than dressed up as a
+		// timeout.
+		return err
+	}
+	return fmt.Errorf("this analysis exhausted its %s budget and Postgres cancelled it. "+
+		"Nothing you sent is wrong, so resending unchanged may work; what makes it "+
+		"likely to is narrowing the run with `max_depth`, `entity_types` or "+
+		"`relation_types` -- or, the one that helps most, `seed_entity_types`, since a "+
+		"walk seeded from every entity in the game is the expensive shape by "+
+		"construction: %w", budget, err)
+}
+
+// statementTimeoutSQLState is Postgres's query_canceled, which is what a
+// statement_timeout raises. Spelled once, beside the only reader.
+const statementTimeoutSQLState = "57014"
 
 // DecodeArgs decodes one analysis call's arguments and **refuses any
 // member it does not know**.

@@ -84,3 +84,19 @@ FROM (
 ) AS edges
 WHERE dependent = ANY(@dependents::uuid[])
   AND (NOT @exclude_invalid::boolean OR NOT invalid);
+
+-- ListRelationsByIDs reads the edges of a cycle back, so a finding can
+-- name the relation *type* of every one of them -- which is the field
+-- Task 4's widening of internal/graph exists for, because the first
+-- thing a designer does with a reported loop is ask whether the type
+-- should have been declared gating at all.
+--
+-- The ids come out of a walk this game's own project id already bounded,
+-- so the project filter here is redundant today. It is written anyway,
+-- for the reason every statement in this file carries one: isolation is
+-- a property of the statement and not of the caller that happens to feed
+-- it, and the next caller of this statement will not be that walk.
+-- name: ListRelationsByIDs :many
+SELECT r.id, r.relation_type_id, r.source_id, r.target_id, r.invalid
+FROM relations r
+WHERE r.project_id = @project_id AND r.id = ANY(@ids::uuid[]);

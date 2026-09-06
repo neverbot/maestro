@@ -188,7 +188,8 @@ func (s *Service) Unreachable(ctx context.Context, projectID uuid.UUID, in Unrea
 		maxResults = DefaultMaxResults
 	}
 
-	considered, consideredKeys, err := s.consideredTypes(ctx, projectID, in)
+	considered, consideredKeys, err := s.consideredTypes(
+		ctx, projectID, in.EntityTypes, in.IgnoreEntityTypes)
 	if err != nil {
 		return UnreachableResult{}, err
 	}
@@ -269,16 +270,23 @@ func (s *Service) Unreachable(ctx context.Context, projectID uuid.UUID, in Unrea
 	return out, nil
 }
 
-// consideredTypes resolves which entity types this report is about.
+// consideredTypes resolves which entity types a report is about.
 //
 // An ignored type is removed from the findings **and** from the totals,
 // which is why it is applied here, once, to the id list every statement
 // below takes.
-func (s *Service) consideredTypes(ctx context.Context, projectID uuid.UUID, in UnreachableInput) (
+//
+// It takes the two key lists rather than one analysis's own input
+// struct, because three analyses now narrow themselves the same way and
+// a second copy of "resolve, then subtract the ignored" is a second
+// place the totals could stop agreeing with the findings.
+func (s *Service) consideredTypes(ctx context.Context, projectID uuid.UUID,
+	entityTypes, ignoreEntityTypes []string,
+) (
 	[]uuid.UUID, []string, error,
 ) {
-	ignored := make(map[string]bool, len(in.IgnoreEntityTypes))
-	for i, key := range in.IgnoreEntityTypes {
+	ignored := make(map[string]bool, len(ignoreEntityTypes))
+	for i, key := range ignoreEntityTypes {
 		typ, err := s.meta.EntityTypeByKey(ctx, projectID, key)
 		if err != nil {
 			return nil, nil, fmt.Errorf("ignore_entity_types[%d] (%q): %w", i, key, err)
@@ -290,8 +298,8 @@ func (s *Service) consideredTypes(ctx context.Context, projectID uuid.UUID, in U
 		id  uuid.UUID
 		key string
 	}
-	if len(in.EntityTypes) > 0 {
-		for i, key := range in.EntityTypes {
+	if len(entityTypes) > 0 {
+		for i, key := range entityTypes {
 			typ, err := s.meta.EntityTypeByKey(ctx, projectID, key)
 			if err != nil {
 				return nil, nil, fmt.Errorf("entity_types[%d] (%q): %w", i, key, err)

@@ -301,3 +301,51 @@ func TestLayoutComposition(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/layout_test.mjs")
 }
+
+// TestTheCanvas drives internal/web/jstest/canvas_test.mjs, which is the
+// SVG emitter, the pan/zoom transform, the drag layer and the edge join
+// the six renderers all consume.
+//
+// What it holds that no Go test can.
+//
+// That **one mark becomes one element with the attributes the contract
+// names and nothing else**. The emitter is the joint the whole
+// sub-project turns on: the renderers are pure functions a mutation
+// turns red, and they are only worth testing that way if the thing that
+// draws their answer adds nothing of its own and drops nothing of
+// theirs. A mark carrying `onload`, `style` and a `href` this instance
+// cannot serve reaches the DOM with none of the three.
+//
+// That **paint order is what the layers say and not what the caller
+// pushed**. The fixture emits a label before the node it names and the
+// ground after both; SVG paints in document order, so a label under its
+// own node is a label nobody can read, and the five layers are what
+// decides.
+//
+// That **a drag touches the dragged subtree and nothing else**, which is
+// the one budget in §8.2 a Node harness can actually measure: not a
+// frame rate, but a count of elements written to. Two hundred nodes, two
+// of them dragged, and three writes per move — one transform for the
+// whole detached body, and one endpoint pair for each of the two edges
+// that leave the selection and therefore cannot ride it.
+//
+// That **an endpoint may not be in the node list**, in all three of its
+// shapes: joined, one end outside, and *both* ends outside — the last
+// being the case an implementation written around "one end is outside"
+// answers wrongly, and it has a fixture that can only produce it.
+//
+// That **zoom and pan are one transform on one element**, which is what
+// makes a map honest: the ground and the pins are one coordinate space,
+// asserted by ancestry rather than by two strings that happen to match.
+// And that labels stop scaling outside a 0.75×–1.5× band, with the
+// inside-the-band control that keeps a clamp-everything mutation from
+// passing.
+//
+// internal/web/static_canvas_test.go holds the half no harness can see:
+// that no own module names an SVG element which runs code, navigates or
+// re-enters the HTML parser, and that the emitter's contract cannot
+// become one.
+func TestTheCanvas(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/canvas_test.mjs")
+}

@@ -302,6 +302,24 @@ var (
 	moduleExtensions = map[string]bool{".js": true, ".mjs": true}
 )
 
+// namespaceDeclaration is the one exemption, and it is exact.
+//
+// `http://www.w3.org/2000/svg` is an **XML namespace name**, not a
+// resource: `createElementNS` compares it as a string and no browser has
+// ever fetched it. Refusing it would mean an SVG element built with
+// `createElement` instead, which is an unknown HTML element that lays
+// out as nothing — a bug with no error message, bought to satisfy a
+// guard about outbound traffic that this line does not cause.
+//
+// The exemption is deliberately not "any w3.org URL" and not "any line
+// containing the namespace". It is a whole line declaring a constant
+// whose name ends in `NS`, so `fetch("http://www.w3.org/2000/svg")` is
+// still reported, an https spelling is still reported, and the xlink
+// namespace — which this front end has no business naming at all, see
+// internal/web/static_canvas_test.go — is still reported.
+// TestTheNamespaceExemptionIsExactlyOneDeclaration holds all four.
+var namespaceDeclaration = regexp.MustCompile(`^export const [A-Z_]*NS = "http://www\.w3\.org/2000/svg";$`)
+
 // networkReach is one line of one module that reaches outside the
 // instance.
 type networkReach struct {
@@ -347,6 +365,9 @@ func scanForNetworkReach(t *testing.T) (read []string, reaches []networkReach) {
 func networkReachesIn(file, src string) []networkReach {
 	var out []networkReach
 	for _, line := range codeLines(src) {
+		if namespaceDeclaration.MatchString(line.code) {
+			continue
+		}
 		if !outboundURL.MatchString(line.code) && !importScriptsFn.MatchString(line.code) {
 			continue
 		}
@@ -690,5 +711,46 @@ func TestEveryImportMapTargetIsServedAsJavaScript(t *testing.T) {
 		if rec.Body.Len() == 0 {
 			t.Errorf("GET %s served an empty body", target)
 		}
+	}
+}
+
+// TestTheNamespaceExemptionIsExactlyOneDeclaration is the guard on the
+// one hole deliberately left in the scan above. An exemption nobody
+// bounds is where every future outbound URL would hide, so this pins
+// what it admits and — the half that matters — what it still refuses.
+func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
+	admitted := `export const SVG_NS = "http://www.w3.org/2000/svg";`
+	if !namespaceDeclaration.MatchString(admitted) {
+		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
+	}
+	for name, refused := range map[string]string{
+		"a fetch of the same string": `const r = await fetch("http://www.w3.org/2000/svg");`,
+		"an https spelling":          `export const SVG_NS = "https://www.w3.org/2000/svg";`,
+		"the xlink namespace":        `export const XLINK_NS = "http://www.w3.org/1999/xlink";`,
+		"a declaration with a tail":  `export const SVG_NS = "http://www.w3.org/2000/svg"; fetch(SVG_NS);`,
+		"any other host":             `export const CDN_NS = "http://cdn.example.com/2000/svg";`,
+	} {
+		if namespaceDeclaration.MatchString(refused) {
+			t.Errorf("the exemption admits %s: %q", name, refused)
+		}
+		if len(networkReachesIn("static/x.js", refused+"\n")) == 0 {
+			t.Errorf("the scan does not report %s: %q", name, refused)
+		}
+	}
+
+	// And the real module really is the one line that uses it, so this
+	// exemption cannot quietly acquire a second beneficiary.
+	raw, err := os.ReadFile(filepath.Join("static", "render", "scene.js"))
+	if err != nil {
+		t.Fatalf("read scene.js: %v", err)
+	}
+	found := 0
+	for _, line := range codeLines(string(raw)) {
+		if namespaceDeclaration.MatchString(line.code) {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Errorf("the namespace declaration appears %d time(s) in render/scene.js, want exactly 1", found)
 	}
 }

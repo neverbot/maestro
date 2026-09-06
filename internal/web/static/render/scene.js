@@ -566,3 +566,247 @@ function countOf(value) {
 function count(n, one, many) {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+// --- The scene: marks, layers, and the emitter's contract ------------
+//
+// Everything below is the second half of this module's job, and it
+// arrives here rather than in the canvas for the same reason the banners
+// did: it is **data**, so a Node harness reads it and a mutation turns
+// it red, where a decision taken inside a component is a decision no
+// test can see.
+//
+// A renderer returns a scene: an array of marks, plus the legend, the
+// banners and the shelf this file already builds. A mark is plain data —
+// `{kind, layer, key, x, y, w, h, text, fill, dash, class}` — and the
+// emitter (components/mst-canvas.js) turns one mark into one SVG
+// element with the attributes named below and **nothing else**. It has
+// no opinion about colour, absence or truncation: those were decided in
+// Task 1 (palette.js) and Task 4 (above) and travel in the mark.
+
+// The SVG namespace. An SVG element created with createElement rather
+// than createElementNS is an unknown HTML element that lays out as
+// nothing, which is a bug with no error message.
+export const SVG_NS = "http://www.w3.org/2000/svg";
+
+// The five mark kinds, and the element each becomes. Five and not six:
+// a `path` mark has no producer today, and this plan's own rule is that
+// a mechanism nothing reads is a lie. It also has no honest answer for
+// the drag layer, which reshapes an edge whose one endpoint moved by
+// rewriting its endpoints — a rule `d` cannot express — so the renderer
+// that needs a curved edge adds the kind *and* that answer together, in
+// a diff a human reads.
+export const MARK_RECT = "rect";
+export const MARK_DISC = "disc";
+export const MARK_LINE = "line";
+export const MARK_LABEL = "label";
+export const MARK_IMAGE = "image";
+
+export const MARK_ELEMENTS = {
+  [MARK_RECT]: "rect",
+  [MARK_DISC]: "circle",
+  [MARK_LINE]: "line",
+  [MARK_LABEL]: "text",
+  [MARK_IMAGE]: "image",
+};
+
+// The five layers, in paint order, which is **document order** in SVG:
+// later siblings paint over earlier ones. This is a correctness property
+// and not a nicety — a label under its own node is a label nobody can
+// read, and a dragged node under the graph it is being dragged through
+// is a drag a designer loses track of.
+//
+// The order is a list rather than a comparison so the whole of it is one
+// readable thing, exactly as BANNER_ORDER above.
+export const LAYER_IMAGE = "image";
+export const LAYER_EDGES = "edges";
+export const LAYER_NODES = "nodes";
+export const LAYER_LABELS = "labels";
+export const LAYER_DRAG = "drag";
+export const LAYER_ORDER = [LAYER_IMAGE, LAYER_EDGES, LAYER_NODES, LAYER_LABELS, LAYER_DRAG];
+
+// Where a mark goes when it does not say. A mark **may** name a layer —
+// a decorative disc belongs under the edges, a chip belongs over them —
+// but it may never name the drag layer: that one belongs to the canvas,
+// which empties it on every drop, and a mark parked there would vanish
+// the first time somebody moved a node.
+export const DEFAULT_LAYER = {
+  [MARK_RECT]: LAYER_NODES,
+  [MARK_DISC]: LAYER_NODES,
+  [MARK_LINE]: LAYER_EDGES,
+  [MARK_LABEL]: LAYER_LABELS,
+  [MARK_IMAGE]: LAYER_IMAGE,
+};
+export const PLACEABLE_LAYERS = LAYER_ORDER.filter((layer) => layer !== LAYER_DRAG);
+
+// The attributes every kind carries, and the one addressing attribute.
+//
+// `key` is the entity's address — `(type, key)` as JSON, the same string
+// engine.js's addressOf builds and the twin's rows are keyed by — and it
+// reaches the DOM as `data-key` so a browser inspecting the canvas shows
+// what a node *is*. The canvas itself never reads it back out of the
+// DOM; it holds an index built while emitting.
+export const COMMON_ATTRIBUTES = {
+  key: "data-key",
+  class: "class",
+};
+
+// One map per kind, from the mark's field to the SVG attribute it
+// becomes. This is the whole of the emitter's contract: **a field not
+// named here does not reach the DOM.** That is what keeps the emitter
+// dumb without making it a passthrough — a passthrough is how `onload`,
+// `href` and `style` arrive on an element built from data.
+//
+// `text` is deliberately in none of them. A mark's text becomes a Text
+// node and never an attribute value; see the canvas's own header for why
+// that is a different argument here than it was for the text twin.
+export const MARK_ATTRIBUTES = {
+  [MARK_RECT]: {
+    x: "x",
+    y: "y",
+    w: "width",
+    h: "height",
+    radius: "rx",
+    fill: "fill",
+    stroke: "stroke",
+    strokeWidth: "stroke-width",
+    dash: "stroke-dasharray",
+    opacity: "opacity",
+  },
+  [MARK_DISC]: {
+    cx: "cx",
+    cy: "cy",
+    r: "r",
+    fill: "fill",
+    stroke: "stroke",
+    strokeWidth: "stroke-width",
+    dash: "stroke-dasharray",
+    opacity: "opacity",
+  },
+  [MARK_LINE]: {
+    x1: "x1",
+    y1: "y1",
+    x2: "x2",
+    y2: "y2",
+    stroke: "stroke",
+    strokeWidth: "stroke-width",
+    dash: "stroke-dasharray",
+    opacity: "opacity",
+  },
+  [MARK_LABEL]: {
+    x: "x",
+    y: "y",
+    fill: "fill",
+    size: "font-size",
+    anchor: "text-anchor",
+    baseline: "dominant-baseline",
+    halo: "stroke",
+    haloWidth: "stroke-width",
+    opacity: "opacity",
+  },
+  [MARK_IMAGE]: {
+    x: "x",
+    y: "y",
+    w: "width",
+    h: "height",
+    href: "href",
+    opacity: "opacity",
+    fit: "preserveAspectRatio",
+  },
+};
+
+// The positional attributes of each kind, as origin pairs. The drag
+// layer translates a mark by adding to each pair; a kind with no pair
+// here cannot be dragged, which is a property of the kind and not of the
+// caller's memory.
+export const MARK_ORIGINS = {
+  [MARK_RECT]: [["x", "y"]],
+  [MARK_DISC]: [["cx", "cy"]],
+  [MARK_LINE]: [["x1", "y1"], ["x2", "y2"]],
+  [MARK_LABEL]: [["x", "y"]],
+  [MARK_IMAGE]: [["x", "y"]],
+};
+
+// isDrawableHref is the one URL rule this front end has, and it lives
+// beside the one attribute that fetches.
+//
+// SVG is not the text twin's problem restated. Nothing here parses
+// markup, so no escaping is delegated to anybody — but `<image>` and
+// `<use>` *fetch what their href names*, and an `href` is the one mark
+// field whose value a browser resolves rather than draws. A background
+// asset is served by this instance at a path this interface builds
+// (`/api/games/{slug}/views/assets/{id}`), so the whole legitimate set
+// is same-origin absolute paths, and that is what this admits: a
+// leading slash, no protocol-relative second slash, no scheme, no
+// whitespace and no backslash. Everything else — `javascript:`, a
+// `data:` document with a script in it, an off-instance host on a
+// self-hosted server with no outbound network — is refused here rather
+// than argued about at six call sites.
+export function isDrawableHref(value) {
+  if (typeof value !== "string" || value.length < 2) return false;
+  if (!value.startsWith("/") || value.startsWith("//")) return false;
+  return !/[:\s\\]/.test(value);
+}
+
+// --- Joining edges to nodes ------------------------------------------
+
+// Which end of an edge was not in the picture.
+export const ENDPOINT_SOURCE = "source";
+export const ENDPOINT_TARGET = "target";
+export const ENDPOINT_BOTH = "both";
+
+// joinEdges is the one place the rule lives.
+//
+// **An edge's endpoints are not guaranteed to be among the nodes, and
+// that is ordinary rather than exceptional**: `edges: [{between: …}]`
+// draws relations between sets the query chose not to draw
+// (internal/views/execute.go). Every one of the six renderers has to
+// tolerate it in its first version, and six implementations of one rule
+// would be five bugs — so it is implemented here, once, and the six
+// consume both halves of the answer.
+//
+// Returns `{drawn, stubs}`:
+//
+//   drawn — `{edge, source, target}`, both endpoints resolved to the
+//           node objects, which is what a renderer needs to place a line.
+//   stubs — `{edge, source, target, missing}` where at least one of the
+//           two is null and `missing` says which. **Both endpoints
+//           missing is also a stub**, and is the case an implementation
+//           written around "one end is outside" gets wrong: an `|| `
+//           that answers "source" for it hides half the truth, and a
+//           check that requires exactly one missing end drops the edge
+//           entirely.
+//
+// The join is by `Node.ID`, which is the one use of an entity id in this
+// front end and never leaves the envelope it came in (the plan's own
+// note on addressing, and static_client_test.go's guard). A node with no
+// id, or with an id that is not a string, is not an endpoint anybody can
+// join to: it is skipped rather than indexed under `undefined`, where it
+// would silently resolve every edge that names no source.
+export function joinEdges(nodes, edges) {
+  const byID = new Map();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node || typeof node !== "object") continue;
+    if (typeof node.id !== "string" || node.id === "") continue;
+    if (!byID.has(node.id)) byID.set(node.id, node);
+  }
+
+  const drawn = [];
+  const stubs = [];
+  for (const edge of Array.isArray(edges) ? edges : []) {
+    if (!edge || typeof edge !== "object") continue;
+    const source = byID.get(edge.source) ?? null;
+    const target = byID.get(edge.target) ?? null;
+    if (source !== null && target !== null) {
+      drawn.push({ edge, source, target });
+      continue;
+    }
+    const missing =
+      source === null && target === null
+        ? ENDPOINT_BOTH
+        : source === null
+          ? ENDPOINT_SOURCE
+          : ENDPOINT_TARGET;
+    stubs.push({ edge, source, target, missing });
+  }
+  return { drawn, stubs };
+}

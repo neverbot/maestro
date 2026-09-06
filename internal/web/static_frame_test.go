@@ -119,14 +119,23 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 
 // TestTheComponentScanReadsEveryComponent is the other half: the test
 // above passes when it finds no offence and finds none both when the
-// components are silent and when it never opened one. Naming the two
+// components are silent and when it never opened one. Naming the three
 // that exist today is deliberate — a component deleted or renamed
 // without this list being updated is a change somebody should have to
-// look at — and the count assertion is what catches the third one
+// look at — and the count assertion is what catches the next one
 // arriving.
+//
+// mst-canvas.js holds **no Lit template at all**, so the scan above
+// passes over it vacuously and the property it stands for is held
+// elsewhere: internal/web/jstest/canvas_test.mjs asserts at runtime that
+// every character in the emitted SVG tree is a mark's own text, and that
+// the canvas stylesheet generates no `content:` of its own. A component
+// whose silence no test can see is a component this list should not have
+// let in quietly, which is why the argument is written down here.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	found := componentFiles(t)
 	want := []string{
+		filepath.Join("static", "components", "mst-canvas.js"),
 		filepath.Join("static", "components", "mst-twin.js"),
 		filepath.Join("static", "components", "mst-view-frame.js"),
 	}

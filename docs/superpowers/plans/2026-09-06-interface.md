@@ -4396,9 +4396,10 @@ proved a module; this task proves the product.
   through rows, nudge a node with the arrow keys, assert the write, and
   assert `document.activeElement` never lands inside the `aria-hidden`
   canvas.
-- [ ] Step 10: shrink the viewport below tablet width and assert the view
+- [x] Step 10: shrink the viewport below tablet width and assert the view
   page falls back to the twin with the writing interactions disabled
-  rather than shrunk.
+  rather than shrunk. **Built after the sub-project closed**, as its own
+  item; see "The narrow-width fallback, built" below.
 - [ ] **Hand check, and it is required.** A human opens the same game and
   answers four questions no assertion above can: is the eight-hue legend
   discriminable at a glance; does the chrome stay achromatic (is there
@@ -4823,16 +4824,113 @@ one as working.
 
 ### What is not done
 
-**Step 10 of the definition of done is not built and is left unticked.**
-Below tablet width the view page should fall back to the twin with the
-writing interactions disabled; it does not, and no task in this plan
-built it. It is recorded in Task 18's corrections with what was measured.
-Whoever picks it up owns a real decision — a CSS-only hide leaves the
-arrangement writable by a keyboard on an invisible canvas — and that
-decision is why it was not improvised at the end of the sub-project.
+**Step 10 of the definition of done was not built by this sub-project.**
+It has since been built as its own item and the step is ticked; what was
+decided and what was measured are under "The narrow-width fallback,
+built" below. The paragraph that used to stand here said the decision —
+a CSS-only hide leaves the arrangement writable by a keyboard on an
+invisible canvas — was why it was not improvised at the end, and that
+reading held: the fix is a gate on the controller and the hide is a
+consequence of it, not the other way round.
 
 **And one thing this front end cannot yet say.** Content arriving from an
 agent does not reach an open picture, by design, and nothing tells the
 designer it happened. The event rules are right; the silence around them
 is a gap. It is the first thing the analysis sub-project will feel, since
 a report is stale the moment the game moves under it.
+
+
+---
+
+## The narrow-width fallback, built
+
+Step 10 of the definition of done, closed after the sub-project. What
+follows is what changed, what was decided, what a browser showed and
+which half has only a guard behind it.
+
+### What it does
+
+`internal/web/static/pages/view.js` watches one media query,
+`NARROW_QUERY` = `(max-width: 47.99rem)`, and `applyWidth` is the
+fallback. Below it: the canvas is hidden, the ground panel goes with it
+(placing a background is an alignment against a picture, and there is no
+picture) with any placement in flight cancelled rather than committed,
+the page says `NOTICE_TOO_NARROW` in its own hole on `view.html`, and
+`Arrangement.setDrawn(false)` disarms every write in the controller.
+Widening the window puts all four back with no reload.
+
+**48rem rather than 768px.** What makes a picture usable at a width is
+how much text fits beside it, so a reader who has turned their font size
+up reaches the fallback sooner. That is the right direction.
+
+### The half that matters: the writing path is gated, not hidden
+
+`Arrangement` gained one field, `drawn`, read by both gates:
+`draggable` (which guards `pointerDown`, `nudge` and `commit`) and
+`mayWrite` (which guards `unpin`, `clearPositions` and
+`switchToMixed`). `setDrawn(false)` sets it, drops a drag in flight
+rather than committing it, and `undo` reads the gate *before* it spends
+its one step, so widening the window gives the move back instead of an
+empty history. `arrangementMenu` refuses first and for every mode —
+including the *Switch this view to mixed layout* an automatic view would
+otherwise offer — and carries `REASON_NOT_DRAWN`, because a silently
+inert canvas is the same defect wearing a mouse.
+
+**The test that fails if the canvas is hidden while the controller still
+accepts a nudge** is
+`jstest/pages_test.mjs::aNarrowWindowHidesTheDrawingAndDisarmsTheKeyboard`.
+It drives `wire` and `watchWidth` — the call sites, not the handlers —
+with a harness-owned media query list, and asserts the *conjunction*:
+`canvas.hidden === true` **and** the arrow key that wrote at full width
+writes nothing now. A CSS-only fallback satisfies the first and fails
+the second. Mutation run: deleting `state.arrangement.setDrawn(!fell)`
+from `applyWidth` gives
+
+    FAIL aNarrowWindowHidesTheDrawingAndDisarmsTheKeyboard:
+    the canvas is hidden and the arrow keys still wrote a position to it:
+    got 2, want 1
+
+`jstest/writes_test.mjs::anUndrawnCanvasAcceptsNoWriteAtAll` holds the
+controller's half — all six writes, one by one, because they sit behind
+two different gates and a fix that closed one would leave three armed.
+
+### The twin's columns: the same twin, and that is the answer
+
+**Decided: the twin below the breakpoint is the same twin, with the same
+columns.** It was built as a description of the *answer* rather than of
+the drawing, so there is nothing it withholds at full width that it
+could grow into narrow — every projection slot the query declares is
+already a column. Measured rather than assumed: at a 600px viewport the
+node table is 5 columns and the edge table 4, both at
+`scrollWidth === clientWidth === 536`, and `documentElement.scrollWidth`
+is 600 — nothing overflows, nothing is cut off, and the page does not
+scroll sideways. Growing it would have meant inventing columns for a
+width, which is a second twin to keep true.
+
+### What the browser showed
+
+At 600px, before: the canvas drew at 536px, the arrangement menu floated
+over an unreadable hairball with *Unpin* and *Clear the saved position*
+tabbable, and every write was live. After, on the same instance and the
+same view: `canvas.hidden` true and its box 0×0, `mst-ground` hidden, the
+notice visible above the frame with the twin as the whole content, the
+menu holding `REASON_NOT_DRAWN` and zero buttons. Focusing a twin row
+still selects (`mst-twin.selected` is `["class","mage"]`) and a forced
+`ArrowRight` on the surface host produced **no** new `/positions`
+request. Resized to 1280 with no reload: the drawing, the ground panel,
+the three menu buttons and the write all came back — one `ArrowRight`,
+one new `/positions` request, undone again with Ctrl-Z so the seeded
+game is as it was.
+
+### Which half has only a guard behind it
+
+Two wiring lines have no runtime signature a Node harness can reach:
+`viewPage` installing the watch, and `draw` re-applying the fallback in
+a `finally` around `drawPicture`. Delete either and nothing throws — the
+symptom is a picture that quietly comes back, freshly armed, the next
+time a stream event redraws a narrow window. They are pinned by
+`TestTheNarrowFallbackIsWiredAtBothCallSites`, a source-shape guard,
+which this plan's own learned section rates honestly: the weakest check
+in the repository and the correct answer for a property with no runtime
+signature. Both mutations were run and both go red with the guard's own
+sentence.

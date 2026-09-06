@@ -53,6 +53,7 @@ const {
   NOTE_UNDO_BOUND,
   NOTE_UNPIN_NEEDS_CLEAR,
   REASON_AUTO_NO_DRAG,
+  REASON_NOT_DRAWN,
   ROLE_VIEWER,
   arrangementMenu,
   snapTo,
@@ -511,6 +512,74 @@ check("draggingIsDisabledInAutoAndTheCanvasSaysWhy", async () => {
   const menu = canvas.showArrangement(arrangement);
   const text = menu.textContent;
   assert(text.includes(REASON_AUTO_NO_DRAG), `the canvas says why: got ${JSON.stringify(text)}`);
+});
+
+// **A canvas nobody can see accepts no write, and that is a gate rather
+// than a stylesheet.**
+//
+// Below tablet width the view page falls back to the twin (design spec
+// §9). Hiding the canvas in CSS would leave this controller believing it
+// may write: the twin stays on screen and stays focusable, its rows
+// still select nodes, and one arrow key would then write a position
+// against a picture with no observer. That is the same thing `auto`
+// refuses a drag for and it gets the same answer — every path refuses,
+// and the canvas says why.
+//
+// This check drives the six writes one by one because they are guarded
+// by two different gates: `pointerDown`, `nudge` and `commit` read
+// `draggable`, and `unpin`, `clearPositions` and `switchToMixed` read
+// `mayWrite`. A fix that closed only one of them would leave three
+// writes armed on an invisible drawing, and the count at the end is what
+// says so.
+check("anUndrawnCanvasAcceptsNoWriteAtAll", async () => {
+  const { server, canvas, arrangement, nodes } = stage({ rows: 2, mode: MODE_MANUAL });
+  arrangement.select(nodes[0].address);
+  // One real move first, so there is an undo step to try to spend and so
+  // the refusals below are not merely refusals of an empty selection.
+  await arrangement.nudge(1, 0);
+  assertEqual(server.countOf("/positions"), 1, "the precondition: a drawn canvas does write");
+  const wrote = server.countOf("/positions");
+  // `/views` is the prefix of the positions route too, so the structural
+  // write is counted as a delta and never as an absolute.
+  const structural = server.countOf("/views");
+  const x = rectOf(canvas, nodes[0].address).getAttribute("x");
+
+  canvas.hidden = true;
+  assertEqual(arrangement.setDrawn(false), false, "the arrangement was not told the drawing is gone");
+  assertEqual(arrangement.draggable, false, "an undrawn canvas is not draggable");
+  assertEqual(arrangement.mayWrite, false, "nor writable by any other path");
+
+  assertEqual(await arrangement.nudge(1, 0), null, "the keyboard nudged a canvas nobody can see");
+  assertEqual(arrangement.pointerDown(nodes[0].address, { x: 0, y: 0 }), null, "a drag started on it");
+  assertEqual(await arrangement.pointerUp(), null, "and something was dropped");
+  assertEqual(await arrangement.unpin(), null, "unpin wrote");
+  assertEqual(await arrangement.clearPositions(), null, "clear wrote");
+  assertEqual(await arrangement.switchToMixed(), null, "the mode switch wrote");
+  assertEqual(await arrangement.undo(), null, "undo wrote");
+  assertEqual(server.countOf("/positions"), wrote, "a write reached the server from an undrawn canvas");
+  assertEqual(server.countOf("/views"), structural, "and so did a structural one");
+  assertEqual(rectOf(canvas, nodes[0].address).getAttribute("x"), x, "and the drawing moved under it");
+
+  // The undo step is not spent by being refused: widening the window
+  // must give back the move that was there, not an empty history.
+  assertEqual(arrangement.setDrawn(true), true, "the drawing came back");
+  assert((await arrangement.undo()) !== null, "widening the window lost the one undo step");
+
+  // And the sentence is on screen rather than only in a comment, for
+  // REASON_AUTO_NO_DRAG's reason.
+  arrangement.setDrawn(false);
+  const menu = canvas.showArrangement(arrangement);
+  assert(menu.textContent.includes(REASON_NOT_DRAWN), `the canvas says why: got ${JSON.stringify(menu.textContent)}`);
+  assertEqual(
+    menu.childNodes.filter((child) => child.tagName === "button").length,
+    0,
+    "an undrawn canvas offers no button either",
+  );
+  assertDeepEqual(
+    arrangementMenu({ mode: MODE_AUTO, role: "", canUndo: true, drawn: false }).actions,
+    [],
+    "not even the switch-to-mixed an automatic view would otherwise offer",
+  );
 });
 
 check("theSwitchToMixedIsAnUpsertWithExpectedVersion", async () => {

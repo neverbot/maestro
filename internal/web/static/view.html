@@ -36,6 +36,11 @@
      keyboard can reach inside it is a control a screen reader will not
      announce. A dialog is not part of the picture. -->
 <div id="save-as-root"></div>
+<!-- The fallback's hole. Below tablet width this page draws no picture
+     and the text twin is the whole of the view (design spec §9), and
+     this is where pages/view.js says so. It carries no words of its
+     own for the same reason nothing else in this shell does. -->
+<p class="notice" id="view-narrow" hidden></p>
 <div id="view-root"></div>
 <!-- The only thing this page says for itself, and only when the view
      could not be read at all: the frame needs an envelope or a refusal

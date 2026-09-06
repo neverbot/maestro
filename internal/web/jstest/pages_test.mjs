@@ -222,6 +222,7 @@ const SHELL_IDS = [
   "assets-more",
   "view-root",
   "view-error",
+  "view-narrow",
   "entity-panel",
   "back-to-game",
   "back-to-views",
@@ -921,6 +922,145 @@ check("theTwinsSelectionReachesTheArrangementAtItsCallSite", async () => {
   // clear a designer's selection on any stray event of the same name.
   await frame.dispatch(SELECT_EVENT, { detail: null });
   assertEqual(selected.length, 1, "an event with no node still reached the arrangement");
+});
+
+// **Below tablet width the drawing goes and the writing path goes with
+// it — and this check drives the page, not the controller.**
+//
+// The plan's Step 10 was left unbuilt for a reason worth keeping: hiding
+// the canvas with CSS alone leaves `Arrangement` believing it may write,
+// so a keyboard reader who tabs the twin — which is *still on screen*,
+// because it is now the whole view — can nudge a node on a drawing
+// nobody can see. writes_test.mjs holds the controller's half; this is
+// the call site, and the two halves together are the property.
+//
+// It asserts the conjunction on purpose: **the canvas is hidden AND the
+// keydown wrote nothing.** A CSS-only fallback satisfies the first and
+// fails the second; a `setDrawn` that nothing calls satisfies the second
+// only because the first never happened. Deleting either the
+// `applyWidth` call from `draw`/`watchWidth` or the `setDrawn` line
+// inside `applyWidth` turns this red.
+check("aNarrowWindowHidesTheDrawingAndDisarmsTheKeyboard", async () => {
+  const dom = mount({
+    ids: ["entity-panel", "view-narrow"],
+    pathname: "/g/azeroth/v/world",
+    routes: [],
+  });
+  const { wire, watchWidth, NOTICE_TOO_NARROW } = await load("view");
+  const { Arrangement } = await import("../static/components/mst-canvas.js");
+  const { client } = await import("../static/client.js");
+  const { MODE_MANUAL } = await import("../static/positions.js");
+
+  // Every request this page could make, counted. It is the instrument
+  // for the half that matters: "the keyboard wrote nothing" is a count
+  // of requests and not a state of a flag.
+  const wrote = [];
+  const c = client({
+    slug: GAME.slug,
+    fetchImpl: async (url) => {
+      wrote.push(String(url));
+      return { ok: true, status: 200, json: async () => ({ positions: [] }) };
+    },
+  });
+
+  const surface = fakeElement("g");
+  const canvas = {
+    hidden: false,
+    shell: { surfaceHost: surface, panels: fakeElement("div") },
+    view: { k: 1 },
+    shown: 0,
+    showArrangement() {
+      this.shown += 1;
+    },
+    nudgeNodes() {},
+    beginDrag() {
+      return null;
+    },
+    endDrag() {
+      return null;
+    },
+  };
+  const arrangement = new Arrangement({
+    canvas,
+    client: c,
+    viewKey: "world",
+    row: { key: "world", layout_mode: MODE_MANUAL, version: 3 },
+    mode: MODE_MANUAL,
+    role: "designer",
+    nodes: [{ type: "quest", key: "hogger", x: 10, y: 20 }],
+  });
+  const ground = {
+    root: fakeElement("div"),
+    placing: null,
+    hidden: false,
+    cancelled: 0,
+    cancel() {
+      this.cancelled += 1;
+      return null;
+    },
+  };
+  const state = {
+    canvas,
+    arrangement,
+    ground,
+    frame: fakeElement("mst-view-frame"),
+    narrowEl: dom.elements["view-narrow"],
+    pictured: true,
+    narrow: false,
+    client: c,
+  };
+  wire(globalThis.document, dom.elements["entity-panel"], GAME.slug, c, state);
+  arrangement.select(JSON.stringify(["quest", "hogger"]));
+
+  // The precondition, and it is the point: at a width that draws, this
+  // very keystroke on this very wiring does write.
+  await surface.dispatch("keydown", { key: "ArrowRight" });
+  assert(wrote.length > 0, "the keyboard wrote nothing even at full width; the check proves nothing");
+  const atFullWidth = wrote.length;
+
+  // A media query list the harness owns, because a fallback that could
+  // only be driven by resizing a real window is a fallback with no test.
+  const listeners = [];
+  const media = {
+    matches: true,
+    addEventListener(name, handler) {
+      if (name === "change") listeners.push(handler);
+    },
+    fire() {
+      for (const handler of listeners) handler({ matches: this.matches });
+    },
+  };
+  watchWidth(state, { media });
+
+  assertEqual(canvas.hidden, true, "the drawing is still on screen below tablet width");
+  assertEqual(ground.hidden, true, "the ground panel outlived the drawing it aligns against");
+  assertEqual(ground.cancelled, 1, "a placement in flight was left in flight");
+  assertEqual(
+    dom.elements["view-narrow"].textContent,
+    NOTICE_TOO_NARROW,
+    "the picture vanished without a word, which reads as a view that answered nothing",
+  );
+  assertEqual(dom.elements["view-narrow"].hidden, false, "and the sentence is hidden");
+
+  await surface.dispatch("keydown", { key: "ArrowRight" });
+  assertEqual(
+    wrote.length,
+    atFullWidth,
+    "the canvas is hidden and the arrow keys still wrote a position to it",
+  );
+  await surface.dispatch("keydown", { key: "z", ctrlKey: true });
+  assertEqual(wrote.length, atFullWidth, "and undo wrote to it too");
+
+  // Widening the window gives the drawing and the writes back, which is
+  // the half that says this is a fallback and not a mode a designer is
+  // stuck in.
+  media.matches = false;
+  media.fire();
+  assertEqual(canvas.hidden, false, "the drawing did not come back when the window did");
+  assertEqual(ground.hidden, false, "nor did the ground panel");
+  assertEqual(dom.elements["view-narrow"].textContent, "", "nor did the sentence go");
+  await surface.dispatch("keydown", { key: "ArrowRight" });
+  assert(wrote.length > atFullWidth, "a widened window still refuses the keyboard");
 });
 
 // --- What the game-summary harness held --------------------------------

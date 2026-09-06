@@ -842,6 +842,18 @@ export const NOTE_LAST_WRITER_WINS =
   "Positions are last-writer-wins. If somebody else moves the same node while " +
   "you are moving it, the later drop wins and nothing warns either of you.";
 
+// The reason a drawing nobody can see offers no writes.
+//
+// It is the same sentence REASON_AUTO_NO_DRAG is: a write whose result
+// is not on screen is not offered, and the designer is told why rather
+// than left to watch nothing happen. Below tablet width the view page
+// falls back to the twin (spec §9), and this is what the arrangement
+// says while it does.
+export const REASON_NOT_DRAWN =
+  "The drawing is not shown at this width, so nothing on it can be moved: a " +
+  "position written here would land on a picture nobody can see. The table " +
+  "below is this view's answer; widen the window to arrange it.";
+
 // snapTo lands one coordinate on the grid. A snap of 0 — the catalogue's
 // own "draw no grid" — is the identity, so "there is no grid" and "the
 // grid is one unit" stay two different answers.
@@ -873,7 +885,13 @@ export function worldDelta(dx, dy, zoom) {
 // Pure, so the whole of "a viewer gets the sentence without the button"
 // is one assertion over a returned object rather than a walk of a DOM
 // that might merely have failed to render.
-export function arrangementMenu({ mode, role, canUndo } = {}) {
+export function arrangementMenu({ mode, role, canUndo, drawn } = {}) {
+  // A canvas that is not on screen refuses first and for every mode: the
+  // fallback below tablet width is not "the drawing is smaller", it is
+  // "there is no drawing", and a menu that still offered *Switch this
+  // view to mixed layout* under it would be offering to change how an
+  // invisible picture is arranged.
+  if (drawn === false) return { notes: [REASON_NOT_DRAWN], actions: [] };
   const mayWrite = role !== ROLE_VIEWER;
   if (!readsPositions(mode)) {
     return {
@@ -899,8 +917,20 @@ export function arrangementMenu({ mode, role, canUndo } = {}) {
 // write" and "the arrow keys write the same shape" are properties of the
 // construction rather than of two implementations agreeing.
 export class Arrangement {
-  constructor({ canvas, client, viewKey, row, mode, snap, role, nodes } = {}) {
+  constructor({ canvas, client, viewKey, row, mode, snap, role, nodes, drawn } = {}) {
     this.canvas = canvas;
+    // Whether the picture this arranges is on screen at all.
+    //
+    // **This is a gate on the writing path and not a style.** Below
+    // tablet width the view page hides the canvas and the twin becomes
+    // the content (spec §9); hiding it with CSS alone would leave every
+    // write armed, and a keyboard reader tabbing the twin could still
+    // nudge a node on a drawing nobody can see — a position written
+    // against a picture with no observer, which is exactly the shape
+    // `auto` refuses a drag for. So it is read by `draggable` and by
+    // `mayWrite`, which between them guard every path in this class that
+    // reaches the client.
+    this.drawn = drawn !== false;
     this.client = client;
     this.viewKey = viewKey;
     // The saved row, for the one version-checked write: switching out of
@@ -934,11 +964,28 @@ export class Arrangement {
   // draggable is compose.js's `draggable` asked of the mode directly,
   // because the canvas has to answer it before there is a composition.
   get draggable() {
-    return readsPositions(this.mode);
+    return this.drawn && readsPositions(this.mode);
   }
 
   get mayWrite() {
-    return this.role !== ROLE_VIEWER;
+    return this.drawn && this.role !== ROLE_VIEWER;
+  }
+
+  // setDrawn arms or disarms the whole writing path in one place.
+  //
+  // Both gates above, and therefore all six writes: `pointerDown`,
+  // `nudge` and `commit` go through `draggable`, and `unpin`,
+  // `clearPositions` and `switchToMixed` go through `mayWrite`. An
+  // in-flight drag is dropped rather than committed — a drag whose drop
+  // nobody would see is not a gesture that finished.
+  setDrawn(drawn) {
+    this.drawn = drawn !== false;
+    if (!this.drawn && this.drag) {
+      this.drag = null;
+      if (this.canvas && typeof this.canvas.endDrag === "function") this.canvas.endDrag();
+      if (this.client && typeof this.client.setDragging === "function") this.client.setDragging(false);
+    }
+    return this.drawn;
   }
 
   // gridStep is the snap that actually applies. `mixed` re-fits the whole
@@ -949,7 +996,12 @@ export class Arrangement {
   }
 
   menu() {
-    return arrangementMenu({ mode: this.mode, role: this.role, canUndo: this.undoStep !== null });
+    return arrangementMenu({
+      mode: this.mode,
+      role: this.role,
+      canUndo: this.undoStep !== null,
+      drawn: this.drawn,
+    });
   }
 
   positionOf(address) {
@@ -1051,7 +1103,10 @@ export class Arrangement {
   // bound NOTE_UNDO_BOUND states rather than leaving to be discovered.
   async undo() {
     const step = this.undoStep;
-    if (!step) return null;
+    // The gate is read *before* the step is spent: `commit` would refuse
+    // an undisplayed canvas anyway, but only after this method had
+    // already forgotten the one move it can put back.
+    if (!step || !this.drawn) return null;
     this.undoStep = null;
     return this.commit(step, { remember: false });
   }

@@ -425,6 +425,9 @@ export async function viewPage(opened, options = {}) {
 
   const surface = mount(doc, rootEl, opened.slug, key, row.result, client, options);
   surface.role = summary.ok ? String(summary.result.role ?? "") : "";
+  // Before the first run, so a narrow window never draws a picture it is
+  // about to take away.
+  watchWidth(surface, options);
   await surface.run();
   wire(doc, panelEl, opened.slug, client, surface);
   client.connect((verdict) => surface.receive(verdict));
@@ -470,6 +473,10 @@ function mount(doc, rootEl, slug, key, row, client, options) {
     saveAs,
     arrangement: null,
     scene: null,
+    // Whether the renderer put a drawing in the slot, which is not the
+    // same question as whether the window is wide enough to show one.
+    pictured: false,
+    narrow: false,
     // The bound parameters, as text, straight off the URL. They are
     // typed against the query's declarations only at the moment of the
     // run, because a URL carries no types and guessing that `20` is the
@@ -478,6 +485,10 @@ function mount(doc, rootEl, slug, key, row, client, options) {
   };
 
   state.noticeEl = doc.getElementById("view-error");
+  // The fallback's own hole, separate from #view-error: a stream notice
+  // and "this window is too narrow" are two facts, and one element
+  // holding both would show whichever arrived last.
+  state.narrowEl = doc.getElementById("view-narrow");
   state.run = async () => run(state, options);
   state.redraw = (envelope) => draw(state, envelope, null, options);
   state.receive = (verdict) => receive(state, verdict);
@@ -493,7 +504,26 @@ async function run(state, options) {
 
 // draw is the whole picture: the layout, the renderer's scene, the
 // frame's model and the canvas.
+// draw is a picture followed, always, by the width the window actually
+// has.
+//
+// The fallback is re-applied in a `finally` rather than at the three
+// places `drawPicture` returns, and that is the whole reason this
+// wrapper exists: `drawPicture` builds a *new* `Arrangement` on every
+// draw and sets `canvas.hidden` from the renderer, so a redraw arriving
+// while the window is narrow — a stream re-read, a parameter change —
+// would put the drawing back and hand a designer a freshly armed
+// writing path. Every exit from a draw goes through the fallback,
+// including the ones that threw.
 async function draw(state, envelope, error, options) {
+  try {
+    return await drawPicture(state, envelope, error, options);
+  } finally {
+    applyWidth(state, state.narrow === true);
+  }
+}
+
+async function drawPicture(state, envelope, error, options) {
   state.envelope = envelope;
   const declarations = declarationsOf(state.row);
   const params = state.row.renderer_params && typeof state.row.renderer_params === "object"
@@ -573,11 +603,13 @@ async function draw(state, envelope, error, options) {
   if (renderer === RENDERER_TABLE) {
     state.table.hidden = false;
     state.table.table = scene;
-    state.canvas.hidden = true;
+    // What the renderer wants on screen, which `applyWidth` then
+    // intersects with what the window is wide enough for.
+    state.pictured = false;
     return state;
   }
   state.table.hidden = true;
-  state.canvas.hidden = false;
+  state.pictured = true;
   state.canvas.draw({ marks: scene.marks });
 
   // The arrangement is rebuilt on every draw, from the coordinates the
@@ -602,6 +634,89 @@ async function draw(state, envelope, error, options) {
     state.fitted = await fitOnce(state.canvas, scene.marks, { frame: state.frame, settle: options.settle });
   }
   return state;
+}
+
+// --- Below tablet width, the twin is the view ------------------------
+
+// The width a view page stops drawing at (spec §9: "layouts respond
+// down to tablet width; below it, view pages fall back to the text twin
+// and the writing interactions are disabled rather than shrunk").
+//
+// 48rem and not 768px: the whole of what makes a picture usable at a
+// width is how much text fits beside it, so a reader who has turned
+// their font size up reaches the fallback sooner, which is the right
+// direction. Measured before this existed, on the seeded thousand-quest
+// instance at a 600px viewport: the canvas drew at 536px with every
+// writing interaction live.
+export const NARROW_QUERY = "(max-width: 47.99rem)";
+
+// What the page says while it is not drawing.
+//
+// **The picture is not removed silently.** A canvas that vanished with
+// no sentence would be indistinguishable from a view that answered
+// nothing, which is the one thing this front end's negative states exist
+// to keep apart. It is the page's own sentence and not the frame's: the
+// frame speaks only its model's words, and "this window is narrow" is a
+// fact about the window rather than about the answer.
+export const NOTICE_TOO_NARROW =
+  "This window is too narrow to draw the picture, so this view is shown as its " +
+  "table below. The table is the same answer. Arranging the picture is off " +
+  "until the window is wider.";
+
+// applyWidth is the fallback, and it is two halves.
+//
+// The first half is that the twin becomes the content: the drawing goes,
+// the ground panel goes with it (placing a background is an alignment
+// against a picture, and there is no picture), and a sentence says so.
+//
+// **The second half is the one that matters, and it is why this is a
+// function rather than a media query.** Hiding the canvas in CSS leaves
+// `Arrangement` believing it may write: the twin is still on screen and
+// still focusable, its rows still select nodes, and one arrow key would
+// then write a position against a drawing nobody can see — the same
+// half-truth `auto` mode refuses a drag for. `setDrawn(false)` disarms
+// every write in that class, and jstest/writes_test.mjs fails if a
+// hidden canvas still accepts a nudge.
+export function applyWidth(state, narrow) {
+  const fell = narrow === true;
+  state.narrow = fell;
+  // What the renderer wanted, intersected with what the window allows.
+  // Written on every application rather than only when narrow, so a
+  // window widened back gets its drawing without waiting for a redraw.
+  if (state.canvas) state.canvas.hidden = fell || state.pictured !== true;
+  if (state.ground) {
+    // A placement in flight is cancelled and not committed: cancelling
+    // writes nothing, which is what makes the mode safe to leave.
+    if (fell && typeof state.ground.cancel === "function") state.ground.cancel();
+    state.ground.hidden = fell;
+  }
+  if (state.arrangement && typeof state.arrangement.setDrawn === "function") {
+    state.arrangement.setDrawn(!fell);
+    // The menu is rebuilt so the sentence explaining the refusal is
+    // there for whoever widens the window and looks.
+    if (state.canvas && typeof state.canvas.showArrangement === "function") {
+      state.canvas.showArrangement(state.arrangement);
+    }
+  }
+  say(state.narrowEl, fell ? NOTICE_TOO_NARROW : "");
+  return fell;
+}
+
+// watchWidth binds the fallback to the viewport and applies it once.
+//
+// The media query list is injectable for the harness's sake: a Node
+// stub has no `matchMedia`, and a fallback that could only be driven by
+// resizing a real window is a fallback with no test — which is how the
+// step this closes went four tasks unbuilt in the first place.
+export function watchWidth(state, options = {}) {
+  const media = options.media
+    || (typeof globalThis.matchMedia === "function" ? globalThis.matchMedia(NARROW_QUERY) : null);
+  if (!media) return null;
+  state.media = media;
+  const apply = () => applyWidth(state, media.matches === true);
+  if (typeof media.addEventListener === "function") media.addEventListener("change", apply);
+  apply();
+  return media;
 }
 
 // FIT_MARGIN is the space left around a picture that has just been fitted

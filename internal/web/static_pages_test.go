@@ -314,3 +314,43 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 		t.Errorf("a shell loads %s directly; it is the plumbing the seven page modules import, not a page", shared)
 	}
 }
+
+// TestTheNarrowFallbackIsWiredAtBothCallSites is a source-shape guard,
+// which is the weakest kind of check in this repository and the correct
+// answer for what it holds.
+//
+// The fallback below tablet width has a runtime half and a wiring half.
+// The runtime half — that an undrawn canvas refuses every write, and
+// that the page's own keydown wiring writes nothing while it is hidden —
+// is driven for real by jstest/writes_test.mjs and jstest/pages_test.mjs,
+// which are the checks that matter. The wiring half is two lines with no
+// runtime signature a harness can reach: `viewPage` installs the watch,
+// and `draw` re-applies the fallback after *every* redraw. Delete
+// either and nothing throws, no test the harness can run goes red, and
+// the symptom is a picture that quietly comes back — freshly armed —
+// the next time a stream event redraws a narrow window.
+//
+// So it is pinned by its shape. The plan's own learned section names
+// this pattern and rates it honestly: a weak guard over a property with
+// no runtime signature beats no guard, and pretending otherwise is how
+// the property gets deleted twice.
+func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
+	if err != nil {
+		t.Fatalf("read static/pages/view.js: %v", err)
+	}
+	src := string(raw)
+
+	if !strings.Contains(src, "watchWidth(surface, options);") {
+		t.Error("viewPage no longer installs the width watch: a narrow window would draw a picture with every write armed")
+	}
+	// The `finally` is the point and not the call: a redraw that threw
+	// must still leave the fallback applied, and a call placed after the
+	// three returns of drawPicture would miss two of them.
+	if !regexp.MustCompile(`(?s)finally\s*\{\s*applyWidth\(state, state\.narrow === true\);\s*\}`).MatchString(src) {
+		t.Error("draw no longer re-applies the fallback in a finally: a redraw would put the drawing back and re-arm the writes")
+	}
+	if !strings.Contains(src, "state.arrangement.setDrawn(!fell);") {
+		t.Error("applyWidth no longer disarms the arrangement: hiding the canvas in CSS alone leaves a keyboard nudging a drawing nobody can see")
+	}
+}

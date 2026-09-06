@@ -236,7 +236,7 @@ type Point struct {
 
 // DefaultBackgroundScale and DefaultBackgroundOffset are
 // 0008_views.sql's column defaults, spelled here for the reason
-// DefaultLayoutSeed is: SetBackground writes all three columns on every
+// DefaultPinned is: SetBackground writes all three columns on every
 // call, so a caller clearing a background must have something to write.
 const DefaultBackgroundScale = 1.0
 
@@ -495,9 +495,8 @@ func (s *Service) RemoveAsset(ctx context.Context, projectID, id uuid.UUID) erro
 //
 // AssetID is a pointer because nil is a value a caller means: it clears
 // the background, which is the only way to remove one. The same
-// distinction PositionInput.Pinned and ViewInput.LayoutSeed draw, for
-// the same reason -- a zero value that means "said nothing" cannot also
-// mean "said none".
+// distinction PositionInput.Pinned draws, for the same reason -- a zero
+// value that means "said nothing" cannot also mean "said none".
 //
 // Scale and Offset are pointers for the narrower half of that rule: a
 // scale of 0 is refused anyway (the column CHECKs `> 0`), but an offset

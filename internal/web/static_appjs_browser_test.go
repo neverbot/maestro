@@ -263,7 +263,9 @@ func TestTheTextTwin(t *testing.T) {
 //
 // That the engine is deterministic, which is what lets `manual` lay out
 // an unplaced node and never write the coordinate back, and what let the
-// `layout_seed` column lose its last possible reader. Every determinism
+// views table's seed column lose its last possible reader (migration
+// 0012 dropped it, and says what a future seed would need). Every
+// determinism
 // assertion runs the input a third time with the node and edge arrays
 // shuffled, because dagre is deterministic *given an insertion order*
 // and not otherwise — measured on the vendored 3.1.1, where reversing

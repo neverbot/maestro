@@ -123,11 +123,10 @@ func TestAPositionSurvivesAReload(t *testing.T) {
 // TestAPositionIsPinnedUnlessTheCallerSaysOtherwise pins the default at
 // the level a caller meets it.
 //
-// PositionInput.Pinned is a *bool for the reason ViewInput.LayoutSeed is
-// a *int32: false is a value a caller may deliberately mean, so a plain
-// bool would store the opposite of 0008_views.sql's column default for
-// every caller that said nothing, and no test that only ever writes the
-// flag explicitly could see it.
+// PositionInput.Pinned is a *bool because false is a value a caller may
+// deliberately mean, so a plain bool would store the opposite of
+// 0008_views.sql's column default for every caller that said nothing,
+// and no test that only ever writes the flag explicitly could see it.
 func TestAPositionIsPinnedUnlessTheCallerSaysOtherwise(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()

@@ -292,7 +292,7 @@ func (q *Queries) GetViewAssetMeta(ctx context.Context, arg GetViewAssetMetaPara
 }
 
 const getViewByID = `-- name: GetViewByID :one
-SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, layout_seed, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
+SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
 WHERE project_id = $1::uuid AND id = $2::uuid
 `
 
@@ -317,7 +317,6 @@ func (q *Queries) GetViewByID(ctx context.Context, arg GetViewByIDParams) (View,
 		&i.Renderer,
 		&i.RendererParams,
 		&i.LayoutMode,
-		&i.LayoutSeed,
 		&i.BackgroundAssetID,
 		&i.BackgroundScale,
 		&i.BackgroundOffset,
@@ -331,7 +330,7 @@ func (q *Queries) GetViewByID(ctx context.Context, arg GetViewByIDParams) (View,
 }
 
 const getViewByKey = `-- name: GetViewByKey :one
-SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, layout_seed, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
+SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
 WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
 `
 
@@ -356,7 +355,6 @@ func (q *Queries) GetViewByKey(ctx context.Context, arg GetViewByKeyParams) (Vie
 		&i.Renderer,
 		&i.RendererParams,
 		&i.LayoutMode,
-		&i.LayoutSeed,
 		&i.BackgroundAssetID,
 		&i.BackgroundScale,
 		&i.BackgroundOffset,
@@ -370,7 +368,7 @@ func (q *Queries) GetViewByKey(ctx context.Context, arg GetViewByKeyParams) (Vie
 }
 
 const getViewByKeyForUpdate = `-- name: GetViewByKeyForUpdate :one
-SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, layout_seed, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
+SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
 WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
 FOR UPDATE
 `
@@ -402,7 +400,6 @@ func (q *Queries) GetViewByKeyForUpdate(ctx context.Context, arg GetViewByKeyFor
 		&i.Renderer,
 		&i.RendererParams,
 		&i.LayoutMode,
-		&i.LayoutSeed,
 		&i.BackgroundAssetID,
 		&i.BackgroundScale,
 		&i.BackgroundOffset,
@@ -847,7 +844,7 @@ func (q *Queries) ListViewsBrokenByType(ctx context.Context, arg ListViewsBroken
 }
 
 const listViewsPage = `-- name: ListViewsPage :many
-SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, layout_seed, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
+SELECT id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM views
 WHERE project_id = $1::uuid
   AND ($2::text IS NULL OR renderer = $2::text)
   AND ($3::uuid IS NULL
@@ -925,7 +922,6 @@ func (q *Queries) ListViewsPage(ctx context.Context, arg ListViewsPageParams) ([
 			&i.Renderer,
 			&i.RendererParams,
 			&i.LayoutMode,
-			&i.LayoutSeed,
 			&i.BackgroundAssetID,
 			&i.BackgroundScale,
 			&i.BackgroundOffset,
@@ -1023,12 +1019,12 @@ func (q *Queries) SetViewBackground(ctx context.Context, arg SetViewBackgroundPa
 const upsertView = `-- name: UpsertView :one
 
 INSERT INTO views (project_id, key, name, description, query, renderer, renderer_params,
-                   layout_mode, layout_seed, updated_by_user_id, updated_by_token_id)
+                   layout_mode, updated_by_user_id, updated_by_token_id)
 VALUES ($1::uuid, $2::text, $3::text,
         $4::text, $5::jsonb,
         $6::text, $7::jsonb,
-        $8::text, $9::integer,
-        $10::uuid, $11::uuid)
+        $8::text,
+        $9::uuid, $10::uuid)
 ON CONFLICT (project_id, lower(key)) DO UPDATE
 SET name                = excluded.name,
     description         = excluded.description,
@@ -1036,12 +1032,11 @@ SET name                = excluded.name,
     renderer            = excluded.renderer,
     renderer_params     = excluded.renderer_params,
     layout_mode         = excluded.layout_mode,
-    layout_seed         = excluded.layout_seed,
     version             = views.version + 1,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id
-WHERE views.version = $12::integer
-RETURNING id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, layout_seed, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
+WHERE views.version = $11::integer
+RETURNING id, project_id, key, name, description, query, renderer, renderer_params, layout_mode, background_asset_id, background_scale, background_offset, version, created_at, updated_at, updated_by_user_id, updated_by_token_id
 `
 
 type UpsertViewParams struct {
@@ -1053,7 +1048,6 @@ type UpsertViewParams struct {
 	Renderer         string
 	RendererParams   []byte
 	LayoutMode       string
-	LayoutSeed       int32
 	UpdatedByUserID  *uuid.UUID
 	UpdatedByTokenID *uuid.UUID
 	ExpectedVersion  int32
@@ -1155,7 +1149,6 @@ func (q *Queries) UpsertView(ctx context.Context, arg UpsertViewParams) (View, e
 		arg.Renderer,
 		arg.RendererParams,
 		arg.LayoutMode,
-		arg.LayoutSeed,
 		arg.UpdatedByUserID,
 		arg.UpdatedByTokenID,
 		arg.ExpectedVersion,
@@ -1171,7 +1164,6 @@ func (q *Queries) UpsertView(ctx context.Context, arg UpsertViewParams) (View, e
 		&i.Renderer,
 		&i.RendererParams,
 		&i.LayoutMode,
-		&i.LayoutSeed,
 		&i.BackgroundAssetID,
 		&i.BackgroundScale,
 		&i.BackgroundOffset,

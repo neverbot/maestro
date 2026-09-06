@@ -15,8 +15,8 @@ import (
 // Positions: where a human dragged each node of one view, and the layout
 // contract the three calls in this file are the state of.
 //
-// **What the server does about layout: nothing.** `layout_mode` and
-// `layout_seed` are validated (views.go), stored (0008_views.sql) and
+// **What the server does about layout: nothing.** `layout_mode` is
+// validated (views.go), stored (0008_views.sql) and
 // returned, and **no server code reads the mode beyond validating and
 // returning it** — nothing in this file branches on it, nothing in this
 // package computes a coordinate, and `pinned` is likewise written, read
@@ -65,16 +65,15 @@ import (
 const MaxPositions = HardMaxNodes
 
 // DefaultPinned is 0008_views.sql's column default, spelled here for the
-// reason DefaultLayoutSeed is: this package fills the value rather than
+// reason DefaultLayoutMode is: this package fills the value rather than
 // letting the column default it, because every position this file writes
 // names the column.
 //
 // True: a position written without saying otherwise is an explicit
 // placement, not a spot a layout algorithm may move. PositionInput.Pinned
-// is a *bool for the same reason LayoutSeed is a *int32 — `false` is a
-// value a caller may deliberately mean, so a plain bool's zero value
-// would silently store the opposite of the column default for every
-// caller that said nothing.
+// is a *bool because `false` is a value a caller may deliberately mean,
+// so a plain bool's zero value would silently store the opposite of the
+// column default for every caller that said nothing.
 const DefaultPinned = true
 
 // PositionInput is one node's coordinates in one view.

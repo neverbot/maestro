@@ -145,8 +145,8 @@ func int32Of(v int32) *int32 { return &v }
 // them write-only *on this surface* while the domain's own test stayed
 // green.
 //
-// All six are set to non-default values, because a field that takes the
-// default cannot tell a stored value from a hard-wired one.
+// All of them are set to non-default values, because a field that takes
+// the default cannot tell a stored value from a hard-wired one.
 func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T) {
 	f := newViewsFixture(t)
 	ctx := context.Background()
@@ -156,7 +156,6 @@ func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T
 		Query: json.RawMessage(questsQuery), Renderer: "map",
 		RendererParams:  map[string]any{"coordinate_source": "manual", "snap": float64(16)},
 		LayoutMode:      "manual",
-		LayoutSeed:      int32Of(0),
 		ExpectedVersion: int32Of(0),
 	})
 	if err != nil {
@@ -188,12 +187,6 @@ func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T
 	}
 	if got.LayoutMode != "manual" {
 		t.Errorf("layout_mode = %q, want manual", got.LayoutMode)
-	}
-	// 0 is a seed a designer may deliberately choose, which is why it is
-	// the one written here: a *int32 read back as a plain int32 would
-	// silently answer with the column default.
-	if got.LayoutSeed == nil || *got.LayoutSeed != 0 {
-		t.Errorf("layout_seed = %v, want the 0 that was saved", got.LayoutSeed)
 	}
 	if got.BackgroundScale != 2.5 {
 		t.Errorf("background_scale = %v, want 2.5", got.BackgroundScale)

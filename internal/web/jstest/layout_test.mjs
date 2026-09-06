@@ -7,8 +7,8 @@
 // true or quietly false:
 //
 //   - **The engine is deterministic.** `manual` mode lays out unplaced
-//     nodes and never writes the result back, and the views spec's
-//     `layout_seed` is being dropped (Task 17), both on that one
+//     nodes and never writes the result back, and the views table's seed
+//     column was dropped (Task 17, migration 0012), both on that one
 //     premise. Every determinism assertion below runs the same input
 //     twice *and a third time with the arrays shuffled*, because dagre
 //     is deterministic given an insertion order and not otherwise —

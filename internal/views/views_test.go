@@ -45,9 +45,9 @@ func saveable(key, doc string) ViewInput {
 // It is not a formality: `relations.fields` was write-only for a whole
 // sub-project because every test asserted the call succeeded and none
 // read the row back, and `renderer_params` is the same shape — a jsonb
-// column nothing in this package reads afterwards. layout_mode,
-// layout_seed and description are the other three a caller can set here
-// and no other test in this file looks at, so all four are asserted
+// column nothing in this package reads afterwards. layout_mode and
+// description are the other two a caller can set here
+// and no other test in this file looks at, so all three are asserted
 // together, off a second read rather than off the returned row: the
 // returned row is what the INSERT said, and only a read says what was
 // stored.
@@ -71,7 +71,6 @@ func TestAViewIsReadBackWithEveryFieldItWasSavedWith(t *testing.T) {
 	in.Description = "Every quest a mage can take,\nby zone."
 	in.RendererParams = map[string]any{"arrows": true, "edge_labels": false}
 	in.LayoutMode = LayoutManual
-	in.LayoutSeed = ptrInt32(7)
 	in.Actor = Actor{UserID: &user, TokenID: &token}
 	written, err := g.views.UpsertView(ctx, g.projectID, in)
 	if err != nil {
@@ -104,9 +103,6 @@ func TestAViewIsReadBackWithEveryFieldItWasSavedWith(t *testing.T) {
 	}
 	if got.LayoutMode != LayoutManual {
 		t.Fatalf("LayoutMode = %q, want %q", got.LayoutMode, LayoutManual)
-	}
-	if got.LayoutSeed != 7 {
-		t.Fatalf("LayoutSeed = %d, want 7", got.LayoutSeed)
 	}
 	// The two audit columns, which no other test in this package fills.
 	if got.UpdatedByUserID == nil || *got.UpdatedByUserID != user {
@@ -143,31 +139,38 @@ func TestTheDefaultsAViewIsStoredWithAreTheColumnsOwn(t *testing.T) {
 	if row.LayoutMode != DefaultLayoutMode {
 		t.Fatalf("LayoutMode = %q, want %q", row.LayoutMode, DefaultLayoutMode)
 	}
-	if row.LayoutSeed != DefaultLayoutSeed {
-		t.Fatalf("LayoutSeed = %d, want %d", row.LayoutSeed, DefaultLayoutSeed)
-	}
 	if string(row.RendererParams) != "{}" {
 		t.Fatalf("renderer_params = %s, want an empty object rather than null: a reader "+
 			"must not have to handle two spellings of \"no parameters\"", row.RendererParams)
 	}
 }
 
-// TestASeedOfZeroIsStoredRatherThanReplacedByTheDefault is why
-// LayoutSeed is a pointer. With a plain int32 the zero value and the
-// deliberate choice are one value, and a designer who pinned a layout on
-// seed 0 would silently get seed 1 — a different diagram, saved under the
-// number they chose.
-func TestASeedOfZeroIsStoredRatherThanReplacedByTheDefault(t *testing.T) {
+// TestUpsertRoundTripsWithoutASeed is the positive control for the
+// column migration 0012 dropped: an ordinary create-then-read, over the
+// upsert statement that no longer names a seed, still stores and returns
+// everything a view is made of.
+//
+// It is the half that TestNoSurfaceAcceptsALayoutSeed (internal/web)
+// cannot state. That test says the knob is gone from both wires; this one
+// says the write path did not lose anything else on the way out.
+func TestUpsertRoundTripsWithoutASeed(t *testing.T) {
 	g, _ := newGame(t)
-	in := saveable("zero_seed", questsOnly)
-	in.LayoutSeed = ptrInt32(0)
+	in := saveable("no_seed", questsOnly)
+	in.LayoutMode = LayoutManual
 	row, err := g.views.UpsertView(context.Background(), g.projectID, in)
 	if err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	if row.LayoutSeed != 0 {
-		t.Fatalf("LayoutSeed = %d, want 0: a seed a caller chose must not be read as unset",
-			row.LayoutSeed)
+	back, err := g.views.ViewByKey(context.Background(), g.projectID, "no_seed")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if back.ID != row.ID || back.Key != "no_seed" || back.Version != 1 {
+		t.Fatalf("read back (%s, %q, v%d), want the row the upsert returned",
+			back.ID, back.Key, back.Version)
+	}
+	if back.LayoutMode != LayoutManual {
+		t.Fatalf("LayoutMode = %q, want %q", back.LayoutMode, LayoutManual)
 	}
 }
 

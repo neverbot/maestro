@@ -192,11 +192,16 @@ type ViewsGetInput struct {
 // written; a second round of escaping would be a second place for a
 // document to be wrong.
 //
-// **LayoutSeed is a *int32 and ExpectedVersion is a *int32**, for the two
-// different reasons this codebase already has: 0 is a seed a designer may
-// deliberately choose, so a plain int32 would store 1 for it; and an
-// omitted expected_version must be distinguishable from `0`, which is the
-// spelling of "this view must not exist yet".
+// **ExpectedVersion is a *int32** because an omitted expected_version
+// must be distinguishable from `0`, which is the spelling of "this view
+// must not exist yet".
+//
+// **There is no seed member, and its absence is enforced.** The inferred
+// input schema closes this struct to additional properties and the REST
+// decoder refuses an unknown member, so a seed sent to either surface is
+// answered rather than dropped — TestNoSurfaceAcceptsALayoutSeed drives
+// both. Migration 0012 carries why the column went and what a future
+// seed would have to seed.
 type ViewsUpsertInput struct {
 	ScopedArgs
 	Key             string          `json:"key"`
@@ -206,7 +211,6 @@ type ViewsUpsertInput struct {
 	Renderer        string          `json:"renderer"`
 	RendererParams  map[string]any  `json:"renderer_params,omitempty"`
 	LayoutMode      string          `json:"layout_mode,omitempty"`
-	LayoutSeed      *int32          `json:"layout_seed,omitempty"`
 	ExpectedVersion *int32          `json:"expected_version"`
 }
 
@@ -354,7 +358,6 @@ type ViewOutput struct {
 	Renderer          string          `json:"renderer"`
 	RendererParams    map[string]any  `json:"renderer_params"`
 	LayoutMode        string          `json:"layout_mode"`
-	LayoutSeed        *int32          `json:"layout_seed,omitempty"`
 	BackgroundAssetID *string         `json:"background_asset_id,omitempty"`
 	BackgroundScale   float64         `json:"background_scale"`
 	BackgroundOffset  ViewsPointInput `json:"background_offset"`
@@ -431,8 +434,8 @@ func viewOutput(row dbq.View) (ViewOutput, error) {
 		ID: row.ID.String(), Key: row.Key, Name: row.Name, Description: row.Description,
 		Query: json.RawMessage(row.Query), Renderer: row.Renderer,
 		RendererParams: map[string]any{}, LayoutMode: row.LayoutMode,
-		LayoutSeed: &row.LayoutSeed, BackgroundScale: row.BackgroundScale,
-		Version: row.Version, UpdatedAt: row.UpdatedAt.Time,
+		BackgroundScale: row.BackgroundScale,
+		Version:         row.Version, UpdatedAt: row.UpdatedAt.Time,
 	}
 	if len(row.RendererParams) > 0 {
 		if err := json.Unmarshal(row.RendererParams, &out.RendererParams); err != nil {
@@ -550,7 +553,7 @@ func viewsUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uui
 	row, err := deps.Views.UpsertView(ctx, projectID, views.ViewInput{
 		Key: in.Key, Name: in.Name, Description: in.Description,
 		Query: []byte(in.Query), Renderer: in.Renderer, RendererParams: in.RendererParams,
-		LayoutMode: in.LayoutMode, LayoutSeed: in.LayoutSeed,
+		LayoutMode:      in.LayoutMode,
 		ExpectedVersion: in.ExpectedVersion, Actor: actorOf(caller),
 	})
 	if err != nil {
@@ -872,8 +875,9 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 				"is renderer_requirements, and the answer is to pick another renderer or "+
 				"change the query.\n\n"+
 				"layout_mode is one of %s and is a contract with the client: the server "+
-				"stores it, returns it and reads nothing else off it. layout_seed is for a "+
-				"client's own deterministic layout, and 0 is a seed like any other.\n\n"+
+				"stores it, returns it and reads nothing else off it. There is no layout "+
+				"seed: the client's layout engine is deterministic, so one view draws the "+
+				"same picture for every designer without one.\n\n"+
 				"**This call does not touch the background.** A view's background image, "+
 				"scale and offset are views.set_background's, so an ordinary edit of a query "+
 				"never silently detaches the world map a designer placed behind it. It does "+
@@ -1102,8 +1106,8 @@ var viewOutputSchema = &jsonschema.Schema{
 		"id": stringSchema(), "key": stringSchema(), "name": stringSchema(),
 		"description": stringSchema(), "query": objectSchema(), "renderer": stringSchema(),
 		"renderer_params": objectSchema(), "layout_mode": stringSchema(),
-		"layout_seed": integerSchema(), "background_asset_id": stringSchema(),
-		"background_scale": numberSchema(), "background_offset": pointSchema,
+		"background_asset_id": stringSchema(),
+		"background_scale":    numberSchema(), "background_offset": pointSchema,
 		"version": integerSchema(), "updated_at": stringSchema(),
 	},
 }

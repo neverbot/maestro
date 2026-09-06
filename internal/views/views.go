@@ -60,12 +60,6 @@ const (
 	// an update that said nothing would otherwise store the empty string
 	// and fail the CHECK.
 	DefaultLayoutMode = LayoutMixed
-	// DefaultLayoutSeed is 0008_views.sql's column default, spelled here
-	// for the same reason. It is not 0: an unseeded force layout draws a
-	// different diagram every load, and a seed of zero is a legal seed a
-	// caller may deliberately choose, which is why LayoutSeed is a
-	// pointer rather than an int32 whose zero value means "unset".
-	DefaultLayoutSeed int32 = 1
 )
 
 // layoutModes is the closed list, in the order a refusal names them.
@@ -125,9 +119,14 @@ const createExpectedVersion int32 = 0
 // the field is still passed as the guard on the DO UPDATE, because a
 // caller that believes it is creating may be racing a creator.
 //
-// LayoutMode and LayoutSeed are optional: an empty mode is
-// DefaultLayoutMode and a nil seed is DefaultLayoutSeed. A pointer for
-// the seed because 0 is a seed a caller may mean.
+// LayoutMode is optional: an empty mode is DefaultLayoutMode.
+//
+// There is no layout seed, and there is deliberately no field for one.
+// A seed column existed on views for a force-directed layout that would
+// have needed one to keep a saved view recognisable; the engine that
+// shipped is deterministic, no reader ever appeared, and migration 0012
+// dropped it — that migration is where the argument lives, and what a
+// future seed would have to seed.
 type ViewInput struct {
 	Key             string
 	Name            string
@@ -136,7 +135,6 @@ type ViewInput struct {
 	Renderer        string
 	RendererParams  map[string]any
 	LayoutMode      string
-	LayoutSeed      *int32
 	ExpectedVersion *int32
 	Actor           Actor
 }
@@ -278,10 +276,6 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 	if mode == "" {
 		mode = DefaultLayoutMode
 	}
-	seed := DefaultLayoutSeed
-	if in.LayoutSeed != nil {
-		seed = *in.LayoutSeed
-	}
 
 	var row dbq.View
 	err = s.withTx(ctx, func(q *dbq.Queries) error {
@@ -415,7 +409,6 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			Renderer:         in.Renderer,
 			RendererParams:   params,
 			LayoutMode:       mode,
-			LayoutSeed:       seed,
 			ExpectedVersion:  expected,
 			UpdatedByUserID:  in.Actor.UserID,
 			UpdatedByTokenID: in.Actor.TokenID,

@@ -87,11 +87,11 @@
 -- directly and edits the view through this statement, which is what
 -- makes the decision above an assertion rather than a paragraph.
 INSERT INTO views (project_id, key, name, description, query, renderer, renderer_params,
-                   layout_mode, layout_seed, updated_by_user_id, updated_by_token_id)
+                   layout_mode, updated_by_user_id, updated_by_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('name')::text,
         sqlc.arg('description')::text, sqlc.arg('query')::jsonb,
         sqlc.arg('renderer')::text, sqlc.arg('renderer_params')::jsonb,
-        sqlc.arg('layout_mode')::text, sqlc.arg('layout_seed')::integer,
+        sqlc.arg('layout_mode')::text,
         sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, lower(key)) DO UPDATE
 SET name                = excluded.name,
@@ -100,7 +100,6 @@ SET name                = excluded.name,
     renderer            = excluded.renderer,
     renderer_params     = excluded.renderer_params,
     layout_mode         = excluded.layout_mode,
-    layout_seed         = excluded.layout_seed,
     version             = views.version + 1,
     updated_by_user_id  = excluded.updated_by_user_id,
     updated_by_token_id = excluded.updated_by_token_id

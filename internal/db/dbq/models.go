@@ -187,7 +187,6 @@ type View struct {
 	Renderer          string
 	RendererParams    []byte
 	LayoutMode        string
-	LayoutSeed        int32
 	BackgroundAssetID *uuid.UUID
 	BackgroundScale   float64
 	BackgroundOffset  []byte

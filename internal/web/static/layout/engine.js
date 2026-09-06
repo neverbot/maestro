@@ -17,7 +17,8 @@
 //
 // **The determinism this module owes the rest of the product, and what
 // it actually rests on.** Spec §5.3 lets `manual` mode lay out unplaced
-// nodes and never write the result back, and §5.6 removes `layout_seed`,
+// nodes and never write the result back, and §5.6 removes the views
+// table's seed column (migration 0012),
 // on one shared premise: the same graph lands in the same place on every
 // load. dagre is deterministic — but only *given an insertion order*.
 // Reversing the order the nodes are added in moves every node; so does

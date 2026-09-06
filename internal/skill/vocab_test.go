@@ -31,6 +31,16 @@ var knownVocabularies = map[string]string{
 	// exists — so naming it here as "checked elsewhere" is a claim with
 	// a test behind it rather than a promise.
 	"error_codes": "TestBundleErrorCodesMatchTheSurface, in internal/web",
+	// The genre fences are not checked against a Go declaration —
+	// there is none, and there must not be one: a list of MMORPG types
+	// in this repository's code is precisely what B1 forbids. They are
+	// checked against the transcript beside each page, which is a
+	// second copy of the same list in the same sense and drifts the
+	// same way. Named here so a fourth genre page whose fence nothing
+	// compares fails the rule below rather than passing quietly.
+	"genre_types_mmorpg":       "TestTheGenrePageAndItsTranscriptAgree, here",
+	"genre_types_racing":       "TestTheGenrePageAndItsTranscriptAgree, here",
+	"genre_types_metroidvania": "TestTheGenrePageAndItsTranscriptAgree, here",
 }
 
 // TestBundleVocabulariesMatchCode set-compares every vocabulary this

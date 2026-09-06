@@ -151,6 +151,7 @@ changed under you unless you changed it.
 | read an error and pick a recovery | `reference/errors.md` |
 | write a query or a saved view | `reference/queries.md` |
 | attach prose to an entity | `reference/documents.md` |
+| see a whole game modelled, in a genre near yours | `genres/mmorpg.md`, `genres/racing.md`, `genres/metroidvania.md` |
 
 Nothing in this bundle is required, and a game none of its examples
 matches is the normal case.

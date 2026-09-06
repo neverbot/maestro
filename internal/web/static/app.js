@@ -152,14 +152,97 @@ function setFormBusy(form, busy, busyLabel) {
   }
 }
 
+// GAMES_PATH is the picker's own address, and the reason it exists is
+// the bug this switcher was written for: "/" is a *shortcut* (handleRoot
+// sends a caller with one game straight into it, and the picker below
+// sends a caller with a remembered game straight back into that one), so
+// "/" is not a way out of a game — it is the way back in. /games serves
+// the same shell and takes neither shortcut, so there is exactly one
+// address in this product that always means "all of my games".
+export const GAMES_PATH = "/games";
+
+// gameSwitcher is the door handle on the inside of a game.
+//
+// Until it existed, signing in landed a designer in the remembered game
+// and nothing in the product listed another one: the wordmark pointed at
+// "/", "/" redirected back, and an account in three games could reach
+// exactly one of them. The exit is put *here*, in the chrome beside the
+// wordmark, rather than by pointing the wordmark somewhere else, for two
+// reasons. It is where a person looks for "which of my things am I
+// in" — and so it answers that question too: the summary is the current
+// game's name, which is the only line outside the home page's own <h1>
+// that says which game these pages belong to. And it is on every page of
+// a game, not only the home, so the way out does not depend on first
+// navigating back to a particular page of the game you are trying to
+// leave.
+//
+// Every game the caller can reach is listed, the current one included
+// and marked with aria-current rather than dropped — the same rule
+// `destinations` (pages/page.js) follows, and for the same reason: a
+// list that changes shape as you move through it is a list nobody learns
+// the shape of.
+//
+// It is <details>/<summary> and not a scripted menu: it opens on click
+// and on Enter, closes on Escape, is reachable by keyboard and readable
+// by a screen reader without a line of JavaScript, and cannot get stuck
+// open in a state this file forgot to close. Built with
+// createElement/textContent throughout, never innerHTML — a game's name
+// is chosen by whoever created the game.
+function gameSwitcher(games, current) {
+  const details = document.createElement("details");
+  details.className = "game-switcher";
+
+  const summary = document.createElement("summary");
+  summary.textContent = current ? current.name : "Games";
+  details.append(summary);
+
+  const list = document.createElement("ul");
+  for (const game of games) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = `/g/${encodeURIComponent(game.slug)}`;
+    link.textContent = game.name;
+    if (current && game.slug === current.slug) {
+      link.setAttribute("aria-current", "page");
+    }
+    item.append(link);
+    list.append(item);
+  }
+
+  // The last row is the picker, which is where a *new* game is made: the
+  // create form used to be reachable only from the empty state, so an
+  // account with one game had no way to make a second one either. Both
+  // halves of that are fixed in one place — this link, and index.html's
+  // form no longer living inside #empty-state.
+  const all = document.createElement("li");
+  all.className = "game-switcher-all";
+  const allLink = document.createElement("a");
+  allLink.href = GAMES_PATH;
+  allLink.textContent = "All games";
+  all.append(allLink);
+  list.append(all);
+
+  details.append(list);
+  return details;
+}
+
 // renderHeader prepends the one piece of chrome every authenticated page
-// (the picker, a game) shares: the product name linking back to "/", and
-// a sign-out button. login.html never calls this — there is nothing to
-// sign out of yet, and nowhere useful for "/" to send an anonymous
-// visitor that isn't back to /login. Built with createElement/textContent
-// throughout, never innerHTML, the same rule every other DOM write in
-// this file follows.
-export function renderHeader() {
+// (the picker, a game) shares: the product name linking back to "/", the
+// game switcher, and a sign-out button. login.html never calls this —
+// there is nothing to sign out of yet, and nowhere useful for "/" to
+// send an anonymous visitor that isn't back to /login. Built with
+// createElement/textContent throughout, never innerHTML, the same rule
+// every other DOM write in this file follows.
+//
+// `options.games` is the caller's own game list and `options.current` is
+// the game this page is inside, or null. They are **passed in and never
+// fetched here**: every page that renders this header has already asked
+// GET /api/games (page.js's openGame, doc.js) because it needs that list
+// to resolve its own slug, so a fetch inside the header would be a
+// second identical request on every page in the product. A caller with
+// no list — the picker itself, which *is* the list — passes nothing and
+// gets no switcher.
+export function renderHeader(options = {}) {
   const header = document.createElement("header");
   header.className = "site-header";
 
@@ -168,6 +251,11 @@ export function renderHeader() {
   brand.href = "/";
   brand.textContent = "Maestro";
   header.append(brand);
+
+  const games = Array.isArray(options.games) ? options.games : [];
+  if (games.length > 0) {
+    header.append(gameSwitcher(games, options.current || null));
+  }
 
   const signOut = document.createElement("button");
   signOut.type = "button";
@@ -403,6 +491,13 @@ export function goToLogin() {
 const gamesList = document.getElementById("games");
 const statusEl = document.getElementById("status");
 const emptyState = document.getElementById("empty-state");
+// The create-game form's own disclosure. It ships hidden and is revealed
+// by the picker below whether or not the caller has games, which is the
+// second half of the same defect the switcher fixes: the form used to
+// live *inside* #empty-state, so the one moment this product offered to
+// create a game was the moment you had none — an account with one game
+// could no more make a second than it could reach a third.
+const newGame = document.getElementById("new-game");
 const createGameForm = document.getElementById("create-game");
 if (gamesList) {
   renderHeader();
@@ -422,7 +517,15 @@ if (gamesList) {
     // was deleted, or membership was lost) is silently ignored and the
     // ordinary picker renders instead, rather than sending the user
     // toward a game that no longer answers for them.
-    const remembered = recallGame();
+    // **Only at "/".** The remembering is right for the common case — a
+    // designer with one game should not meet a one-row picker every
+    // morning — but a shortcut that fires on every rendering of this
+    // shell is a shortcut with no way past it, which is exactly how an
+    // account in three games came to be able to reach one. /games serves
+    // this same shell and is the address that never redirects, so the
+    // convenience keeps the door it was written for and stops being the
+    // lock on it.
+    const remembered = window.location.pathname === "/" ? recallGame() : null;
     if (remembered && games.some((game) => game.slug === remembered)) {
       window.location.href = `/g/${remembered}`;
     } else if (games.length === 0) {
@@ -433,9 +536,17 @@ if (gamesList) {
       // and already accepts a session caller).
       if (statusEl) statusEl.hidden = true;
       if (emptyState) emptyState.hidden = false;
+      if (newGame) {
+        newGame.hidden = false;
+        // Opened, not merely shown: an account with nothing has exactly
+        // one useful action here, and making them click a disclosure to
+        // find it would be a step for its own sake.
+        newGame.open = true;
+      }
     } else {
       if (statusEl) statusEl.hidden = true;
       gamesList.hidden = false;
+      if (newGame) newGame.hidden = false;
       for (const game of games) {
         const item = document.createElement("li");
         const link = document.createElement("a");

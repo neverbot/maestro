@@ -78,6 +78,35 @@ func TestSafeReturnPathRejectsOffOriginBypasses(t *testing.T) {
 	runJSTest(t, "jstest/safe_return_path_test.mjs")
 }
 
+// TestYouCanReachAnotherGameFromInsideOne pins the bug the author found
+// on the first real session against a running instance: signing in
+// landed them in one game and nothing in the product could reach
+// another, though the account was a member of three. The picker
+// redirected off the remembered game the moment it had one, and the only
+// link out of a game was the wordmark, pointing at "/" — the picker,
+// which redirected straight back in.
+//
+// **No Go test in this package could have caught it and none can assert
+// the fix.** Every route here serves a static shell and resolves nothing
+// server-side: GET /g/{slug} returned game.html before the bug and
+// returns the same bytes after it, and GET /api/games listed all three
+// games throughout. The defect and its repair are entirely in what the
+// shell's script then draws, which is what
+// internal/web/jstest/game_switcher_test.mjs drives — the real,
+// unmodified pages/home.js and app.js in a DOM stub, reading the
+// addresses off the rendered chrome rather than calling the function
+// that builds them.
+//
+// The check that matters is asserted **from inside a game with a
+// remembered game in storage**, because a check that only proved the
+// picker lists games when nothing is remembered would have passed on the
+// broken product. The two halves of the shortcut are held there too: it
+// still fires at "/" and never at /games.
+func TestYouCanReachAnotherGameFromInsideOne(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/game_switcher_test.mjs")
+}
+
 // TestThePageModulesRenderTheirRoutes drives the seven page modules
 // Task 15 put on seven routes — the real, unmodified sources, a stubbed
 // DOM and a stubbed fetch — and is the whole of the evidence for the

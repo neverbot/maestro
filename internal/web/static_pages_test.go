@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/web"
 )
 
@@ -90,56 +92,137 @@ func TestEveryShellIsReachableByItsRoute(t *testing.T) {
 			"an exemption nobody bounds is where the next unserved shell hides", len(dispatching))
 	}
 
+	// The table is keyed by pattern, because a shell may be served at
+	// more than one address — index.html is the picker at "/" and at
+	// "/games" — so the join back to the files on disk is built here.
+	patterns := map[string][]string{}
+	for pattern, file := range routes {
+		patterns[file] = append(patterns[file], pattern)
+	}
+
 	for _, shell := range shellFiles(t) {
 		name := filepath.Base(shell)
-		pattern, ok := routes[name]
+		served, ok := patterns[name]
 		if !ok {
 			t.Errorf("%s is embedded in the binary and no route serves it: a shell with no route is a page "+
 				"that 404s in a browser and passes every test in this package", name)
-			continue
-		}
-		if dispatching[name] {
-			// handleRoot decides between the picker, a single game and
-			// the sign-in page before it serves anything, so a bare GET
-			// is not a test of it — auth_test.go and api_projects_test.go
-			// drive those three decisions. What is asserted here is the
-			// half this test owns: the shell has a route at all.
 			continue
 		}
 		want, err := os.ReadFile(shell)
 		if err != nil {
 			t.Fatalf("read %s: %v", shell, err)
 		}
-		url := concreteURL(pattern)
-		rec := httptest.NewRecorder()
-		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
-		if rec.Code != http.StatusOK {
-			t.Errorf("GET %s (for %s) answered %d, want 200", url, name, rec.Code)
-			continue
-		}
-		if rec.Body.String() != string(want) {
-			t.Errorf("GET %s served %d bytes, which are not %s's %d", url, rec.Body.Len(), name, len(want))
-		}
-		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
-			t.Errorf("GET %s served as %q, want text/html", url, ct)
+		for _, pattern := range served {
+			if dispatching[pattern] {
+				// handleRoot decides between the picker, a single game
+				// and the sign-in page before it serves anything, so a
+				// bare GET is not a test of it — auth_test.go and
+				// api_projects_test.go drive those three decisions. What
+				// is asserted here is the half this test owns: the shell
+				// has a route at all.
+				continue
+			}
+			url := concreteURL(pattern)
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+			if rec.Code != http.StatusOK {
+				t.Errorf("GET %s (for %s) answered %d, want 200", url, name, rec.Code)
+				continue
+			}
+			if rec.Body.String() != string(want) {
+				t.Errorf("GET %s served %d bytes, which are not %s's %d", url, rec.Body.Len(), name, len(want))
+			}
+			if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+				t.Errorf("GET %s served as %q, want text/html", url, ct)
+			}
 		}
 	}
 
 	// And the table holds nothing that is not a shell, so an entry left
 	// behind by a deleted page is a failure rather than a dead row.
-	for name := range routes {
+	for _, name := range routes {
 		if _, err := os.Stat(filepath.Join("static", name)); err != nil {
 			t.Errorf("shellRoutes names %s, which is not a file under internal/web/static", name)
 		}
 	}
 }
 
+// gamesPathRegexp reads the picker's address out of app.js's own
+// constant, so the test below joins the front end's spelling to the
+// server's routing table rather than repeating a literal that could
+// drift from either.
+var gamesPathRegexp = regexp.MustCompile(`export const GAMES_PATH = "([^"]+)";`)
+
+// TestThePickerHasAnAddressThatDoesNotRedirect is the server half of the
+// bug the author found on the first real session: signed in, they landed
+// in one game and could reach no other, because the only address that
+// listed their games was "/" — and "/" is a shortcut that sends a caller
+// with one game straight back into it.
+//
+// The header's game switcher points at app.js's GAMES_PATH, and this is
+// what makes that link a page rather than a 404: the constant is read
+// out of the module and driven at this server, by a caller with exactly
+// one game, which is precisely the caller "/" refuses to show a list to.
+// Delete the route and this fails; rename the constant without adding
+// the route and this fails too, which is the join a shipped-dead wiring
+// slips through.
+func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("static", "app.js"))
+	if err != nil {
+		t.Fatalf("read static/app.js: %v", err)
+	}
+	match := gamesPathRegexp.FindSubmatch(source)
+	if match == nil {
+		t.Fatal("static/app.js declares no GAMES_PATH: the header's switcher has nowhere to point")
+	}
+	gamesPath := string(match[1])
+
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "picker@studio.com", DisplayName: "Picker", Password: "password12345",
+	})
+	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	cookie := loginAs(t, srv, "picker@studio.com")
+
+	// The control: "/" is still the shortcut it was, for the same caller
+	// in the same request. If this stopped redirecting, the assertion
+	// below would be proving nothing.
+	root := httptest.NewRecorder()
+	rootReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	rootReq.AddCookie(cookie)
+	srv.ServeHTTP(root, rootReq)
+	if root.Code != http.StatusFound || root.Header().Get("Location") != "/g/azeroth" {
+		t.Fatalf("GET / answered %d to /g/azeroth=%q, want a 302 into the one game: the single-game "+
+			"shortcut this fix had to keep is gone", root.Code, root.Header().Get("Location"))
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, gamesPath, nil)
+	req.AddCookie(cookie)
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s answered %d, want 200: the game switcher links here from inside every game",
+			gamesPath, rec.Code)
+	}
+	want, err := os.ReadFile(filepath.Join("static", "index.html"))
+	if err != nil {
+		t.Fatalf("read static/index.html: %v", err)
+	}
+	if rec.Body.String() != string(want) {
+		t.Errorf("GET %s served %d bytes, which are not the picker's %d", gamesPath, rec.Body.Len(), len(want))
+	}
+}
+
 // TestNoShellIsServedTwice keeps the new shells inside the /static/ file
 // server's refusal.
 //
-// Every shell is reachable at exactly one URL, through a handler with
-// its own dispatch logic — handleRoot's single-game shortcut and its
-// redirect for an anonymous caller in particular. A second URL under
+// Every shell is reachable only at the routes shellRoutes declares,
+// through a handler with its own dispatch logic — handleRoot's
+// single-game shortcut and its redirect for an anonymous caller in
+// particular. A second URL under
 // /static/ would bypass all of that, which is precisely the defect a
 // review found once: /static/index.html, wired through http.FileServerFS
 // with no filtering, skipped handleRoot entirely.

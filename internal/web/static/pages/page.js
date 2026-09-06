@@ -171,16 +171,31 @@ export async function openGame(options = {}) {
   const doc = options.document || globalThis.document;
   const url = options.location || globalThis.window.location;
   const slug = slugOf(url.pathname);
-  renderHeader();
   const answer = await fetchGames();
   if (!answer.ok) {
     if (answer.expired) {
       goToLogin();
       return null;
     }
+    // The header still goes up on a failed list — with no switcher,
+    // because there is no list to switch through — so a page that could
+    // not load is still a page a person can sign out of.
+    renderHeader();
     return { slug, game: null, client: null, failure: answer.message, document: doc, location: url };
   }
   const game = answer.games.find((row) => row.slug === slug) || null;
+  // The header is rendered **here and not before the fetch**, which is
+  // the whole of what makes its switcher possible: the switcher lists
+  // the caller's games and marks the current one, and this is the first
+  // moment either is known. The cost is that the wordmark and the
+  // sign-out button appear one round trip later than they used to; the
+  // alternative was a second GET /api/games on every page in the
+  // product to fill in chrome the page had already paid for.
+  //
+  // `game` may be null — a slug that reaches nothing. The switcher then
+  // says "Games" instead of naming one, which is exactly the state that
+  // most needs a way out.
+  renderHeader({ games: answer.games, current: game });
   if (game === null) {
     return { slug, game: null, client: null, failure: null, document: doc, location: url };
   }

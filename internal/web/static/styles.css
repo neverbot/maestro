@@ -214,6 +214,82 @@ p.muted { color: var(--muted); }
   font-weight: 600;
 }
 
+/* The game switcher: the way out of a game, and the line that says which
+   game you are in. A <details> and not a scripted menu, so it opens on
+   click and on Enter, closes on Escape and needs no outside-click
+   handler this file would have to remember to write. The panel is
+   absolutely positioned so opening it does not push the page down —
+   chrome that resizes the document under a reader is chrome that loses
+   their place. */
+.game-switcher { position: relative; }
+
+.game-switcher > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.game-switcher > summary::-webkit-details-marker { display: none; }
+
+.game-switcher > summary::after {
+  content: " \25be";
+  color: var(--muted);
+}
+
+/* **`display: none` here, and `grid` only under [open].** A closed
+   <details> hides its non-summary children through the UA stylesheet's
+   own display rule, so an author `display: grid` on a direct child
+   overrides it and the panel renders permanently open — which is what
+   this rule did in Firefox on the first real page it was loaded on: the
+   switcher's whole list sat under the wordmark with the disclosure shut.
+   Nothing but a browser could see it; the DOM was correct throughout,
+   which is why the harness in internal/web/jstest/game_switcher_test.mjs
+   was green while the page was wrong. */
+.game-switcher ul {
+  display: none;
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  min-width: 14rem;
+  margin: 0.4rem 0 0;
+  padding: 0.35rem;
+  list-style: none;
+  gap: 0.15rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.game-switcher[open] ul { display: grid; }
+
+.game-switcher a {
+  display: block;
+  padding: 0.3rem 0.45rem;
+  border-radius: 3px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.game-switcher a:hover { background: var(--ground); }
+
+.game-switcher a[aria-current="page"] { font-weight: 600; }
+
+/* The picker sits under the games, one step back from them: it is where
+   you go, not what you are looking at. */
+.game-switcher-all {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+}
+
+.game-switcher-all a { color: var(--muted); }
+
+#new-game > summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-top: 1.5rem;
+}
+
 form { display: grid; gap: 0.75rem; margin-top: 1.5rem; }
 
 form label {

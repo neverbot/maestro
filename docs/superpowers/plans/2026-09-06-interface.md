@@ -5078,3 +5078,117 @@ data. `internal/markdown.RenderDiff`'s real output was generated and
 injected into the real document page, so the markup, the stylesheet and
 the cascade are the product's; the route that fetches a comparison is
 unchanged by this work and is covered where it already was.
+
+## The way out of a game
+
+The author's first real session with a running instance found the one
+defect no test in this repository could have: **signing in landed them in
+a game and nothing in the product could reach another one**, though the
+account is a member of all three games in the instance and every page
+already knew it.
+
+Two halves closed the loop. `app.js` remembers the last game this browser
+visited and, once `GET /api/games` confirms the account can still reach
+it, jumps straight there — the picker below that redirect lists every
+game, works perfectly, and was unreachable the moment a remembered slug
+existed. And the only link out of a game was the wordmark, pointing at
+`/`, which is the address that redirects. The data was there; the route
+was not.
+
+**The remembering is right and was kept.** A designer with one game
+should not meet a one-row picker every morning, and `handleRoot`'s
+single-game shortcut is the same convenience one layer down. What was
+missing was an exit.
+
+### The shape chosen, and the two it was chosen over
+
+**A switcher in the game chrome**, beside the wordmark, plus the explicit
+`/games` route it needs anyway.
+
+Two other shapes were on the table and are not combined with it. Pointing
+the **wordmark** at the picker instead of at `/` would have been one line,
+but it hides the exit behind a word that means "home" and it answers
+nothing about where you are; it also leaves the wordmark and `/` meaning
+two different things, which is worse than either. An **explicit games
+route alone** would be an exit you have to know the URL of.
+
+The switcher is where a person looks for "which of my things am I in",
+and so it answers that question too: its summary is the current game's
+name. It is on every page of a game — home, catalogue, entity, view,
+images and the reading view — so leaving does not first require
+navigating back to a particular page of the game you are trying to leave.
+It lists every game with the current one marked `aria-current` rather
+than dropped, the rule `destinations` already follows: a list that
+changes shape as you move through it is a list nobody learns. It is
+`<details>`/`<summary>` and not a scripted menu — it opens on click and
+on Enter, closes on Escape, is reachable by keyboard, and cannot get
+stuck open in a state some handler forgot to close.
+
+`/games` serves the picker shell with neither shortcut applying:
+`app.js` takes the remembered-game redirect **only at `/`**. So `/` stays
+the shortcut a fresh tab wants and `/games` is the one address in this
+product that always means "all of my games" — which is also where a
+second game gets made.
+
+### The two decisions taken in the same sitting
+
+**Naming the current game.** Nothing told a designer which game they were
+in until the home page's `<h1>` loaded, and no other page of a game said
+it at all. The switcher's summary is that line now, on every page, in the
+chrome.
+
+**Creating a second game.** The create-game form lived *inside*
+`#empty-state`, so the one moment this product offered to create a game
+was the moment you had none: an account with one game could no more make
+a second than it could reach a third. The form is a `New game`
+disclosure beside the list now, revealed whether or not the caller has
+games, and opened automatically when they have none.
+
+### What the browser found that Node could not
+
+The first build put the switcher's panel on screen permanently, list
+open, under the wordmark, with the disclosure shut. The DOM was correct
+throughout and the Node harness was green: a closed `<details>` hides its
+non-summary children through the UA stylesheet's own `display` rule, so
+the author `display: grid` on the `<ul>` overrode it. The fix is
+`display: none` on the panel and `grid` only under `[open]`. **Twelfth
+instance of this sub-project's one defect** and the second in a
+stylesheet — correct in the module, wrong in the cascade, invisible to
+anything without one.
+
+Driven afterwards on the running instance, signed in as the seeded admin
+with three games. `/` redirected into `interface-e2e` (the shortcut,
+intact) and the header read `Interface end to end` with the panel shut;
+clicking it opened four rows — the three games and `All games`; clicking
+`Le Mans 1971` landed on `/g/le-mans` with the `<h1>`, the summary and
+the remembered slug all reading `le-mans`. `/games` listed all three
+without redirecting, with the remembered slug still `le-mans` in storage
+and the `New game` disclosure visible. The reading view
+(`/g/interface-e2e/doc?path=lore/westfall.md`) and the catalogue
+(`/g/interface-e2e/types`) both carried the switcher, one header apiece.
+
+### What is asserted
+
+`internal/web/jstest/game_switcher_test.mjs`, driven by
+`TestYouCanReachAnotherGameFromInsideOne`, loads the real `pages/home.js`
+at `/g/{slug}` **with a remembered game in storage** and reads the
+addresses off the rendered chrome: every other game is reachable, the
+switcher names the current one and marks it, a crafted game name arrives
+as text. A check that only proved the picker lists games when nothing is
+remembered would have passed on the broken product, which is why the
+subject is a game page and not the picker. The same file holds both
+halves of the shortcut — it still fires at `/`, it never fires at
+`/games` — because either one alone is satisfiable by deleting the other.
+
+`TestThePickerHasAnAddressThatDoesNotRedirect` (static_pages_test.go)
+reads `GAMES_PATH` out of `app.js` and drives it at a real server as a
+caller with exactly one game, with `/`'s redirect asserted in the same
+request as the control. `TestEveryPageInsideAGameGivesItsHeaderTheGameList`
+(static_appjs_test.go) holds the wiring at both call sites that have to
+do it, since a page that calls `renderHeader()` bare renders perfectly
+and is simply a page with no way off it.
+
+`ShellRoutesForTest` is keyed by pattern now and not by file: `index.html`
+is served at `/` and at `/games`, one dispatching and one deliberately
+not, and a map keyed by file could only remember one of them — silently
+dropping the route this whole entry is about.

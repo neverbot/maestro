@@ -128,6 +128,36 @@ func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
 	}
 }
 
+// TestEveryPageInsideAGameGivesItsHeaderTheGameList pins the wiring the
+// switcher is, at the two call sites that have to do it.
+//
+// renderHeader draws a switcher only when it is handed the caller's game
+// list, and it is handed one only by a page that already fetched it. A
+// page that calls renderHeader() bare still renders — the wordmark, the
+// sign-out button, everything a reviewer would look at — and is simply a
+// page with no way off it, which is this repository's standing failure
+// pattern: correct in the module, dead at the call site. The check is a
+// source shape rather than a rendered assertion because the two modules
+// are driven by two different harnesses and this is the one property
+// both must have; what the switcher *renders* is asserted for real
+// against pages/home.js in jstest/game_switcher_test.mjs.
+func TestEveryPageInsideAGameGivesItsHeaderTheGameList(t *testing.T) {
+	// The two shells a person can be inside a game on: every page under
+	// /g/{slug} except the reading view starts at openGame (page.js), and
+	// the reading view is doc.js.
+	for _, module := range []string{openGameModule, "static/doc.js"} {
+		raw, err := os.ReadFile(module)
+		if err != nil {
+			t.Fatalf("read %s: %v", module, err)
+		}
+		if !strings.Contains(string(raw), "renderHeader({ games:") {
+			t.Errorf("%s renders the shared header without handing it the caller's game list, so its "+
+				"switcher is not drawn: a page inside a game with no switcher is a page with no way to "+
+				"another game", module)
+		}
+	}
+}
+
 // openGameModule is where the slug corroboration lives since Task 15.
 const openGameModule = "static/pages/page.js"
 

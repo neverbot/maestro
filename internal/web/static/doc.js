@@ -138,8 +138,6 @@ function entityRow(link) {
 const backLink = document.getElementById("back-to-game");
 const titleEl = document.getElementById("doc-title");
 if (titleEl) {
-  renderHeader();
-
   // /g/{slug}/doc?path=… — the slug in the path, the document's path in
   // the query string, mirroring the API's own shape (a document path
   // never occupies a URL segment; see internal/web/api_docs.go).
@@ -150,33 +148,39 @@ if (titleEl) {
     backLink.href = `/g/${encodeURIComponent(slug)}`;
   }
 
-  if (!docPath) {
-    titleEl.textContent = "No document asked for";
-    showFailure("This address names no document. Open one from the game's Documents list.");
+  // The game's row, from the same list every other page resolves a slug
+  // against: /g/{slug} serves a static shell and resolves nothing
+  // server-side, and this page adds none. It is fetched for the game's
+  // name and to confirm the slug reaches a game at all — not, since the
+  // routes started taking slugs, to translate one address into another.
+  //
+  // It is fetched **before the header** and before the "no document
+  // asked for" branch, which it did not used to be: the header carries
+  // the game switcher now (app.js's renderHeader) and the switcher is
+  // this list. A reading view that skipped the fetch on its own error
+  // paths would be a page with no way off it, which is the exact defect
+  // the switcher exists to close — and this page has more error paths
+  // than any other in the product.
+  const games = await fetchGames();
+  if (!games.ok && games.expired) {
+    goToLogin();
   } else {
-    // The game's row, from the same list every other page resolves a
-    // slug against: /g/{slug} serves a static shell and resolves nothing
-    // server-side, and this page adds none. It is fetched for the game's
-    // name and to confirm the slug reaches a game at all — not, since
-    // the routes started taking slugs, to translate one address into
-    // another.
-    const games = await fetchGames();
-    if (!games.ok) {
-      if (games.expired) {
-        goToLogin();
-      } else {
-        titleEl.textContent = "Could not load this document";
-        showFailure(games.message);
-      }
+    const list = games.ok ? games.games : [];
+    const game = list.find((g) => g.slug === slug) || null;
+    renderHeader({ games: list, current: game });
+
+    if (!docPath) {
+      titleEl.textContent = "No document asked for";
+      showFailure("This address names no document. Open one from the game's Documents list.");
+    } else if (!games.ok) {
+      titleEl.textContent = "Could not load this document";
+      showFailure(games.message);
+    } else if (!game) {
+      titleEl.textContent = "Game not found";
+      showFailure("You may not have access to this game, or it no longer exists.");
     } else {
-      const game = games.games.find((g) => g.slug === slug);
-      if (!game) {
-        titleEl.textContent = "Game not found";
-        showFailure("You may not have access to this game, or it no longer exists.");
-      } else {
-        // The stored slug, for the reason app.js's own call says.
-        await renderDocument(game.slug, docPath);
-      }
+      // The stored slug, for the reason app.js's own call says.
+      await renderDocument(game.slug, docPath);
     }
   }
 }

@@ -26,16 +26,25 @@
 <p class="muted" id="status" aria-live="polite">Loading your games…</p>
 <ul class="games" id="games" hidden></ul>
 
-<div id="empty-state" hidden>
-  <p>You have no games yet.</p>
+<p id="empty-state" hidden>You have no games yet.</p>
+
+<!-- The way a second game gets made. It sits beside the list rather than
+     inside the empty state, because "create a game" stopped being an
+     answer the moment you had one otherwise — and this shell is served
+     at /games as well as at "/", so it is reachable from inside a game
+     through the header's switcher. Hidden until app.js has an answer
+     from GET /api/games, so an unauthenticated visitor about to be sent
+     to /login never sees a form flash past. -->
+<details id="new-game" hidden>
+  <summary>New game</summary>
   <form id="create-game">
     <label for="create-game-slug">Slug</label>
     <input id="create-game-slug" type="text" name="slug" placeholder="azeroth" autocomplete="off" required>
     <label for="create-game-name">Name</label>
     <input id="create-game-name" type="text" name="name" placeholder="Azeroth" autocomplete="off" required>
-    <button type="submit">Create your first game</button>
+    <button type="submit">Create game</button>
     <p class="error" id="create-game-error" role="alert" aria-live="assertive"></p>
   </form>
-</div>
+</details>
 
 <script type="module" src="/static/app.js"></script>

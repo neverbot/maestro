@@ -54,6 +54,25 @@ function fakeElement(tag = "div") {
     querySelector() {
       return null;
     },
+    // attributes, and the two accessors the chrome needs since the game
+    // switcher started marking the current game with aria-current.
+    //
+    // The stub refuses a non-string and answers null — never "" — for an
+    // attribute nobody set, following svg_dom.mjs: a stub that answers
+    // the empty string makes "unset" and "set to nothing" the same
+    // value, and a test asserting on that cannot tell an implementation
+    // that marked the current game from one that marked every game with
+    // nothing. The stub must never be the reason a test passes.
+    attributes: {},
+    setAttribute(name, value) {
+      if (typeof value !== "string") {
+        throw new TypeError(`setAttribute(${name}) takes a string, got ${typeof value}`);
+      }
+      this.attributes[name] = value;
+    },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
+    },
   };
 }
 

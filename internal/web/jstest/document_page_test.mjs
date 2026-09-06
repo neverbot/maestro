@@ -48,6 +48,16 @@ function fakeElement(tag = "div") {
       return this.children;
     },
     listeners: {},
+    // The header's game switcher marks the current game with
+    // aria-current, so the stub has to hold an attribute — recorded,
+    // never interpreted, like everything else here.
+    attributes: new Map(),
+    setAttribute(name, value) {
+      this.attributes.set(name, String(value));
+    },
+    getAttribute(name) {
+      return this.attributes.has(name) ? this.attributes.get(name) : null;
+    },
     append(...nodes) {
       this.children.push(...nodes);
     },

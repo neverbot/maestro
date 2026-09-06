@@ -63,6 +63,21 @@ type Service struct {
 	// its bound looks exactly like one that kept it. Nothing in
 	// production sets it.
 	observeBounds func(statementTimeout, readOnly string)
+	// beforeWalk, when set, runs inside CheckRoute between the read of
+	// the game's design version and the first walk. It is written only
+	// by this package's own check tests and nothing in production sets
+	// it.
+	//
+	// It is not decoration either. The one thing a refusal test cannot
+	// observe is *when* a value was read: a check that read
+	// design_version after its walk instead of before it stores a
+	// version the walk never saw and marks a route freshly green against
+	// content it did not look at, and from outside that is
+	// indistinguishable from a correct check on a quiet game. This hook
+	// is what lets a write land in the middle of a check on purpose, so
+	// TestAWriteDuringACheckLeavesTheRouteStaleRatherThanFreshlyGreen
+	// asserts the ordering rather than believing it.
+	beforeWalk func()
 }
 
 // New builds the service. The hub may be nil, in which case nothing is

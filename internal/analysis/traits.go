@@ -382,7 +382,10 @@ var traitMeanings = map[string]string{
 		"normalised direction, so nothing about it is reversed",
 	"containment": "the target is inside the source, so reaching the source reaches " +
 		"everything it holds",
-	"ordering": "the edges of this type impose a sequence on what they join",
+	"ordering": "the **source** comes before the target, which is the same direction " +
+		"`unlocks` is read in and is deliberately not a second convention. A route whose " +
+		"steps put the target first is `out_of_order` at the step that arrived late. It " +
+		"gates as well as orders: reaching the source is what makes the target reachable",
 	"symmetric": "the edge means the same read from either end, so a walk may follow " +
 		"it in both directions",
 	"acyclic": "edges of this type must not form a loop; a loop in them is a finding. " +

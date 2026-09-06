@@ -41,13 +41,18 @@ const (
 // **`route.checked` is not declared here, and the reason is a rule this
 // file would otherwise break.** The plan puts all three kinds in this
 // file so that one gating decision is made once. Its publisher is
-// CheckRoute, which does not exist yet — and a constant with no reader is
-// a mechanism nothing reads, which this repository's linter refuses
-// outright and which is the same rule stated in prose three files away.
-// So the *decision* is recorded here and the constant is declared beside
-// its publisher, which is the only place it can be used from:
+// CheckRoute — and when this file was written CheckRoute did not exist,
+// so the constant would have had no reader, which is a mechanism nothing
+// reads and which this repository's linter refuses outright. So the
+// *decision* is recorded here and the constant is declared beside its
+// publisher, which is the only place it can be used from. The decision
+// stands unchanged now that the publisher exists; what follows is what
+// check.go implements, and TestCheckingARoutePublishesItsVerdictSummary
+// asserts the gating and the payload rather than trusting this list:
 //
-//   - the kind is `route.checked`;
+//   - the kind is `route.checked`, and it is declared as
+//     eventRouteChecked in check.go, beside CheckRoute, which is the
+//     only place it can be used from;
 //   - its gating is routeEventMinRole and routeEventHumanOnly, the two
 //     constants below, taken rather than re-decided — a caller who may
 //     learn that a route changed may learn that it was checked;

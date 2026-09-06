@@ -305,6 +305,75 @@ func (q *Queries) ListNormalisedInEdges(ctx context.Context, arg ListNormalisedI
 	return items, nil
 }
 
+const listOrderingEdgesAmong = `-- name: ListOrderingEdgesAmong :many
+SELECT r.id, r.relation_type_id, r.source_id, r.target_id
+FROM relations r
+WHERE r.project_id = $1
+  AND r.relation_type_id = ANY($2::uuid[])
+  AND r.source_id = ANY($3::uuid[])
+  AND r.target_id = ANY($3::uuid[])
+  AND (NOT $4::boolean OR NOT r.invalid)
+`
+
+type ListOrderingEdgesAmongParams struct {
+	ProjectID      uuid.UUID
+	RelationTypes  []uuid.UUID
+	Entities       []uuid.UUID
+	ExcludeInvalid bool
+}
+
+type ListOrderingEdgesAmongRow struct {
+	ID             uuid.UUID
+	RelationTypeID uuid.UUID
+	SourceID       uuid.UUID
+	TargetID       uuid.UUID
+}
+
+// ListOrderingEdgesAmong is the whole SQL side of the `out_of_order`
+// verdict, and it is deliberately **not** a walk.
+//
+// routes.check's other three verdicts come out of the reachability
+// closure; this one does not, and check.go says so beside the code that
+// reads these rows. An ordering relation places two entities in a
+// sequence, and whether a route respects it is a question about the two
+// positions the route gives them -- a depth-1 lookup over the route's
+// own entity ids, with no recursion, no seed and no closure. A reader
+// who assumed the closure produced this verdict would go looking for a
+// bug in the walk that is not there.
+//
+// Both endpoints are constrained to the route's own step entities: an
+// ordering edge to something the route never mentions orders nothing
+// the route claims.
+func (q *Queries) ListOrderingEdgesAmong(ctx context.Context, arg ListOrderingEdgesAmongParams) ([]ListOrderingEdgesAmongRow, error) {
+	rows, err := q.db.Query(ctx, listOrderingEdgesAmong,
+		arg.ProjectID,
+		arg.RelationTypes,
+		arg.Entities,
+		arg.ExcludeInvalid,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOrderingEdgesAmongRow
+	for rows.Next() {
+		var i ListOrderingEdgesAmongRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RelationTypeID,
+			&i.SourceID,
+			&i.TargetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrphansPage = `-- name: ListOrphansPage :many
 SELECT e.id, e.key, e.name, et.key AS entity_type_key,
        ind.n::bigint AS in_degree, outd.n::bigint AS out_degree
@@ -772,5 +841,56 @@ func (q *Queries) UpsertRoute(ctx context.Context, arg UpsertRouteParams) (Route
 		&i.UpdatedByUserID,
 		&i.UpdatedByTokenID,
 	)
+	return i, err
+}
+
+const writeRouteCheck = `-- name: WriteRouteCheck :one
+UPDATE routes
+SET last_check                  = $1::jsonb,
+    last_checked_at             = now(),
+    last_checked_design_version = $2::bigint
+WHERE project_id = $3::uuid AND id = $4::uuid
+RETURNING last_checked_at, last_checked_design_version
+`
+
+type WriteRouteCheckParams struct {
+	LastCheck     []byte
+	DesignVersion int64
+	ProjectID     uuid.UUID
+	ID            uuid.UUID
+}
+
+type WriteRouteCheckRow struct {
+	LastCheckedAt            pgtype.Timestamptz
+	LastCheckedDesignVersion *int64
+}
+
+// WriteRouteCheck stores the one thing this sub-project caches.
+//
+// **The design version is a parameter and not a subselect.** Reading
+// `projects.design_version` here would read it at the end of the check,
+// so a metamodel write that committed while the walk was running would
+// be counted as a design this verdict had seen -- and the route would
+// read `checked` against content it never looked at. The value bound
+// here is the one check.go read **before** the walk began, which makes a
+// mid-check write leave the route `stale` rather than freshly green.
+// TestAWriteDuringACheckLeavesTheRouteStaleRatherThanFreshlyGreen is
+// that assertion.
+//
+// **version is not in the SET list.** A check is not an edit of the
+// route: the steps and the parameters a caller holds are still current
+// afterwards, and bumping the version would turn every check into a
+// version_conflict for the next writer. routes_set_updated_at does fire,
+// which is why last_checked_at is written from the same now() -- see
+// routeStatus, which compares the two.
+func (q *Queries) WriteRouteCheck(ctx context.Context, arg WriteRouteCheckParams) (WriteRouteCheckRow, error) {
+	row := q.db.QueryRow(ctx, writeRouteCheck,
+		arg.LastCheck,
+		arg.DesignVersion,
+		arg.ProjectID,
+		arg.ID,
+	)
+	var i WriteRouteCheckRow
+	err := row.Scan(&i.LastCheckedAt, &i.LastCheckedDesignVersion)
 	return i, err
 }

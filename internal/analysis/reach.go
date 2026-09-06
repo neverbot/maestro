@@ -205,10 +205,23 @@ SELECT w.id, w.depth, w.via_relation, COALESCE(r.invalid, false)
 FROM ` + graph.ReadFrom(walk) + ` w
 LEFT JOIN relations r ON r.id = w.via_relation AND r.project_id = $1`
 
+	// **Seeds is never nil**, and that is a wire decision made in the
+	// domain rather than in a projection. A nil slice marshals to `null`
+	// and the analysis tools' output schemas say `seeds.entities` is an
+	// array; a run seeded by entity *type* alone names no individual key,
+	// so the empty case is the ordinary one rather than a corner. Views
+	// shipped the same shape as an open object and a client had two
+	// spellings of "nothing was dragged" to handle; here it would have
+	// been a tool no real client could call at all, which is what
+	// TestEveryAnalysisToolIsCallableOverTheRealTransport caught.
+	refs := seed.refs
+	if refs == nil {
+		refs = []SeedRef{}
+	}
 	out := Reach{
 		Reached:         map[uuid.UUID]bool{},
 		Depth:           map[uuid.UUID]int{},
-		Seeds:           seed.refs,
+		Seeds:           refs,
 		SeedEntityTypes: seed.entityTypes,
 		IncludeUngated:  seed.includeUngated,
 		Gating:          p.Gating,

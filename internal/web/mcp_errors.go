@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
@@ -189,6 +190,22 @@ func mcpErrorFor(ctx context.Context, toolName string, caller Caller, err error)
 	case errors.Is(err, views.ErrQueryStale):
 		return mcpErrorResult(errCodeQueryStale, err.Error(), staleDetails(err))
 
+	// The analysis domain's one code. TestEveryAnalysisSentinelHasAWireCode
+	// drives analysis.Sentinels() through this function rather than
+	// repeating the list, so a second sentinel added there cannot be
+	// forgotten here — an unrecognised code matches no arm and surfaces
+	// as internal_error, which tells an agent to give up on something it
+	// could fix in one call.
+	//
+	// The details payload is the game's relation type catalogue, built
+	// in the domain (analysis.UndeclaredError.Details) so this surface
+	// and the REST one cannot disagree about what the refusal carries.
+	// It is the whole reason this code exists: the recovery is "declare
+	// something about your game's relation types" and no caller can
+	// perform it without that list.
+	case errors.Is(err, analysis.ErrSemanticsUndeclared):
+		return mcpErrorResult(errCodeSemanticsUndeclared, err.Error(), undeclaredDetails(err))
+
 	// **Before the retryable arm, and that ordering is the whole point.**
 	// A *views.TimeoutError unwraps to the pgconn.PgError carrying 57014,
 	// so metamodel.IsRetryable admits it and the arm below would catch it
@@ -349,4 +366,23 @@ func staleDetails(err error) map[string]any {
 	}
 	details["stale"] = stale
 	return details
+}
+
+// undeclaredDetails is the relation type catalogue an undeclared game's
+// refusal carries, or nil when the error is the bare sentinel.
+//
+// It is a helper rather than an `errors.As` in the arm itself for the
+// reason every other arm in these two functions matches with errors.Is:
+// the arm's job is to name the *code*, which the sentinel decides, and
+// the payload is whatever the concrete error underneath happens to
+// carry. Matching on the concrete type instead would send a bare
+// analysis.ErrSemanticsUndeclared -- which is what
+// TestEveryAnalysisSentinelHasAWireCode drives, and what a future
+// wrapper could produce -- all the way to internal_error.
+func undeclaredDetails(err error) map[string]any {
+	var undeclared *analysis.UndeclaredError
+	if !errors.As(err, &undeclared) {
+		return nil
+	}
+	return undeclared.Details()
 }

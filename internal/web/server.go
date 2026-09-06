@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -53,6 +54,16 @@ type Options struct {
 	// tools (mcp_views.go) and their REST mirror (api_views.go) all read
 	// it.
 	Views *views.Service
+
+	// Analysis is the analysis domain: the three read-only analyses, the
+	// route CRUD and routes.check. Optional in the same sense as
+	// Metamodel, Markdown and Views, and a field here for the same
+	// reason: whoever constructs the service has to hand this package
+	// the same instance, over the same pool and the same hub, or a
+	// route.checked event would be published into a hub no SSE stream
+	// reads from. The eight analysis.* / routes.* MCP tools
+	// (mcp_analysis.go) and their REST mirror (api_analysis.go) read it.
+	Analysis *analysis.Service
 
 	// Hub is the realtime fan-out this instance publishes into and the
 	// SSE endpoint (events.go) reads from. publish.go's own handlers
@@ -422,6 +433,27 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/positions", s.handleSetViewPositions)
 	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/positions/clear", s.handleClearViewPositions)
 	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/background", s.handleSetViewBackground)
+	// The analysis surface (api_analysis.go), registered unconditionally
+	// for the reason every block around it is: a registration gated on
+	// the service being present is invisible to
+	// TestEveryContentRouteIsRegisteredAsContent and
+	// TestEveryContentWriteRouteRefusesAViewer, both of which build their
+	// server from stubOptions.
+	//
+	// The three analyses are POSTs and are still reads — their arguments
+	// are a nested object that does not fit in a query string — so
+	// registerContentRoute puts requireEditor in front of them. That is
+	// the same cost `views.run` pays and api_analysis.go's header
+	// records it as a finding against the pair rather than resolving it
+	// for one domain only.
+	s.registerContentRoute("POST /api/games/{game}/analysis/cycles", s.handleAnalysisCycles)
+	s.registerContentRoute("POST /api/games/{game}/analysis/unreachable", s.handleAnalysisUnreachable)
+	s.registerContentRoute("POST /api/games/{game}/analysis/orphans", s.handleAnalysisOrphans)
+	s.registerContentRoute("GET /api/games/{game}/routes", s.handleListRoutes)
+	s.registerContentRoute("POST /api/games/{game}/routes", s.handleUpsertRoute)
+	s.registerContentRoute("GET /api/games/{game}/routes/by-key/{key}", s.handleGetRoute)
+	s.registerContentRoute("DELETE /api/games/{game}/routes/by-key/{key}", s.handleRemoveRoute)
+	s.registerContentRoute("POST /api/games/{game}/routes/by-key/{key}/check", s.handleCheckRoute)
 	s.registerContentRoute("GET /api/games/{game}/docs", s.handleListDocs)
 	s.registerContentRoute("POST /api/games/{game}/docs", s.handleWriteDoc)
 	s.registerContentRoute("POST /api/games/{game}/docs/batch", s.handleWriteDocs)
@@ -495,6 +527,18 @@ var shellRoutes = []struct {
 	dispatches bool
 }{
 	{pattern: "GET /{$}", file: "index.html", byHand: true, dispatches: true},
+	// The picker's own address, and the one route in this product that
+	// serves a shell a second route also serves. "/" is a *shortcut* —
+	// handleRoot sends a caller with exactly one game straight into it,
+	// and the picker's script sends a caller with a remembered game
+	// straight back into that one — so "/" cannot double as the way out
+	// of a game: it is the way back in. /games serves the same shell
+	// with neither shortcut applying (app.js takes the remembered-game
+	// redirect only at "/"), so the header's game switcher has somewhere
+	// to point that always means "all of my games", and the create-game
+	// form has somewhere to live that an account with one game can
+	// reach.
+	{pattern: "GET /games", file: "index.html"},
 	{pattern: "GET /login", file: "login.html", byHand: true},
 	{pattern: "GET /g/{slug}", file: "game.html", byHand: true},
 	{pattern: "GET /g/{slug}/doc", file: "document.html", byHand: true},

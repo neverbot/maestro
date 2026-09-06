@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/views"
@@ -64,6 +65,21 @@ var wireDomainRoots = map[string]reflect.Type{
 	// member of it is a wire value under its own Go-decided name.
 	"views.Result": reflect.TypeFor[views.Result](),
 
+	// The analysis domain answers with its own result types rather than
+	// with a projection, deliberately: every member of each is already a
+	// wire spelling designed as the answer to a tool call, and a
+	// projection would be a second place that decides what a finding is.
+	// That choice is only safe while this sweep names the roots, so it
+	// does — including the two that reach the encoder through no tagged
+	// field of this package at all, RouteCheck and RoutePage, which are
+	// a tool's whole `Out` value.
+	"analysis.CyclesResult":      reflect.TypeFor[analysis.CyclesResult](),
+	"analysis.UnreachableResult": reflect.TypeFor[analysis.UnreachableResult](),
+	"analysis.OrphansResult":     reflect.TypeFor[analysis.OrphansResult](),
+	"analysis.Route":             reflect.TypeFor[analysis.Route](),
+	"analysis.RoutePage":         reflect.TypeFor[analysis.RoutePage](),
+	"analysis.RouteCheck":        reflect.TypeFor[analysis.RouteCheck](),
+
 	"metamodel.Schema":        reflect.TypeFor[metamodel.Schema](),
 	"metamodel.BulkWrite":     reflect.TypeFor[metamodel.BulkWrite](),
 	"metamodel.BulkFailure":   reflect.TypeFor[metamodel.BulkFailure](),
@@ -76,7 +92,8 @@ var wireDomainRoots = map[string]reflect.Type{
 // not a wire value, and a tagged field holding one would be a finding of
 // its own rather than something to check the tags of.
 var domainPackages = map[string]bool{
-	"views": true, "metamodel": true, "markdown": true, "identity": true,
+	"analysis": true,
+	"views":    true, "metamodel": true, "markdown": true, "identity": true,
 	"projects": true, "realtime": true, "roles": true, "paging": true,
 	"graph": true, "config": true,
 }
@@ -130,6 +147,18 @@ func walkWireType(t *testing.T, path string, typ reflect.Type, seen map[reflect.
 				continue
 			}
 			tag, ok := field.Tag.Lookup("json")
+			// **An embedded struct with no tag has no wire name of its
+			// own**: encoding/json inlines its fields into the outer
+			// object, so what a client reads are that type's members,
+			// which the walk below checks exactly as it checks the
+			// outer ones. Requiring a tag here would demand a spelling
+			// no client ever sees. An anonymous field of a *non*-struct
+			// type is not inlined — it crosses the wire under its type's
+			// name — so it falls through to the check.
+			if !ok && field.Anonymous && embeddedStruct(field.Type) {
+				walkWireType(t, path+"."+field.Name, field.Type, seen)
+				continue
+			}
 			if !ok {
 				t.Errorf("%s.%s carries no json tag: it crosses the wire as %q, which is a "+
 					"Go field name and not the spelling the tools document — a client reading "+
@@ -203,6 +232,15 @@ func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
 			"name them, so nothing checks that their members are spelled the way an agent is "+
 			"told to read them: %s", strings.Join(missing, ", "))
 	}
+}
+
+// embeddedStruct reports whether an anonymous field's type is one
+// encoding/json inlines: a struct, or a pointer to one.
+func embeddedStruct(typ reflect.Type) bool {
+	for typ.Kind() == reflect.Pointer {
+		typ = typ.Elem()
+	}
+	return typ.Kind() == reflect.Struct
 }
 
 func taggedForJSON(field *ast.Field) bool {

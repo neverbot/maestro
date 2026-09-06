@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/identity"
@@ -114,6 +115,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 		Metamodel: metamodel.New(pool, hub),
 		Markdown:  markdown.New(pool, hub),
 		Views:     views.New(pool, hub),
+		Analysis:  analysis.New(pool, hub),
 		Hub:       hub,
 	})
 	srv := &http.Server{

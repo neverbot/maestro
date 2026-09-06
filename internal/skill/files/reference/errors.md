@@ -8,7 +8,7 @@ an afternoon of looking in the wrong place.
 unauthorized internal_error not_found bad_request scope_violation
 retryable version_conflict schema_violation invalid_schema invalid_input
 endpoint_type_mismatch in_use query_invalid renderer_requirements
-limit_exceeded query_stale
+limit_exceeded query_stale semantics_undeclared
 ```
 
 ## Fix everything in one pass
@@ -45,6 +45,7 @@ the problem is not.
 | `version_conflict` | somebody wrote between your read and your write | re-read, merge onto the version reported, write again |
 | `endpoint_type_mismatch` | an edge's endpoint is of a type its relation type does not admit | fix that end, or widen the relation type's endpoint list |
 | `in_use` | a removal would strand content | remove the content first, or cascade deliberately |
+| `semantics_undeclared` | an analysis was asked about a game whose relation types say nothing about how they behave, so the engine had no edge it was allowed to walk | declare `analysis_traits` on the types that gate progression, or set a `semantic_role` the engine translates; the error carries this game's relation types with whatever each currently declares |
 | `query_invalid` | the query document itself is wrong, at the pointer given | fix that position and validate again |
 | `renderer_requirements` | the query and the renderer disagree about what is drawn | change the query, or change the renderer |
 | `limit_exceeded` | a declared limit is above its hard cap; it is refused rather than lowered for you | lower the number you sent |

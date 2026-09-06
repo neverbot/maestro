@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
@@ -173,5 +174,6 @@ func NewToolReferenceServer() *Server {
 		Metamodel: metamodel.New(nil, nil),
 		Markdown:  markdown.New(nil, nil),
 		Views:     views.New(nil, nil),
+		Analysis:  analysis.New(nil, nil),
 	})
 }

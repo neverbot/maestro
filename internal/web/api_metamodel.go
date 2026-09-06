@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
@@ -87,7 +88,8 @@ const maxContentRequestBodyBytes = 4 << 20
 // second place Options' services are read from.
 func (s *Server) deps() MCPDeps {
 	return MCPDeps{Identity: s.opts.Identity, Projects: s.opts.Projects,
-		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown, Views: s.opts.Views}
+		Metamodel: s.opts.Metamodel, Markdown: s.opts.Markdown, Views: s.opts.Views,
+		Analysis: s.opts.Analysis}
 }
 
 // requireContentService refuses a game-content route on an instance
@@ -251,6 +253,15 @@ func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err er
 		writeCodedError(w, http.StatusBadRequest, errCodeLimitExceeded, err.Error(), fieldDetails(err))
 	case errors.Is(err, views.ErrQueryStale):
 		writeCodedError(w, http.StatusConflict, errCodeQueryStale, err.Error(), staleDetails(err))
+	// The analysis domain's one, arm for arm with mcpErrorFor and in the
+	// same position. **422, not 400 and not 409.** The request is well
+	// formed — nothing the caller sent is wrong — and the game is in a
+	// state the caller can fix by declaring something, which is exactly
+	// the statement invalid_schema and schema_violation are 422 for. 400
+	// would blame the arguments and 409 would claim a race there is not.
+	case errors.Is(err, analysis.ErrSemanticsUndeclared):
+		writeCodedError(w, http.StatusUnprocessableEntity, errCodeSemanticsUndeclared,
+			err.Error(), undeclaredDetails(err))
 	// Before the retryable arm, for the reason mcpErrorFor's twin of this
 	// one gives at length: the arm below drops the error's own message,
 	// which is right for a lock wait and would discard the one thing a
@@ -301,6 +312,13 @@ func statusForCode(code string) int {
 	// would be a lie the moment this layer does build one.
 	case errCodeQueryStale:
 		return http.StatusConflict
+	// semantics_undeclared is 422 and reaches this switch only through an
+	// *MCPError this layer built, which the analysis surface does not do
+	// today — the domain's own error takes the arm in writeDomainError.
+	// It is named anyway because statusForCode's default is already 422
+	// and a silent agreement is one a later edit to the default breaks.
+	case errCodeSemanticsUndeclared:
+		return http.StatusUnprocessableEntity
 	default:
 		return http.StatusUnprocessableEntity
 	}

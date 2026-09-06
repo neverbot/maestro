@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -49,6 +50,14 @@ type MCPDeps struct {
 	// (TestTheViewsToolsAreAbsentWithoutAViewsService). cmd/maestro
 	// always builds one.
 	Views *views.Service
+
+	// Analysis is the analysis domain the tools in mcp_analysis.go
+	// serve. Optional in the same sense as the three above: a Server
+	// built without one still starts and still answers every other tool,
+	// because newMCPServer registers the analysis tools only when it is
+	// present (TestTheAnalysisToolsAreAbsentWithoutAnAnalysisService).
+	// cmd/maestro always builds one.
+	Analysis *analysis.Service
 }
 
 // WhoamiOutput is the shape returned by the whoami tool. Its ProjectID
@@ -475,6 +484,11 @@ func (s *Server) newMCPServer() *mcp.Server {
 	// The saved-view tools, on the same terms — see MCPDeps.Views.
 	if deps.Views != nil {
 		s.addViewsTools(srv, deps)
+	}
+
+	// The analysis tools, on the same terms — see MCPDeps.Analysis.
+	if deps.Analysis != nil {
+		s.addAnalysisTools(srv, deps)
 	}
 
 	return srv

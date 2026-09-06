@@ -1,5 +1,12 @@
 package web
 
+import (
+	"context"
+	"net/http"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
 // This file exposes a little of this package's internal routing
 // bookkeeping to the external web_test package, and nothing else. It is
 // a _test.go file, so none of it is compiled into the binary — the same
@@ -63,29 +70,72 @@ func (s *Server) ToolDescriptionsForTest() map[string]string {
 	return out
 }
 
-// ShellRoutesForTest returns every HTML shell this server serves and the
-// route it is served at. It exists for TestEveryShellIsReachableByItsRoute
-// (static_pages_test.go), which enumerates the shells on disk against it
-// and then drives a real request at each pattern: a shell added without a
-// route must fail there rather than 404 in a browser.
+// ShellRoutesForTest returns every route that serves an HTML shell, keyed
+// by **pattern** and valued by the shell it serves. It exists for
+// TestEveryShellIsReachableByItsRoute (static_pages_test.go), which
+// enumerates the shells on disk against it and then drives a real
+// request at each pattern: a shell added without a route must fail there
+// rather than 404 in a browser.
+//
+// It is keyed by pattern and not by file because a file is not a key: the
+// picker shell (index.html) is served at "/" and at "/games", one of them
+// a dispatching shortcut and the other deliberately not, and a map keyed
+// by file could only remember one of the two — silently dropping the
+// route the browser bug this shape was written for actually needed
+// tested.
 func ShellRoutesForTest() map[string]string {
 	out := make(map[string]string, len(shellRoutes))
 	for _, shell := range shellRoutes {
-		out[shell.file] = shell.pattern
+		out[shell.pattern] = shell.file
 	}
 	return out
 }
 
-// DispatchingShellsForTest returns the shells whose route decides
+// DispatchingShellsForTest returns the patterns whose route decides
 // something before it serves — handleRoot's redirect in particular — so
 // the test above can assert a route exists for them without asserting
-// that a bare GET returns their bytes.
+// that a bare GET returns their bytes. Keyed by pattern for the reason
+// above: "/" dispatches and "/games" does not, and they serve one file.
 func DispatchingShellsForTest() map[string]bool {
 	out := make(map[string]bool, len(shellRoutes))
 	for _, shell := range shellRoutes {
 		if shell.dispatches {
-			out[shell.file] = true
+			out[shell.pattern] = true
 		}
 	}
 	return out
+}
+
+// MCPErrorForTest maps a domain error to its wire result, so
+// TestEveryAnalysisSentinelHasAWireCode can drive a package's sentinel
+// list through the real mapping rather than repeating it.
+func MCPErrorForTest(err error) *mcp.CallToolResult {
+	return mcpErrorFor(context.Background(), "test.tool", Caller{}, err)
+}
+
+// WriteDomainErrorForTest is the REST twin of the above, so a sentinel
+// can be driven through both arms in one test and the two surfaces held
+// to answering with one code.
+func (s *Server) writeDomainErrorForTest(w http.ResponseWriter, r *http.Request, err error) {
+	s.writeDomainError(w, r, err)
+}
+
+// WriteDomainErrorForTest builds the minimum server writeDomainError
+// needs — it reads no option — and writes the refusal into w.
+func WriteDomainErrorForTest(w http.ResponseWriter, r *http.Request, err error) {
+	(&Server{}).writeDomainErrorForTest(w, r, err)
+}
+
+// ErrorCodesForTest is every wire code this package can answer with, so
+// a guard over agent-facing prose can tell a code from a vocabulary word
+// without a second list of codes to maintain.
+func ErrorCodesForTest() []string {
+	return []string{
+		errCodeUnauthorized, errCodeInternal, errCodeNotFound, errCodeBadRequest,
+		errCodeScopeViolation, errCodeRetryable, errCodeVersionConflict,
+		errCodeSchemaViolation, errCodeInvalidSchema, errCodeInvalidInput,
+		errCodeEndpointTypeMismatch, errCodeInUse, errCodeQueryInvalid,
+		errCodeRendererRequirements, errCodeLimitExceeded, errCodeQueryStale,
+		errCodeSemanticsUndeclared, errCodeForbidden,
+	}
 }

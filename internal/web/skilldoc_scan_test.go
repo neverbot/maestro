@@ -89,7 +89,15 @@ var restatementFixtures = []struct {
 	},
 	{
 		name: "an attribution to a tool the server does not register",
-		page: "> **From `analysis.orphans`'s own description:**\n> entities.upsert accepts at most 500 items",
+		// The attributed name is deliberately one no domain would ever
+		// claim. It used to be `analysis.orphans`, chosen when this
+		// package registered no analysis tools, and it stopped testing
+		// anything the day one was registered: the fixture then reported
+		// the *other* violation — a claim about entities.upsert under a
+		// quote from a real tool — and its `contains` no longer matched.
+		// A placeholder that a later task can turn into a real tool is a
+		// fixture with an expiry date on it.
+		page: "> **From `nosuch.tool`'s own description:**\n> entities.upsert accepts at most 500 items",
 		want: 1, contains: "does not register",
 	},
 	{

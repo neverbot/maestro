@@ -98,6 +98,20 @@ const (
 	errCodeRendererRequirements = "renderer_requirements"
 	errCodeLimitExceeded        = "limit_exceeded"
 	errCodeQueryStale           = "query_stale"
+
+	// The analysis domain's one. internal/analysis/errors.go argues at
+	// length why it is one and not four: `invalid_input` already means
+	// "a row's own arguments are malformed, change that argument" and
+	// covers every nonsensical analysis argument; `limit_exceeded`
+	// already names a bound above its cap; `retryable` already carries a
+	// statement that ran out of budget, and internal/views refused a
+	// `query_timeout` code for exactly that reason four days earlier.
+	// This one ships because its recovery is none of those — **declare
+	// something about your game's relation types** — and because it
+	// carries a payload no existing code has a place for: the game's
+	// relation types with their current roles and traits, which is the
+	// list a caller needs in front of it to perform that recovery.
+	errCodeSemanticsUndeclared = "semantics_undeclared"
 	// vocab:error_codes end
 
 	// Below the region: codes only the HTTP surface writes. An agent

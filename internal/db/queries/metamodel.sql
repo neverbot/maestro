@@ -310,8 +310,9 @@ FOR UPDATE;
 --     scoped to another game.
 --
 -- search is written by this statement and by nothing else, on both arms
--- of the upsert. **It is weighted**: the name goes in twice, once alone
--- under label A and once as the head of the whole text under label B.
+-- of the upsert. **It is weighted in three parts**: the name alone under
+-- label A, the name at the head of the whole text under label B, and the
+-- row's key under label C.
 -- The A half is what SearchEntities' leading sort key reads to put a row
 -- the query names above a row that merely mentions the words — see its
 -- own comment for why that is a sort key and not a weight — and the
@@ -328,6 +329,37 @@ FOR UPDATE;
 -- indexed under its previous words and a search stops finding it with
 -- nothing to signal why.
 --
+-- **The C half is the row's key, and 0010_entity_key_search.sql
+-- back-filled it.** The key is the handle every other tool on this
+-- surface addresses a row by and the one every error message quotes, and
+-- until 0010 it was the one string about a row that search could not
+-- find: a designer typing `circuit-000` got nothing back. It is a third
+-- setweight rather than more text in an existing half so that the
+-- backfill stays exact — a migrated row is `(A||B) || C` and a row
+-- written here is `(A||B) || C`, the same bytes — and so that both
+-- earlier halves keep meaning exactly what 0006 and SearchEntities say
+-- they mean.
+--
+-- **C and not A**, which is the whole decision. `name_match` is
+-- `ts_filter(search, '{a}')`, and SearchEntities leads its ORDER BY with
+-- it precisely so that no amount of repetition can lift a row past one
+-- the query *names*. Keys in real content are minted from names
+-- (`ironforge` for "Ironforge"), so putting them in A would mostly
+-- duplicate lexemes already there — and where it would not, it would
+-- break the promise: two hundred rows keyed `race-000`…`race-199` would
+-- every one of them answer the word "race" as a name match, ahead of the
+-- row actually named Race. C keeps the key findable and leaves
+-- `name_match` asking the question it was built to ask. Ranking below B
+-- costs a key-only hit nothing in practice: an exact handle is a lexeme
+-- almost nothing else carries, so it competes with no one.
+--
+-- **The C half is built from the requested key, not the stored one**, and
+-- on the DO UPDATE arm those can differ in case — the key column is
+-- deliberately absent from the SET list, so the first spelling stands.
+-- It does not matter: `to_tsvector('simple', …)` folds case, so both
+-- spellings produce the identical lexeme, and Go refuses the respelling
+-- after the write anyway.
+--
 -- invalid is reset to false because the caller has just validated these
 -- values against the type's current schema; a row that is being written
 -- is a row that has been judged.
@@ -336,7 +368,8 @@ INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('entity_type_id')::uuid,
         sqlc.arg('key')::text, sqlc.arg('name')::text, sqlc.arg('fields')::jsonb,
         setweight(to_tsvector('simple', sqlc.arg('name')::text), 'A')
-          || setweight(to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text), 'B'),
+          || setweight(to_tsvector('simple', sqlc.arg('name')::text || ' ' || sqlc.arg('search_text')::text), 'B')
+          || setweight(to_tsvector('simple', sqlc.arg('key')::text), 'C'),
         sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
 ON CONFLICT (project_id, entity_type_id, lower(key)) DO UPDATE
 SET name                = excluded.name,
@@ -772,6 +805,13 @@ LIMIT sqlc.arg('limit')::int;
 -- amount of repetition in a field can lift a row past one whose name
 -- matches — and `rank` still orders within each of the two groups, so
 -- the weights keep doing the work they were introduced for.
+--
+-- 0010_entity_key_search.sql added a third half to the vector, the row's
+-- key under label C, and deliberately did not put it in A so that this
+-- predicate keeps asking about the name alone. A row found only by its
+-- key therefore comes back with `name_match` false, which is the honest
+-- answer: the query named the handle, not the name. UpsertEntity's
+-- comment carries the argument.
 --
 -- After 0006's Down arm `strip` has removed every weight, so this
 -- predicate is uniformly false and the ordering falls back to rank

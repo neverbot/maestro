@@ -685,8 +685,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 	if !ok {
 		return
 	}
+	// verbose, through the same helper the two listings read it with, and
+	// defaulting off exactly as they do. A search that could only be
+	// asked for fields over MCP would be a mirror that answers a
+	// different question from the surface it mirrors.
+	verbose, ok := queryBool(w, r, "verbose")
+	if !ok {
+		return
+	}
 	out, err := searchContent(r.Context(), s.deps(), caller, scope.ProjectID, SearchInput{
-		Query: query, Kind: kind, TypeKey: typeKey, DocKind: docKind, Limit: limit,
+		Query: query, Kind: kind, TypeKey: typeKey, DocKind: docKind,
+		Limit: limit, Verbose: verbose,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)

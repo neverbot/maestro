@@ -9230,6 +9230,129 @@ questions:
 
 ---
 
+### Metamodel 13: search is unconditionally verbose, and does not index row keys
+
+**Status: done.** One migration (`0010_entity_key_search.sql`), one
+line added to `UpsertEntity`, one flag on `SearchInput` and its REST
+mirror, five new tests and three existing ones corrected.
+
+Both halves come from Task 9's end-to-end seeding run, which drove the
+surface the way an agent actually drives it, and both were pinned there
+as *passing* limitations to be deleted when closed. They are deleted.
+
+#### The payload: `verbose`, off by default
+
+`entities.list` defaults `verbose` off and states the reason: a page of
+five hundred entities with their fields is the whole game back in one
+answer, and an agent walking a catalogue almost always wants keys and
+names. `relations.list` restates it for edges. `search` had no such
+argument at all and answered with every hit's whole field payload,
+`longtext` included, up to its 200-row cap — **one sixty-hit search
+measured at 1.6 MB of JSON** against a game whose rows carry 25 KB of
+lore each.
+
+**The fix follows the listing's rule and its reasoning rather than
+inventing a second one.** Same spelling, same default, same argument —
+and the argument is *stronger* here, not weaker: a search is what an
+agent reaches for before it knows which row it wants, so without the
+flag the payload it swallows is by definition the payload of rows it
+has not chosen. A slim hit keeps everything choosing needs — `type_key`,
+`key`, `name`, `invalid`, `version` — and `entities.get`, or a verbose
+repeat, is the second call that reads the one it picked.
+
+The flag gates **entity hits only**, and that is stated rather than
+implied. A document hit has never carried a body (`DocumentHitOutput`
+argues why, and `TestASearchHitCarriesNoBodyAtAll` pins it over every
+field), so there is nothing on that side to withhold; a flag that
+silently meant less on one of two kinds would be worse than no flag.
+
+It is on **both** surfaces. The REST mirror reads it through `queryBool`,
+the same helper the two listings read `verbose` with, so it takes the
+same four true spellings and refuses the same value-less parameter — a
+search that could only be asked for fields over MCP would be a mirror
+answering a different question from the surface it mirrors.
+
+#### The index: the key goes in at label C
+
+The vector was `setweight(name, 'A') || setweight(name || field_text,
+'B')`. A row's **key** — the handle `entities.get` takes, the handle
+every refusal quotes back, the handle a designer reads off every listing
+— was not in it, so typing `circuit-000` found nothing.
+
+**Label C, and this is the whole decision.** `SearchEntities` leads its
+ORDER BY with `ts_filter(search, '{a}') @@ query`, which is what turns
+"a row the query *names* outranks a row that merely mentions the words"
+from a tendency into a guarantee (review finding M1, Task 6). The A half
+has to stay the name and nothing else. Keys minted from names
+(`ironforge` for "Ironforge") would add nothing there; keys minted from
+a counter would actively break it — the seeded racing game holds two
+hundred rows keyed `race-000`…`race-199`, and under label A every one of
+them would claim a name match on the word "race", ahead of the row
+actually named Race. Under C the key is findable, `name_match` still
+answers the question it was introduced for, and a hit found by its key
+alone truthfully reports `name_match` false. B (0.4) outranking C (0.2)
+costs such a hit nothing in practice: an exact handle is a lexeme almost
+no other row carries, so it competes with no one.
+
+**The migration follows 0006's precedent exactly, because 0006 is the
+worked example for this shape of change** — a write-path edit plus a
+rewrite of every stored vector. The new vector is the old one *plus* a
+third `setweight`, never a re-derivation of an existing half, so the
+backfill is a pure function of the stored value: `||` shifts the right
+operand's positions past the left's, both the migration and
+`UpsertEntity` evaluate `(A||B) || C`, and a migrated row is
+byte-for-byte what the shipping write path produces.
+`TestTheEntityKeyBackfillIsExact` asserts that over 0006's own twelve
+shapes plus two the key adds, with the two sides of each pair carrying
+the *identical* key under two entity types — comparing `migrated-07`
+against `reseeded-07` would now compare two different vectors and pass
+or fail for the wrong reason. `coalesce` for 0006's reason: a migration
+must not be the thing that empties an index. The Down arm is
+`ts_filter(…, '{a,b}')`, which is exact for every row this migration
+wrote — a lexeme the key and the name share keeps its A and B positions
+and loses only its C one.
+
+#### Three existing tests corrected, each for a stated reason
+
+- `TestTheSearchBackfillIsExact` (0006's own) compared whole vectors
+  between a migrated row and a re-seeded one. Its two rows carry
+  different keys by construction — one game, one type — so it now
+  compares `ts_filter(…, '{a,b}')`, with the C half asserted whole by
+  0010's own test next to it.
+- `TestTheSearchVectorIsTheSameForTheSameValues` pins that two rows
+  holding identical *values* index identically, which is what caught the
+  missing key sort in `searchTextOf`. Its six rows are `q0`…`q5` and are
+  now supposed to differ at label C, so `searchColumn` filters it out.
+  This is the one that failed first and it failed correctly.
+- Task 9's `what the surface makes an agent do the long way` block loses
+  its cases 2 and 4, which is what closing a pinned limitation is
+  supposed to do to it.
+
+#### Mutation, applied
+
+- **Key at label A instead of C.** `TestAKeyMatchDoesNotClaimToBeANameMatch`
+  red: `row "race-002" was found by its key and reported name_match
+  true`. `TestSearchFindsAnEntityByItsKeyOverTheToolSurface` red: `a hit
+  found by its key alone claims name_match`.
+- **The C half dropped from the write path.**
+  `TestSearchFindsARowByItsKey` red: `Search("circuit-000") = [], want
+  [circuit-000]`. `TestTheEntityKeyBackfillIsExact` red on every shape:
+  `the migrated row's vector differs from the re-seeded row's`.
+- **`verbose` ignored (`entityOf(..., true)` restored).**
+  `TestASearchOmitsFieldsUnlessAskedToBeVerbose` red: `a search nobody
+  asked to be verbose carried fields`. `TestTheRESTMirrorTakesTheSameVerboseFlag`
+  red: `the REST mirror is verbose by default`. The seeded end-to-end run
+  red too: `a search nobody asked to be verbose carried fields:
+  ... Key:race-000 ... Fields:map[laps:10 night:false]`.
+
+The seeded run now logs what the flag is worth on real content: one
+200-hit search over 511 rows is **37,854 bytes slim against 49,956
+verbose**, and the single hit carrying a long briefing is **220 bytes
+slim against 4,944 verbose** — a 22× difference on exactly the row shape
+that produced the original 1.6 MB.
+
+---
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:

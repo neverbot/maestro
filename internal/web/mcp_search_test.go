@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/markdown"
+	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/web"
 )
 
@@ -717,5 +718,179 @@ func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T
 	}
 	if len(both.Items) != 0 {
 		t.Fatalf("no entities matched \"gnoll\", got %+v", both.Items)
+	}
+}
+
+// TestASearchOmitsFieldsUnlessAskedToBeVerbose pins the flag Task 9's
+// seeding run found missing, on both surfaces and over the wire.
+//
+// The measurement that made it necessary: against a game whose rows carry
+// 25 KB of lore each, one sixty-hit search answered with 1.6 MB of JSON,
+// because there was no argument that turned the payload off. The fixture
+// here is that shape in miniature — one row carrying a long briefing —
+// and it asserts the two things that matter: without the flag the hit
+// carries no `fields` key *at all* on the wire (not an empty object,
+// which a client would have to tell apart from a row with no values),
+// and with it the whole payload comes back.
+func TestASearchOmitsFieldsUnlessAskedToBeVerbose(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+
+	if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: []web.FieldInput{{Key: "briefing", Type: "longtext"}},
+	}); err != nil {
+		t.Fatalf("MCPTypesUpsert: %v", err)
+	}
+	briefing := strings.Repeat("The kerbstone at the exit is the whole lap. ", 200)
+	if _, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game, web.EntitiesUpsertInput{
+		Items: []web.EntityItemInput{{
+			TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+			Fields: map[string]any{"briefing": briefing},
+		}},
+	}); err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+
+	plain, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "wanted"})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	if len(plain.Items) != 1 || plain.Items[0].Entity == nil {
+		t.Fatalf("search = %+v, want one entity hit", plain.Items)
+	}
+	if plain.Items[0].Entity.Fields != nil {
+		t.Fatalf("a search nobody asked to be verbose carried fields: %+v", plain.Items[0].Entity)
+	}
+	// Identity is still whole: what a caller needs to choose which hit to
+	// read is exactly what a non-verbose hit keeps.
+	if got := plain.Items[0].Entity; got.Key != "hogger" || got.TypeKey != "quest" ||
+		got.Name != "Wanted: Hogger" || got.Version != 1 {
+		t.Fatalf("a non-verbose hit lost part of its identity: %+v", got)
+	}
+	raw, err := json.Marshal(plain.Items[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "fields") {
+		t.Fatalf("a non-verbose hit carries a fields key on the wire: %s", raw)
+	}
+
+	verbose, err := web.MCPSearch(ctx, f.deps, f.caller, f.game,
+		web.SearchInput{Query: "wanted", Verbose: true})
+	if err != nil {
+		t.Fatalf("MCPSearch verbose: %v", err)
+	}
+	if len(verbose.Items) != 1 || verbose.Items[0].Entity == nil ||
+		verbose.Items[0].Entity.Fields["briefing"] != briefing {
+		t.Fatalf("a verbose search left the row's values out: %+v", verbose.Items)
+	}
+}
+
+// TestTheRESTMirrorTakesTheSameVerboseFlag is the other half of the flag:
+// a search that could only be asked for fields over MCP would be a mirror
+// answering a different question from the surface it mirrors. It goes
+// through queryBool, so it takes the same four true spellings the two
+// listings take and refuses the same value-less parameter.
+func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
+	f := newRESTFixture(t)
+	ctx := context.Background()
+
+	if _, err := f.mm.UpsertEntityType(ctx, f.game, metamodel.EntityTypeInput{
+		Key: "quest", Label: "Quest", LabelPlural: "Quests",
+		Schema: metamodel.Schema{{Key: "briefing", Type: metamodel.FieldText}},
+	}); err != nil {
+		t.Fatalf("UpsertEntityType: %v", err)
+	}
+	if _, err := f.mm.UpsertEntity(ctx, f.game, metamodel.EntityInput{
+		TypeKey: "quest", Key: "hogger", Name: "Wanted: Hogger",
+		Fields: map[string]any{"briefing": "Defeat the gnoll chieftain."},
+	}); err != nil {
+		t.Fatalf("UpsertEntity: %v", err)
+	}
+
+	read := func(t *testing.T, path string) map[string]json.RawMessage {
+		t.Helper()
+		rec := f.as(t, http.MethodGet, path, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
+		}
+		var out struct {
+			Items []struct {
+				Entity map[string]json.RawMessage `json:"entity"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode %s: %v", rec.Body.String(), err)
+		}
+		if len(out.Items) != 1 {
+			t.Fatalf("GET %s answered with %s, want one hit", path, rec.Body.String())
+		}
+		return out.Items[0].Entity
+	}
+
+	if _, present := read(t, "/search?query=wanted")["fields"]; present {
+		t.Fatalf("the REST mirror is verbose by default")
+	}
+	if fields, present := read(t, "/search?query=wanted&verbose=true")["fields"]; !present ||
+		!strings.Contains(string(fields), "gnoll chieftain") {
+		t.Fatalf("verbose=true over REST returned %s", fields)
+	}
+	refused := f.as(t, http.MethodGet, "/search?query=wanted&verbose=", nil)
+	if refused.Code != http.StatusBadRequest ||
+		!strings.Contains(refused.Body.String(), "invalid_input") {
+		t.Fatalf("?verbose= over REST = %d %s", refused.Code, refused.Body.String())
+	}
+}
+
+// TestSearchFindsAnEntityByItsKeyOverTheToolSurface carries 0010's change
+// one step along: the domain test proves the vector holds the key, and
+// this proves an agent calling the tool gets the row.
+//
+// It also pins where the key went. The row is found by its handle and
+// comes back with name_match false, because 0010 put the key at label C
+// and left `name_match` asking about the name alone — the property that
+// keeps "a row the query names outranks a row that mentions the words" a
+// guarantee, which a keyed-by-counter catalogue would otherwise flood.
+func TestSearchFindsAnEntityByItsKeyOverTheToolSurface(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+	seedSearchable(t, f)
+
+	hits, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "hogger"})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	// "hogger" is both the entity's key and a word of its name, and it is
+	// also a word of the attached script's body, so this call proves the
+	// key does not break the merge either.
+	var entity *web.SearchHit
+	for i, hit := range hits.Items {
+		if hit.Kind == "entity" {
+			entity = &hits.Items[i]
+			break
+		}
+	}
+	if entity == nil || entity.Entity.Key != "hogger" || !entity.NameMatch {
+		t.Fatalf("searching a word of the name gave %+v, want the named entity first", hits.Items)
+	}
+
+	// And a handle that is nothing but a handle. The script's body does
+	// not carry it and neither does any name.
+	if _, err := web.MCPEntitiesUpsert(ctx, f.deps, f.caller, f.game, web.EntitiesUpsertInput{
+		Items: []web.EntityItemInput{{TypeKey: "quest", Key: "circuit-000", Name: "Silverpine Straight"}},
+	}); err != nil {
+		t.Fatalf("MCPEntitiesUpsert: %v", err)
+	}
+	byKey, err := web.MCPSearch(ctx, f.deps, f.caller, f.game, web.SearchInput{Query: "circuit-000"})
+	if err != nil {
+		t.Fatalf("MCPSearch: %v", err)
+	}
+	if len(byKey.Items) != 1 || byKey.Items[0].Entity == nil ||
+		byKey.Items[0].Entity.Key != "circuit-000" {
+		t.Fatalf("searching a row's key gave %+v, want that row", byKey.Items)
+	}
+	if byKey.Items[0].NameMatch {
+		t.Fatalf("a hit found by its key alone claims name_match: %+v", byKey.Items[0])
 	}
 }

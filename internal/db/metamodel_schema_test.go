@@ -552,10 +552,23 @@ func TestTheSearchBackfillIsExact(t *testing.T) {
 
 	for i, shape := range shapes {
 		t.Run(shape.label, func(t *testing.T) {
+			// **The comparison is over the A and B halves alone**, and it
+			// was over the whole vector until 0010_entity_key_search.sql.
+			// 0010 added a third half built from the row's key, and these
+			// two rows deliberately carry *different* keys — `migrated-07`
+			// against `reseeded-07` — because that is how one game holds
+			// both. So the C halves differ by construction and comparing
+			// them would fail for a reason that has nothing to do with
+			// what this test asserts. ts_filter keeps the positions
+			// carrying the named weights, so a lexeme the key and the name
+			// share keeps its A and B positions and loses only the C one;
+			// 0010's exactness is asserted whole, by
+			// TestTheEntityKeyBackfillIsExact.
 			var same bool
 			var migrated string
 			if err := pool.QueryRow(ctx, `
-				SELECT m.search = r.search, m.search::text
+				SELECT ts_filter(m.search, '{a,b}') = ts_filter(r.search, '{a,b}'),
+				       m.search::text
 				FROM entities m, entities r
 				WHERE m.project_id = $1 AND m.key = $2
 				  AND r.project_id = $1 AND r.key = $3`,
@@ -597,6 +610,181 @@ func TestTheSearchBackfillIsExact(t *testing.T) {
 	}
 	if unweighted != 0 {
 		t.Fatalf("%d rows still carry a weight or a NULL vector after the Down arm", unweighted)
+	}
+}
+
+// TestTheEntityKeyBackfillIsExact is TestTheSearchBackfillIsExact for
+// 0010_entity_key_search.sql, and it makes the same claim about the same
+// property: a row migrated by the Up arm holds byte-for-byte the vector
+// the shipping write path produces for the same row, so a migrated game
+// and a re-seeded one rank identically.
+//
+// **The two halves of each pair differ only by their entity type**, not
+// by their key — which is the change: the key is in the vector now, so
+// comparing `migrated-07` against `reseeded-07` would compare two
+// different vectors and pass or fail for the wrong reason. Two types in
+// one game let both rows carry the identical key, which is what the
+// entity key unique index (project, type, lower(key)) allows.
+//
+// The shapes are 0006's twelve plus the two the key can be that the name
+// cannot: a key is pattern-checked in Go, so the ones that reach the
+// database are ASCII, but a hyphenated key and a key that is also a word
+// of the name are both ordinary and both exercise the merge.
+func TestTheEntityKeyBackfillIsExact(t *testing.T) {
+	t.Parallel()
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+
+	var projectID, oldTypeID, newTypeID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (slug, name) VALUES ('nagrand', 'Nagrand') RETURNING id`).
+		Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	for _, seed := range []struct {
+		key string
+		id  *uuid.UUID
+	}{{"migrated", &oldTypeID}, {"reseeded", &newTypeID}} {
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO entity_types (project_id, key, label, label_plural)
+			 VALUES ($1, $2, 'Quest', 'Quests') RETURNING id`, projectID, seed.key).
+			Scan(seed.id); err != nil {
+			t.Fatalf("insert entity type %s: %v", seed.key, err)
+		}
+	}
+
+	shapes := []struct{ label, key, name, text string }{
+		{"ordinary", "gnoll-pack", "Gnoll Pack", "A gnoll camp led by a gnoll chieftain."},
+		{"no text at all", "gnoll-pack-2", "Gnoll Pack", ""},
+		{"fields that repeat the name", "gnoll", "Gnoll", "Gnoll gnoll gnoll"},
+		{"an empty name", "nameless", "", "A camp with no name."},
+		{"a name of nothing but spaces", "blank-name", "   ", "A camp with a blank name."},
+		{"punctuation only", "punct", "!?&", "..."},
+		{"unicode", "chateau", "Château d'Ombrage", "Un château hanté par des goules."},
+		{"emoji", "wolf-pack", "🐺 Pack", "🐺🐺🐺 everywhere"},
+		{"a word too long to index", "too-long", strings.Repeat("z", 3000), strings.Repeat("y", 3000)},
+		{"a very long body", "long-body", "Gnoll Pack", strings.Repeat("gnoll pack ", 5000)},
+		{"text that is only whitespace", "whitespace", "Gnoll", "   \t  "},
+		{"a name that is also the whole text", "hogger", "Hogger", "Hogger"},
+		{"a key that is also a word of the name", "hogger-2", "Hogger the Gnoll", "Hogger again."},
+		{"a hyphenated counter key", "circuit-000", "Silverpine Straight", "A long left-hander."},
+	}
+
+	// The pre-0010 write path, spelled here because it no longer exists
+	// anywhere else: this is exactly what 0006's UpsertEntity stored.
+	const oldWritePath = `INSERT INTO entities (project_id, entity_type_id, key, name, search)
+		VALUES ($1, $2, $3, $4,
+			setweight(to_tsvector('simple', $4::text), 'A')
+			  || setweight(to_tsvector('simple', $4::text || ' ' || $5::text), 'B'))`
+	for _, shape := range shapes {
+		if _, err := pool.Exec(ctx, oldWritePath, projectID, oldTypeID,
+			shape.key, shape.name, shape.text); err != nil {
+			t.Fatalf("seed %s as a pre-migration row: %v", shape.label, err)
+		}
+	}
+	// A row whose vector is NULL, which is why the migration coalesces.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO entities (project_id, entity_type_id, key, name, search)
+		 VALUES ($1, $2, 'no-vector', 'No Vector', NULL)`, projectID, oldTypeID); err != nil {
+		t.Fatalf("seed a row with no vector: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, gooseArm(t, "0010_entity_key_search.sql", "Up")); err != nil {
+		t.Fatalf("apply the migration's Up arm: %v", err)
+	}
+
+	q := dbq.New(pool)
+	for _, shape := range shapes {
+		if _, err := q.UpsertEntity(ctx, dbq.UpsertEntityParams{
+			ProjectID: projectID, EntityTypeID: newTypeID,
+			Key: shape.key, Name: shape.name, Fields: []byte("{}"),
+			SearchText: shape.text, ExpectedVersion: -1,
+		}); err != nil {
+			t.Fatalf("re-seed %s: %v", shape.label, err)
+		}
+	}
+
+	for _, shape := range shapes {
+		t.Run(shape.label, func(t *testing.T) {
+			var same bool
+			var migrated string
+			if err := pool.QueryRow(ctx, `
+				SELECT m.search = r.search, m.search::text
+				FROM entities m, entities r
+				WHERE m.entity_type_id = $1 AND m.key = $3
+				  AND r.entity_type_id = $2 AND r.key = $3`,
+				oldTypeID, newTypeID, shape.key,
+			).Scan(&same, &migrated); err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+			if !same {
+				t.Fatalf("the migrated row's vector differs from the re-seeded row's: %s", migrated)
+			}
+			if !strings.Contains(migrated, "C") {
+				t.Fatalf("the migrated vector carries no C-weighted lexeme: %s", migrated)
+			}
+		})
+	}
+
+	// The NULL row comes out holding its key, which is more than it had:
+	// coalesce is what stops the migration emptying an index.
+	t.Run("a row that had no vector", func(t *testing.T) {
+		var got string
+		if err := pool.QueryRow(ctx,
+			`SELECT search::text FROM entities WHERE entity_type_id = $1 AND key = 'no-vector'`,
+			oldTypeID).Scan(&got); err != nil {
+			t.Fatalf("read the backfilled vector: %v", err)
+		}
+		if got != "'no':2C 'no-vector':1C 'vector':3C" {
+			t.Fatalf("vector = %s, want the key alone under label C", got)
+		}
+	})
+
+	// The Down arm removes the C positions and leaves the A and B halves
+	// exactly as 0006 wrote them — which is checkable, because the
+	// pre-migration rows are still here to compare against. It is written
+	// as a filter rather than as a rebuild because this migration does
+	// not hold the text it would have to rebuild from.
+	before := map[string]string{}
+	rows, err := pool.Query(ctx,
+		`SELECT key, search::text FROM entities WHERE entity_type_id = $1`, newTypeID)
+	if err != nil {
+		t.Fatalf("read the re-seeded vectors: %v", err)
+	}
+	for rows.Next() {
+		var key, vec string
+		if err := rows.Scan(&key, &vec); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		before[key] = vec
+	}
+	rows.Close()
+
+	if _, err := pool.Exec(ctx, gooseArm(t, "0010_entity_key_search.sql", "Down")); err != nil {
+		t.Fatalf("apply the migration's Down arm: %v", err)
+	}
+	var stillWeighted int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM entities WHERE project_id = $1 AND search::text LIKE '%C%'`,
+		projectID).Scan(&stillWeighted); err != nil {
+		t.Fatalf("count downgraded rows: %v", err)
+	}
+	if stillWeighted != 0 {
+		t.Fatalf("%d rows still carry a C-weighted lexeme after the Down arm", stillWeighted)
+	}
+	// And a downgraded row still finds the words it found before 0010: a
+	// key-only handle is gone, a name is not.
+	for _, shape := range shapes {
+		var found bool
+		if err := pool.QueryRow(ctx,
+			`SELECT search @@ plainto_tsquery('simple', $3::text)
+			 FROM entities WHERE entity_type_id = $1 AND key = $2`,
+			newTypeID, shape.key, shape.key).Scan(&found); err != nil {
+			t.Fatalf("query the downgraded row %s: %v", shape.key, err)
+		}
+		if found && !strings.Contains(before[shape.key], "'"+shape.key+"'") {
+			t.Fatalf("row %s is still findable by its key after the Down arm", shape.key)
+		}
 	}
 }
 

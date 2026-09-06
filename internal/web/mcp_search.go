@@ -56,6 +56,24 @@ const (
 // "documents carrying no kind at all" — the same limitation
 // markdown.ListFilter.Kind records, since a document's kind is optional
 // and "" is also a real stored value.
+//
+// **Verbose is off by default, and it is the listing's rule rather than
+// a second one.** EntitiesListInput states it: a page of five hundred
+// entities with their fields is the whole game back in one answer, and
+// an agent walking a catalogue almost always wants keys and names. A
+// search is the *stronger* case, not a weaker one — it is what an agent
+// reaches for when it does not yet know what it is looking for, so the
+// payload it swallows is by definition the payload of rows it has not
+// decided it wants. Task 9 measured that: against a game whose rows
+// carry 25 KB of lore each, one sixty-hit search answered with 1.6 MB of
+// JSON, and there was no argument that turned it off. There is now, it
+// is spelled the same as the listing's, and it defaults the same way.
+//
+// It gates the entity half only. A document hit has never carried a
+// body — DocumentHitOutput's comment argues why, and
+// TestASearchHitCarriesNoBodyAtAll pins it over every field — so there
+// is nothing on that side for this flag to withhold, and a flag that
+// silently meant less on one of two kinds would be worse than no flag.
 type SearchInput struct {
 	ScopedArgs
 	Query   string `json:"query"`
@@ -63,6 +81,7 @@ type SearchInput struct {
 	TypeKey string `json:"type_key,omitempty"`
 	DocKind string `json:"doc_kind,omitempty"`
 	Limit   int32  `json:"limit,omitempty"`
+	Verbose bool   `json:"verbose,omitempty"`
 }
 
 // SearchHit is one result, labelled.
@@ -133,9 +152,14 @@ type SearchOutput struct {
 	Truncated bool        `json:"truncated"`
 }
 
-// MCPSearch implements search over both of a game's indexes. The entity
-// hits carry their fields: a search is a caller looking for content, and
-// a hit it then has to fetch one by one is a round trip per row.
+// MCPSearch implements search over both of a game's indexes.
+//
+// An entity hit carries its fields only when the caller asked to be
+// verbose, which is entities.list's rule applied here; SearchInput
+// carries the argument. Without it a hit is identity — kind, key, name,
+// type, invalid, version — which is what a caller narrowing down what it
+// is looking for needs, and entities.get or a verbose repeat is the
+// second call that reads the one it chose.
 func MCPSearch(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in SearchInput) (SearchOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
 		return SearchOutput{}, err
@@ -202,7 +226,7 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 				ID: row.ID, ProjectID: row.ProjectID, EntityTypeID: row.EntityTypeID,
 				Key: row.Key, Name: row.Name, Fields: row.Fields,
 				Invalid: row.Invalid, Version: row.Version,
-			}, names, true)
+			}, names, in.Verbose)
 			if err != nil {
 				return SearchOutput{}, err
 			}

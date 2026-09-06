@@ -505,3 +505,114 @@ func TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument(t *testing.T) {
 		}
 	})
 }
+
+// TestSearchFindsARowByItsKey pins what 0010_entity_key_search.sql
+// added: the handle every other tool on this surface addresses a row by
+// is a handle search can find.
+//
+// Task 9's seeding run measured the hole this closes — `search
+// ("circuit-000")` answered with nothing, so a designer typing the string
+// they see in every error message and every listing had to know to reach
+// for entities.get instead — and pinned it as a passing limitation to be
+// deleted when it was fixed.
+//
+// **The fixture is chosen so the key is the only thing that can match.**
+// The row is named "Silverpine Straight" and its summary talks about
+// kerbs; nothing but the key carries the lexeme `circuit-000`. A vector
+// that had merely grown a copy of the name would leave this red.
+func TestSearchFindsARowByItsKey(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedSearchableType(t, svc, project)
+
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+		TypeKey: "quest", Key: "circuit-000", Name: "Silverpine Straight",
+		Fields: map[string]any{
+			"min_level": float64(1),
+			"summary":   "A long left-hander onto the kerbs.",
+		},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		{"the whole key", "circuit-000", []string{"circuit-000"}},
+		// Postgres's parser splits a hyphenated token into the whole and
+		// its parts, so the halves are lexemes of their own. This is a
+		// consequence of indexing the key rather than a promise about
+		// key syntax, and it is written down here so a parser change
+		// that removed it is seen rather than silently absorbed.
+		{"a part of a hyphenated key", "circuit", []string{"circuit-000"}},
+		{"a key nothing carries", "circuit-001", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, err := svc.Search(ctx, project, tc.query, "", 10)
+			if err != nil {
+				t.Fatalf("Search(%q): %v", tc.query, err)
+			}
+			if got := searchKeys(rows); !equalStrings(got, tc.want) {
+				t.Fatalf("Search(%q) = %v, want %v", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestAKeyMatchDoesNotClaimToBeANameMatch is the other half of 0010, and
+// the one that pins *where* in the vector the key went.
+//
+// `name_match` is `ts_filter(search, '{a}') @@ query`, and SearchEntities
+// leads its ORDER BY with it so that a row the query names outranks a row
+// that merely mentions the words, however often. 0010 put the key under
+// label C rather than A precisely so that predicate keeps asking about
+// the name alone. Without that decision, two hundred rows keyed
+// `race-000`…`race-199` would every one of them answer the word "race" as
+// a name match, ahead of the row actually named Race — which is this
+// fixture, in miniature and with the inversion made visible.
+func TestAKeyMatchDoesNotClaimToBeANameMatch(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedSearchableType(t, svc, project)
+
+	// The row the word names, and three rows that merely carry it in
+	// their handle. The named row is deliberately seeded *last*, so a
+	// ranking that fell back to insertion or key order would put it
+	// fourth and be caught.
+	for _, seed := range []struct{ key, name string }{
+		{"race-000", "Silverpine Straight"},
+		{"race-001", "Redridge Sweep"},
+		{"race-002", "Duskwood Chicane"},
+		{"opening", "Race"},
+	} {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: seed.key, Name: seed.name,
+			Fields: map[string]any{"min_level": float64(1)},
+		}); err != nil {
+			t.Fatalf("seed %s: %v", seed.key, err)
+		}
+	}
+
+	rows, err := svc.Search(ctx, project, "race", "", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("Search(\"race\") found %v, want all four rows", searchKeys(rows))
+	}
+	if rows[0].Key != "opening" || !rows[0].NameMatch {
+		t.Fatalf("the top hit is %q (name_match %v), want the row actually named Race",
+			rows[0].Key, rows[0].NameMatch)
+	}
+	for _, row := range rows[1:] {
+		if row.NameMatch {
+			t.Fatalf("row %q was found by its key and reported name_match true", row.Key)
+		}
+	}
+}

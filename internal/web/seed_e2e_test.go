@@ -869,6 +869,103 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		if hits := s.search(t, "Mulsanne", "circuit"); len(hits) != 1 || hits[0].Entity.Key != "circuit-000" {
 			t.Fatalf("a type-narrowed search found %+v", hits)
 		}
+
+		// A key. This was the seeding run's finding 7 and it is
+		// 0010_entity_key_search.sql's whole purpose: the handle a
+		// designer reads off every listing and every refusal used to
+		// find nothing, so the only recovery was knowing to reach for
+		// entities.get instead.
+		hits = s.search(t, "circuit-000", "")
+		if len(hits) != 1 || hits[0].Entity.Key != "circuit-000" {
+			t.Fatalf("searching a row's key found %+v", hits)
+		}
+		// And it does not claim to be a name match: the key is indexed
+		// at label C so that "a row the query names outranks a row that
+		// mentions the words" stays a guarantee. This game is exactly
+		// the fixture that would break under label A — two hundred rows
+		// keyed race-000…race-199 — so the check is here rather than
+		// only in the unit test.
+		if hits[0].NameMatch {
+			t.Fatalf("a hit found by its key alone claims name_match: %+v", hits[0])
+		}
+		named := s.search(t, "race", "")
+		if len(named) == 0 {
+			t.Fatalf("the word race found nothing at all")
+		}
+		for _, h := range named {
+			if h.NameMatch && !strings.Contains(strings.ToLower(h.Entity.Name), "race") {
+				t.Fatalf("row %q claims a name match on \"race\" with the name %q — the key "+
+					"has leaked into the A weight", h.Entity.Key, h.Entity.Name)
+			}
+		}
+	})
+
+	// The other half of the seeding run's finding 7: the payload. Search
+	// used to answer with every hit's whole field set, longtext included,
+	// with no argument that turned it off — measured at 1.6 MB of JSON
+	// for one sixty-hit call against this game. It now follows
+	// entities.list's rule, and this measures both sides of it on the
+	// real catalogue rather than on a two-row fixture.
+	t.Run("a search is slim unless it is asked not to be", func(t *testing.T) {
+		ctx := context.Background()
+		search := func(t *testing.T, query string, verbose bool) (web.SearchOutput, []byte) {
+			t.Helper()
+			out, err := web.MCPSearch(ctx, s.deps, s.caller, s.game,
+				web.SearchInput{Query: query, Limit: 200, Verbose: verbose})
+			if err != nil {
+				t.Fatalf("search %q (verbose %v): %v", query, verbose, err)
+			}
+			raw, err := json.Marshal(out)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			return out, raw
+		}
+
+		// The broad case: every race in the game, which is the shape of
+		// answer the flag exists for. Not one hit carries a fields key,
+		// and every one keeps the identity a caller needs to pick from.
+		broad, broadRaw := search(t, "race", false)
+		if len(broad.Items) < seedRaces {
+			t.Fatalf("the word race found %d rows, want at least the %d races",
+				len(broad.Items), seedRaces)
+		}
+		for _, hit := range broad.Items {
+			if hit.Entity.Fields != nil {
+				t.Fatalf("a search nobody asked to be verbose carried fields: %+v", hit.Entity)
+			}
+			if hit.Entity.Key == "" || hit.Entity.Name == "" || hit.Entity.TypeKey == "" {
+				t.Fatalf("a slim hit lost part of its identity: %+v", hit.Entity)
+			}
+		}
+		_, broadVerboseRaw := search(t, "race", true)
+		if len(broadVerboseRaw) <= len(broadRaw) {
+			t.Fatalf("verbose over %d hits answered with %d bytes against %d slim",
+				len(broad.Items), len(broadVerboseRaw), len(broadRaw))
+		}
+
+		// The measured case, and the one Task 9 wrote down: a row carrying
+		// a long briefing. That is where the 1.6 MB came from — one
+		// longtext per hit, multiplied by the hits — and it is what the
+		// flag actually withholds.
+		lore, loreRaw := search(t, "stint", false)
+		if len(lore.Items) != 1 || lore.Items[0].Entity.Key != "race-100" {
+			t.Fatalf("searching inside a long briefing found %+v", lore.Items)
+		}
+		loreVerbose, loreVerboseRaw := search(t, "stint", true)
+		body, ok := loreVerbose.Items[0].Entity.Fields["briefing"].(string)
+		if !ok || len(body) < 4000 {
+			t.Fatalf("a verbose hit did not carry the whole briefing: %+v", loreVerbose.Items[0])
+		}
+		if len(loreVerboseRaw) < 10*len(loreRaw) {
+			t.Fatalf("the verbose answer is %.1fx the slim one; the flag is not withholding "+
+				"what it was added to withhold (%d against %d bytes)",
+				float64(len(loreVerboseRaw))/float64(len(loreRaw)), len(loreVerboseRaw), len(loreRaw))
+		}
+		t.Logf("one %d-hit search over %d rows: %d bytes slim, %d verbose; "+
+			"one hit carrying a briefing: %d slim, %d verbose",
+			len(broad.Items), seedEntities, len(broadRaw), len(broadVerboseRaw),
+			len(loreRaw), len(loreVerboseRaw))
 	})
 
 	t.Run("a dense neighbourhood is reachable in full, one page at a time", func(t *testing.T) {
@@ -1125,14 +1222,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("counting %d races took %d pages", total, pages)
 		}
 
-		// 2. **Search does not index keys.** A designer who types the
-		// handle they see everywhere else gets nothing, and has to know
-		// to use entities.get instead.
-		if hits := s.search(t, "circuit-000", ""); len(hits) != 0 {
-			t.Fatalf("search now finds a row by its key; delete this case: %+v", hits)
-		}
-
-		// 3. **Two of the seventeen tools address rows by uuid only.**
+		// 2. **Two of the seventeen tools address rows by uuid only.**
 		// entities.remove and relations.remove take an id, and
 		// relations.list filters endpoints by id, so an agent holding the
 		// (type key, key) every other tool speaks has to resolve it
@@ -1153,30 +1243,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 			t.Fatalf("race-000 has %d outgoing edges, want 3", len(out.Items))
 		}
 
-		// 4. **Search is unconditionally verbose, and cannot be asked not
-		// to be.** entities.list defaults `verbose` off, arguing that a
-		// page of five hundred rows with their fields is the whole game
-		// back in one answer; search has no such argument and hands back
-		// every hit's whole field payload, longtext included, up to its
-		// 200-row cap. Measured over the wire against a game whose rows
-		// carry 25 KB of lore each, one 60-hit search answered with 1.6 MB
-		// of JSON. Here the same asymmetry, in one pair of calls.
-		listed2, err := web.MCPEntitiesList(ctx, s.deps, s.caller, s.game,
-			web.EntitiesListInput{TypeKey: "race", Limit: 5})
-		if err != nil {
-			t.Fatalf("entities.list: %v", err)
-		}
-		for _, row := range listed2.Items {
-			if row.Fields != nil {
-				t.Fatalf("entities.list is verbose by default now: %+v", row)
-			}
-		}
-		hits := s.search(t, "kerbstone", "")
-		if len(hits) != 1 || len(hits[0].Entity.Fields["briefing"].(string)) < 1000 {
-			t.Fatalf("search no longer returns a whole longtext; delete this case: %+v", hits)
-		}
-
-		// 5. **A relation type states its endpoints as entity type ids**,
+		// 3. **A relation type states its endpoints as entity type ids**,
 		// so a second seeding session — one that did not itself declare
 		// the types and so never saw the ids — has to call types.list and
 		// build the key-to-id map by hand before it can declare or edit a

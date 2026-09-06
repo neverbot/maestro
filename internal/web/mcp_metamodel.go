@@ -1694,10 +1694,22 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"only in a quest's script produces a document hit, not a quest hit, and that "+
 				"hit's linked_to names the entities the document is attached to so you can "+
 				"get to the quest from it.\n\n"+
-				"**What is indexed.** For an entity: its name plus the text its values carry "+
+				"**Fields are omitted unless verbose is true**, the same default "+
+				"entities.list applies and for a stronger version of the same reason: a "+
+				"search is what you reach for before you know which row you want, so "+
+				"without the flag every hit's whole payload — longtext included, up to the "+
+				"row cap below — comes back for rows you have not chosen yet. A hit always "+
+				"carries type_key, key, name, invalid and version, which is what picking "+
+				"one needs. The flag gates entity hits only; a document hit has never "+
+				"carried a body.\n\n"+
+				"**What is indexed.** For an entity: its name, its key, plus the text its "+
+				"values carry "+
 				"— text, longtext, the chosen option of an enum, and the elements of a "+
 				"list<text>; numbers and booleans are not, so filter for those with "+
-				"entities.list. Only the first %d bytes of one row's flattened text are "+
+				"entities.list. A row found by its key alone comes back with name_match "+
+				"false: the key is indexed at a lower weight than the name precisely so "+
+				"that the ranking guarantee above keeps meaning what it says. Only the "+
+				"first %d bytes of one row's flattened text are "+
 				"indexed. For a document: its title, its summary and its body, each by its "+
 				"first %d characters — a document may hold far more body than that, and a "+
 				"word past that point is stored and re-read intact but is not findable here. "+

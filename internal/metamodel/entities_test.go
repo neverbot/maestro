@@ -1147,11 +1147,22 @@ func TestAListOfTextIsSearchable(t *testing.T) {
 // searchColumn reads the stored tsvector as text, positions included:
 // two rows built from the same values must produce the same string, and
 // the positions are what makes the field order observable.
+// searchColumn reads the value-derived halves of a row's search vector:
+// the name under label A and the name plus the flattened field text
+// under label B.
+//
+// **It filters out label C, which is the row's key**, because the one
+// caller compares two *different* rows and 0010_entity_key_search.sql
+// made the key part of the vector. Without the filter the comparison
+// below would be red for the one reason it is not asking about — the two
+// rows are `q0` and `q1` and are supposed to differ there.
+// TestTheEntityKeyBackfillIsExact (internal/db) is what asserts the C
+// half, whole and unfiltered.
 func searchColumn(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) string {
 	t.Helper()
 	var text string
 	if err := pool.QueryRow(context.Background(),
-		`SELECT search::text FROM entities WHERE id = $1`, id).Scan(&text); err != nil {
+		`SELECT ts_filter(search, '{a,b}')::text FROM entities WHERE id = $1`, id).Scan(&text); err != nil {
 		t.Fatalf("read search column: %v", err)
 	}
 	return text

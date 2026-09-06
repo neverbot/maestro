@@ -481,8 +481,27 @@ relation type's key plus both endpoints as `(type_key, key)` — and
 `relations.list` grows the same `verbose` flag `entities.list` has, off
 by default for the same reason.
 
-Cross-cutting — `search` (free text over names and text fields,
-filterable by type).
+Cross-cutting — `search` (free text over names, row keys and text
+fields, filterable by type).
+
+`search` grew two things in Metamodel 13, both found by Task 9's seeding
+run and both a consequence of the surface being driven the way an agent
+drives it:
+
+- **It indexes a row's key.** The vector was built from the name and the
+  type's indexable field values, so a designer typing the handle they
+  read off every listing and every refusal got nothing back. The key
+  goes in at a *lower* weight than the name (`0010_entity_key_search.sql`
+  carries the argument), so a row found only by its key comes back with
+  `name_match` false and the ranking promise below keeps meaning what it
+  says.
+- **It takes `verbose`, off by default.** It answered with every hit's
+  whole field payload, `longtext` included, up to its 200-row cap — one
+  sixty-hit search measured at 1.6 MB of JSON. That is now the rule the
+  two listings already stated, applied to the read that needs it most: a
+  search is what an agent reaches for *before* it knows which row it
+  wants. The flag gates entity hits only; a document hit has never
+  carried a body.
 
 ### Idempotency
 
@@ -593,6 +612,13 @@ Every `list` paginates with an opaque cursor and a maximum page size.
 Responses are **slim** by default — jsonb payloads omitted unless
 requested. Token discipline is a first-order concern: agents are the
 main consumer.
+
+**`search` obeys the same rule**, which it did not until Metamodel 13.
+It is a top-N rather than a page, so it has no cursor, but `verbose`
+is spelled and defaulted exactly as `entities.list`'s and
+`relations.list`'s are. A read that answers with more than a page can
+and does exist on this surface; a read that answers with more than a
+page and cannot be asked not to does not.
 
 ### Error shapes
 

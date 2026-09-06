@@ -1642,6 +1642,19 @@ explicit *re-arrange* or when the retained set is under half the new one.
    asymmetry is **named, not fixed**: giving `Position` tags is a wire
    change to the MCP surface and belongs to whoever owns that decision.
 
+   **Superseded — the workaround is gone.** The views sub-project took
+   that decision and tagged `Position`; see the views plan's *The wire
+   defect the layout composer found*. `storedFrom` reads **one**
+   spelling, `entity_type/entity_key/x/y/pinned`, and the dual read and
+   its `pick` helper are deleted. The guard above went red on the tagging
+   commit exactly as designed and now pins the single spelling in both
+   directions: it fails if a marshalled member is unread, and it fails if
+   `compose.js` reads a Go field name again — the second half added
+   because the dual read had made the first half nearly blind (it caught
+   the tagging only through `updated_at`, the one member `compose.js`
+   never named). Nothing in this task's behaviour changes; a reader that
+   was correct is now also the only reader.
+
 10. **The separation pass is ordered by the entity's *address*, not by
     its key.** §5.3 says "in entity-key order", and a key alone is not
     unique across types — `quest/boss` and `zone/boss` are two entities.

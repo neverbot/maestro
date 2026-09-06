@@ -1767,7 +1767,7 @@ The drag layer is the one performance-shaped decision: during a drag only
 the dragged nodes and their incident edges are re-rendered, on a detached
 layer moved by a transform, and never the whole tree.
 
-- [ ] Tests: `theEmitterWritesEveryGameStringAsText` — a node named with
+- [x] Tests: `theEmitterWritesEveryGameStringAsText` — a node named with
   markup, assert `textContent`; `sceneOrderIsPaintOrder` — assert labels
   emit after their nodes and the drag layer after everything;
   `joinEdgesSeparatesStubs` — an edge with one endpoint outside `nodes`,
@@ -1784,7 +1784,7 @@ layer moved by a transform, and never the whole tree.
   since the 68ch measure applies to reading surfaces and a diagram inside
   it is unusable.
 
-- [ ] See red: re-render the full tree on drag and watch
+- [x] See red: re-render the full tree on drag and watch
   `aDragTouchesOnlyTheDraggedSubtree` report 200-odd; apply the zoom
   transform to the nodes and not the background image and watch
   `zoomAndPanMoveOneTransform` fail — this is the mutation that produces
@@ -1797,6 +1797,216 @@ git add internal/web/static/components/mst-canvas.js \
         internal/web/jstest internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the SVG canvas, its dumb emitter and a drag layer that touches one subtree"
 ```
+
+#### Corrections made during implementation
+
+1. **Task 5's escaping argument does not transfer, and nothing here
+   reuses it.** The twin's answer was *the framework escapes and our job
+   is placement*, asserted by a scanner that finds where each value is
+   bound in a Lit template. There is no framework on this path at all:
+   the canvas builds its tree with `createElementNS`, `setAttribute` and
+   `textContent`, none of which parses markup, so nothing is escaped
+   because nothing is ever re-parsed. That is strictly stronger than
+   correct escaping and needs no scanner — a `textContent` assignment
+   cannot put an element into a document however the string is spelled.
+   What SVG adds that HTML text position did not have is answered in
+   three places instead:
+
+   - **Element and attribute names never come from data.** Both are
+     looked up in `scene.js`'s `MARK_ELEMENTS` and `MARK_ATTRIBUTES` by
+     the mark's kind. This is also why the emitter is an allowlist and
+     not a passthrough: dumb about *meaning* (colour, absence,
+     truncation), not dumb about what a field may become, because a
+     passthrough is exactly how `onload`, `style` and `href` arrive on an
+     element built from data. `theEmitterWritesOnlyTheAttributesTheContract
+     Names` hands it all four and finds none of them in the DOM.
+   - **`href` is filtered, because it is the one attribute a browser
+     resolves rather than draws.** `<image>` and `<use>` fetch what
+     theirs names, and an instance with no outbound route must render
+     completely. `isDrawableHref` admits a same-origin absolute path and
+     nothing else — no scheme, no protocol-relative `//`, no whitespace,
+     no backslash. It is a safety rule and not a design opinion, so it
+     sits with the one attribute rather than at the six call sites that
+     would each have to remember it.
+   - **`internal/web/static_canvas_test.go` is a third escaping
+     perimeter**, beside the DOM-sink one (`static_sinks_test.go`) and
+     the Lit-directive one (`static_twin_test.go`), because neither of
+     those has a spelling for an SVG element. `<foreignObject>` re-enters
+     the **HTML** parser, which is the one door back to the twin's
+     question that the twin's answer does not cover; `<script>` and the
+     animation elements run code; `<a>` navigates; `<use>`, `<iframe>`,
+     `<object>` and `<embed>` fetch; and `xlink:href` is the legacy
+     spelling a filter written against `href` never sees. The guard holds
+     both the source (no own module names one) and the contract
+     (`MARK_ELEMENTS` cannot become one), with
+     `TestTheSVGHazardScanReadsWhatItClaimsTo` on top in both directions.
+     It also asserts that every `createElementNS` names `SVG_NS`: an SVG
+     element made in the HTML namespace is an unknown element that lays
+     out as nothing, which is a bug with no error message.
+
+2. **The SVG namespace needed a bounded exemption from Task 2's outbound
+   URL scan, which it did not have.** `http://www.w3.org/2000/svg` is an
+   XML namespace *name* — compared as a string, never dereferenced — and
+   `TestNoModuleFetchesFromTheNetwork` failed on it. The alternative was
+   `createElement` and an element that lays out as nothing, bought to
+   satisfy a guard about traffic this line does not cause. The exemption
+   is a **whole line declaring a constant whose name ends in `NS`**, not
+   "any w3.org URL" and not "any line containing the namespace", so
+   `fetch("http://www.w3.org/2000/svg")`, an `https` spelling, a
+   declaration with a call after it and the xlink namespace are all still
+   reported. `TestTheNamespaceExemptionIsExactlyOneDeclaration` holds
+   those four refusals *and* that the real module contains exactly one
+   line the exemption applies to, so it cannot quietly acquire a second
+   beneficiary.
+
+3. **There is no shared DOM stub to extend; this task writes the first
+   one.** The task's file list says "modify `internal/web/jstest/` DOM
+   stub", and there is no such file: the six existing harnesses each
+   inline the three or four members of `document` they need. Adding
+   `createElementNS` to four copies would have been four copies of the
+   instrument this task's assertions are *made with* — which attribute
+   carries which value, in what order elements were appended, how many
+   elements a drag touched — so `internal/web/jstest/svg_dom.mjs` is a
+   module. The existing harnesses are left alone: rewriting four passing
+   files to share a stub they do not need is a diff with no test behind
+   it.
+
+4. **The stub is written against making a test pass on its own, and has
+   a check of its own.** `getAttribute` answers **null** and never the
+   empty string, so "the emitter wrote this" and "the emitter wrote
+   nothing" stay two answers; `setAttribute` refuses a non-string, since
+   accepting a number would let an emitter that never called `String()`
+   pass a comparison a browser fails; `createElementNS` refuses a missing
+   namespace, so "this landed in the SVG namespace" cannot be satisfied
+   by a default; `innerHTML` throws on read *and* write; and the mutation
+   log records writes only, so the drag measurement cannot be inflated by
+   the act of measuring. `theDOMStubStartsWhereTheAssertionsBegin`
+   asserts every one of those against the stub itself, and both
+   mutations run against it (a `""` default, a read that logs) turn it
+   red — the first of them turning three other checks red beside it,
+   which is the point.
+
+5. **The drag is better than the number the task asks for, and the check
+   says so.** The task asks that the elements whose attributes changed
+   equal *the dragged nodes plus their incident edges*. The dragged body
+   — boxes, labels, and the edges whose **both** endpoints are dragged —
+   rides one transform on the detached layer, so it costs **one** write
+   however many nodes are in it; what cannot ride a transform is an edge
+   with one end standing still, which is reshaped by rewriting the
+   moving end's coordinate pair. Two hundred nodes, two of them dragged:
+   three writes per move, forever, and `beginDrag` itself writes nothing
+   at all (detaching is a tree move, not an attribute write), which the
+   check asserts separately. The distinction the count rests on has its
+   own check, `anEdgeInsideTheSelectionRidesTheTransformAndOneLeavingItDoes
+   Not`, so a `beginDrag` that reshaped everything incident fails on the
+   rule and not only on the arithmetic.
+
+6. **An edge is a `line` mark carrying two endpoint keys, and only
+   that.** The drag layer reshapes a half-moved edge by rewriting an
+   endpoint pair, which is a rule `d` cannot express, so a kind that
+   cannot be reshaped cannot be an edge. `MARK_PATH` was in the first
+   draft of the vocabulary and came out again: it had no producer, and
+   the plan's own rule is that a mechanism nothing reads is a lie. The
+   renderer that wants a curved edge adds the kind **and** the reshaping
+   answer in one diff a human reads.
+
+7. **The canvas is not a `LitElement`, and it is the first component
+   that is not.** Lit's contract is "describe the tree and it will be
+   reconciled", which is precisely what §8.2's drag budget forbids: a
+   component that re-rendered its tree to move four nodes would be a
+   correct Lit component and a broken canvas. The cost is that
+   `TestEveryComponentSpeaksOnlyItsModelsWords` passes over it
+   **vacuously** — it has no template to scan — so the property is held
+   at runtime instead by `everyTextNodeInTheTreeCameFromAMark`, which
+   walks the emitted tree and asserts the multiset of its characters is
+   exactly the label marks' texts, plus a check that the stylesheet
+   declares no `content:`. `TestTheComponentScanReadsEveryComponent`'s
+   list gained the file, which is what forced the argument to be written
+   down rather than discovered later.
+
+8. **The layout budget's band has a reader now.** Task 6 declared
+   `BANNER_LAYOUT_BUDGET` and `ACTION_RETRY_LAYOUT` in `budget.js`, kept
+   them out of `BANNER_ORDER` — that stack is built from the envelope,
+   and this band is a statement about *this browser's* last two seconds —
+   and said the canvas places them. `setLayoutResult` is the canvas
+   placing them, and `theCanvasPlacesTheLayoutBudgetBand` drives a real
+   `runWithBudget` timeout through it and asserts the band clears when a
+   later attempt finishes. The **rejecting** path budget.js hands to
+   "the canvas (Task 7)" is deliberately *not* here: the canvas never
+   calls the worker, so the page that does (Task 15) is where a rejection
+   can be caught, and inventing a handler here would be a mechanism
+   nothing reaches.
+
+9. **`aria-hidden` was inherited rather than decided again.** Task 5's
+   `theCanvasIsAriaHiddenAndTheTwinIsNot` asserts the position of a
+   `div.canvas` in `mst-view-frame.js`, which is the wrapper this
+   component is slotted into. `mst-canvas.js` sets no `aria-hidden` of
+   its own: two declarations of one property is how they come to differ,
+   and the frame's is the one a test already reads.
+
+10. **Two checks the task did not name, both because a named one could
+    otherwise pass for the wrong reason.**
+    `aMarkMayChooseALayerButNotTheDragLayer` pins that the drag layer
+    belongs to the canvas — a mark parked there would vanish on the first
+    drop, since `endDrag` empties it — and that a mark naming an unknown
+    layer falls to its kind's default rather than disappearing.
+    `everyTextNodeInTheTreeCameFromAMark` is correction 7's runtime
+    stand-in for a scan that cannot see this component. `sceneOrderIsPaint
+    Order` also asserts the five layer names against a **literal** list
+    written in the harness rather than against the imported
+    `LAYER_ORDER`, because a test that imports the list it is checking
+    agrees with any reordering of it.
+
+**Mutations run, all red.** The drag re-rendering the whole tree
+(`aDragTouchesOnlyTheDraggedSubtree`, *"203 elements changed in a
+200-node picture"*); the zoom transform moved to the nodes layer
+(`zoomAndPanMoveOneTransform`, *"and it is the world group: got `<g
+class="layer layer-nodes">`, want `<g class="world">`"*) and the same
+mutation in its two-transform form, which is the pins-drift-off-the-
+terrain bug (*"pan and zoom are one transform on one element, and never
+two that can drift: got 2, want 1"*); `joinEdges` answering `source` for
+a both-missing edge (*"got "source", want "both""*) and dropping it
+entirely (*"and both of the others are stubs: got 1, want 2"*); the
+labels layer moved ahead of the nodes layer and the drag layer moved off
+the end (`sceneOrderIsPaintOrder`); labels clamped to 1× at every zoom
+(*"the authored size is divided down: got 2.75, want 4.125"*) and labels
+scaling unbanded (*"at 4x it stops at the ceiling: got 4, want 1.5"*);
+the emitter passing every mark field through (`theEmitterWritesOnlyThe
+AttributesTheContractNames`, *"onload … got "alert(1)", want null"*, and
+`theEmitterWritesEveryGameStringAsText`, *"text's text carries markup"*);
+the `href` filter dropped (*"got "javascript:alert(1)", want null"*) and
+`isDrawableHref` admitting a protocol-relative URL; a label's text
+written to an attribute instead of a text node (two checks red); every
+incident edge reshaped (two checks red); the stub answering `""` for an
+unset attribute (four checks red) and logging a read as a mutation; a
+`foreignObject` emitted and `MARK_ELEMENTS` naming `<use>` (both Go
+guards); `mst-canvas.js` removed from the component list; and the
+namespace exemption widened to any w3.org URL
+(`TestTheNamespaceExemptionIsExactlyOneDeclaration`, eight failures).
+
+**The hand check this task leaves — and the two it now makes
+performable.** Tasks 5 and 6 each left one waiting on a canvas. Both are
+now *performable in principle* and neither is performable *yet*, for the
+same reason: **no route mounts a view.** This task builds the component
+and registers it; Task 15 is the first task that puts one on a page. So
+both hand checks stay open and are carried forward to Task 15 unchanged
+— Task 5's (a node named with markup read in a real browser, and the
+number of tabs to reach the twin) and Task 6's (a 500-node graph: does
+the ranked drawing read as structure or as a hairball, plus the two
+numbers to record while looking). What *this* task changes is that the
+thing they were waiting on now exists and is asserted, so what remains
+is mounting rather than building.
+
+This task's own hand check, also waiting on Task 15: **paint order and
+occlusion**, which the plan's preamble names as the gap between a scene
+test and a browser. A scene says a label is drawn after its node and
+this task asserts document order; only a browser says the label is *on
+top* of it, that a node's fill does not swallow its own text at 11px,
+and that a dragged body over a dense graph is still legible while it is
+moving. Two things to look at specifically: whether the 2px `--ground`
+halo on a map label survives over a busy background image, and whether
+the drag layer's contents look attached to the picture they came out of
+or noticeably brighter/detached.
 
 ---
 

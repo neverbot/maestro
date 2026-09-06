@@ -57,11 +57,14 @@ type Node struct {
 // Edge is one relation in a result.
 //
 // **ID is a relations.id and is not stable across a re-seed.** relations
-// carries no key and no version (0004_metamodel.sql), so an edge is
-// addressable only as (relation_type_id, source_id, target_id) and a
-// re-seed that deleted and recreated it produces a new id for the same
-// edge. Nothing in this sub-project stores an edge id; a client that does
-// is storing something that will change under it.
+// carries no key of its own, so an edge is addressable only as
+// (relation_type_id, source_id, target_id) and a re-seed that deleted and
+// recreated it produces a new id for the same edge. Nothing in this
+// sub-project stores an edge id; a client that does is storing something
+// that will change under it. (0009 gave relations a `version`, which does
+// not change this: a version orders the revisions of one row and is not
+// an address, so it is not something a re-seed could carry across a
+// delete either.)
 //
 // Label is what the edge entry's label_from asked to be drawn on this
 // relation: a field it declares, or its relation type's key for @type.

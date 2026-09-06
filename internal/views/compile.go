@@ -977,12 +977,15 @@ func (c *compiler) edge(i int) (frag, error) {
 // leafScope is what a predicate is being compiled against: the alias its
 // leaves address, and whether that alias is a relation.
 //
-// The distinction is not cosmetic. A relation has no key, no name and no
-// invalid flag — 0004_metamodel.sql gives it an id, a type, two
-// endpoints, its fields and its timestamps and nothing else — so
-// @name, @key and @invalid have no column to compile against on an edge.
+// The distinction is not cosmetic. A relation has no key and no name —
+// 0004_metamodel.sql gives it an id, a type, two endpoints, its fields
+// and its timestamps, and 0009 adds its validity flag and its version —
+// so @name and @key have no column to compile against on an edge.
 // Resolution refuses them there (fieldScope.edge), and this is the second
 // half of the same rule, for a *Resolved a Go caller built by hand.
+//
+// @invalid was on that refused list until 0009 gave relations the
+// column; fieldScope.edge carries the argument for why it moved.
 type leafScope struct {
 	alias frag
 	edge  bool

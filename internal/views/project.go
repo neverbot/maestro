@@ -281,11 +281,13 @@ func resolveProjection(cat *Catalogue, q *Query, add func(ptr, message string),
 // relation types that entry draws.
 //
 // It is the edge's half of the same rule, and it is narrower on one
-// point: a relation has an id, a type, two endpoints, its declared fields
-// and its timestamps and nothing else (0004_metamodel.sql), so @name,
-// @key and @invalid name no column there. fieldScope.builtin is the
-// judgement, spelled once and reused, so an edge label and an edge
-// predicate refuse the same built-ins for the same reason.
+// point: a relation has an id, a type, two endpoints, its declared
+// fields, its validity flag and its timestamps and nothing else
+// (0004_metamodel.sql plus 0009), so @name and @key name no column there.
+// fieldScope.builtin is the judgement, spelled once and reused, so an
+// edge label and an edge predicate admit and refuse the same built-ins
+// for the same reason — which is what made @invalid drawable and
+// comparable in one change when 0009 gave relations the column.
 func resolveEdgeLabel(cat *Catalogue, rows []*dbq.RelationType, label, ptr string,
 	add func(ptr, message string), st *staleness) string {
 	if label == "" {

@@ -795,6 +795,9 @@ func queryBool(w http.ResponseWriter, r *http.Request, name string) (bool, bool)
 // answers a designer asking for the rows that no longer fit their type
 // with exactly the rows that do, which is the "wrong answer that looks
 // like a right one" handleListEntities refuses everywhere else.
+// handleListRelations takes the same filter, over the same column on the
+// edge table (0009), and reads it through this same function rather than
+// through a second parse — one spelling of `?invalid=` on both routes.
 //
 // Both spellings of both sides are accepted, and anything else is the
 // caller's own argument at its own path.

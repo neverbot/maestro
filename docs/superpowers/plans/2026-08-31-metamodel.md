@@ -9094,6 +9094,142 @@ a test that drives the statement.
 
 ---
 
+### Metamodel 11: `UpsertEntity` deadlocks against a cascading entity-type removal
+
+**Status: done.** Two locking reads (`GetEntityTypeByKeyForKeyShare`,
+`GetEntityTypeByIDForUpdate`), one call site changed in each of the two
+writers, two staged tests and one stress test.
+
+**The defect, as measured.** Eight workers alternating `entities.upsert`
+against `RemoveEntityType(cascade)` produced deadlocks steadily:
+**15 in 15 seconds** on the harness kept as
+`TestUpsertEntityAndACascadingRemovalDoNotDeadlock`, matching the profile
+the item was filed with (8 in 15 s). Bisecting the operation set had
+already isolated the pair — entity + entity-type writes alone: 0,
+entity-type writes + removals: 0, entity writes + removals: 8 — in a game
+holding no relation types at all, so `LockEndpointEntityTypes`' share
+lock was never taken and this was not a consequence of that change.
+
+**The cycle.** Two writers, two tables, opposite orders:
+
+- `UpsertEntity` took `entities` `FOR UPDATE` (`GetEntityByKeyForUpdate`)
+  and *then* `entity_types` `FOR KEY SHARE`, because the closing
+  `INSERT ... ON CONFLICT` runs the `entity_type_id` foreign key and a
+  foreign key locks its parent row. The type read in front of it took no
+  lock at all.
+- `RemoveEntityType(cascade)` took `entities` exclusively
+  (`DeleteEntitiesOfType`) and *then* `entity_types` exclusively
+  (`DeleteEntityType`) — whose own `ON DELETE RESTRICT` check reads
+  `entities` back `FOR KEY SHARE`. Its type read in front of it took no
+  lock either.
+
+So each writer could hold what the other was waiting for. The victims
+sampled from `pg_stat_activity` when the item was filed were
+`DeleteEntityType` (6 of 7) and `DeleteEntitiesOfType` (1 of 7), parked
+against `UpsertEntity`'s `INSERT ... ON CONFLICT` and
+`GetEntityByKeyForUpdate`; the reproduction here saw the same three
+statements named.
+
+**The fix is the rule `LockEndpointEntityTypes` already established for
+the other pair: both writers take `entity_types` first.** The entity
+write's type read becomes `FOR KEY SHARE` — exactly the lock the foreign
+key would take a few statements later, so it adds no conflict the write
+did not already have, and two entity writes into one type still run
+concurrently. The removal's type read becomes `FOR UPDATE`, which
+conflicts with that share lock, which is the mutual exclusion that makes
+the order matter: an entity write already in flight is waited for at the
+*first* lock rather than met head-on at the second.
+
+Every other writer that touches both tables was checked rather than
+assumed. `UpsertEntityType` already locked `entity_types` `FOR UPDATE`
+before its re-validation sweep marked `entities`, so it was already on
+the right side of the rule. `RemoveEntity` locks neither: it reads
+unlocked and deletes a child row, which takes no parent lock. The bulk
+paths go through `upsertEntityWith` and inherit the fix. `UpsertRelation`
+takes no lock on `entity_types` at all.
+
+**Measured, and proved by inverting the order rather than by assertion.**
+The same harness, same shape, 8 workers:
+
+| build | deadlocks |
+| --- | --- |
+| before (both reads unlocked) | 15 in 15 s |
+| after (both take `entity_types` first) | 0 in 15 s, and 0 over six further 3 s runs |
+| **inverted: entity write fixed, removal reverted** | **16 in 15 s** |
+| inverted: removal fixed, entity write reverted | 0 deadlocks, but 1,753 raw `23503` foreign-key violations — the write racing a removal it no longer waits for |
+
+The third row is the proof that matters: with the lock present but taken
+in the other order, the deadlocks come straight back. It is the ordering
+and not the mere presence of a lock that closes this. The fourth row
+records the second thing the fix bought — with the type row held, an
+entity write can no longer land between a type's deletion and its own
+`INSERT`, so the raw constraint violation an agent used to read as
+`internal_error` is now the honest `not_found`.
+
+At 3 seconds — the duration the kept test runs at — reverting either half
+produced 3, 3, 3, 5 and 7 deadlocks over five runs, so the stress test is
+red every time and is cheap enough to need no gate.
+
+**Retryable SQLSTATEs on both surfaces: already correct, and now
+asserted.** `IsRetryable` has admitted `40P01` since Task 7, and both
+mapping boundaries route it to the `retryable` wire code —
+`mcpErrorFor` (MCP) and `writeDomainError` (REST), each checking it after
+every domain code and before the `internal_error` default. Nothing on the
+`UpsertEntity` or `RemoveEntityType` paths intercepts a `*pgconn.PgError`
+before it gets there: `ActorConstraintViolation` matches `23503` only,
+`searchLimitExceeded` `54000` only, `notFound`/`notFoundByID` only
+`pgx.ErrNoRows`, and `RemoveEntityType`'s own `23503` arm names the code
+it catches. The reproduction confirms it end to end: every deadlock the
+inverted-order runs produced was classified by `IsRetryable` on the way
+out of a real service call.
+
+What was missing was an assertion, which is this repository's other
+standing failure. The MCP surface had pinned `40P01` since Task 7
+(`TestMCPErrorForReportsContentionAsRetryable`); the REST twin table
+pinned only its neighbour `40001`, under a case whose message read
+"deadlock detected" while its code was `serialization_failure`. Both are
+corrected, and the new row carries the error *wrapped* the way every
+write path in `internal/metamodel` wraps one, so `errors.As` is exercised
+rather than a bare `*pgconn.PgError` matched.
+
+**One swallow found and deliberately not fixed here.** The game-content
+surfaces (metamodel, documents, views, view assets) all route through
+`writeDomainError`/`mcpErrorFor` and are covered. The game-*administration*
+REST handlers — `api_projects.go`, `api_tokens.go`, `api_invites.go`,
+`api_auth.go`, `api_admin.go`, `api_password.go` — do not: each maps every
+error to `500 internal_error` with a fixed human sentence, so a contention
+SQLSTATE there (`deleteProject` cascading over a game an agent is writing
+to is the realistic one) is reported as a server fault. It is the same
+misdiagnosis class, one surface along. It is recorded rather than fixed
+because it is a contract change to a different vocabulary — those handlers
+answer a human in a browser, not an agent — across a dozen call sites, with
+no measurement behind it yet, and it deserves its own item.
+
+**Tests.** Two staged and one stress, because the two answer different
+questions:
+
+- `TestAnEntityWriteTakesTheTypeRowBeforeItsOwnRow` and
+  `TestACascadingRemovalTakesTheTypeRowBeforeAnyEntity` are
+  deterministic. Each holds the *other* writer's first lock on the
+  `entity_types` row from a connection of the test's own — `FOR UPDATE`
+  for a removal, `FOR KEY SHARE` for an entity write — waits for the
+  writer under test to park, and then asks with `FOR UPDATE NOWAIT`
+  whether it is sitting on the entity row. Under the correct order it is
+  not: it never got that far. That probe is the whole discrimination —
+  both builds park, and only the broken one parks holding an entity.
+  Each is red with its own half of the fix reverted.
+- `TestUpsertEntityAndACascadingRemovalDoNotDeadlock` is the filed
+  harness, shortened to 3 seconds and kept as an ordinary test that runs
+  by default. It is timing-dependent and cannot prove absence, which is
+  what the two staged tests are for; what it catches is a third statement
+  crossing the rule that no staged test was written for. It is gated on
+  nothing — this repository has no gate but `TEST_DATABASE_URL`, and a
+  gated test is a test that stops running — and it asserts on its own
+  traffic (at least 50 successful writes and 50 successful removals) so
+  that a race which silently stopped racing cannot pass as a clean run.
+
+---
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:

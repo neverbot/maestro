@@ -220,6 +220,10 @@ check("anEdgeLeavingThePictureInventsNoNode", () => {
   const withStub = [...edges, edge({ type: "quest", key: "hogger" }, { type: "quest", key: "offscreen" })];
   const result = layoutGraph(nodes, withStub);
   assertEqual(result.placements.length, nodes.length, "no node was invented");
+  // The second line is the one that catches it. `placements` is built
+  // from the nodes that were handed in, so an invented seventh box never
+  // appears there — it appears as a rank the real nodes had to make room
+  // for, which is a coordinate shift and nothing else.
   assertEqual(coordinatesOf(result), coordinatesOf(layoutGraph(nodes, edges)), "and nothing moved");
 });
 
@@ -490,12 +494,15 @@ check("theFitDoesNotRotate", () => {
   const result = compose(MODE_MIXED, computed, rows);
   const witness = at(result, "q", "w");
 
-  // Where a 90° rotation about the centroid would have put it. The
-  // rotation carrying (1,0) to (0,1) maps the offset (0, 300) from the
-  // computed centroid (100, 100) to (-300, 0), landing the witness at
-  // the pinned centroid (0, 100) plus that: (-300, 100).
+  // Where a 90° rotation would have put it, worked out rather than
+  // guessed: the pins' computed centroid is (100, 0) and their stored
+  // centroid is (0, 100), the rotation carrying (1, 0) to (0, 1) maps
+  // the witness's offset (0, 400) to (-400, 0), and the witness lands at
+  // (-400, 100). Worth stating because the first version of this
+  // fixture named (-300, 100) — a point no transform produces — and so
+  // held nothing at all: the assertion below it was doing all the work.
   assert(
-    !(Math.abs(witness.x + 300) < 1 && Math.abs(witness.y - 100) < 1),
+    !(Math.abs(witness.x + 400) < 1 && Math.abs(witness.y - 100) < 1),
     `the witness landed at the rotated position (${witness.x}, ${witness.y})`,
   );
   // And it went where a translation puts it: the shape kept its
@@ -778,7 +785,13 @@ check("theBudgetTerminatesAndTheGridIsAnnounced", async () => {
   // this line stays green, which is the drift the generated sentence
   // exists to make impossible.
   assertEqual(result.banner.text, budgetSentence(LAYOUT_BUDGET_MS), "the sentence is the number's");
-  assert(result.banner.text.includes("2 seconds"), "and at today's constant it reads as 2 seconds");
+  // Spelled from the constant, not from a reading of it: hard-coding
+  // "2 seconds" *and* retuning the constant would leave the equality
+  // above green, because both sides would be the same frozen string.
+  assert(
+    result.banner.text.includes(`${LAYOUT_BUDGET_MS / 1000} seconds`),
+    "and it names the budget it actually enforced",
+  );
   assert(
     result.banner.text.includes("grid"),
     "a grid presented without explanation reads as the graph having no structure",

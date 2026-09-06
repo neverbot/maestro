@@ -250,3 +250,54 @@ func TestTheTextTwin(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/twin_test.mjs")
 }
+
+// TestLayoutComposition drives internal/web/jstest/layout_test.mjs,
+// which imports the real internal/web/static/layout/engine.js,
+// compose.js and budget.js and asserts over the plain data they return.
+//
+// It is the whole of the evidence for the one module in this product
+// that reads `views.layout_mode`. The column is stored, validated and
+// returned by the server and read by **no server code at all** —
+// 0008_views.sql says so — so there is no Go test that could see any of
+// what follows, and there never will be:
+//
+// That the engine is deterministic, which is what lets `manual` lay out
+// an unplaced node and never write the coordinate back, and what let the
+// `layout_seed` column lose its last possible reader. Every determinism
+// assertion runs the input a third time with the node and edge arrays
+// shuffled, because dagre is deterministic *given an insertion order*
+// and not otherwise — measured on the vendored 3.1.1, where reversing
+// either array moves every node — so the guarantee comes from engine.js
+// sorting by the entity's address and not from the envelope's own order,
+// which is an `ORDER BY … capped.id` over uuids and does not survive a
+// re-seed.
+//
+// That a pinned node is restored to the designer's exact stored number,
+// asserted with `===` rather than within a tolerance, and that the fit
+// which gets it there is a translation and a uniform scale and **never a
+// rotation** — against a fixture whose best-fit rotation is 90°, because
+// a full similarity fit would find that rotation, would minimise the
+// error better, and would hand back a diagram nobody recognises.
+//
+// That the fit's three degeneracies are three different answers with
+// three different fixtures: two or more pins determine it, one
+// degenerates to a translation, none is the identity and `mixed` then
+// behaves as `auto` — plus the two arrangements that would divide by
+// zero if the branch were a tolerance instead of a branch, coincident
+// pins and a fit that would prefer a negative scale.
+//
+// And that the separation pass is a **reduction** of overlap rather than
+// a guarantee of none, which is asserted by a fixture that still
+// overlaps after it, so the sentence in compose.js cannot quietly become
+// a promise.
+//
+// internal/web/static_layout_test.go holds the three halves no harness
+// can see: that nothing in that directory imports by bare specifier (a
+// module worker has no import map), that the budget is one number whose
+// banner sentence is generated from it, and that the spelling a stored
+// position is read back in is the one internal/views.Position actually
+// marshals to.
+func TestLayoutComposition(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/layout_test.mjs")
+}

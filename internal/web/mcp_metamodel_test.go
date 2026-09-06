@@ -216,7 +216,43 @@ func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
 	}
 }
 
-// TestMCPToolsRefuseAnotherGame is the isolation test for this whole// TestMCPToolsRefuseAnotherGame is the isolation test for this whole
+// TestTheRenameToolsSayWhatARenameDoesNotDo is the description guard for
+// the one thing an agent will otherwise meet as a surprise.
+//
+// A rename leaves every saved view that names the type reporting
+// `*_renamed` until the view is saved again. That is the designed
+// behaviour — nothing rewrites a stored query behind its author — but an
+// agent that renames a type and then sees a diagnostic it was not warned
+// about will read it as a defect and go looking for a repair that does
+// not exist. Both tools carry the same paragraph, because a designer
+// renaming an entity type and a designer renaming a relation type meet
+// the same diagnostic and must not have to find the explanation under
+// only one of the two names.
+func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {
+	f := newMetamodelFixture(t)
+	descriptions := f.srv.ToolDescriptionsForTest()
+	for _, tool := range []string{"types.rename", "relation_types.rename"} {
+		got, ok := descriptions[tool]
+		if !ok {
+			t.Errorf("%s is not served", tool)
+			continue
+		}
+		for phrase, why := range map[string]string{
+			"does not repair the saved views": "the limit an agent meets first",
+			"until somebody saves the view again": "the repair, named rather than " +
+				"left to be guessed",
+			"differing only in capitalisation": "a case-only rename is refused, and an " +
+				"agent that does not know will read the refusal as a bug",
+			"never merges two types": "a taken destination is refused",
+		} {
+			if !strings.Contains(got, phrase) {
+				t.Errorf("%s does not say %q — %s", tool, phrase, why)
+			}
+		}
+	}
+}
+
+// TestMCPToolsRefuseAnotherGame is the isolation test for this whole
 // surface: every tool that takes a project id is called with the id of a
 // game the caller's own *user* owns but the caller's own *token* is not
 // bound to, and every one must refuse before touching the database.

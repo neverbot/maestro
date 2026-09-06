@@ -406,7 +406,7 @@ export function legendFor(nodes, slot) { /* -> {rows, byValue} */ }
 export function fillFor(row) { /* -> {kind: "hue"|"hatch"|"unset", index} */ }
 ```
 
-- [ ] Tests (`internal/web/jstest/palette_test.mjs`, driven by
+- [x] Tests (`internal/web/jstest/palette_test.mjs`, driven by
   `TestPaletteRules`):
   `hueIsStableAcrossResultOrder` — shuffle the node array, assert every
   value keeps its slot; `absentAndEmptyStringAreTwoRows` — one node with
@@ -421,7 +421,7 @@ export function fillFor(row) { /* -> {kind: "hue"|"hatch"|"unset", index} */ }
   `legendRowsAreOrderedByCountThenValue` — deterministic ordering,
   asserted twice on shuffled input.
 
-- [ ] Tests (`internal/web/static_tokens_test.go`, pure Go over the CSS
+- [x] Tests (`internal/web/static_tokens_test.go`, pure Go over the CSS
   source): `TestEveryTokenIsDeclaredInBothThemes` — parse `:root` and the
   dark media block, assert the two declare the same token names;
   `TestEveryDeclaredTokenIsUsed` and `TestEveryUsedTokenIsDeclared` —
@@ -438,7 +438,7 @@ export function fillFor(row) { /* -> {kind: "hue"|"hatch"|"unset", index} */ }
   own comment) and assert every pair of the eight is above a stated ΔE
   threshold in each simulation, in both themes.
 
-- [ ] See red: change `--data-3` in the light block to a near-duplicate of
+- [x] See red: change `--data-3` in the light block to a near-duplicate of
   `--data-5` and watch `TestTheDataHuesSeparateUnderDeuteranopiaAndProtanopia`
   name the pair. Then set `--muted` to `#8f8f8f` and watch
   `TestTextContrastMeetsWCAG` fail on `--muted` over `--paper`. Then make

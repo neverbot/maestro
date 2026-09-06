@@ -326,21 +326,24 @@ function parseJSON(text) {
 // that keep a re-read cheap.
 //
 // Every seam a test needs is injected, and every one of them defaults to
-// the browser's own: fetchImpl, the clock, the timers and the jitter
-// source. There is exactly one network primitive in this module —
+// the browser's own: fetchImpl, the timers and the jitter source. There
+// is no injected wall clock, though the plan's sketch of this signature
+// names one: nothing here reads the time. The coalescing window and the
+// reconnect backoff are both expressed as timers, which is the seam a
+// test needs, and an injected `now` that nothing called would be a
+// mechanism nothing reads. There is exactly one network primitive in
+// this module —
 // fetchImpl — and the stream goes through it too, which is what makes
 // "one module owns every call and the stream" a property a source guard
 // can check rather than a habit.
 export function client({
   slug,
   fetchImpl = fetch,
-  now = () => Date.now(),
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   random = Math.random,
 } = {}) {
   const state = {
-    slug,
     // The views this client has open, keyed by their key. Each holds the
     // parameters its last run was given and the envelope that run
     // returned. A re-read repeats the same question.

@@ -91,7 +91,6 @@ function fakeClock() {
   let seq = 0;
   const timers = new Map();
   return {
-    now: () => at,
     setTimer(fn, ms) {
       const id = ++seq;
       timers.set(id, { at: at + ms, fn });
@@ -229,7 +228,6 @@ async function harness(options) {
   const c = client({
     slug: "azeroth",
     fetchImpl: server.fetchImpl,
-    now: clock.now,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
     random: () => 0,

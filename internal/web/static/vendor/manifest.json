@@ -1,0 +1,41 @@
+{
+  "note": "Provenance and payload record for every file this repository vendors into internal/web/static/vendor. A vendored file in a public repository is a file this project answers for, so the package, the exact version, the URL it was fetched from, its SHA-256, its byte size and its licence are recorded as data rather than claimed in a comment. To re-vendor a file: fetch the new url, replace the file, and update sha256 and bytes here in the same commit -- internal/web/static_vendor_test.go walks this file and the tree in both directions and fails if either side is missing an entry. The payload budget is not stored here on purpose: a budget a contributor can raise by editing the file it is checked against is not a budget. It lives in that test as a constant.",
+  "files": [
+    {
+      "path": "lit-core.min.js",
+      "package": "lit",
+      "version": "3.3.3",
+      "url": "https://raw.githubusercontent.com/lit/dist/v3.3.3/core/lit-core.min.js",
+      "url_note": "The lit npm package ships no single-file bundle; github.com/lit/dist is the Lit team's own prebuilt distribution repository and v3.3.3 is its tag for this release. The raw URL at the tag is used rather than a CDN's semver-resolving alias so the URL is immutable.",
+      "sha256": "f607f470475d8ab790754cb70f72cdbe2390c4a57ab59df6cdb360eeb72bd87c",
+      "bytes": 15734,
+      "license": "BSD-3-Clause",
+      "license_path": "licenses/lit.txt",
+      "license_url": "https://unpkg.com/lit@3.3.3/LICENSE"
+    },
+    {
+      "path": "dagre.mjs",
+      "package": "@dagrejs/dagre",
+      "version": "3.1.1",
+      "url": "https://unpkg.com/@dagrejs/dagre@3.1.1/dist/dagre.esm.js",
+      "url_note": "The package's own `exports.import` entry point. It is minified and self-contained: it bundles a copy of @dagrejs/graphlib and re-exports it as `graphlib`.",
+      "sha256": "93f5f23d1bee1217531900366798277689400850a5560f238d4f213c8d552a63",
+      "bytes": 48559,
+      "license": "MIT",
+      "license_path": "licenses/dagre.txt",
+      "license_url": "https://unpkg.com/@dagrejs/dagre@3.1.1/LICENSE"
+    },
+    {
+      "path": "graphlib.mjs",
+      "package": "@dagrejs/graphlib",
+      "version": "4.0.5",
+      "url": "https://unpkg.com/@dagrejs/graphlib@4.0.5/dist/graphlib.esm.js",
+      "url_note": "The version @dagrejs/dagre 3.1.1 depends on, vendored standalone so the layout code builds its graphs against a module it imports by name instead of reaching through dagre's re-export.",
+      "sha256": "1fb0d5eeff8b2565a825484e38587a8714180fab12c029163b60603f34c6e3fb",
+      "bytes": 13113,
+      "license": "MIT",
+      "license_path": "licenses/graphlib.txt",
+      "license_url": "https://unpkg.com/@dagrejs/graphlib@4.0.5/LICENSE"
+    }
+  ]
+}

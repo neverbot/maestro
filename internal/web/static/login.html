@@ -5,6 +5,21 @@
 <meta name="referrer" content="no-referrer">
 <title>Sign in · Maestro</title>
 <link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
 <h1>Maestro</h1>
 <noscript>
   <p class="notice">Signing in needs JavaScript enabled in this browser.</p>

@@ -78,24 +78,38 @@ func TestSafeReturnPathRejectsOffOriginBypasses(t *testing.T) {
 	runJSTest(t, "jstest/safe_return_path_test.mjs")
 }
 
-// TestGameHomePageRendersItsSummary drives the game home page the way a
-// browser does — the real app.js, a stubbed DOM and a stubbed fetch —
-// and pins the three things about that page a Go test of the API
-// underneath it cannot see: that a game's own labels reach the DOM as
-// text and never as markup, that a game with nothing in it gets its
-// empty states instead of two blank lists, and that a failed summary
-// leaves the server's own message on screen rather than an empty
-// catalogue that reads exactly like a game with no content.
+// TestThePageModulesRenderTheirRoutes drives the seven page modules
+// Task 15 put on seven routes — the real, unmodified sources, a stubbed
+// DOM and a stubbed fetch — and is the whole of the evidence for the
+// half of this product a Go test cannot reach.
 //
-// It also pins the property that makes this page a summary at all: it
-// issues exactly three requests — the game list, the summary and one
-// bounded keyset page of documents — and none of them enumerates
-// entities or relations, so a game holding four hundred entities
-// renders like one holding four. See
-// internal/web/jstest/game_summary_test.mjs for the harness.
-func TestGameHomePageRendersItsSummary(t *testing.T) {
+// Every route here serves a static shell and resolves nothing
+// server-side, so a handler test can prove a shell is served and nothing
+// about what the shell then does. What this holds instead: that the home
+// costs **one** call for its counts however big the game is, and never
+// enumerates the content it is counting; that its three lanes are Views,
+// Catalogue and Prose in that order; that a game with no views is given
+// a sentence and a link and no control that leads nowhere; that a viewer
+// and an editor read two different sentences; that a moved document is
+// followed rather than cached; that an entity page renders the fields
+// its type declares and its entity does not carry; that a relation row
+// carries the edge's own fields — the shape that was write-only for a
+// whole sub-project — and that both directions are two lists from two
+// calls; that the entity panel over a canvas runs no view at all and a
+// node click does not cost a designer their arrangement; and that the
+// catalogue says out loud that it is a catalogue and pages over the
+// cursor the server already issues.
+//
+// It replaces the game-home harness that drove the game page out of
+// app.js (jstest/game_summary_test.mjs, removed with its Go driver in
+// this task): Task 15 moved that page into static/pages/home.js, and the
+// four properties that harness held — a
+// crafted label as text, an empty game's empty states, a failed summary
+// leaving the server's own message and no catalogue, and one summary
+// call — are the four checks at the end of the new harness.
+func TestThePageModulesRenderTheirRoutes(t *testing.T) {
 	nodeOrSkip(t)
-	runJSTest(t, "jstest/game_summary_test.mjs")
+	runJSTest(t, "jstest/pages_test.mjs")
 }
 
 // TestTheDocumentPageRendersADocument drives the reading view the same

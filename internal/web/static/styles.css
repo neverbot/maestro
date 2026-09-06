@@ -374,3 +374,133 @@ ul.history li {
 .diff-context { color: var(--ink); }
 .diff-added { color: #14532d; background: rgba(22, 101, 52, 0.12); border-left: 3px solid #166534; }
 .diff-removed { color: var(--danger); background: rgba(164, 38, 44, 0.1); border-left: 3px solid var(--danger); }
+
+/* --- Task 15: the three destinations, and the pages under them -------
+ *
+ * Nothing here spends a hue. The lanes are told apart by space and by a
+ * single hairline, an absent value by weight and colour-of-text, and the
+ * one thing that ever asks for attention — a row that no longer fits its
+ * type — keeps the --danger it already had. Every rule below uses a
+ * token declared at the top of this file and no literal colour.
+ */
+
+/* The strip every page but the home carries, so a designer can reach the
+   other two destinations from wherever they are. The current one is
+   marked rather than removed: a strip that dropped the page you are on
+   would change shape as you navigate. */
+.destinations {
+  display: flex;
+  gap: 1.25rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+.destinations a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.destinations a[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Three lanes side by side where there is room and stacked where there
+   is not. The columns are equal because none of the three is the main
+   one: the whole point of the home is that a designer sees all three. */
+.lanes {
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: 1fr;
+  margin-top: 1.5rem;
+}
+@media (min-width: 60rem) {
+  .lanes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.lane h2 {
+  margin-top: 0;
+}
+.lane h2 a {
+  color: inherit;
+}
+.lane h3 {
+  margin: 1.5rem 0 0.4rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* The one piece of onboarding in this product: a sentence and a link,
+   and deliberately no control. */
+.onboarding {
+  padding: 1rem;
+  background: var(--ground);
+  border-left: 3px solid var(--line-strong);
+}
+.onboarding p {
+  margin-top: 0;
+}
+
+/* The entity page's fields. Three columns — label, value, declared type
+   — so a field the entity does not carry still reads as a field that
+   could be filled in, which is the question this page is for. */
+dl.fields {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  align-items: baseline;
+}
+dl.fields dt {
+  font-weight: 600;
+}
+dl.fields dd {
+  margin: 0;
+}
+dl.fields dd.absent {
+  color: var(--muted);
+}
+dl.fields dt.undeclared {
+  color: var(--danger);
+}
+.field-type {
+  font-family: var(--mono);
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+/* A relation's own fields, beside the far end it names. Typed edges are
+   a first-class idea in this product and this is where their values are
+   read. */
+.relation-type {
+  font-family: var(--mono);
+}
+.relation-field {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+/* The entity panel a node click opens over a canvas. It floats over the
+   drawing rather than replacing it: losing an arrangement to read a
+   field would make reading fields feel expensive. */
+.side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(28rem, 100vw);
+  height: 100vh;
+  overflow: auto;
+  padding: 1rem 1.25rem;
+  background: var(--paper);
+  border-left: 1px solid var(--line-strong);
+}
+
+/* The images page. A thumbnail is bounded so a 4000px map does not push
+   the row it is in off the screen. */
+.asset-thumb {
+  max-width: 8rem;
+  max-height: 5rem;
+  border: 1px solid var(--line);
+}

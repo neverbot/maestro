@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entity · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+<p class="muted"><a id="back-to-type" href="/">Back to this type</a></p>
+
+<h1 id="entity-name">Loading…</h1>
+<p class="mono" id="entity-address" aria-live="polite"></p>
+<p class="error" id="entity-error" hidden></p>
+
+<section id="entity-content" hidden>
+  <h2>Fields</h2>
+  <!-- Declared order, declared type, and a field the entity does not
+       carry rendered as declared-and-unset rather than hidden: *what
+       could be filled in here* is the question a designer is usually
+       asking, and a page that hid the empty rows would answer a
+       different one. -->
+  <dl class="fields" id="entity-fields"></dl>
+  <p class="muted" id="entity-fields-empty" hidden>This type declares no fields.</p>
+
+  <h2>Relations out</h2>
+  <div id="relations-out"></div>
+  <p class="muted" id="relations-out-empty" hidden>Nothing leads out of this entity.</p>
+
+  <h2>Relations in</h2>
+  <div id="relations-in"></div>
+  <p class="muted" id="relations-in-empty" hidden>Nothing leads into this entity.</p>
+
+  <h2>Documents</h2>
+  <ul class="catalogue" id="entity-docs"></ul>
+  <p class="muted" id="entity-docs-empty" hidden>
+    No document is attached to this entity. An agent attaches one over MCP
+    (docs.links.add); nothing on this page attaches one.
+  </p>
+</section>
+
+<script type="module" src="/static/pages/entity.js"></script>

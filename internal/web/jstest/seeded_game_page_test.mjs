@@ -1,13 +1,17 @@
 // Renders the game home page over a summary a *real* server produced.
 //
-// game_summary_test.mjs beside this one proves the page renders *a*
-// summary, and invents the numbers it renders. This one is handed the
-// JSON that GET /api/games/{game}/summary actually answered for the
-// seeded game in seed_e2e_test.go, so the two halves of the claim — the
-// server counted the game correctly, and the page shows what the server
-// counted — are checked against the same numbers for once. A page that
-// dropped a type, mis-summed a total or rendered a count as "[object
-// Object]" would pass every fixture-driven check and fail here.
+// pages_test.mjs beside this one proves the page renders *a* summary,
+// and invents the numbers it renders. This one is handed the JSON that
+// GET /api/games/{game}/summary actually answered for the seeded game in
+// seed_e2e_test.go, so the two halves of the claim — the server counted
+// the game correctly, and the page shows what the server counted — are
+// checked against the same numbers for once. A page that dropped a type,
+// mis-summed a total or rendered a count as "[object Object]" would pass
+// every fixture-driven check and fail here.
+//
+// Task 15 moved the page it drives: the game home is
+// static/pages/home.js now and its catalogue is the middle of three
+// lanes. The claim this file makes is unchanged.
 //
 // Usage: `node internal/web/jstest/seeded_game_page_test.mjs <summary.json>`.
 // internal/web/seed_e2e_test.go writes the file and shells out to it.
@@ -61,12 +65,25 @@ function text(node) {
 const elements = {
   "game-name": fakeElement("h1"),
   "game-summary": fakeElement("p"),
-  "game-content": fakeElement("section"),
+  home: fakeElement("div"),
+  "views-link": fakeElement("a"),
+  "types-link": fakeElement("a"),
+  "assets-link": fakeElement("a"),
+  views: fakeElement("ul"),
+  "views-error": fakeElement("p"),
+  "views-onboarding": fakeElement("div"),
+  "views-more": fakeElement("button"),
   types: fakeElement("ul"),
   "types-empty": fakeElement("p"),
   "types-empty-action": fakeElement("span"),
   "relation-types": fakeElement("ul"),
   "relation-types-empty": fakeElement("p"),
+  docs: fakeElement("ul"),
+  "doc-kinds": fakeElement("p"),
+  "docs-empty": fakeElement("p"),
+  "docs-empty-action": fakeElement("span"),
+  "docs-error": fakeElement("p"),
+  "docs-more": fakeElement("button"),
   games: null,
   status: null,
   "empty-state": null,
@@ -75,7 +92,7 @@ const elements = {
   login: null,
   invite: null,
 };
-elements["game-content"].hidden = true;
+elements.home.hidden = true;
 
 const body = fakeElement("body");
 globalThis.document = {
@@ -108,10 +125,28 @@ globalThis.fetch = async (url) => {
   if (url === `/api/games/${game.slug}/summary`) {
     return { ok: true, status: 200, json: async () => summary };
   }
+  // The other two lanes and the stream. They are answered rather than
+  // stubbed out because this file's subject is the catalogue lane and a
+  // lane that failed would hide the page body it is asserting on.
+  if (url.startsWith(`/api/games/${game.slug}/views`)) {
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+  }
+  if (url === `/api/games/${game.slug}/docs/kinds`) {
+    return { ok: true, status: 200, json: async () => ({ kinds: [], unkinded: 0 }) };
+  }
+  if (url.startsWith(`/api/games/${game.slug}/docs`)) {
+    return { ok: true, status: 200, json: async () => ({ items: [] }) };
+  }
+  if (url === `/api/games/${game.slug}/events`) {
+    // No body: the client reads that as a stream that never opened and
+    // reconnects on its own timer, which is exactly what a browser would
+    // do and costs this harness nothing.
+    return { ok: true, status: 200 };
+  }
   return { ok: false, status: 404, json: async () => ({ error: "not_found", message: "unexpected fetch: " + url }) };
 };
 
-await import("../static/app.js");
+await import("../static/pages/home.js");
 
 // Every declared type reaches the page, under its own plural label and
 // with the count the server sent. A type the game has and the page does
@@ -145,7 +180,7 @@ if (!totals.includes(`${summary.totals.entities} entities`)) {
 if (!totals.includes(`${summary.totals.relations} relations`)) {
   fail(`the totals line does not carry the relation total: ${JSON.stringify(totals)}`);
 }
-if (elements["game-content"].hidden) {
+if (elements.home.hidden) {
   fail("the page body is still hidden after a real summary");
 }
 if (!elements["types-empty"].hidden || !elements["relation-types-empty"].hidden) {
@@ -157,8 +192,17 @@ if (elements.types.hidden || elements["relation-types"].hidden) {
 if (rendered.includes("[object Object]") || relations.includes("[object Object]")) {
   fail("a value reached the page unrendered");
 }
-if (requested.length !== 2) {
-  fail(`the page fetched ${JSON.stringify(requested)}; a summary must stay two requests however big the game is`);
+// **One call for the counts, whatever the game holds.** The other lanes
+// have calls of their own and are allowed them; what a catalogue may
+// never do is ask per type, or enumerate the content it is counting.
+const summaryCalls = requested.filter((url) => url.endsWith("/summary"));
+if (summaryCalls.length !== 1) {
+  fail(`the page made ${summaryCalls.length} summary call(s): ${JSON.stringify(requested)}`);
+}
+for (const url of requested) {
+  if (url.includes("/entities") || url.includes("/relations")) {
+    fail(`the page enumerated content to build a catalogue: ${url}`);
+  }
 }
 
 console.log(
@@ -166,3 +210,6 @@ console.log(
     `${summary.relation_types.length} relation types, ` +
     `${summary.totals.entities} entities and ${summary.totals.relations} relations`,
 );
+// The data client keeps the event stream open and reconnects on a timer,
+// which is right in a browser and would hold this process open for ever.
+process.exit(0);

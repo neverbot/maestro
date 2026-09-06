@@ -342,6 +342,7 @@ export function client({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   random = Math.random,
+  onAnswer = null,
 } = {}) {
   const state = {
     // The views this client has open, keyed by their key. Each holds the
@@ -453,6 +454,18 @@ export function client({
         onStale: opts.onStale,
         result: answer.result,
       };
+      // The seam a surface redraws on.
+      //
+      // **Without it the re-read is a mechanism nothing reads.** A
+      // coalesced re-read is this module's own call, made on its own
+      // timer, and until Task 15 its answer went into `state.views` and
+      // no further — a page could ask a question and could not be told
+      // that the answer had changed, which is the whole point of the
+      // stream. It is one optional callback rather than an event target
+      // because there is exactly one surface per view, and it carries
+      // the envelope and the key and nothing else: what to *do* with a
+      // new answer is the page's decision and never this module's.
+      if (typeof onAnswer === "function") onAnswer(key, answer.result);
     }
     return answer;
   }
@@ -593,6 +606,133 @@ export function client({
     if (Number.isFinite(opts.limit)) search.set("limit", String(opts.limit));
     const query = search.toString();
     return get(base + "/view-assets" + (query === "" ? "" : "?" + query));
+  }
+
+  // --- The reads the pages navigate by --------------------------------
+  //
+  // Task 15 put seven page modules on seven routes, and every one of
+  // them needed a shape this module did not have: the game's own name,
+  // its catalogue, its saved views, its prose, one entity type's field
+  // schema, one entity and the edges either side of it. **The rule that
+  // sent the work here is this file's own** — one module owns every call
+  // — and internal/web/static_client_test.go's two guards are what make
+  // that a property rather than a habit, so a page that needed a shape
+  // widened the client instead of reaching for `fetch`.
+  //
+  // Every one of them is a GET, every one returns the server's own body
+  // untouched, and none of them composes a word. The paging arguments
+  // are spelled once, in `paged`, because a listing that spelled its own
+  // cursor is a listing that can disagree with the next one about what a
+  // cursor is called.
+
+  // games is the one call on this client that is not scoped to a game,
+  // and it is here rather than in a page for the rule's sake: the page
+  // that shows a game's name has to know the slug reaches a game this
+  // caller can open at all, which is what tells "not found" apart from a
+  // blank page.
+  async function games() {
+    return get("/api/games");
+  }
+
+  async function summary() {
+    return get(base + "/summary");
+  }
+
+  async function listViews(options) {
+    return get(paged(base + "/views", options));
+  }
+
+  async function listDocs(options) {
+    return get(paged(base + "/docs", options));
+  }
+
+  async function docKinds() {
+    return get(base + "/docs/kinds");
+  }
+
+  async function listTypes() {
+    return get(base + "/types");
+  }
+
+  // getType is the field schema an entity page renders its rows from —
+  // in declared order, including the fields the entity does not carry.
+  // The listing does not carry a schema, so this is a call and not a
+  // filter over one.
+  async function getType(key) {
+    return get(base + "/types/by-key/" + encodeURIComponent(String(key || "")));
+  }
+
+  async function listRelationTypes() {
+    return get(base + "/relation-types");
+  }
+
+  async function getRelationType(key) {
+    return get(base + "/relation-types/by-key/" + encodeURIComponent(String(key || "")));
+  }
+
+  // listEntities is the catalogue page's own listing, and `verbose` is
+  // its caller's decision rather than this module's: a catalogue of two
+  // hundred rows does not want two hundred field objects, and the entity
+  // page that does asks for one row.
+  async function listEntities(options) {
+    const opts = options && typeof options === "object" ? options : {};
+    const search = new URLSearchParams();
+    if (typeof opts.typeKey === "string" && opts.typeKey !== "") {
+      search.set("type_key", opts.typeKey);
+    }
+    if (opts.verbose === true) search.set("verbose", "true");
+    return get(paged(base + "/entities", opts, search));
+  }
+
+  async function getEntity(typeKey, key) {
+    const path =
+      base +
+      "/entities/by-key/" +
+      encodeURIComponent(String(typeKey || "")) +
+      "/" +
+      encodeURIComponent(String(key || ""));
+    return get(path);
+  }
+
+  // listRelations asks the edges from one side. **Both directions are
+  // two calls and never one filtered list**: the route filters on an
+  // endpoint, an edge is directed, and a page that asked once and sorted
+  // the answer would be inventing a direction the server did not state.
+  async function listRelations(options) {
+    const opts = options && typeof options === "object" ? options : {};
+    const search = new URLSearchParams();
+    const ends = [
+      ["source_type_key", opts.sourceType],
+      ["source_key", opts.sourceKey],
+      ["target_type_key", opts.targetType],
+      ["target_key", opts.targetKey],
+    ];
+    for (const [name, value] of ends) {
+      if (typeof value === "string" && value !== "") search.set(name, value);
+    }
+    if (opts.verbose === true) search.set("verbose", "true");
+    return get(paged(base + "/relations", opts, search));
+  }
+
+  // listEntityDocs is the join from the entity's side. The route refuses
+  // a call that names both sides and a call that names neither, so this
+  // one names exactly one.
+  async function listEntityDocs(typeKey, key, options) {
+    const search = new URLSearchParams();
+    search.set("entity_type", String(typeKey || ""));
+    search.set("entity_key", String(key || ""));
+    return get(paged(base + "/docs/links", options, search));
+  }
+
+  // paged appends the two arguments every listing on this surface takes,
+  // onto whatever narrowing the caller already built.
+  function paged(path, options, search) {
+    const opts = options && typeof options === "object" ? options : {};
+    const query = search instanceof URLSearchParams ? search : new URLSearchParams();
+    if (typeof opts.cursor === "string" && opts.cursor !== "") query.set("cursor", opts.cursor);
+    if (Number.isFinite(opts.limit)) query.set("limit", String(opts.limit));
+    const text = query.toString();
+    return path + (text === "" ? "" : "?" + text);
   }
 
   // counted is the bookkeeping every write shares: while one is in
@@ -762,6 +902,19 @@ export function client({
     upsertView,
     uploadAsset,
     listAssets,
+    games,
+    summary,
+    listViews,
+    listDocs,
+    docKinds,
+    listTypes,
+    getType,
+    listRelationTypes,
+    getRelationType,
+    listEntities,
+    getEntity,
+    listRelations,
+    listEntityDocs,
     connect,
     disconnect,
     setDragging,

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entities · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+<p class="muted"><a id="back-to-types" href="/">Back to the catalogue</a></p>
+
+<h1 id="type-name">Loading…</h1>
+<p class="muted" id="type-meta" aria-live="polite"></p>
+<!-- Said out loud, because this page is deliberately close in
+     appearance to the `table` renderer and is not one: it lists every
+     entity of a declared type, in key order, and answers no query. -->
+<p class="muted" id="type-note"></p>
+
+<ul class="catalogue" id="entities" hidden></ul>
+<p class="muted" id="entities-empty" hidden>
+  Nothing of this type yet. Entities are written through this instance&#39;s API,
+  from an agent over MCP or over the game&#39;s content routes.
+</p>
+<p class="error" id="entities-error" hidden></p>
+<button type="button" class="link-button" id="entities-more" hidden>Show more</button>
+
+<script type="module" src="/static/pages/catalogue.js"></script>

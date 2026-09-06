@@ -294,6 +294,24 @@ func NewServer(opts Options) *Server {
 	s.routeFunc("GET /g/{slug}/doc", func(w http.ResponseWriter, r *http.Request) {
 		s.serveAsset(w, r, "document.html")
 	})
+	// The seven remaining shells, from one table (shellRoutes, below).
+	//
+	// Every one of them resolves nothing server-side, exactly as
+	// /g/{slug} and /g/{slug}/doc above do: the page reads the slug and
+	// the keys out of the URL the browser already has, and the data
+	// client asks for them by slug and by key. That is why they are
+	// registered here as plain shells rather than through
+	// registerProjectRoute, and why every path variable is spelled
+	// {slug}, {key} or {typeKey} and never {game}.
+	for _, shell := range shellRoutes {
+		if shell.byHand {
+			continue
+		}
+		file := shell.file
+		s.routeFunc(shell.pattern, func(w http.ResponseWriter, r *http.Request) {
+			s.serveAsset(w, r, file)
+		})
+	}
 	s.route("GET /static/", s.staticFileServer())
 	s.routeFunc("GET /api/config", s.handleConfig)
 	s.route("GET /api/games", requireCaller(s.handleListGames))
@@ -441,6 +459,50 @@ func NewServer(opts Options) *Server {
 	// changes after construction.
 	s.handler = s.securityHeaders(s.authenticate(s.mux))
 	return s
+}
+
+// shellRoutes is every HTML shell this server serves, with the route it
+// is served at.
+//
+// **It is a table so that a shell and its route cannot come apart.**
+// internal/web/static_pages_test.go enumerates the shells on disk and
+// asserts each has an entry here, and then drives a real request at each
+// pattern and asserts the bytes that come back are that shell's — so a
+// shell added without a route fails in a test rather than 404ing in a
+// browser, and a route pointing at the wrong shell fails too.
+//
+// game.html and document.html are registered by hand above rather than
+// from here, because each has more to say than a file name: the game
+// page's own comment records why its path variable is {slug} and not
+// {game}, and the document page's records why a document path travels in
+// the query string. Their entries are here as well, with no handler, so
+// the enumeration below covers every shell rather than every shell this
+// loop happens to register — a list that covered only what it registered
+// would be a list that agrees with itself.
+var shellRoutes = []struct {
+	pattern string
+	file    string
+	// byHand says this pattern is registered elsewhere in newServer, with
+	// an argument of its own beside it.
+	byHand bool
+	// dispatches says the route does something before it serves — it may
+	// redirect, or serve a different page — so "GET this pattern and
+	// compare the bytes" is not a test of it. Exactly one route is like
+	// that: handleRoot decides between the picker, a single game and the
+	// sign-in page, which is the whole reason it is a handler and not a
+	// file.
+	dispatches bool
+}{
+	{pattern: "GET /{$}", file: "index.html", byHand: true, dispatches: true},
+	{pattern: "GET /login", file: "login.html", byHand: true},
+	{pattern: "GET /g/{slug}", file: "game.html", byHand: true},
+	{pattern: "GET /g/{slug}/doc", file: "document.html", byHand: true},
+	{pattern: "GET /g/{slug}/views", file: "views.html"},
+	{pattern: "GET /g/{slug}/v/{key}", file: "view.html"},
+	{pattern: "GET /g/{slug}/types", file: "types.html"},
+	{pattern: "GET /g/{slug}/t/{typeKey}", file: "type.html"},
+	{pattern: "GET /g/{slug}/e/{typeKey}/{key}", file: "entity.html"},
+	{pattern: "GET /g/{slug}/assets", file: "assets.html"},
 }
 
 // route registers pattern on the mux and records it in

@@ -149,11 +149,19 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // rejected write's message exactly as it arrived, while
 // internal/web/static_ground_test.go pins the picker's promises to the
 // bounds internal/views really applies.
+//
+// mst-table.js joined the list in Task 15, and it carries one word of its
+// own for the same reason: SORT_HINT names what pressing a column header
+// does, which is a control and not a state of the answer. Everything else
+// it renders — every label, every cell, every group caption, the pager's
+// sentence — is an interpolation of render/table.js's model, which is
+// what the scan above reads the templates for.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	found := componentFiles(t)
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
 		filepath.Join("static", "components", "mst-ground.js"),
+		filepath.Join("static", "components", "mst-table.js"),
 		filepath.Join("static", "components", "mst-twin.js"),
 		filepath.Join("static", "components", "mst-view-frame.js"),
 	}

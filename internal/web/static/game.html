@@ -25,47 +25,74 @@
 <h1 id="game-name">Loading…</h1>
 <p class="muted" id="game-summary" aria-live="polite">Loading this game…</p>
 
-<section id="game-content" hidden>
-  <h2>Entity types</h2>
-  <ul class="catalogue" id="types"></ul>
-  <p class="muted" id="types-empty" hidden>
-    This game has no entity types yet. A game declares its own — Quest, Zone
-    and Class for one game, Driver, Car and Circuit for another.
-    <!-- The sentence that says what to do about it depends on who is
-         reading: an editor can declare one, a viewer cannot, and telling
-         a viewer to do what the server will refuse is worse than telling
-         them nothing. app.js fills this in from the caller's own role,
-         which GET /summary carries. -->
-    <span id="types-empty-action"></span>
-  </p>
+<!-- Three lanes, in this order, and the order is the product's map:
+     **Views · Catalogue · Prose**. The metamodel has four primitives
+     (entity types, entities, relation types, relations) and the product
+     has three surfaces over them — the pictures a designer reads, the
+     vocabulary the game declared, and the prose beside it — so a
+     designer holds the whole tool in their head on day one instead of
+     discovering a fourth place things live in.
 
-  <h2>Documents</h2>
-  <!-- The kind vocabulary, above the documents it describes. A kind is
-       free text this game invented, so nothing but this line can tell a
-       designer what vocabulary their own prose is using; it is the prose
-       half of the entity-type catalogue above. Hidden until there is a
-       kind to show, because "no kinds" is not a fact worth a line. -->
-  <p class="muted" id="doc-kinds" hidden></p>
-  <ul class="catalogue" id="docs"></ul>
-  <p class="muted" id="docs-empty" hidden>
-    This game has no documents yet. A document is prose addressed by a path
-    inside this game — lore/duskwood, scripts/wanted-hogger — versioned on
-    every save.
-    <!-- Same rule as the entity-types empty state above: the sentence
-         that says what to do about it depends on who is reading, and a
-         viewer must not be told to do what the server will refuse. -->
-    <span id="docs-empty-action"></span>
-  </p>
-  <p class="error" id="docs-error" hidden></p>
-  <button type="button" class="link-button" id="docs-more" hidden>Show more documents</button>
+     The lane order is asserted rather than left to this file: pages/
+     page.js declares DESTINATIONS and pages/home.js renders in that
+     order, so a reordered home is a failing check and not a surprise. -->
+<div id="home" class="lanes" hidden>
+  <section class="lane" id="lane-views" aria-labelledby="lane-views-heading">
+    <h2 id="lane-views-heading"><a id="views-link" href="/">Views</a></h2>
+    <ul class="catalogue" id="views" hidden></ul>
+    <!-- The one piece of onboarding in this product: a sentence and a
+         link, never a *New view* button. pages/page.js carries both. -->
+    <div id="views-onboarding" hidden></div>
+    <p class="error" id="views-error" hidden></p>
+    <button type="button" class="link-button" id="views-more" hidden>Show more views</button>
+  </section>
 
-  <h2>Relation types</h2>
-  <ul class="catalogue" id="relation-types"></ul>
-  <p class="muted" id="relation-types-empty" hidden>
-    No relation types yet. A relation type is a kind of edge between entities —
-    takes_place_in, requires, unlocks — and is declared the same way an entity
-    type is.
-  </p>
-</section>
+  <section class="lane" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
+    <h2 id="lane-catalogue-heading"><a id="types-link" href="/">Catalogue</a></h2>
+    <ul class="catalogue" id="types"></ul>
+    <p class="muted" id="types-empty" hidden>
+      This game has no entity types yet. A game declares its own — Quest, Zone
+      and Class for one game, Driver, Car and Circuit for another.
+      <!-- The sentence that says what to do about it depends on who is
+           reading: an editor can declare one, a viewer cannot, and telling
+           a viewer to do what the server will refuse is worse than telling
+           them nothing. pages/home.js fills this in from the caller's own
+           role, which GET /summary carries. -->
+      <span id="types-empty-action"></span>
+    </p>
 
-<script type="module" src="/static/app.js"></script>
+    <h3>Relation types</h3>
+    <ul class="catalogue" id="relation-types"></ul>
+    <p class="muted" id="relation-types-empty" hidden>
+      No relation types yet. A relation type is a kind of edge between entities —
+      takes_place_in, requires, unlocks — and is declared the same way an entity
+      type is.
+    </p>
+  </section>
+
+  <section class="lane" id="prose" aria-labelledby="lane-prose-heading">
+    <h2 id="lane-prose-heading">Prose</h2>
+    <!-- The kind vocabulary, above the documents it describes. A kind is
+         free text this game invented, so nothing but this line can tell a
+         designer what vocabulary their own prose is using; it is the prose
+         half of the entity-type catalogue beside it. Hidden until there is
+         a kind to show, because "no kinds" is not a fact worth a line. -->
+    <p class="muted" id="doc-kinds" hidden></p>
+    <ul class="catalogue" id="docs"></ul>
+    <p class="muted" id="docs-empty" hidden>
+      This game has no documents yet. A document is prose addressed by a path
+      inside this game — lore/duskwood, scripts/wanted-hogger — versioned on
+      every save.
+      <!-- Same rule as the entity-types empty state above: the sentence
+           that says what to do about it depends on who is reading, and a
+           viewer must not be told to do what the server will refuse. -->
+      <span id="docs-empty-action"></span>
+    </p>
+    <p class="error" id="docs-error" hidden></p>
+    <button type="button" class="link-button" id="docs-more" hidden>Show more documents</button>
+  </section>
+</div>
+
+<p class="muted"><a id="assets-link" href="/">Images</a></p>
+
+<script type="module" src="/static/pages/home.js"></script>

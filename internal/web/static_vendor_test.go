@@ -320,6 +320,25 @@ var (
 // TestTheNamespaceExemptionIsExactlyOneDeclaration holds all four.
 var namespaceDeclaration = regexp.MustCompile(`^export const [A-Z_]*NS = "http://www\.w3\.org/2000/svg";$`)
 
+// documentationLink is the second exemption, and it is exact in the same
+// shape and for the same kind of reason.
+//
+// Task 15 ships the product's one piece of onboarding: a game with no
+// saved views is told, in a sentence, that a view is written by an agent
+// over MCP, with a link to the documentation that teaches it. That link
+// is a **hyperlink a human may click** and not a resource this front end
+// loads — nothing fetches it, and every page it appears on renders whole
+// without it — so the property this scan exists for, that an instance
+// with no outbound route works completely, is untouched. What is not
+// untouched is the *hole*: an exemption nobody bounds is where every
+// future CDN import would hide.
+//
+// So it admits one shape and one host: a whole line declaring a constant
+// named SKILL_BUNDLE_HREF, https, on this project's own documentation
+// site, with nothing after the semicolon.
+var documentationLink = regexp.MustCompile(
+	`^export const SKILL_BUNDLE_HREF = "https://neverbot\.github\.io/maestro/[a-z][a-z0-9/-]*";$`)
+
 // networkReach is one line of one module that reaches outside the
 // instance.
 type networkReach struct {
@@ -365,7 +384,7 @@ func scanForNetworkReach(t *testing.T) (read []string, reaches []networkReach) {
 func networkReachesIn(file, src string) []networkReach {
 	var out []networkReach
 	for _, line := range codeLines(src) {
-		if namespaceDeclaration.MatchString(line.code) {
+		if namespaceDeclaration.MatchString(line.code) || documentationLink.MatchString(line.code) {
 			continue
 		}
 		if !outboundURL.MatchString(line.code) && !importScriptsFn.MatchString(line.code) {
@@ -752,5 +771,59 @@ func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
 	}
 	if found != 1 {
 		t.Errorf("the namespace declaration appears %d time(s) in render/scene.js, want exactly 1", found)
+	}
+}
+
+// TestTheDocumentationExemptionIsExactlyOneDeclaration is the guard on
+// the second hole, written to the same standard as the first: what it
+// admits, what it still refuses, and that the front end contains exactly
+// one line it applies to.
+func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
+	admitted := `export const SKILL_BUNDLE_HREF = "https://neverbot.github.io/maestro/agents/views";`
+	if !documentationLink.MatchString(admitted) {
+		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
+	}
+	for name, refused := range map[string]string{
+		"a fetch of the same URL":   `const r = await fetch("https://neverbot.github.io/maestro/agents/views");`,
+		"an http spelling":          `export const SKILL_BUNDLE_HREF = "http://neverbot.github.io/maestro/agents/views";`,
+		"another host":              `export const SKILL_BUNDLE_HREF = "https://cdn.example.com/maestro/agents/views";`,
+		"another constant":          `export const ANALYTICS_HREF = "https://neverbot.github.io/maestro/agents/views";`,
+		"a declaration with a tail": `export const SKILL_BUNDLE_HREF = "https://neverbot.github.io/maestro/a"; fetch(SKILL_BUNDLE_HREF);`,
+	} {
+		if documentationLink.MatchString(refused) {
+			t.Errorf("the exemption admits %s: %q", name, refused)
+		}
+		if len(networkReachesIn("static/x.js", refused+"\n")) == 0 {
+			t.Errorf("the scan does not report %s: %q", name, refused)
+		}
+	}
+
+	// And exactly one line in the whole front end benefits from it, so a
+	// second external link cannot arrive under this argument without
+	// somebody writing a new one.
+	found := 0
+	err := filepath.WalkDir("static", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !moduleExtensions[filepath.Ext(path)] {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, line := range codeLines(string(raw)) {
+			if documentationLink.MatchString(line.code) {
+				found++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk static: %v", err)
+	}
+	if found != 1 {
+		t.Errorf("the documentation link appears %d time(s) under internal/web/static, want exactly 1", found)
 	}
 }

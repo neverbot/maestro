@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>View · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">A view is a drawing this page builds in the browser, so it needs JavaScript enabled.</p>
+</noscript>
+<p class="muted"><a id="back-to-views" href="/">Back to the views</a></p>
+
+<!-- Everything on this page is built by pages/view.js: the frame owns
+     every negative state (Task 4), the canvas owns the drawing and the
+     drag layer (Task 7), and the ground panel owns the background
+     (Task 14). The shell holds the holes and no words of its own —
+     a sentence typed here would be a second copy of one the frame&#39;s
+     model already carries. -->
+<div id="view-root"></div>
+<!-- The only thing this page says for itself, and only when the view
+     could not be read at all: the frame needs an envelope or a refusal
+     before it can say anything, and "this view does not exist" is
+     neither. -->
+<p class="error" id="view-error" hidden></p>
+
+<!-- The entity panel a node click opens, over the canvas rather than
+     instead of it: losing an arrangement to read a field would make
+     reading fields feel expensive. -->
+<aside id="entity-panel" class="side-panel" hidden aria-label="Entity"></aside>
+
+<script type="module" src="/static/pages/view.js"></script>

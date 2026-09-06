@@ -122,26 +122,37 @@ func TestTheDocumentPageDeclaresEveryElementItsScriptLooksUp(t *testing.T) {
 	}
 }
 
-// TestTheGamePageDeclaresTheDocumentsElementsAppScriptLooksUp is the same
-// check for the four ids the documents catalogue added to game.html.
-// app.js is shared by three shells, so it cannot be checked against one
-// of them wholesale — these four are named because they are this task's
-// own additions.
-func TestTheGamePageDeclaresTheDocumentsElementsAppScriptLooksUp(t *testing.T) {
+// TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp is the same
+// check for the five ids the prose lane needs on game.html.
+//
+// **It follows the code**: Task 15 moved the game page out of app.js and
+// into static/pages/home.js, and a test that kept reading app.js would
+// have gone on passing over a file that no longer contains the lane.
+func TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp(t *testing.T) {
 	body, err := os.ReadFile("static/game.html")
 	if err != nil {
 		t.Fatalf("read static/game.html: %v", err)
 	}
 	shell := string(body)
-	source := appScriptSource(t)
+	source := homeScriptSource(t)
 	for _, id := range []string{"docs", "docs-empty", "docs-empty-action", "docs-error", "docs-more"} {
 		if !strings.Contains(shell, `id="`+id+`"`) {
 			t.Errorf("game.html does not declare #%s", id)
 		}
 		if !strings.Contains(source, `getElementById("`+id+`")`) {
-			t.Errorf("app.js no longer looks up #%s", id)
+			t.Errorf("static/pages/home.js no longer looks up #%s", id)
 		}
 	}
+}
+
+// homeScriptSource reads the module that draws the game home page.
+func homeScriptSource(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile("static/pages/home.js")
+	if err != nil {
+		t.Fatalf("read static/pages/home.js: %v", err)
+	}
+	return string(body)
 }
 
 // TestNeitherProseEmptyStateOffersAViewerAWrite pins the rule the parent
@@ -154,18 +165,26 @@ func TestTheGamePageDeclaresTheDocumentsElementsAppScriptLooksUp(t *testing.T) {
 // through an HTTP response: GET /summary carries the role, and the
 // branch is taken in the browser.
 func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
-	source := appScriptSource(t)
-	fn := strings.Index(source, "function describeWhoWritesDocuments(role) {")
+	// The sentence moved with the page in Task 15, into
+	// static/pages/page.js's `whoWrites` — one function for both prose
+	// and vocabulary, because "who may do this" is one rule with two
+	// subjects rather than two functions that can come to disagree.
+	raw, err := os.ReadFile("static/pages/page.js")
+	if err != nil {
+		t.Fatalf("read static/pages/page.js: %v", err)
+	}
+	source := string(raw)
+	fn := strings.Index(source, "export function whoWrites(role, what) {")
 	if fn == -1 {
-		t.Fatal("app.js no longer decides the documents empty state from the caller's role")
+		t.Fatal("static/pages/page.js no longer decides an empty state's action from the caller's role")
 	}
 	end := strings.Index(source[fn:], "\n}\n")
 	if end == -1 {
-		t.Fatal("could not read describeWhoWritesDocuments's body")
+		t.Fatal("could not read whoWrites's body")
 	}
 	body := source[fn : fn+end]
-	if !strings.Contains(body, `role === "viewer"`) {
-		t.Error("describeWhoWritesDocuments does not branch on the viewer role")
+	if !strings.Contains(body, "role === ROLE_VIEWER") {
+		t.Error("whoWrites does not branch on the viewer role")
 	}
 	if !strings.Contains(body, "will refuse a write from you") {
 		t.Error("the viewer's sentence no longer says the instance will refuse the write")

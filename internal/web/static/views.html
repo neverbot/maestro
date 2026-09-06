@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Views · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+<p class="muted"><a id="back-to-game" href="/">Back to this game</a></p>
+
+<h1 id="view-list-title">Views</h1>
+<p class="muted" id="view-list-note" aria-live="polite">Loading this game&#39;s views…</p>
+
+<ul class="catalogue" id="views" hidden></ul>
+<!-- The one piece of onboarding in this product, and it is a sentence
+     and a link. Nothing in this interface writes a view: a saved query
+     is an agent&#39;s job over MCP, so a *New view* button here would lead
+     nowhere. pages/page.js carries the sentence and the link, because
+     the home lane says the same thing and two copies of it would drift. -->
+<div id="views-onboarding" hidden></div>
+<p class="error" id="views-error" hidden></p>
+<button type="button" class="link-button" id="views-more" hidden>Show more views</button>
+
+<script type="module" src="/static/pages/views.js"></script>

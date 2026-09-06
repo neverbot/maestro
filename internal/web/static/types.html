@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catalogue · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+<p class="muted"><a id="back-to-game" href="/">Back to this game</a></p>
+
+<h1 id="catalogue-title">Catalogue</h1>
+<p class="muted" id="catalogue-note" aria-live="polite">Loading this game&#39;s vocabulary…</p>
+
+<h2>Entity types</h2>
+<ul class="catalogue" id="types"></ul>
+<p class="muted" id="types-empty" hidden>
+  This game has no entity types yet. A game declares its own — Quest, Zone
+  and Class for one game, Driver, Car and Circuit for another.
+  <span id="types-empty-action"></span>
+</p>
+
+<h2>Relation types</h2>
+<ul class="catalogue" id="relation-types"></ul>
+<p class="muted" id="relation-types-empty" hidden>
+  No relation types yet. A relation type is a kind of edge between entities —
+  takes_place_in, requires, unlocks — and is declared the same way an entity
+  type is.
+</p>
+<p class="error" id="catalogue-error" hidden></p>
+
+<script type="module" src="/static/pages/types.js"></script>

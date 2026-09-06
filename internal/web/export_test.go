@@ -62,3 +62,30 @@ func (s *Server) ToolDescriptionsForTest() map[string]string {
 	}
 	return out
 }
+
+// ShellRoutesForTest returns every HTML shell this server serves and the
+// route it is served at. It exists for TestEveryShellIsReachableByItsRoute
+// (static_pages_test.go), which enumerates the shells on disk against it
+// and then drives a real request at each pattern: a shell added without a
+// route must fail there rather than 404 in a browser.
+func ShellRoutesForTest() map[string]string {
+	out := make(map[string]string, len(shellRoutes))
+	for _, shell := range shellRoutes {
+		out[shell.file] = shell.pattern
+	}
+	return out
+}
+
+// DispatchingShellsForTest returns the shells whose route decides
+// something before it serves — handleRoot's redirect in particular — so
+// the test above can assert a route exists for them without asserting
+// that a bare GET returns their bytes.
+func DispatchingShellsForTest() map[string]bool {
+	out := make(map[string]bool, len(shellRoutes))
+	for _, shell := range shellRoutes {
+		if shell.dispatches {
+			out[shell.file] = true
+		}
+	}
+	return out
+}

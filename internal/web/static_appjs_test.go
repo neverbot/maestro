@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -66,33 +67,107 @@ func TestLastVisitedRedirectIsCorroboratedBeforeItFires(t *testing.T) {
 }
 
 // TestRememberGameIsOnlyCalledAfterCorroboration pins the companion fix:
-// game.html must only call rememberGame(slug) once GET /api/games has
-// confirmed slug is actually reachable, never unconditionally from the
-// URL the moment the page loads — a stray or stale /g/{slug} link must
-// not be able to overwrite a good remembered value with one that cannot
-// be reached. The call site (a statement, "rememberGame(slug);") is
-// matched separately from the function's own declaration ("function
-// rememberGame(slug) {"), which would otherwise also contain the
-// substring "rememberGame(slug)" and defeat a naive count-based check.
+// the remembered slug is written only once GET /api/games has confirmed
+// the slug is actually reachable, never unconditionally from the URL the
+// moment a page loads — a stray or stale /g/{slug} link must not be able
+// to overwrite a good remembered value with one that cannot be reached.
+//
+// **The call site moved in Task 15 and this test moved with it**, which
+// is this repository's standing failure pattern caught in the act: the
+// game page became `static/pages/home.js` and the slug corroboration
+// became `openGame` in `static/pages/page.js`, so a test that kept
+// reading app.js would have passed for ever on a file that no longer
+// contains the behaviour. It now asserts the call is where the
+// corroboration is, and — the half that could not be asserted while the
+// two lived in one file — that the whole front end holds exactly **one**
+// call site, so a second page cannot start remembering a slug it never
+// checked.
 func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
-	source := appScriptSource(t)
-	// The call site ("rememberGame(slug);", an argument-list-then-semicolon
-	// statement) is distinguished from the function's own declaration
-	// ("function rememberGame(slug) {", which ends in a brace, not a
-	// semicolon) purely by that trailing character — a plain substring
-	// count would otherwise also match the declaration and silently pass
-	// even if every real call site were deleted.
 	const callSite = "rememberGame(slug);"
-	if n := strings.Count(source, callSite); n != 1 {
-		t.Fatalf("found %d call sites for %q; want exactly 1", n, callSite)
+	// The declaration ("export function rememberGame(slug) {") ends in a
+	// brace, not a semicolon, so it is not counted as a call — a plain
+	// substring count would otherwise pass even if every real call site
+	// were deleted.
+	calls := map[string]int{}
+	total := 0
+	for _, path := range ownModules(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if n := strings.Count(string(raw), callSite); n > 0 {
+			calls[path] = n
+			total += n
+		}
+	}
+	if total != 1 {
+		t.Fatalf("found %d call site(s) for %q across the front end (%v); want exactly 1 — "+
+			"a second page remembering a slug is a second page that has to corroborate it first",
+			total, callSite, calls)
+	}
+	if _, ok := calls[openGameModule]; !ok {
+		t.Fatalf("the one call site for %q is not in %s, which is where the slug is corroborated "+
+			"against the caller's own game list", callSite, openGameModule)
 	}
 
-	foundGameIdx := strings.Index(source, "if (game) {")
-	if foundGameIdx == -1 {
-		t.Fatal("app.js no longer has the expected if (game) { ... } shape this test depends on")
+	source := openGameSource(t)
+	// The corroboration, the refusal it produces, and the call, in that
+	// order. Asserting the order is what stops the call being hoisted
+	// above the check "to simplify".
+	corroboration := strings.Index(source, "answer.games.find((row) => row.slug === slug)")
+	refusal := strings.Index(source, "if (game === null) {")
+	call := strings.Index(source, callSite)
+	switch {
+	case corroboration == -1:
+		t.Fatal(openGameModule + " no longer resolves the slug against the caller's own game list")
+	case refusal == -1:
+		t.Fatal(openGameModule + " no longer refuses a slug that is not in that list")
+	case call < corroboration || call < refusal:
+		t.Fatalf("%s remembers the slug before it has been corroborated (find at %d, refusal at %d, "+
+			"call at %d)", openGameModule, corroboration, refusal, call)
 	}
-	callIdx := strings.Index(source, callSite)
-	if callIdx < foundGameIdx {
-		t.Fatal("rememberGame(slug) is called before app.js confirms the slug is in the caller's own game list")
+}
+
+// openGameModule is where the slug corroboration lives since Task 15.
+const openGameModule = "static/pages/page.js"
+
+func openGameSource(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile(openGameModule)
+	if err != nil {
+		t.Fatalf("read %s: %v", openGameModule, err)
 	}
+	return string(body)
+}
+
+// ownModules is every module this project wrote, vendored code excluded.
+// It is a walk rather than a list for the reason the component roster is
+// one: a list is a thing the next file forgets to join.
+func ownModules(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir("static", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		slashed := filepath.ToSlash(path)
+		if d.IsDir() {
+			if slashed == vendorDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch filepath.Ext(path) {
+		case ".js", ".mjs":
+			out = append(out, slashed)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk static: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("found no own module under internal/web/static: this test would pass on an empty tree")
+	}
+	return out
 }

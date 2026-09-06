@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Images · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+<p class="muted"><a id="back-to-game" href="/">Back to this game</a></p>
+
+<h1>Images</h1>
+<p class="muted" id="assets-note" aria-live="polite">Loading this game&#39;s images…</p>
+
+<ul class="catalogue" id="assets" hidden></ul>
+<p class="muted" id="assets-empty" hidden>
+  This game has no uploaded images yet. A map view is given its background
+  from the view itself, which is where an image is uploaded.
+</p>
+<p class="error" id="assets-error" hidden></p>
+<button type="button" class="link-button" id="assets-more" hidden>Show more images</button>
+
+<script type="module" src="/static/pages/assets.js"></script>

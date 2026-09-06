@@ -3223,7 +3223,7 @@ offset}`; cancelling writes nothing; clearing is `asset_id: null` behind
 a confirmation. In-flight elements carry `--pending`, a reduced-opacity
 treatment and not a spinner.
 
-- [ ] Tests: `aFortyNodeDragIsOneWrite` — assert exactly one request with
+- [x] Tests: `aFortyNodeDragIsOneWrite` — assert exactly one request with
   forty entries; `nothingIsWrittenUntilTheDrop` — assert zero requests
   across sixty pointermove events;
   `aDraggedNodeIsWrittenPinned` — assert `pinned: true` on every entry;
@@ -3247,7 +3247,7 @@ treatment and not a spinner.
   `adjustGroundMovesTheImageAndNotTheNodes` — assert node coordinates are
   unchanged during the mode; `pendingElementsCarryThePendingTreatment`.
 
-- [ ] See red: write on `pointermove` and watch `nothingIsWrittenUntilTheDrop`
+- [x] See red: write on `pointermove` and watch `nothingIsWrittenUntilTheDrop`
   report sixty; drop the revert from the failure path and watch
   `aRefusedWriteRevertsAndBands` find the optimistic coordinates —
   **this is the mutation that produces the one outcome a shared design
@@ -3255,7 +3255,8 @@ treatment and not a spinner.
   indefinitely; enable dragging in `auto` and watch its test find a
   request; send `pinned: false` on a drag and watch its test fail.
 
-- [ ] Hand check: drag a marquee of forty nodes on a thousand-node view
+- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+  drag a marquee of forty nodes on a thousand-node view
   and watch for stutter. The frame budget is measured in Task 18; what a
   human is judging here is whether the *snap* and the pinned/unpinned
   anchor marks are discernible while moving.
@@ -3265,6 +3266,162 @@ git add internal/web/static/components internal/web/jstest/writes_test.mjs \
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): dragging and background placement, written on drop and reverted on refusal"
 ```
+
+#### Corrections made during implementation
+
+1. **The upload is not multipart, and the task's own sentence was
+   written before the route existed.** `POST …/view-assets` takes the
+   image as the **raw request body** with the filename in the query
+   string, and internal/web/api_view_assets.go's header argues it at
+   length: a multipart parser is a second parser over hostile bytes,
+   with its own boundary scanning and its own temporary files, for a
+   request that carries exactly one file. Sending multipart from here
+   would have been a body the server does not read. The client sends
+   `request(path, {method, body: file})` with **no content-type at all**,
+   because the mime is sniffed from the bytes there and a header this
+   client set would be a claim the server is written to ignore.
+
+2. **Three files the task's list does not name were widened, and the
+   rule that sent the work there is Task 3's.** The data client owns
+   every call, so `writeBackground`, `uploadAsset`, `listAssets`,
+   `clearPositions` and `upsertView` are client.js's rather than the
+   components'. `internal/web/static_client_test.go`'s two guards — no
+   string literal carrying whitespace, and no other own module naming a
+   network primitive — passed unchanged over all five, which is the
+   evidence that widening the client was the shape of the change and not
+   a way round it. The bookkeeping that defers a re-read while a write is
+   unacknowledged became one `counted` wrapper rather than five copies of
+   a `finally`: a write that threw and left the counter raised would
+   defer every re-read for the life of the page.
+
+3. **`clearPositions` refuses an empty list in the client, and a
+   mutation found that the harness was only asking the menu.** On that
+   route an absent `entities` clears the *whole* view — internal/web's
+   ViewsClearPositionsInput spends a pointer on exactly that distinction
+   — so an empty selection must never become one. Both layers guard it;
+   the menu's guard runs first and masked the client's, so the mutation
+   that made the client send an unnamed clear stayed **green**. The check
+   now drives `client.clearPositions(key, [])` directly as well. This is
+   the standing pattern *correct and unasserted*, caught by mutation and
+   not by reading: the next caller of that function is not this menu.
+
+4. **The three layout modes moved out of layout/compose.js into
+   static/positions.js**, which is Task 11's correction 1 carried one step
+   along and for the same measurement. The canvas has to know whether a
+   drag may be written *before* it knows whether there is anything to lay
+   out, and compose.js imports engine.js, which imports 48 kB of vendored
+   dagre. `readsPositions` and `snapsPositions` live there too, so "may a
+   drag be written here" and "does the grid apply here" are one answer
+   each rather than a mode string compared at every call site. compose.js
+   re-exports all of them and Task 6's guards are untouched.
+
+5. **`snapsPositions` is narrower than `readsPositions`, and that is a
+   reading rather than an omission.** `auto` may not be dragged at all;
+   `mixed` may, but it re-fits the whole picture through a similarity
+   transform, so a coordinate landed on the grid at write time is not on
+   the grid when it is drawn back. `map`'s own `snap` tooltip already
+   says the knob is read in `manual` mode only. The fixture that pins it
+   drags by (43, 17) against a grid of 25: a drag that happened to land
+   on the grid would have passed under either policy.
+
+6. **Snapping is per node and not per gesture.** The catalogue's own
+   words are that `snap` is "the grid a dragged node **lands on**", so
+   each node's final coordinate is rounded; snapping the delta instead
+   would leave a node that was never on the grid permanently off it. The
+   drag layer bakes one uniform offset on drop, so `commit` applies the
+   per-node residual through `nudgeNodes` — which is the same function
+   the arrow keys, the undo and the revert use, and is why there is one
+   write path rather than four.
+
+7. **`--pending` is a class and not a token.** The task's spelling reads
+   like a custom property; declaring one would have put an opacity into a
+   token file whose two guards are "declared in both themes" and "every
+   declared token is used", neither of which means anything for a number
+   that is not a colour. It is `.pending`, one declaration, worn by the
+   arrangement menu and by the ground panel while a write is outstanding,
+   and the harness catches it mid-flight by holding the stubbed answer.
+
+8. **The two components carry words, and the component roster had to be
+   told why.** `TestTheComponentScanReadsEveryComponent` names every file
+   under `static/components/`, so mst-ground.js could not land without an
+   argument for its silence — and it is not silent. The argument is
+   mst-view-frame.js's own exception carried one step along: RUN_ANYWAY_
+   LABEL lives in the component because it names a *control*, and
+   everything these two say is the same kind of thing. The arrangement
+   menu states the three behaviours a designer would otherwise learn by
+   watching nothing happen (unpinning changes no pixel until the position
+   is cleared, undo has one level and no server behind it, a position
+   write loses silently to a concurrent one); the picker states three
+   *preconditions*. Neither composes a refusal: both render the server's
+   own message verbatim, and `internal/web/static_ground_test.go` pins
+   the picker's promises to `views.MaxAssetBytes` and the three mimes
+   `sniffedMime` admits, so a bound raised on the server cannot leave an
+   authoritative-looking lie on the picker.
+
+9. **A new image does not inherit the previous one's arithmetic**, which
+   is internal/web/mcp_views.go's own stated contract for a nil Scale and
+   a nil Offset and had no reader until now. Adjusting the *same* image
+   starts from the scale and offset the view is drawn at; adjusting a new
+   one starts from the defaults. A picker that always sent its current
+   knobs would have satisfied every other check here.
+
+10. **The re-read check is driven over the wire, because the first
+    version of it passed for the wrong reason.** It asserted
+    `pendingWrites` and `dragging` and never delivered an event, so "and
+    nothing was re-read behind our back" was true of a re-read nobody had
+    scheduled. It now writes real `text/event-stream` bytes into a stubbed
+    stream mid-drag and again mid-write, and asserts the count of
+    `/views/run` calls is unchanged both times and then rises by
+    **exactly one** — two events asking, one re-read, after the write has
+    landed. The `resync`-shaped defect this file could have had is the
+    reverse: a client that re-read on its own write's echo *while* the
+    write was in flight would read back the state the write is about to
+    change.
+
+**Mutations run, all eighteen red, each with its patch confirmed on disk
+before the harness was believed.** A write on every `pointermove`
+(*"sixty pointermoves are still no write: got 60, want 0"*, and three
+other checks with it); the revert dropped from the failure path (*"the
+model goes back to the pre-drag coordinates: got {"x":260,"y":40}, want
+{"x":200,"y":0}"* — the one outcome a shared design tool may not
+produce); `readsPositions` returning true always (*"the drag does not
+start"*, and the viewer offered a button); `pinned: false` on a drag
+(*"every one of them is written pinned: got [false], want [true]"*);
+`snapsPositions` widened to every mode that reads positions (*"and lands
+where it was dropped in mixed: got 50, want 43"*); `worldDelta` ignoring
+the zoom (*"the write is the game's coordinate: got 340, want 320"*);
+`commit` always remembering, which makes undo a redo (*"the second Ctrl-Z
+has nothing to do"*); the upsert's `expected_version` sent as null
+(*"the version it read the row at: got null, want 7"*); the ground
+cleared without its confirmation (*"the first ask writes nothing: got 1,
+want 0"*); `cancel` committing (*"cancelling reaches the server not once:
+got 1, want 0"*); `adjustGround` moving the node layer too (*"only the
+ground was written to: got 11, want 1"*); `mayWrite` true for everybody
+(*"is not offered the button the server would refuse"*); `commit` looping
+one call per node (*"and the drop is one write, not forty and not sixty:
+got 40, want 1"*); the picker's facts rendered only once a file is chosen
+(*"the picker states it up front"*); a sentence of our own in place of a
+refused upload's (*"the sentence is the server's, unmodified"*); the
+client's empty-list clear sending an unnamed one (*"without reaching the
+route at all: got 2, want 1"*); `setDragging(false)` on pointer down
+(*"a re-read never fires while a drag is in flight: got 2, want 1"*); and
+the pending class never applied (*"the panel wears the treatment"*). The
+two Go guards were mutated too: a fourth mime in the picker and a doubled
+cap both turn `internal/web/static_ground_test.go` red.
+
+**The hand check this task leaves**, to be performed at Task 15: **drag a
+marquee of forty nodes across a thousand-node view, in `manual` mode with
+a grid set and a background image placed.** The frame budget is Task 18's;
+what a human is judging here is whether the *snap* is discernible while
+moving — whether a node visibly lands on a cell rather than merely
+stopping — and whether the pinned and unpinned anchor marks can be told
+apart at a glance over a designer's own image. Nothing automated can
+answer either: the harness asserts the coordinate that reaches the wire is
+a multiple of the grid and that an unpinned node is written with the flag,
+and says nothing about whether a designer can see the difference. The
+second half is *adjust ground*: with the mode active, does it read as the
+image moving under the nodes, or as the whole picture drifting?
+
 
 ---
 

@@ -427,6 +427,15 @@ check("heartbeatCommentsAreNotEvents", () => {
   const mixed = parseFrames(": ping\n\n" + frame("view.positions", { key: "world" }) + ": ping\n\n");
   assertEqual(mixed.frames.length, 1, "the one real event between two heartbeats");
   assertEqual(mixed.frames[0].kind, "view.positions", "and it is the event, not a ping");
+
+  // A comment line inside a frame is ignored without disturbing the
+  // frame around it, which is the other half of "a comment is not a
+  // field": the block below still names one event and carries its whole
+  // payload.
+  const inside = parseFrames(': ping\nevent: view.positions\n: data: {"key":"forged"}\ndata: {"key":"world"}\n\n');
+  assertEqual(inside.frames.length, 1, "one event");
+  assertEqual(inside.frames[0].kind, "view.positions", "its kind survived the comment lines");
+  assertEqual(inside.frames[0].data.key, "world", "and a comment could not forge its payload");
 });
 
 check("aFrameSplitAcrossChunksIsOneEvent", () => {

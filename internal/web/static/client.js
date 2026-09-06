@@ -277,11 +277,22 @@ export function parseFrames(buffer) {
   return { frames, rest };
 }
 
+// parseFrame reads one block into an event, and returns null for a block
+// that carried none.
+//
+// **A comment line is ignored because its field name is empty**, which
+// is the SSE grammar's own reason and not a special case bolted on here:
+// a line beginning with a colon has nothing before that colon, so its
+// name is neither `event` nor `data` and it contributes nothing. There
+// was an explicit `startsWith(":")` skip here and it came out again:
+// removing it changed the behaviour of no input anybody could write, so
+// it was a guard no test could ever turn red — a mechanism nothing
+// reads. What carries the rule instead is the empty-block check below,
+// which a mutation does turn red.
 function parseFrame(block) {
   let kind = "";
   const dataLines = [];
   for (const line of block.split("\n")) {
-    if (line === "" || line.startsWith(":")) continue;
     const colon = line.indexOf(":");
     const name = colon < 0 ? line : line.slice(0, colon);
     let value = colon < 0 ? "" : line.slice(colon + 1);

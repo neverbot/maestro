@@ -61,6 +61,76 @@ func seedDoc(t *testing.T, svc *markdown.Service, game uuid.UUID, path string) {
 	}
 }
 
+// TestAResurrectedDocumentKeepsItsIdAndItsLinks pins the *asymmetry*
+// between this domain and internal/metamodel, from the side that has to
+// stay different.
+//
+// internal/metamodel refuses a version claim against a row that is not
+// there (metamodel.RemovedError), because its removals are hard: the row
+// that comes back carries a new id and every relation, position,
+// saved-view reference and attachment that named the old one goes on
+// naming nothing. This domain deliberately does **not** adopt that rule
+// for a deleted path, and the reason is exactly what this test asserts:
+// the tombstone is the same row, so a write to the path continues the
+// document — same id, same links, history unbroken — and nothing a
+// caller would mourn is lost.
+//
+// **It is here to stop the two being harmonised.** A reader who notices
+// that markdown accepts a claim the metamodel refuses will look for the
+// reason, and the reason is a behaviour, not a paragraph: turning this
+// test red is what a "consistency" fix would do first.
+//
+// It also pins the half the two domains *do* share: a claim against a
+// path this game has never had is refused here too
+// (TestExpectingAVersionOfADocumentThatDoesNotExistIsNotFound), so the
+// two agree wherever the row is gone in every sense.
+func TestAResurrectedDocumentKeepsItsIdAndItsLinks(t *testing.T) {
+	svc, entities, _, pool := newService(t)
+	ctx := context.Background()
+	game := newGame(t, pool, "azeroth")
+	newQuest(t, entities, game, "wanted-hogger", "Wanted: Hogger")
+
+	before, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "scripts/wanted-hogger", Content: "one\n", ExpectedVersion: ptrInt32(0),
+	})
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := svc.LinkAdd(ctx, game, markdown.LinkInput{
+		Path: "scripts/wanted-hogger", EntityType: "quest", EntityKey: "wanted-hogger",
+		Role: "script",
+	}); err != nil {
+		t.Fatalf("LinkAdd: %v", err)
+	}
+	if _, err := svc.Delete(ctx, game, markdown.DeleteInput{
+		Path: "scripts/wanted-hogger", ExpectedVersion: &before.CurrentVersion,
+	}); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	// The claim the metamodel refuses: a version stated for a path whose
+	// document was deleted. Here it is the resurrection, by design.
+	after, err := svc.Write(ctx, game, markdown.WriteInput{
+		Path: "scripts/wanted-hogger", Content: "back again\n", ExpectedVersion: ptrInt32(2),
+	})
+	if err != nil {
+		t.Fatalf("a write to a deleted path must bring the document back: %v", err)
+	}
+	if after.ID != before.ID {
+		t.Fatalf("the resurrected document has id %s, want the id it already had (%s): "+
+			"the whole reason this domain accepts the claim the metamodel refuses is that "+
+			"the row survives its own deletion", after.ID, before.ID)
+	}
+	links, err := docLinks(svc, ctx, game, "scripts/wanted-hogger")
+	if err != nil {
+		t.Fatalf("LinksByDocument: %v", err)
+	}
+	if len(links) != 1 || links[0].EntityKey != "wanted-hogger" {
+		t.Fatalf("links after the resurrection = %+v, want the attachment still there: an "+
+			"association the metamodel's own resurrection would have lost", links)
+	}
+}
+
 func TestALinkAttachesADocumentToAnEntityAndReadsBackFromBothSides(t *testing.T) {
 	svc, entities, _, pool := newService(t)
 	ctx := context.Background()

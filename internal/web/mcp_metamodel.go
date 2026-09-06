@@ -1688,6 +1688,22 @@ func relationTypeKeys(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (m
 // same number, and the only way to guarantee that is for there to be one
 // of them: metamodel exports MaxSearchQuery, MaxIndexedText and the page
 // bounds precisely so this file can quote them rather than repeat them.
+// versionClaimDoc is one sentence of contract, on every tool that takes
+// an expected_version, written once because it is one rule: a version
+// claim is a claim about a row that exists.
+//
+// It is on the wire rather than left to be discovered, because the
+// behaviour it replaced was the discoverable one — a claim against a
+// missing row used to create it, and an agent that had learned to
+// re-send a whole seed with the versions it last read would now meet
+// not_found on exactly the rows a designer had removed and needs to be
+// told what that means and what to do.
+var versionClaimDoc = "**A version claim is a claim about a row that exists.** Stating " +
+	"expected_version for one this game does not have is not_found saying it was removed, " +
+	"never a quiet re-creation: the row that would come back carries a new id, and every " +
+	"edge, position, saved-view reference and attachment that named the old one would go " +
+	"on naming nothing. Send it again with no expected_version to re-create it deliberately."
+
 func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 	// The two halves of the repair tools' descriptions, written once and
 	// used by both, because a rule stated twice is a rule that drifts:
@@ -1780,7 +1796,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"every existing entity and marks the ones that no longer fit as invalid rather " +
 			"than deleting them. Idempotent by key, so re-running a seed updates in place. " +
 			"expected_version is required to update an existing type and must match the " +
-			"stored version; on creation there is nothing to match.",
+			"stored version; on creation there is nothing to match. " + versionClaimDoc,
 		OutputSchema: typeDetailOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in TypesUpsertInput) (TypeDetailOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -1862,8 +1878,8 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"and marks the ones that no longer fit as invalid rather than deleting them "+
 				"or filling in the missing values, exactly as types.upsert does for "+
 				"entities. relations.list's `invalid` filter is how to find them. "+
-				"Idempotent by key; expected_version is required to update an existing type.",
-			quotedList(metamodel.SemanticRoles)),
+				"Idempotent by key; expected_version is required to update an existing type. %s",
+			quotedList(metamodel.SemanticRoles), versionClaimDoc),
 		OutputSchema: relationTypeDetailOutputSchema,
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationTypesUpsertInput) (RelationTypeDetailOutput, error) {
 		caller, _ := CallerFrom(ctx)
@@ -1933,7 +1949,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"is reported as done). Anything else is refused rather than read as partial. "+
 			"Rows are idempotent by (type_key, key), so re-running a seed updates in place; "+
 			"updating an existing entity requires expected_version, which the written entries "+
-			"of a previous call carry. written names every row that landed with its id and "+
+			"of a previous call carry. "+versionClaimDoc+" written names every row that landed with its id and "+
 			"its new version; count is how many. A failure coded \"retryable\" means the "+
 			"database refused that item over contention — send it again; if a batch keeps "+
 			"producing them, send fewer rows at a time.", metamodel.MaxBulkItems),
@@ -2019,6 +2035,7 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"requires expected_version, which the written entries of a previous call carry, "+
 			"exactly as entities.upsert does. Sending the wrong one, or none, is "+
 			"version_conflict reporting the version to merge onto — nothing is overwritten. "+
+			versionClaimDoc+" "+
 			"An edge's fields are validated against the relation type's field_schema, and a "+
 			"successful write clears any invalid flag a schema edit had put on it. "+
 			"A game cannot hold two edges of one "+

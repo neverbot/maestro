@@ -638,6 +638,9 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 		{"views.run", "text, number or bool", "a parameter cannot feed an enum or a list field"},
 		{"views.run", "Every other comparison against a declared field — equality included",
 			"what a condition actually costs"},
+		{"views.upsert", "is not_found saying it was removed",
+			"a version claim against a view that is gone is refused, not a quiet " +
+				"re-creation that discards the arrangement"},
 		{"views.upsert", "A view's key is permanent", "there is no rename for a view"},
 		{"views.upsert", "types.rename", "a *type* key can be renamed, and an agent told " +
 			"otherwise would take the several-call workaround for a one-call job"},

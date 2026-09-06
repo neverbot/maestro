@@ -258,11 +258,12 @@ func TestARespelledEntityKeyIsNamedEvenWhenTheVersionIsAlsoStale(t *testing.T) {
 //
 // The pre-read runs before the write and only ever sees a row that is
 // already committed. On the creation path there is nothing to lock, so a
-// writer racing a creator — carrying an ExpectedVersion that happens to
-// match the version the winner lands on — sails through both the read and
-// the guard on the DO UPDATE and updates a row it never saw, stored under
-// a different spelling, returning no error at all. Only the check on the
-// row the upsert returns catches it.
+// writer racing a creator sails through it, blocks on the folding unique
+// index, and must be refused by something downstream — otherwise it
+// lands its content on a row it never saw, under a spelling it never
+// sent. conflictOnEntityKey is that something: the guard on the DO
+// UPDATE is a guaranteed mismatch for a creating caller, and the re-read
+// after it names both spellings.
 //
 // The interleaving is driven by an open rival transaction rather than a
 // second goroutine, so it is the test's to choose and not the scheduler's.
@@ -289,12 +290,17 @@ func TestARaceThatWouldLandAnEntityUnderAnotherSpellingIsRefused(t *testing.T) {
 		t.Fatalf("rival insert: %v", err)
 	}
 
+	// No version claimed: two creations racing into the folding unique
+	// index, one of which loses. It used to claim the version the winner
+	// lands on, which reached the post-write spelling check; a version
+	// claim against a row the locked read cannot see is now refused
+	// before the write, so the race this test is about is staged the way
+	// it actually happens to a seeding agent.
 	result := make(chan error, 1)
 	go func() {
 		_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 			TypeKey: "quest", Key: "hogger", Name: "MINE",
-			Fields:          map[string]any{"min_level": float64(1)},
-			ExpectedVersion: ptrInt32(1),
+			Fields: map[string]any{"min_level": float64(1)},
 		})
 		result <- err
 	}()
@@ -1312,14 +1318,17 @@ func TestAnEntityLosingItsKeyToAnotherSpellingIsNamedAsARespelling(t *testing.T)
 		t.Fatalf("rival insert: %v", err)
 	}
 
-	// A version the rival's row will not have, so the DO UPDATE's guard
-	// is a guaranteed mismatch and the upsert returns no row at all.
+	// No version claimed, so the DO UPDATE's guard (noVersion) is a
+	// guaranteed mismatch and the upsert returns no row at all. It used
+	// to claim a version the rival's row would not have, which reached
+	// the same arm by a route a version claim can no longer take: one
+	// against a row the locked read cannot see is refused before the
+	// write.
 	result := make(chan error, 1)
 	go func() {
 		_, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 			TypeKey: "quest", Key: "hogger", Name: "MINE",
-			Fields:          map[string]any{"min_level": float64(1)},
-			ExpectedVersion: ptrInt32(2),
+			Fields: map[string]any{"min_level": float64(1)},
 		})
 		result <- err
 	}()

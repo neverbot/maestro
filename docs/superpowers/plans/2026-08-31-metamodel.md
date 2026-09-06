@@ -9815,6 +9815,141 @@ is exactly the collision the `by-key` discriminator exists to make
 impossible. `rename` joins the word list in
 `TestARouteShapedKeyIsStillAddressable`.
 
+### Metamodel 17: a version claim against a row that is not there resurrects it
+
+**Status: done.** One error type, five upsert branches — the four
+metamodel tables and `views.upsert` — three post-write checks deleted,
+and the tests that used to pin the opposite outcome replaced.
+
+**What was wrong.** An update that parks behind a committed removal
+silently resurrected the row. The locked read found nothing, the call
+took the creation path, the guard on the `DO UPDATE` was never
+evaluated, and the caller's version claim was accepted for a row that no
+longer existed: a new id, so every relation, position, saved-view
+reference and attachment that named the old row named nothing while a
+row with the same key sat there looking fine. `internal/views` had the
+defect written down in `UpsertView` as an observed, filed backlog item;
+`internal/metamodel` had it written down in `EntityTypeInput` as a
+*decision*, defended by
+`TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing`.
+
+**Why that defence does not hold.** Its argument was that nothing is
+overwritten, that the row is addressed by `(project, key)` rather than by
+id so a caller cannot be surprised, and that a returned `Version` of 1 is
+the caller's own signal. All true, and all about the *content*, which the
+caller was resending anyway. What is lost is every reference to the id
+that went away, and no caller can see that from a returned version
+number.
+
+**The rule, for the metamodel and for views, in one change.** They have
+byte-identical shapes, and fixing one alone is the second contract this
+repository keeps paying for.
+
+| claim | row | outcome |
+| --- | --- | --- |
+| none | none | create (unchanged) |
+| none | exists | refuse — `version_conflict` (unchanged) |
+| yes | exists | compare and set (unchanged) |
+| yes | none | **refuse — `not_found`, "it was removed"** |
+
+`not_found` and never `version_conflict`: the two name different
+recoveries and an agent must not have to guess which it is holding.
+Stale means re-read and merge, which cannot terminate against a row that
+is gone; removed means decide whether to re-create deliberately, with no
+claim, accepting a new row with a new id. `metamodel.RemovedError`
+satisfies `ErrNotFound` rather than declaring an eighth sentinel, so both
+of `internal/web`'s surfaces map it with no new arm.
+
+**All five upserts, not the two the defect was found in.** `types.upsert`
+and `views.upsert` were the named pair; `relation_types.upsert`,
+`entities.upsert` and `relations.upsert` have the same branch, and a rule
+honoured by two of five callers is a rule an agent discovers depends on
+which call it made. `TestEveryUpsertOfThisShapeRefusesAClaimAgainstAMissingRow`
+drives all four metamodel writers through it.
+
+**One exemption, and it is on the wire rather than in the domain.**
+`views.upsert` took `internal/markdown`'s convention, where
+`expected_version: 0` spells "this must not exist yet", so a `0` reaching
+a view's empty read is a creation claim that has just been proved right
+rather than a claim about a row. `createExpectedVersion` names it, and
+`TestZeroIsACreationClaimAndNotAClaimAboutARow` pins both halves —
+that 0 creates, and that it still refuses when the view does exist. The
+metamodel takes an absent version for that meaning and reads `0` as an
+impossible version, which is why the exemption is written in
+`internal/views` and not shared.
+
+**The refusal is raced, not merely produced.** A sequential test —
+remove the row, then call the upsert — reaches the same branch without
+ever proving the race, so a fix that only worked sequentially would look
+identical. `holdRemoval` opens a transaction of the test's own, deletes
+the row and holds the lock; the writer's locked read parks on it, the
+test asserts it is *parked* (`lockWaiters`, and a non-blocking read of
+the result channel) rather than merely slow, and only then commits the
+removal. That is the technique the lock-ordering work introduced in
+`lock_order_test.go`. `TestAnUpdateThatLosesToACommittedRemovalIsToldTheRowIsGone`,
+`TestAnEntityUpdateThatLosesToACommittedRemovalIsToldTheRowIsGone` and
+`TestAViewUpdateThatLostToACommittedRemovalIsToldTheViewIsGone` stage it
+on `entity_types`, `entities` and `views`. Deleting the refusal from
+`UpsertEntityType` turns the first red with `err = <nil>, want
+not_found`.
+
+**Three post-write spelling checks became unreachable and were deleted,
+which is the consequence that took the most care.** `row.Key != in.Key`
+after the upsert (entity types, relation types, entities, and the view
+twin) existed for one race: a creation racing a creator while holding
+the version the winner lands on passed both the locked read and the
+guard and updated a row it never saw. That writer is exactly the one the
+new rule turns away at the locked read, so with the rule in place the
+check cannot fire — measured: the five tests that used to reach it or
+its siblings went red at the earlier refusal, and no test in the module
+reaches it any more.
+
+They were deleted rather than kept as a backstop, which is the position
+`internal/markdown` already reached for the identical check on its own
+write path, and for the same reason: a check that cannot fire is a
+second claim about a race that one place actually handles. The place
+that handles it is `conflictOn*`, whose re-read names both spellings —
+and it is still live, because a *creation* (claiming nothing, passing
+`noVersion`) that loses to the folding unique index still lands there.
+The five race tests were retargeted onto that route by dropping their
+version claim, which is also the shape the race actually takes for a
+seeding agent, and every one of them kept its exact assertion on the
+message.
+
+**The cost of the simpler refusal, recorded rather than discovered
+later.** A caller that races a creator *while holding a version* now
+hears "it was removed" rather than "spelled `Hogger`, use that". Its
+claim was false — it cannot have read a row that was never committed —
+and the advice it is given is correct and terminates: resending with no
+claim meets the winner's row and gets the spelling. But it is one round
+trip where there used to be none, and the first sentence names removal
+for a row that was never there. The alternative considered was to let
+the write proceed under a guard nothing can match and judge the outcome,
+which keeps the better message; it was rejected as a speculative INSERT
+on an error path in five places, and because it answers a rival that
+committed the *same* spelling with a `version_conflict` naming a row the
+caller never read — a milder form of the defect being fixed.
+
+**internal/markdown is deliberately different and was checked rather
+than assumed.** A write to a *deleted* path resurrects the document
+there, and that is designed, not accidental: `GetDocumentByPathForUpdate`
+carries no `deleted_at` filter, so such a write never reaches the
+creation branch at all — it finds the tombstone, compares versions and
+continues the same row, same id, same links, numbering unbroken. It was
+already pinned
+(`TestWritingToADeletedPathResurrectsItAndContinuesTheNumbering`,
+`TestAStaleVersionCannotSilentlyResurrectADocument`), and the half that
+was *not* pinned — that the id and the attachments survive, which is the
+whole reason the asymmetry is safe — now is:
+`TestAResurrectedDocumentKeepsItsIdAndItsLinks`. Where the row is gone in
+every sense the two domains already agree: a claim against a path that
+never existed is `not_found` there too
+(`TestExpectingAVersionOfADocumentThatDoesNotExistIsNotFound`). The
+asymmetry is written down on both sides — at
+`metamodel.RemovedError`, at the creation arm of `markdown.writeWith`,
+and in both specs — so the next reader to notice the inconsistency finds
+the reason rather than harmonising them.
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:

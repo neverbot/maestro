@@ -32,17 +32,25 @@ const noVersion int32 = -1
 // the guard is the only thing standing between the loser of that race and
 // a silent overwrite.
 //
-// What it is *not*, on that path, is a claim this service checks. If no
-// row exists when the write runs — because none ever did, or because a
-// rival deleted the one this caller held a version of — the insert lands
-// and the guard is never evaluated: a fresh row appears under a new id,
-// with version 1, and the call returns nil. Nothing is overwritten, and
-// nothing is silent either: this type is addressed by (project, key) and
-// not by id, the input carries no id to be surprised about, and a
-// returned Version of 1 is the caller's own signal that it created
-// rather than updated. Refusing instead was considered and rejected —
-// TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing
-// records the argument and pins the outcome.
+// **A version claim against a row that is not there is refused, not read
+// as a creation.** It used to be read as one: the locked read found
+// nothing, the call took the insert path, the guard was never evaluated,
+// and a fresh row appeared under a new id at version 1 with no error.
+// The argument for that was that nothing is overwritten and the caller
+// can tell from the returned Version of 1 — and it is wrong about what
+// is lost. What is lost is not the content, which the caller was
+// resending anyway; it is every relation, view reference, prose link and
+// endpoint rule that named the *removed* row by id, each of which now
+// names nothing while a row with the same key sits there looking fine.
+// The state is easy to reach: an update parking behind a committed
+// removal produces it, and TestAnUpdateThatLosesToACommittedRemovalIsToldTheRowIsGone
+// stages exactly that race. So a non-nil ExpectedVersion that reaches
+// the empty read is a RemovedError — a not_found saying the row was
+// removed, never a version_conflict, because there is nothing to merge
+// onto and "merge and retry" is a loop that cannot terminate.
+//
+// A nil ExpectedVersion still creates, unchanged: that caller claimed
+// nothing and gets what it asked for.
 type EntityTypeInput struct {
 	Key             string
 	Label           string
@@ -113,6 +121,20 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 				return &VersionConflictError{Current: existing.Version}
 			}
 		case errors.Is(err, pgx.ErrNoRows):
+			// **No row, and a version claimed: the row was removed.** See
+			// RemovedError, which carries the whole argument. In short: a
+			// version claim is a claim about a row that exists, and
+			// accepting it here created a second row under a new id while
+			// telling the caller nothing — losing every relation, view
+			// reference and attachment that named the row it thought it
+			// was editing.
+			if in.ExpectedVersion != nil {
+				return &RemovedError{
+					Subject: "entity type",
+					Address: fmt.Sprintf("%q", in.Key),
+					Claimed: *in.ExpectedVersion,
+				}
+			}
 			// Creation: no version to match, nothing to lock.
 		default:
 			return fmt.Errorf("lookup entity type: %w", err)
@@ -142,19 +164,36 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 			}
 			return fmt.Errorf("upsert entity type: %w", err)
 		}
-		// The locked read above cannot be the only place the spelling is
-		// checked. It runs before the write and only ever sees a row that is
-		// already visible, so on the creation path — where there is nothing
-		// to lock — a writer racing a creator, holding an ExpectedVersion
-		// that happens to match the version the winner lands on, passed both
-		// the read and the guarded DO UPDATE and updated a row it never saw,
-		// stored under a different spelling, returning no error at all. The
-		// upsert returns the row it actually touched, so comparing the stored
-		// spelling to the submitted one *after* the write closes the pre-read
-		// path and the race with one check; withTx rolls the write back.
-		if row.Key != in.Key {
-			return keyRespellingError("key", in.Key, row.Key)
-		}
+		// **There is deliberately no `row.Key != in.Key` check here any
+		// more, and the reason is worth writing down, because correction
+		// 15 spent three commits adding one.** The race it closed was
+		// real: on the creation path there was nothing to lock, so a
+		// writer racing a creator while holding an ExpectedVersion that
+		// happened to match the version the winner landed on passed both
+		// the locked read and the guarded DO UPDATE and updated a row it
+		// never saw, under a spelling it never sent.
+		//
+		// That writer no longer reaches this statement. A version claim
+		// against a row the locked read cannot see is now refused up
+		// there (RemovedError), so the only calls that get here are the
+		// ones whose claim matched a row this transaction holds FOR
+		// UPDATE — where the returned row *is* that row, by the guard —
+		// and the ones claiming nothing, which pass noVersion and so can
+		// only ever insert their own spelling or lose to the index and
+		// land in conflictOnEntityTypeKey. Both remaining refusals are
+		// still exercised: conflictOnEntityTypeKey's respelling arm is
+		// what a creation racing another spelling meets, and
+		// TestARaceThatWouldLandUnderAnotherSpellingIsRefused stages
+		// exactly that.
+		//
+		// Proved by mutation before it was deleted: with the version rule
+		// in place, this check no longer fires for any test in the
+		// package — the five race tests that used to reach it or its
+		// siblings now stop at the earlier refusal. This is the same
+		// position internal/markdown reached for the identical check on
+		// its own write path, and for the same kind of reason: a check
+		// that cannot fire is a second claim about a race that one place
+		// actually handles.
 
 		// A schema change can invalidate stored rows. Re-check them rather
 		// than rejecting the change or inventing values for a new field.

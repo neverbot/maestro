@@ -463,6 +463,27 @@ Five deliberate choices in that table:
   metamodel batch of five hundred rows should not have to learn five
   hundred versions before it can be re-run. Naming the difference here
   is what stops it being read as an accident.
+
+- **A version claim against a *deleted* path resurrects the document
+  here, and the metamodel refuses the same claim. That asymmetry is
+  deliberate and must not be harmonised.** In both domains a claim
+  against a path or a key that has *never* existed is `not_found`: there
+  is nothing to merge onto, so telling the caller to merge would send it
+  round a loop that cannot terminate. Where they part is the row that
+  was removed. Deletion here is **soft**: the tombstone is the same row,
+  so writing the path again continues the document — the same id, the
+  same links, the version numbering unbroken — and nothing a caller
+  would mourn is lost. The metamodel's removals are **hard**, so the row
+  that would come back carries a new id, and every relation, position,
+  saved-view reference and attachment that named the old one goes on
+  naming nothing while a row with the same key sits there looking fine.
+  So the metamodel refuses a version claim that reaches its insert path
+  (`metamodel.RemovedError`, and "Concurrency" in
+  `2026-08-31-core-and-metamodel-design.md`), and this domain accepts
+  it, because the two deletions are different rather than the two
+  domains disagreeing about concurrency.
+  `TestAResurrectedDocumentKeepsItsIdAndItsLinks` is what a
+  "consistency" fix would turn red first.
 - **`docs.write` takes an optional `links` array**, so an agent seeding
   a game creates the script and attaches it to its quest in one call.
   Passing `links` *replaces* the document's link set; omitting it

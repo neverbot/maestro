@@ -17,11 +17,12 @@ import (
 
 // EntityInput is an upsert request, addressed by type key plus entity key.
 //
-// ExpectedVersion carries exactly the meaning EntityTypeInput's does, and
-// the same caveat: on the insert path it is passed as the guard on the
-// DO UPDATE and is never evaluated, so a claim against a row that does
-// not exist creates one rather than being refused. See
-// EntityTypeInput.ExpectedVersion for the argument.
+// ExpectedVersion carries exactly the meaning EntityTypeInput's does,
+// including the rule that a claim against a row that is not there is a
+// RemovedError rather than a creation. See EntityTypeInput.ExpectedVersion
+// for the argument; this is the table it costs the most, because an
+// entity's id is what every edge touching it and every view position
+// placing it names.
 type EntityInput struct {
 	TypeKey         string
 	Key             string
@@ -279,6 +280,18 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 			return upsertedEntity{}, &VersionConflictError{Current: existing.Version}
 		}
 	case errors.Is(err, pgx.ErrNoRows):
+		// No row, and a version claimed: the row was removed. This is
+		// the table where the loss is largest — an entity's id is named
+		// by every edge touching it and by every view position placing
+		// it — so the rule is not merely inherited here, it is the case
+		// RemovedError's argument is written about.
+		if in.ExpectedVersion != nil {
+			return upsertedEntity{}, &RemovedError{
+				Subject: "entity",
+				Address: fmt.Sprintf("%q of type %q", in.Key, typ.Key),
+				Claimed: *in.ExpectedVersion,
+			}
+		}
 		// Creation: no version to match, nothing to lock.
 	default:
 		return upsertedEntity{}, fmt.Errorf("lookup entity: %w", err)
@@ -317,16 +330,13 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 		}
 		return upsertedEntity{}, fmt.Errorf("upsert entity: %w", err)
 	}
-	// The locked read cannot be the only place the spelling is checked:
-	// on the creation path there is nothing to lock, so a writer racing a
-	// creator with a matching expected version passes both the read and
-	// the guard and updates a row it never saw. The upsert returns the
-	// row it touched and key is not in the SET list, so comparing the
-	// stored spelling to the submitted one after the write closes both;
-	// the caller's transaction rolls the write back.
-	if row.Key != in.Key {
-		return upsertedEntity{}, keyRespellingError("key", in.Key, row.Key)
-	}
+	// **No post-write spelling check here any more**, for the reason
+	// UpsertEntityType's own comment states at length: a version claim
+	// against a row the locked read cannot see is refused above, so the
+	// writer that used to reach this check — a creation racing a creator
+	// while holding the version the winner lands on — no longer gets
+	// here. conflictOnEntityKey is what a creation racing another
+	// spelling meets, and it is still exercised.
 	return upsertedEntity{row: row, typeKey: typ.Key}, nil
 }
 

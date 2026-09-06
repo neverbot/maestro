@@ -1373,21 +1373,26 @@ func TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale(t *testing.T) {
 }
 
 // TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling
-// reaches the post-write spelling check, which is the one refusal in this
-// call that neither the locked read nor the failed-guard re-read can
-// make.
+// stages a creation losing to a creation under another spelling, and
+// pins that the loser is told the stored spelling rather than silently
+// overwriting the winner's row.
 //
-// The shape is narrow and it is real: a caller that believes it is
-// *updating* — it holds an expected version — against a key that does not
-// exist yet, while another writer is creating it. The locked read finds
-// nothing, so there is nothing to compare a spelling to; the winner lands
-// at version 1; and the guard, asked for version 1, matches — so this
-// call updates a row it never saw, stored under a spelling it did not
-// send. Only comparing the returned key to the submitted one catches it,
-// and withTx rolls the write back.
+// **It used to hold an ExpectedVersion and end at the post-write
+// spelling check.** That was the narrow, real shape the check existed
+// for: a caller that believes it is *updating* against a key that does
+// not exist yet, while another writer is creating it. The locked read
+// found nothing, the winner landed at version 1, the guard — asked for
+// version 1 — matched, and the call updated a row it never saw.
 //
-// Measured before it was written: with this test absent, deleting the
-// post-write check leaves the package green.
+// That caller is now turned away at the locked read: a version claim
+// against a row that is not there is a not_found saying the row was
+// removed, not a creation (metamodel.RemovedError), and
+// TestAViewUpdateThatLostToACommittedRemovalIsToldTheViewIsGone is where
+// that is asserted. So the post-write check became unreachable and went;
+// what stays is this race with the claim dropped, which is the shape a
+// seeding agent actually meets, and which conflictOnViewKey answers.
+// `expected_version: 0` is how this surface spells "must not exist yet",
+// so it is a creation and not a claim.
 func TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling(t *testing.T) {
 	g, _ := newGame(t)
 	ctx := context.Background()
@@ -1407,9 +1412,6 @@ func TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling(t *testing
 	go func() {
 		in := saveable("ROUTE", questsOnly)
 		in.Name = "Ours"
-		// The version the winner is about to land on, held by a caller
-		// that never saw the row.
-		in.ExpectedVersion = ptrInt32(1)
 		_, err := g.views.UpsertView(ctx, g.projectID, in)
 		done <- err
 	}()
@@ -1434,6 +1436,109 @@ func TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling(t *testing
 	if got.Name != "Theirs" || got.Version != 1 {
 		t.Fatalf("view = (%q, %d), want the winner's row untouched: the refused write "+
 			"must have rolled back", got.Name, got.Version)
+	}
+}
+
+// TestAViewUpdateThatLostToACommittedRemovalIsToldTheViewIsGone is this
+// package's half of a rule that lives in two places at once, and it
+// races the state rather than producing it sequentially.
+//
+// A designer removes a view; an agent that read version 1 a moment
+// earlier saves an edit to it. The edit's locked read parks on the row
+// lock the deletion holds, and when the deletion commits that read comes
+// back empty. This branch used to take the creation path from there —
+// with the caller's version claim never evaluated — and store the view
+// again under a **new id**, undoing the removal. That was recorded in
+// UpsertView as an observed defect and filed as a backlog item; it is
+// closed here, and in internal/metamodel's four upserts of the same
+// shape in the same change, because fixing one alone is the second
+// contract this repository would then be paying for.
+//
+// What a *view* loses to the resurrection is its own: view_positions and
+// view_assets key into views(id), so a new id silently discards every
+// node a designer dragged and the background image behind them.
+func TestAViewUpdateThatLostToACommittedRemovalIsToldTheViewIsGone(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+	saved, err := g.views.UpsertView(ctx, g.projectID, saveable("route", questsOnly))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	remover, err := g.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = remover.Rollback(ctx) }()
+	if _, err := remover.Exec(ctx, `DELETE FROM views WHERE id = $1`, saved.ID); err != nil {
+		t.Fatalf("the removal: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		in := saveable("route", questsOnly)
+		in.Name = "An edit written against the version the designer removed"
+		in.ExpectedVersion = &saved.Version
+		_, err := g.views.UpsertView(ctx, g.projectID, in)
+		done <- err
+	}()
+
+	// Parked, not merely slow: if the edit finished before the removal
+	// committed, the interleaving this test is about never happened.
+	waitForABlockedStatement(t, g.pool)
+	select {
+	case err := <-done:
+		t.Fatalf("the edit returned %v before the removal committed", err)
+	default:
+	}
+	if err := remover.Commit(ctx); err != nil {
+		t.Fatalf("commit the removal: %v", err)
+	}
+
+	err = <-done
+	if !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("err = %v, want not_found: the view the caller claimed a version of is gone", err)
+	}
+	if errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("err = %v, want not_found and not a conflict: merging onto a version is "+
+			"the one recovery that cannot work when the row is gone", err)
+	}
+	if !strings.Contains(err.Error(), "was removed") || !strings.Contains(err.Error(), `"route"`) {
+		t.Fatalf("err = %v, want it to name the view and say it was removed", err)
+	}
+	if _, err := g.views.ViewByKey(ctx, g.projectID, "route"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the view is back: %v — the removal must stand", err)
+	}
+}
+
+// TestZeroIsACreationClaimAndNotAClaimAboutARow is the exemption the
+// rule above has to carry, and without it every creation over the MCP
+// and REST surfaces would be refused.
+//
+// This package took internal/markdown's wire convention rather than
+// internal/metamodel's: `expected_version: 0` is how a caller spells
+// "this view must not exist yet" (ViewInput.ExpectedVersion, and the
+// views.upsert description), so a 0 reaching the empty read is a
+// creation claim that has just been proved right — not a claim about a
+// row that is not there. Every other value is the latter.
+func TestZeroIsACreationClaimAndNotAClaimAboutARow(t *testing.T) {
+	g, _ := newGame(t)
+	ctx := context.Background()
+
+	in := saveable("route", questsOnly)
+	in.ExpectedVersion = ptrInt32(0)
+	row, err := g.views.UpsertView(ctx, g.projectID, in)
+	if err != nil {
+		t.Fatalf("expected_version 0 must create: %v", err)
+	}
+	if row.Version != 1 {
+		t.Fatalf("Version = %d, want 1", row.Version)
+	}
+
+	// And it keeps meaning "must not exist yet": sent again against the
+	// view it just created, it is a conflict and not a second creation.
+	if _, err := g.views.UpsertView(ctx, g.projectID, in); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("err = %v, want a version conflict: 0 says the view must not exist", err)
 	}
 }
 

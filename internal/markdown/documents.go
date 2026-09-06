@@ -279,7 +279,35 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		// Creation. A caller that expected a version of a document that
 		// does not exist gets not_found and not version_conflict: there
 		// is nothing to merge onto, so "merge and retry" would send it
-		// round a loop that cannot terminate.
+		// round a loop that cannot terminate. This is the rule
+		// metamodel.RemovedError states for the four metamodel tables
+		// and for a saved view, reached here first and by the same
+		// reasoning — a version claim is a claim about a row that
+		// exists.
+		//
+		// **Where this domain is deliberately different is the row that
+		// *was* deleted, and it must not be harmonised with the
+		// metamodel.** The read above carries no deleted_at filter, so a
+		// write to a tombstoned path never reaches this branch at all: it
+		// finds the row, compares versions and continues the document —
+		// same id, same links, version numbering unbroken
+		// (TestWritingToADeletedPathResurrectsItAndContinuesTheNumbering,
+		// and TestAStaleVersionCannotSilentlyResurrectADocument for the
+		// guard on it). A path is resurrectable *by design* here:
+		// deletion is soft, the tombstone keeps the whole history, and
+		// bringing a document back is the same call as writing it, so
+		// nothing a caller would mourn is lost and refusing would leave
+		// it no route back to its own document.
+		//
+		// The metamodel's resurrection loses the association instead —
+		// its removals are hard, so the row that comes back carries a new
+		// id and every relation, position, saved-view reference and
+		// attachment that named the old one names nothing. So the two
+		// rules differ because the two deletions differ, not because two
+		// domains disagree about concurrency, and this branch and
+		// metamodel.RemovedError agree exactly where they can: a claim
+		// against a row that is *not there in any form* is refused in
+		// both.
 		if expected != 0 {
 			return dbq.Document{}, missingDocument(in.Path)
 		}

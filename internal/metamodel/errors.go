@@ -193,6 +193,76 @@ func (e *SchemaError) Error() string {
 // false.
 func (e *SchemaError) Is(target error) bool { return target == ErrInvalidSchema }
 
+// RemovedError is what a caller hears when it states an
+// `expected_version` for a row that is not there.
+//
+// **A version claim means "I am editing the row I read at version N."**
+// If no such row exists, that belief is false and the honest answer says
+// so. Before this error, every upsert in this package read an
+// `expected_version` that reached its insert path as *no claim at all*:
+// the locked read found nothing, the call took the creation path, and a
+// brand-new row appeared under a **new id** with version 1 and no error.
+// The way to produce it is not exotic — an update that parks behind a
+// committed removal does exactly that — and what it costs is not the
+// content, which the caller was resending anyway, but every reference to
+// the row that was removed. Relations, view positions, saved-view
+// references, prose links and endpoint rules all name a row by id, so
+// each of them now names nothing while a row with the same key sits
+// there looking fine.
+//
+// **It says the row was removed, and deliberately not that the version
+// is stale.** The two failures have different recoveries and an agent
+// must not have to guess which it is holding: `version_conflict` means
+// re-read, merge and write again, which cannot terminate here because
+// there is nothing to merge onto; `not_found` means decide whether to
+// re-create the row deliberately, with no claim, accepting that it is a
+// new row that nothing pointing at the old one will follow.
+//
+// It satisfies ErrNotFound rather than declaring an eighth sentinel: it
+// is the same fact every other by-key miss in this package reports —
+// this game has no such row — arriving from a write path, and
+// internal/web's two surfaces already map that sentinel with no new arm.
+//
+// **The markdown domain is deliberately different, and must not be
+// harmonised with this.** internal/markdown's `writeWith` accepts a
+// version claim against a *deleted* path and continues the document:
+// deletion there is soft, the tombstone keeps the whole history, and a
+// write to the path resurrects the same row — same id, same links,
+// version numbering continuing — so nothing a caller would mourn is
+// lost, and refusing would leave a caller no way back to its own
+// document. (Against a path that has *never* existed, markdown already
+// refuses: a non-zero `expected_version` there is `not_found`, which is
+// the same rule this error states, reached by the same reasoning.) The
+// asymmetry is between a resurrection that keeps the association and one
+// that loses it, not between two domains that disagree about
+// concurrency. See the creation arm of markdown.writeWith, which carries
+// the other half of this note.
+//
+// Address is the row as the caller addressed it, already quoted or
+// otherwise legible — a key, or an edge named by its type and both ends
+// — because that is the one part of the call a caller can compare
+// against what it holds.
+type RemovedError struct {
+	Subject string
+	Address string
+	Claimed int32
+}
+
+func (e *RemovedError) Error() string {
+	return fmt.Sprintf("%s: no %s %s in this game: it was removed since you read version %d. "+
+		"A version claim is a claim about a row that still exists, and nothing can be "+
+		"merged onto a row that is gone, so this was refused rather than quietly creating "+
+		"a second one — the new row would carry a new id, and every relation, position, "+
+		"saved-view reference and attachment that named the old one would go on naming "+
+		"nothing. Send this again with no expected_version to create it deliberately",
+		ErrNotFound, e.Subject, e.Address, e.Claimed)
+}
+
+// Is makes errors.Is(err, ErrNotFound) true, and deliberately leaves
+// errors.Is(err, ErrVersionConflict) false: telling a caller to merge is
+// the one instruction that cannot work here.
+func (e *RemovedError) Is(target error) bool { return target == ErrNotFound }
+
 // VersionConflictError reports the version the caller must merge onto.
 type VersionConflictError struct {
 	Current int32

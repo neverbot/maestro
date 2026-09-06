@@ -488,6 +488,53 @@ meanings between one pair of entities go into the edge's own fields, and
 those fields were the one place in the metamodel with no protection
 against a concurrent write.)*
 
+**A version claim is a claim about a row that exists.** Stating
+`expected_version` for a row that is not there is `not_found` — saying
+the row was **removed** — and never a creation and never
+`version_conflict`. The four table rules, in full:
+
+| claim | row | outcome |
+| --- | --- | --- |
+| none | none | create |
+| none | exists | refuse (`version_conflict`) |
+| yes | exists | compare and set |
+| yes | none | refuse (`not_found`, "it was removed") |
+
+The last line was a creation until it was corrected. The locked read
+found nothing, the call took the insert path, the guard on the
+`DO UPDATE` was never evaluated, and a brand-new row appeared under a
+**new id** at version 1 with the call returning nil. The state is easy to
+reach — an update parking behind a committed removal produces it — and
+what it costs is not the content, which the caller was resending anyway,
+but every relation, view position, saved-view reference and attachment
+that named the id that went away: each of them now names nothing, while
+a row with the same key sits there looking fine.
+
+`not_found` and not `version_conflict`, because the two name different
+recoveries and an agent must not have to guess which it is holding:
+stale means re-read and merge, which cannot terminate here; removed
+means decide whether to re-create the row deliberately, with no claim,
+accepting a new row with a new id. The rule holds for all four metamodel
+tables **and** for a saved view (`views.upsert`), whose upsert has the
+same shape and lost the same thing — its positions and its background —
+to the same defect.
+
+**internal/markdown is deliberately different and is not to be
+harmonised with this.** Its deletions are soft, so writing a deleted
+path continues the same row — same id, same links, numbering unbroken —
+and nothing is lost; the metamodel's resurrection loses the association
+instead. The two agree where the row is gone in every sense: a claim
+against a path or a key that never existed is `not_found` in both. See
+`2026-09-02-markdown-domain-design.md` §7, which carries the other half
+of this note.
+
+*(One exception, on the wire and not in this domain: `views.upsert` took
+internal/markdown's convention, where `expected_version: 0` spells "this
+must not exist yet". A `0` reaching a view's insert path is therefore a
+creation claim that has just been proved right, not a claim about a row.
+The metamodel takes an absent version for that meaning and reads `0` as
+an impossible version.)*
+
 ### Audit
 
 Every write records the actor (user id or token id). No full version

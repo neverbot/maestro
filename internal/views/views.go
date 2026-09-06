@@ -87,6 +87,17 @@ func LayoutModes() []string { return append([]string(nil), layoutModes...) }
 // a type is, so the shapes are the same shape rather than two.
 const noVersion int32 = -1
 
+// createExpectedVersion is the `expected_version` that spells "this view
+// must not exist yet".
+//
+// It is 0 because this surface took internal/markdown's convention for
+// the wire rather than internal/metamodel's absent-means-create — see
+// ViewInput.ExpectedVersion — and it is named rather than written as a
+// bare `0` in UpsertView, where the literal would read as a version
+// number and is in fact the opposite of one: no stored view is ever at
+// version 0, so this value can only mean "I am creating".
+const createExpectedVersion int32 = 0
+
 // ViewInput is one saved-view upsert, addressed by its key.
 //
 // Query is the document **as the caller wrote it** and that is what gets
@@ -107,10 +118,12 @@ const noVersion int32 = -1
 //
 // ExpectedVersion must match the stored version when the view already
 // exists; a nil ExpectedVersion against an existing view is a conflict,
-// not an overwrite. On creation there is nothing to match, and the field
-// is still passed as the guard on the DO UPDATE, because a caller that
-// believes it is creating may be racing a creator — the whole argument
-// is at metamodel.EntityTypeInput and is not restated here.
+// not an overwrite, and a non-nil one against a view that is *not* there
+// is a metamodel.RemovedError rather than a creation — the whole
+// argument is at metamodel.EntityTypeInput and metamodel.RemovedError
+// and is not restated here. On creation there is nothing to match, and
+// the field is still passed as the guard on the DO UPDATE, because a
+// caller that believes it is creating may be racing a creator.
 //
 // LayoutMode and LayoutSeed are optional: an empty mode is
 // DefaultLayoutMode and a nil seed is DefaultLayoutSeed. A pointer for
@@ -348,20 +361,47 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 				}
 			}
 		case errors.Is(err, pgx.ErrNoRows):
-			// Creation: no version to match, nothing to lock.
-			//
-			// **Seen and left alone: an update blocked behind a committed
-			// removal resurrects the view.** The blocked caller's locked
-			// read returns no rows, so it takes this path, and its
+			// **No row, and a version claimed: the view was removed.**
+			// This branch used to carry that defect as a recorded
+			// observation: an update blocked behind a committed removal
+			// found no row, took the creation path, and its
 			// ExpectedVersion — asserted about a row that no longer
-			// exists — is accepted by an insert that has no version to
+			// exists — was accepted by an insert with no version to
 			// guard, storing the view again under a new id and undoing
-			// the designer's deletion. internal/metamodel's type upsert
-			// has byte-identical structure, so this is repository-wide
-			// inherited behaviour rather than anything this sub-project
-			// decided; it is recorded here so the next reader knows it
-			// was observed, and filed as a backlog item rather than
-			// changed under this task.
+			// the designer's deletion. The note said internal/metamodel's
+			// type upsert had byte-identical structure and filed it as a
+			// backlog item.
+			//
+			// It is closed here **and** there, in one change, for the
+			// reason the note itself gives: two upserts of one shape
+			// answering the same question two ways is the second contract
+			// this repository would then be paying for. What a view loses
+			// to a resurrection is its own: view_positions and
+			// view_assets key into views(id), so a new id silently
+			// discards every node a designer dragged and the background
+			// image behind them, and view_refs goes with the row.
+			// metamodel.RemovedError carries the whole argument, and the
+			// markdown asymmetry it must not be harmonised with.
+			//
+			// **Zero is exempt, and it is the one difference from
+			// internal/metamodel's four upserts.** This surface adopted
+			// internal/markdown's convention rather than the metamodel's:
+			// `expected_version: 0` is how a caller spells "this view must
+			// not exist yet" (ViewInput.ExpectedVersion, and the
+			// `views.upsert` description), so a 0 reaching this branch is
+			// a creation claim that has just been proved right, not a
+			// claim about a row. Every other value is a claim about a row
+			// that is not there. The metamodel takes nil for the same
+			// meaning and reads 0 as an impossible version, which is why
+			// this exemption is written here and not shared.
+			if in.ExpectedVersion != nil && *in.ExpectedVersion != createExpectedVersion {
+				return &metamodel.RemovedError{
+					Subject: "view",
+					Address: fmt.Sprintf("%q", in.Key),
+					Claimed: *in.ExpectedVersion,
+				}
+			}
+			// Creation: no version to match, nothing to lock.
 		default:
 			return fmt.Errorf("lock view: %w", err)
 		}
@@ -400,28 +440,23 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			}
 			return fmt.Errorf("upsert view: %w", err)
 		}
-		// The locked read cannot be the only place the spelling is
-		// checked, and the hole it leaves is the creation path, where
-		// there was nothing to lock: a writer racing a creator, holding
-		// an ExpectedVersion that happens to equal the version the winner
-		// landed on, passes both the read and the guard and updates a row
-		// it never saw, stored under a different spelling. The statement
-		// keeps the stored key — `key` is not in its SET list — so
-		// comparing the returned spelling to the submitted one closes it,
-		// and withTx rolls the write back.
-		//
-		// **That race is staged rather than argued**, because the same
-		// claim was made in internal/markdown for a check that turned out
-		// to be unreachable there: with expected_version 0 spelling a
-		// create, the loser always falls to the failed-guard arm instead.
-		// Here a version is a claim about a row rather than a claim to be
-		// creating one, so the arm is live —
+		// **There is deliberately no `row.Key != in.Key` check here any
+		// more.** It was live, and it was staged rather than argued:
 		// TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling
-		// stages it, and deleting these three lines makes that test
-		// report a nil error over a silently overwritten row.
-		if row.Key != in.Key {
-			return viewKeyRespellingError(in.Key, row.Key)
-		}
+		// held an ExpectedVersion equal to the version the winning
+		// creator landed on, passed both the locked read and the guard,
+		// and updated a row it never saw under a spelling it never sent.
+		//
+		// That writer is now turned away at the locked read, because a
+		// version claim against a row that is not there is a
+		// metamodel.RemovedError rather than a creation — so the only
+		// calls reaching this statement either matched a row this
+		// transaction holds FOR UPDATE or claimed nothing at all and pass
+		// noVersion, which can insert their own spelling or lose to the
+		// index but never update a stranger's row. conflictOnViewKey is
+		// what the loser of *that* race meets, and its respelling arm is
+		// still exercised. This is exactly the position internal/markdown
+		// records for the same check, reached here by the same rule.
 		// **The refs are rewritten inside this transaction**, against the
 		// row this statement just wrote. Outside it they would drift from
 		// the query they index, which is the one thing they exist not to

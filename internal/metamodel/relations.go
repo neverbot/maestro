@@ -44,10 +44,9 @@ type Ref struct {
 
 // RelationInput is an upsert request for one edge.
 //
-// **ExpectedVersion carries exactly the meaning EntityInput's does**, and
-// the same caveat: on the insert path it is passed as the guard on the DO
-// UPDATE and is never evaluated, so a claim against an edge that does not
-// exist creates one rather than being refused. See
+// **ExpectedVersion carries exactly the meaning EntityInput's does**,
+// including the rule that a claim against an edge that is not there is a
+// RemovedError rather than a creation. See
 // EntityTypeInput.ExpectedVersion for the argument.
 //
 // **It did not exist until 0009, and this is what changed.** `relations`
@@ -342,6 +341,20 @@ func (s *Service) upsertRelationWith(ctx context.Context, q *dbq.Queries, projec
 			return upsertedRelation{}, &VersionConflictError{Current: existing.Version}
 		}
 	case errors.Is(err, pgx.ErrNoRows):
+		// No row, and a version claimed: the edge was removed. It is the
+		// same rule as the three tables above (RemovedError), and it is
+		// applied here even though an edge's id is referenced by less
+		// than any other row's: the point is that the caller's belief
+		// was false, and a domain where four upserts of one shape answer
+		// the same question two ways is a domain where the answer is a
+		// coincidence of which call you made.
+		if in.ExpectedVersion != nil {
+			return upsertedRelation{}, &RemovedError{
+				Subject: "edge",
+				Address: fmt.Sprintf("%q from %q to %q", relType.Key, in.Source.Key, in.Target.Key),
+				Claimed: *in.ExpectedVersion,
+			}
+		}
 		// Creation: no version to match, nothing to lock.
 	default:
 		return upsertedRelation{}, fmt.Errorf("lookup relation: %w", err)

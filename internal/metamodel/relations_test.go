@@ -1553,7 +1553,7 @@ func TestARelationTypeLosingItsKeyToAnotherSpellingIsNamedAsARespelling(t *testi
 	result := make(chan error, 1)
 	go func() {
 		_, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
-			Key: "requires", Label: "mine", ExpectedVersion: ptrInt32(3),
+			Key: "requires", Label: "mine",
 		})
 		result <- err
 	}()
@@ -1578,16 +1578,19 @@ func TestARelationTypeLosingItsKeyToAnotherSpellingIsNamedAsARespelling(t *testi
 	}
 }
 
-// TestARelationTypeCreationRacingAnotherSpellingIsRefusedAfterTheWrite
-// is the one path the locked pre-read cannot cover, and the only thing
-// the post-write spelling check catches on its own: on the creation path
-// there is nothing to lock, so a writer whose expected version happens
-// to match the version the winner lands on passes both the read and the
-// guarded DO UPDATE and updates a row it never saw, stored under a
-// different spelling. The upsert returns the row it touched and key is
-// not in the SET list, so comparing the stored spelling to the submitted
-// one after the write closes it, and withTx rolls the write back.
-func TestARelationTypeCreationRacingAnotherSpellingIsRefusedAfterTheWrite(t *testing.T) {
+// TestARelationTypeCreationRacingAnotherSpellingIsRefused is the one
+// path the locked pre-read cannot cover: on the creation path there is
+// nothing to lock, so a writer racing a creator reaches the write, meets
+// the folding unique index, and must be refused by something that ran
+// after it. conflictOnRelationTypeKey is that something — a creating
+// caller passes noVersion, so the guarded DO UPDATE matches nothing and
+// the re-read names both spellings — and withTx rolls the write back.
+//
+// It used to end at the *post-write* spelling check instead, by claiming
+// the version the winner lands on. That claim is now refused before the
+// write (metamodel.RemovedError), which is why this test stages the race
+// without one; the post-write check went with it.
+func TestARelationTypeCreationRacingAnotherSpellingIsRefused(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
 	ctx := context.Background()
@@ -1604,12 +1607,21 @@ func TestARelationTypeCreationRacingAnotherSpellingIsRefusedAfterTheWrite(t *tes
 		t.Fatalf("rival insert: %v", err)
 	}
 
+	// **No ExpectedVersion, and that is what routes this race.** It used
+	// to carry one — the version the rival's row would land on — so the
+	// guarded DO UPDATE matched and the *post-write* spelling check was
+	// the thing that refused. A version claim against a row the locked
+	// read cannot see is now refused before the write reaches the
+	// database at all (metamodel.RemovedError), which is a different
+	// answer to a different question, so the race this test is about is
+	// staged the way it actually happens to a seeding agent: two
+	// creations, neither claiming a version, one losing to the folding
+	// unique index. The guard is then a guaranteed mismatch, and
+	// conflictOn* re-reads and names the spelling.
 	result := make(chan error, 1)
 	go func() {
-		// Version 1 is what the rival's fresh row will carry, so the
-		// guard passes and only the spelling is left to refuse this.
 		_, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
-			Key: "requires", Label: "mine", ExpectedVersion: ptrInt32(1),
+			Key: "requires", Label: "mine",
 		})
 		result <- err
 	}()

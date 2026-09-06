@@ -853,6 +853,12 @@ func (s *Server) addViewsTools(srv *mcp.Server, deps MCPDeps) {
 				"it is invalid_input, not a guess: a mistyped key with no version would "+
 				"silently become a second view. A mismatch is version_conflict carrying the "+
 				"current version.\n\n"+
+				"**Any other version, against a view this game does not have, is not_found "+
+				"saying it was removed** — not a quiet re-creation. The view that would come "+
+				"back carries a new id, and a view's saved node positions and its background "+
+				"image hang off that id, so the picture a designer arranged would be "+
+				"discarded without a word. Pass 0 to bring the view back deliberately, "+
+				"knowing the arrangement starts over.\n\n"+
 				"%s\n\n"+
 				"The query is judged before anything is stored: it must resolve against this "+
 				"game's types and fields, and the renderer must be able to draw what it "+

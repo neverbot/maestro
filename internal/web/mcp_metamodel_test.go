@@ -155,7 +155,68 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 	}
 }
 
-// TestMCPToolsRefuseAnotherGame is the isolation test for this whole
+// TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire is the
+// surface's half of Metamodel 17, and it is here because the two wire
+// codes are the whole point of the domain's discrimination: `not_found`
+// tells an agent to decide whether to re-create the row, and
+// `version_conflict` tells it to merge — and merging is the one recovery
+// that cannot work against a row that is gone.
+//
+// Both surfaces map metamodel.RemovedError through the ErrNotFound arm
+// they already had, so what could break is the domain's own Is method
+// rather than an arm here; that is exactly why this asserts the code an
+// agent reads rather than the Go type.
+func TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire(t *testing.T) {
+	f := newMetamodelFixture(t)
+	ctx := context.Background()
+
+	_, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "circuit", Label: "Circuit", LabelPlural: "Circuits",
+		ExpectedVersion: ptrInt32Web(1),
+	})
+	if !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("err = %v, want not_found", err)
+	}
+	if errors.Is(err, metamodel.ErrVersionConflict) {
+		t.Fatalf("err = %v, want not_found and not version_conflict on the wire too", err)
+	}
+	if !strings.Contains(err.Error(), "was removed") {
+		t.Fatalf("err = %v, want the message an agent acts on", err)
+	}
+	// And the type was not quietly created on the way to the refusal.
+	if _, err := web.MCPTypesGet(ctx, f.deps, f.caller, f.game,
+		web.TypesGetInput{Key: "circuit"}); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("the refused upsert created the type anyway: %v", err)
+	}
+}
+
+// TestEveryToolThatTakesAVersionSaysWhatAClaimMeans pins the sentence on
+// the wire, for the reason every description guard in this package
+// exists: the behaviour changed under agents that had learned the old
+// one, and an agent that re-sends a seed with the versions it last read
+// will now meet not_found on exactly the rows a designer removed. A rule
+// an agent cannot read is a rule an agent trips over.
+func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
+	f := newMetamodelFixture(t)
+	descriptions := f.srv.ToolDescriptionsForTest()
+	for _, tool := range []string{
+		"types.upsert", "relation_types.upsert", "entities.upsert", "relations.upsert",
+	} {
+		got, ok := descriptions[tool]
+		if !ok {
+			t.Errorf("%s is not served", tool)
+			continue
+		}
+		if !strings.Contains(got, "A version claim is a claim about a row that exists") {
+			t.Errorf("%s does not say what a version claim means", tool)
+		}
+		if !strings.Contains(got, "no expected_version") {
+			t.Errorf("%s does not name the recovery", tool)
+		}
+	}
+}
+
+// TestMCPToolsRefuseAnotherGame is the isolation test for this whole// TestMCPToolsRefuseAnotherGame is the isolation test for this whole
 // surface: every tool that takes a project id is called with the id of a
 // game the caller's own *user* owns but the caller's own *token* is not
 // bound to, and every one must refuse before touching the database.

@@ -45,6 +45,12 @@ var renamedAwayTestNames = map[string]string{
 	"TestSearchRanksTheStrongerMatchFirst": "internal/metamodel/search_test.go: " +
 		"the pre-Task-7 name of TestSearchRanksTheNameMatchFirst, cited only " +
 		"to say what changed and why.",
+	"TestAVersionClaimAgainstAMissingTypeCreatesItRatherThanRefusing": "internal/metamodel/" +
+		"removed_test.go: the test that pinned the *opposite* outcome — a version claim " +
+		"reaching an upsert's insert path creating the row — which Metamodel 17 replaced " +
+		"with TestAVersionClaimAgainstATypeThisGameNeverHadIsRefusedToo. It is cited to " +
+		"say which decision was reversed and why, which is history rather than a claim " +
+		"that the old name is coverage anywhere.",
 }
 
 // TestNoCommentNamesATestThatDoesNotExist is the standing check the

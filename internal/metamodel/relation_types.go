@@ -166,6 +166,18 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 				return &VersionConflictError{Current: existing.Version}
 			}
 		case errors.Is(err, pgx.ErrNoRows):
+			// No row, and a version claimed: the row was removed. The
+			// rule and its argument are RemovedError's, applied here
+			// rather than restated — a relation type's removal takes
+			// every edge of it, so a resurrection under a new id leaves
+			// a type standing whose whole graph is gone.
+			if in.ExpectedVersion != nil {
+				return &RemovedError{
+					Subject: "relation type",
+					Address: fmt.Sprintf("%q", in.Key),
+					Claimed: *in.ExpectedVersion,
+				}
+			}
 			// Creation: no version to match, nothing to lock.
 		default:
 			return fmt.Errorf("lookup relation type: %w", err)
@@ -201,16 +213,13 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 			}
 			return fmt.Errorf("upsert relation type: %w", err)
 		}
-		// The locked read cannot be the only place the spelling is
-		// checked: on the creation path there is nothing to lock, so a
-		// writer racing a creator with a matching expected version passes
-		// both the read and the guard and updates a row it never saw. The
-		// upsert returns the row it touched and key is not in the SET
-		// list, so comparing the stored spelling to the submitted one
-		// after the write closes both; withTx rolls the write back.
-		if row.Key != in.Key {
-			return keyRespellingError("key", in.Key, row.Key)
-		}
+		// **No post-write spelling check here any more**, for the reason
+		// UpsertEntityType's own comment states at length: a version
+		// claim against a row the locked read cannot see is refused up
+		// there, so the only writer that could ever have reached this
+		// check with a foreign spelling no longer gets here.
+		// conflictOnRelationTypeKey is what a *creation* racing another
+		// spelling meets, and it is still exercised.
 
 		// A schema change can invalidate stored edges. Re-check them
 		// rather than rejecting the change or inventing values for a new

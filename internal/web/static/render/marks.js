@@ -689,3 +689,155 @@ export function midpointOf(source, target) {
 export function directionOf(source, target) {
   return unit(target.x - source.x, target.y - source.y);
 }
+// --- Boxes that contain boxes ----------------------------------------
+//
+// `nested` draws a container as a `--paper` rectangle with a hairline
+// and its name on the top-left, and tints the **header strip** rather
+// than the box: a nest of four filled levels is four overlapping fills
+// and no legible text (§4.5). So the fill and the tint are two fields
+// here, and the box's is not a caller's choice.
+export const CLASS_CONTAINER = "container";
+export const CLASS_CONTAINER_ABSENT = "container absent";
+export const CLASS_CONTAINER_HEADER = "container-header";
+export const CLASS_CONTAINER_LABEL = "container-label";
+export const CONTAINER_PADDING = 14;
+export const HEADER_HEIGHT = Math.ceil(LABEL_SIZE * LINE_HEIGHT) + 2 * NODE_PADDING_Y;
+
+// containerMarks is one container: the box, its header strip, its name.
+//
+// `x`/`y` are the box's **centre**, as everywhere else in this module,
+// so a caller never has to remember which of the two conventions this
+// mark uses.
+//
+// `headerFill` is where colour lands. A container with no colour to
+// carry gets the ground under its name, which is a strip a reader can
+// see the shape of; `UNFILLED` would make the header invisible and the
+// tint's absence indistinguishable from a renderer that forgot it.
+export function containerMarks(container) {
+  const { key, label, x, y, width, height, headerFill, dash } = container;
+  const left = x - width / 2;
+  const top = y - height / 2;
+  const header = Math.min(HEADER_HEIGHT, height);
+  return [
+    {
+      kind: MARK_RECT,
+      key,
+      class: dash ? CLASS_CONTAINER_ABSENT : CLASS_CONTAINER,
+      x: left,
+      y: top,
+      w: width,
+      h: height,
+      radius: NODE_RADIUS,
+      // Never the tint: the box is paper at every level, and the header
+      // is the one surface colour is allowed to touch.
+      fill: NODE_PLAIN_FILL,
+      stroke: dash ? "var(--line-strong)" : NODE_STROKE,
+      strokeWidth: NODE_STROKE_WIDTH,
+      dash: dash ? ABSENT_DASH : undefined,
+    },
+    {
+      kind: MARK_RECT,
+      key,
+      class: CLASS_CONTAINER_HEADER,
+      x: left,
+      y: top,
+      w: width,
+      h: header,
+      radius: NODE_RADIUS,
+      fill: typeof headerFill === "string" && headerFill !== "" ? headerFill : PLATE_FILL,
+    },
+    {
+      kind: MARK_LABEL,
+      key,
+      class: CLASS_CONTAINER_LABEL,
+      x: left + NODE_PADDING_X,
+      y: top + header / 2,
+      text: typeof label === "string" ? label : "",
+      fill: LABEL_FILL,
+      size: LABEL_SIZE,
+      anchor: "start",
+      baseline: "middle",
+    },
+  ];
+}
+
+// --- The count chip --------------------------------------------------
+//
+// What a drawing shows when it is deliberately not drawing something it
+// holds: `nested`'s children beyond `max_depth` (§4.5) and `timeline`'s
+// marks past the third in one lane (§4.8) are the same statement — *"and
+// twelve more, already here"* — so they are one mark.
+//
+// It reads `+12` and never `12`: a bare number beside a box reads as a
+// property of the box.
+export const CLASS_CHIP = "chip";
+export const CLASS_CHIP_LABEL = "chip-label";
+export const CHIP_HEIGHT = LABEL_SIZE + NODE_PADDING_Y;
+
+export function chipText(count) {
+  return "+" + Math.max(0, Math.trunc(count));
+}
+
+// chipMarks is the plate and its text, centred on `at`.
+export function chipMarks(at, count, key) {
+  const text = chipText(count);
+  const width = boxFor(text, { size: LABEL_SIZE }).width - NODE_PADDING_X;
+  return [
+    {
+      kind: MARK_RECT,
+      key,
+      class: CLASS_CHIP,
+      x: at.x - width / 2,
+      y: at.y - CHIP_HEIGHT / 2,
+      w: width,
+      h: CHIP_HEIGHT,
+      radius: 2,
+      fill: PLATE_FILL,
+      stroke: NODE_STROKE,
+      strokeWidth: NODE_STROKE_WIDTH,
+    },
+    {
+      kind: MARK_LABEL,
+      key,
+      class: CLASS_CHIP_LABEL,
+      x: at.x,
+      y: at.y,
+      text,
+      fill: LABEL_FILL,
+      size: LABEL_SIZE,
+      anchor: "middle",
+      baseline: "middle",
+    },
+  ];
+}
+
+// --- The repeat ------------------------------------------------------
+//
+// A containment cycle — A contains B contains A — is data the metamodel
+// permits, and a nest that drew it would recurse forever. The recursion
+// stops at the repeat and the repeated box says so, because silently
+// stopping would draw a plausible tree over a graph that is not one
+// (§4.5).
+//
+// A glyph and not only a dash: the dash already means "something this
+// box needs is not in the picture", and a repeat is the opposite — the
+// thing is here, and here again.
+export const CLASS_CYCLE = "cycle";
+export const CYCLE_GLYPH = "↻";
+
+export function cycleGlyphMarks(box, key) {
+  return [
+    {
+      kind: MARK_LABEL,
+      key,
+      class: CLASS_CYCLE,
+      x: box.x + box.width / 2 - NODE_PADDING_X,
+      y: box.y - box.height / 2 + HEADER_HEIGHT / 2,
+      text: CYCLE_GLYPH,
+      fill: "var(--line-strong)",
+      size: LABEL_SIZE,
+      anchor: "end",
+      baseline: "middle",
+    },
+  ];
+}

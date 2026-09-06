@@ -32,6 +32,13 @@ export const CONTROL_BOOL = "bool";
 export const CONTROL_ENUM = "enum";
 export const CONTROL_NUMBER = "number";
 export const CONTROL_TEXT = "text";
+// A whole number of at least 1 — `nested`'s `max_depth`. It is its own
+// kind and not `number` because the server's is: a control that offered
+// 0 or 2.5 would compose a document views.upsert refuses.
+export const CONTROL_COUNT = "count";
+// The key of a relation type this game declares — `nested`'s
+// `contain_via`, which is required.
+export const CONTROL_RELATION_TYPE = "relation_type";
 // `layered`'s `rank_by`: the literal "edges", or a declared number field
 // key. Neither an enum nor a slot, and the server spells it as its own
 // kind for that reason.

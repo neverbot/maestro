@@ -401,7 +401,7 @@ export function layeredScene(envelope, layout, params = {}) {
 
   let against = 0;
   let loops = 0;
-  for (const { edge, source, target } of drawn) {
+  for (const { source, target } of drawn) {
     const from = boxes.get(addressOf(source));
     const to = boxes.get(addressOf(target));
     if (from && to && from === to) {
@@ -429,7 +429,11 @@ export function layeredScene(envelope, layout, params = {}) {
       anchorless++;
       continue;
     }
-    marks.push(...stubMarks({ node: box, enclosure: pictureBounds || boundsOf([box]) }));
+    // The enclosure a stub has to leave is the whole picture: `layered`
+    // has no `group_by` and therefore no smaller box to escape from.
+    // `pictureBounds` cannot be null here — `box` is one of the boxes it
+    // was measured over — so there is no fallback to be wrong about.
+    marks.push(...stubMarks({ node: box, enclosure: pictureBounds }));
   }
 
   let unranked = 0;

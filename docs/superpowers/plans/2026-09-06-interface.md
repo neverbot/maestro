@@ -2481,7 +2481,7 @@ no legible text.
 
 **The negative half**, all three cases real.
 
-- [ ] Tests: `beyondMaxDepthACountChipExpandsWithoutARerun` — assert the
+- [x] Tests: `beyondMaxDepthACountChipExpandsWithoutARerun` — assert the
   chip reads `+12`, assert expanding it issues **zero** fetches, since
   the nodes are already in the envelope and treating a drawing depth as a
   fetch boundary would make one parameter mean two things;
@@ -2497,20 +2497,159 @@ no legible text.
   `theTwinListsEveryNodeIncludingThoseBeyondMaxDepth` — the twin is a
   description of the answer, not of the drawing.
 
-- [ ] See red: recurse without the repeat check on the cyclic fixture and
+- [x] See red: recurse without the repeat check on the cyclic fixture and
   watch the test fail on a stack overflow rather than a glyph — then
   restore, because a crash is the failure mode this test exists to make
   loud; draw the orphan of the cap identically to a root and watch its
   test name the dash.
 
-- [ ] Hand check: four levels deep with tinted headers. Is the nesting
-  legible, or does it need the fills the design refuses?
+- [ ] Hand check, carried to Task 15 where a route first mounts a view:
+  four levels deep with tinted headers. Is the nesting legible, or does
+  it need the fills the design refuses?
 
 ```bash
 git add internal/web/static/render/nested.js internal/web/jstest/render_nested_test.mjs \
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): the nested renderer, which will not draw a tree over a graph that is not one"
 ```
+
+#### Corrections made during implementation
+
+1. **The three marks this renderer needed went into the shared
+   vocabulary, and two of them are already the next renderer's.**
+   `render/marks.js` gained `containerMarks` (the `--paper` box, its
+   header strip and its name), `chipMarks` (the `+12` plate, which §4.8
+   asks `timeline` for again when marks in one lane collapse) and
+   `cycleGlyphMarks`. Nothing was copied out of `graph.js` or
+   `layered.js`: the dash, the padding, the label size, the plate and the
+   box measurement are the same constants those two use.
+
+2. **`nested` has no `color_by` parameter and §4.5 says colour tints its
+   header, and both are true.** The catalogue gives this renderer three
+   knobs — `contain_via`, `max_depth`, `leaf_label` — and the views spec's
+   own renderer table agrees; adding a fourth would change an
+   agent-facing contract from inside a renderer task, and the Go guard
+   would have had to be told to expect it. But `color_by` is also a
+   **projection slot** in the query language (the views spec lists
+   `color_by`, `group_by`, `size_by`, `sort_by` as the conventional slot
+   names a renderer consumes), so a query that declares `project.color_by`
+   puts a value on every node's `attrs`. This renderer tints from that
+   slot, with no parameter naming it, exactly as `graph.js` already reads
+   `attrs.label` with no parameter naming it. No knob is invented, no
+   catalogue entry moves, and the mechanism is one a query author can
+   actually reach — which is the test any mechanism has to pass here.
+
+3. **The frame's containment-cycle band names the entities, and
+   `layered`'s cycle sentence refuses to.** Those look contradictory and
+   are not: `layered` finds *a* cycle somewhere in a whole graph, and
+   naming it would mean choosing which one — an analysis sub-project 6
+   owns. `nested` stops the recursion **between two specific boxes** and
+   knows both of them by name; §4.5 asks for exactly that, because a
+   designer told only "this picture contains a cycle" is left to find two
+   boxes out of four hundred. So `BANNER_CONTAINMENT_CYCLE` is the one
+   band in this interface whose rows name entities, and its comment says
+   why.
+
+4. **The orphan count is a clause on the truncation band and not a band
+   of its own.** §4.5 says the orphan of the cap is "counted in the
+   truncation banner", and it is: `bannersFor` takes `orphans` the way it
+   already takes `placedAutomatically`, because a node whose container is
+   not in the picture is found by joining the node list to the edge list
+   — which the renderer does and the envelope cannot. A count of zero
+   adds no clause, which is this module's own first rule.
+
+5. **The missing repeat check is a wrong picture rather than a crash,
+   because `max_depth` is a second guard — so the fixture raises it.**
+   The plan asks to watch the mutation "fail on a stack overflow"; with
+   the depth bound at its default of four, a cycle simply hits the bound
+   and draws four plausible boxes, which is the quiet failure this test
+   exists to prevent and not a loud one. `aContainmentCycleStopsAtTheRepeat`
+   therefore sets `max_depth: 60`, so the bound cannot stand in for the
+   check, and the mutation draws sixty boxes for three nodes and is named
+   by two assertions. Two independent guards, both asserted, rather than
+   one guard and a comment.
+
+6. **A thing contained in two places is drawn in one, and the first
+   version drew it twice.** `relations` carries no constraint against a
+   node being the source of two containment edges, so a `nested` view can
+   meet it; the tree was built by pushing the child into every parent's
+   list, which drew it twice, counted it twice in `drawn`, and would have
+   disagreed with its own twin about how many things the answer has. The
+   container with the lowest address wins — a choice made from the answer
+   rather than from the envelope's arrival order — and the second
+   containment is still an edge in the answer and still a row in the
+   twin, which is where a relation this vocabulary cannot draw belongs.
+   `aThingContainedInTwoPlacesIsDrawnInOne` is the check.
+
+7. **A cyclic answer has no root at all, and the first version drew
+   nothing for it.** Every member of a ring of containers has a parent,
+   so a renderer that drew only from roots produces an empty picture —
+   which hides the defect even more thoroughly than the plausible tree
+   §4.5 warns about. The lowest address of each unreached group is
+   promoted to an entry point, and `aCyclicAnswerStillDrawsSomething`
+   pins it.
+
+8. **`nested` asks the layout engine for nothing, which departs from
+   §5.1.** The spec lists it among dagre's three consumers on the
+   strength of compound graphs. What a compound layout decides is the
+   arrangement of nodes that *also* have edges between them; this
+   renderer consumes "nodes, edges of one containment relation type" and
+   draws no other relation, so the arrangement of a container's children
+   is determined by the tree and by their measured sizes. Asking a graph
+   algorithm for it would be asking for an arrangement the data already
+   states, and would put 48 kB of vendored dagre on the path of every
+   nest. The packing is bottom-up and deterministic — children in address
+   order, in a grid whose column count is their square root — and the
+   module's header carries this argument for the reader who comes from
+   §5.1.
+
+9. **A defect in Task 8's own footer, found by this task's fixture:
+   *"1 edge lead outside this picture"*.** `footerFor` wrote the noun
+   through `count` and left the verb behind, so the singular did not
+   agree. Every fixture that had met the sentence until now happened to
+   have two. The verb travels with the noun now
+   (`count(outside, "edge leads", "edges lead")`), which is the same
+   argument the module already makes for writing "1 node" rather than
+   "1 nodes", and this task's twin check asserts the singular.
+
+10. **The containment check is strict, because a flush box is the
+    fixture-at-the-edge mistake in another costume.** `contains` in the
+    harness first read `<=` on every side, which passes for a renderer
+    that drew the nest with no padding at all — the child's border and
+    its container's coinciding. It now requires clearance on all four
+    sides, and setting `CONTAINER_PADDING` to zero turns two tests red.
+
+**Mutations run, all red.** Recursing without the repeat check on the
+cyclic fixture (*"the repeated box carries one cycle glyph: got 0,
+want 1"* and *"every node in the ring is drawn once: got 60, want 3"*);
+drawing the orphan of the cap identically to a root (*"the orphan of the
+cap is drawn as an absence: got "container", want "container absent""*)
+and the orphan count never reaching the band (*"and the band counts the
+orphan: This picture hit its node cap and the answer had more nodes than
+it shows."*); the tint moved from the header to the box (*"zone/l1's box
+is paper: got "var(--data-4)", want "var(--paper)""*); a leaf whose
+`leaf_label` slot found nothing going blank (*"and a leaf whose slot
+found nothing keeps its name: got "", want "Bare""*); the chip counting
+direct children instead of descendants (*"the chip counts every node
+under the container, not its children: got [{… "count":1}], want
+[{… "count":2}]"*); a twice-contained node drawn under both containers
+(*"three nodes, three boxes: got 4, want 3"*); the cycle band naming one
+end (*"the row names the outer box: Alpha is part of a containment
+cycle"*); and the container padding set to zero (*"zone/k0 is drawn
+inside the root"*).
+
+**The hand check this task leaves**, to be performed at Task 15: **four
+levels deep with tinted headers.** Is the nesting legible, or does it
+need the fills the design refuses? Nothing automated can answer it — the
+harness asserts the box is `--paper` at every level and the strip carries
+the hue, and says nothing about whether four hairlines and four strips
+read as four levels of containment to somebody who did not write them.
+Two more things to look at while that picture is open, both of them this
+task's own: whether a `+12` chip reads as *"there is more here"* rather
+than as a badge on the container, and whether a dashed top-level box
+reads as "this thing's parent did not fit" beside an undashed one that
+is genuinely top-level — the one distinction in this renderer that a
+reader has to make from the drawing alone.
 
 ---
 

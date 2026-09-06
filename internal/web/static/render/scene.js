@@ -54,6 +54,16 @@ export const BANNER_TRUNCATED_EDGES = "truncated_edges";
 export const BANNER_TRUNCATED_DEPTH = "truncated_depth";
 export const BANNER_PLACED = "placed_automatically";
 export const BANNER_AMBIGUOUS = "ambiguous";
+// A containment cycle: A contains B contains A. It is `nested`'s, it is
+// data the metamodel permits, and it is the one band whose rows **name
+// the entities** — §4.5 is explicit that both ends are named, because a
+// nest that stopped at the repeat without saying where would have drawn
+// a plausible tree over a graph that is not one. That is not the same
+// refusal `layered`'s cycle sentence makes: there, naming a cycle means
+// choosing *which* cycle out of a whole graph, which is an analysis
+// nobody ran; here the repeat is the two boxes the drawing itself just
+// stopped between.
+export const BANNER_CONTAINMENT_CYCLE = "containment_cycle";
 
 // The order the stack is drawn in, fixed rather than incidental: a
 // designer learns positions, and two of these routinely co-occur — a
@@ -71,6 +81,7 @@ export const BANNER_ORDER = [
   BANNER_TRUNCATED_DEPTH,
   BANNER_PLACED,
   BANNER_AMBIGUOUS,
+  BANNER_CONTAINMENT_CYCLE,
 ];
 
 // The four kinds of thing the frame can be showing. They are four and
@@ -172,10 +183,22 @@ export function bannersFor(envelope, options = {}) {
   // deeper — into one sentence naming none of them.
   const truncated = env.truncated && typeof env.truncated === "object" ? env.truncated : {};
   if (truncated.nodes === true) {
+    // `orphans` is the caller's, for `outside`'s reason: a node whose
+    // container is not in the picture is discovered by joining the node
+    // list to the edge list, which the renderer does and the envelope
+    // cannot. It is a **clause on this band** rather than a band of its
+    // own because it is not a second fact — it is what the cap did to
+    // the drawing, and §4.5 asks for exactly that: "counted in the
+    // truncation banner".
+    const orphans = countOf(options.orphans);
     banners.push({
       code: BANNER_TRUNCATED_NODES,
       css: "var(--muted)",
-      text: "This picture hit its node cap and the answer had more nodes than it shows.",
+      text:
+        "This picture hit its node cap and the answer had more nodes than it shows." +
+        (orphans > 0
+          ? ` ${count(orphans, "box is", "boxes are")} drawn at the top level because the container it names did not fit.`
+          : ""),
       rows: [],
     });
   }
@@ -218,6 +241,33 @@ export function bannersFor(envelope, options = {}) {
         `${count(ambiguous, "node", "nodes")} resolved a related attribute ambiguously — ` +
         "more than one entity matched and the first by name was used.",
       rows: [],
+    });
+  }
+
+  // The containment cycle, last, because it is the only band that names
+  // entities and a reader who has met the others learns its position.
+  //
+  // One row per repeat, each naming **both** ends: the box the nest
+  // stopped at and the box that contains it. A band that said only "this
+  // picture contains a cycle" would leave a designer to find two boxes
+  // out of four hundred.
+  const cycles = Array.isArray(options.containmentCycles) ? options.containmentCycles : [];
+  if (cycles.length > 0) {
+    banners.push({
+      code: BANNER_CONTAINMENT_CYCLE,
+      css: "var(--muted)",
+      text:
+        `${count(cycles.length, "containment cycle was", "containment cycles were")} found and ` +
+        "the nesting stops where it repeats; these things contain each other.",
+      rows: cycles.map((cycle) => ({
+        code: BANNER_CONTAINMENT_CYCLE,
+        // The two ends, as the labels the picture drew, so the band and
+        // the boxes say the same words about the same entities.
+        inner: text(cycle && cycle.inner),
+        outer: text(cycle && cycle.outer),
+        message: `${text(cycle && cycle.outer)} contains ${text(cycle && cycle.inner)}, which contains it again`,
+        css: "var(--muted)",
+      })),
     });
   }
 
@@ -427,7 +477,12 @@ export function footerFor(envelope, options = {}) {
   ];
   if (layoutMs !== null) parts.push(`layout ${layoutMs} ms`);
   if (outside !== null && outside > 0) {
-    parts.push(`${count(outside, "edge", "edges")} lead outside this picture`);
+    // "1 edge leads", not "1 edge lead": the verb agrees with the count
+    // the same way the noun does. `count` writes the noun, so the verb
+    // travels with it — a frame that says "1 edge lead outside this
+    // picture" reads like a machine talking to itself, which is this
+    // module's own argument for counting in words at all.
+    parts.push(`${count(outside, "edge leads", "edges lead")} outside this picture`);
   }
   if (against !== null && against > 0) {
     parts.push(

@@ -437,3 +437,46 @@ func TestTheLayeredRenderer(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_layered_test.mjs")
 }
+
+// TestTheNestedRenderer drives internal/web/jstest/render_nested_test.mjs.
+//
+// What it holds that no Go test can, and what is this renderer's alone.
+//
+// That **a drawing depth is not a fetch boundary**. `max_depth` holds
+// children back from the picture and every one of them is already in the
+// envelope, so the count chip's expansion is a redraw. The chip's number
+// is asserted and so is the number of requests an expansion makes —
+// zero, over a stubbed global `fetch` that counts, because a renderer
+// that grew a client would still pass a check that only read its
+// imports.
+//
+// That **a root and an orphan of the cap do not look alike**, in one
+// fixture. "This thing is top-level" and "this thing's parent did not
+// fit" are two statements about two different situations and both are
+// drawn at the top level; the second is dashed and counted in the
+// truncation band. Two fixtures would pass for an implementation that
+// treated them identically, which is why there is one.
+//
+// That **a containment cycle terminates and says so**. A contains B
+// contains A is data the metamodel permits and the failure mode without
+// a repeat check is a stack overflow rather than a wrong picture. The
+// nesting stops at the repeat, the repeated box carries the glyph, and
+// the frame's band names **both** ends — the one band in this interface
+// whose rows name entities, because the alternative leaves a designer to
+// find two boxes out of four hundred. A ring with no root at all still
+// draws, since an empty picture would hide the defect more thoroughly
+// than a plausible tree.
+//
+// That **colour tints the header strip and never the box**, asserted at
+// four levels: a nest of four fills is four overlapping fills and no
+// legible text.
+//
+// And that **the twin describes the answer rather than the drawing**: it
+// lists every node, including the ones the depth bound held back, which
+// is the one place in this sub-project where the picture and the twin
+// are deliberately allowed to differ — and the arithmetic that joins
+// them says exactly how.
+func TestTheNestedRenderer(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/render_nested_test.mjs")
+}

@@ -321,7 +321,10 @@ const nodes = [
   node("elwynn", "zone", "Elwynn", "drawn", { label: "Elwynn", color_by: "alliance", level: 1 }),
   node("duskwood", "zone", "Duskwood", "drawn", { label: "Duskwood", color_by: "alliance", level: 10 }),
   node("barrens", "zone", "The Barrens", "drawn", { label: "The Barrens", color_by: "horde", level: 10 }),
-  node("orgrimmar", "city", "Orgrimmar", "shelved", { label: "Orgrimmar", color_by: "horde" }),
+  // `region` is carried by this node and by no earlier one: the columns
+  // are the union of every node's slots, and a twin that read them off
+  // the first row would lose this whole column and the answer in it.
+  node("orgrimmar", "city", "Orgrimmar", "shelved", { label: "Orgrimmar", color_by: "horde", region: "kalimdor" }),
   node("hyjal", "zone", "Hyjal", "shelved", { label: "Hyjal", color_by: "neutral", level: 55 }),
   node("blackrock", "zone", "Blackrock", "beyond", { label: "Blackrock", color_by: "" , level: 55 }),
   node("deadmines", "instance", "The Deadmines", "beyond", { label: "The Deadmines" }),
@@ -443,8 +446,15 @@ check("everyEdgeHasARowIncludingStubs", () => {
 check("absentSlotsRenderAsAnEmDashNotBlank", () => {
   const twin = twinFor(answer);
   const columns = twin.nodes.columns.map((column) => column.key);
-  assertDeepEqual(columns, ["name", "type", "key", "label", "color_by", "level"],
+  assertDeepEqual(columns, ["name", "type", "key", "label", "color_by", "level", "region"],
     "the slot columns are the union of every node's slots, with label first");
+  // Named, because the assertion above would also pass on a twin that
+  // read its columns off the first row if every slot happened to be
+  // there: `region` is on the fourth node and on no earlier one.
+  assert(!Object.prototype.hasOwnProperty.call(answer.nodes[0].attrs, "region"),
+    "the fixture's first node does not carry every slot, or this test cannot tell the two readings apart");
+  const region = twin.nodes.rows.find((r) => r.node.key === "elwynn").cells[columns.indexOf("region")];
+  assertEqual(region.absent, true, "and a node without the late-arriving slot is absent in that column");
 
   const cellOf = (key, column) => {
     const row = twin.nodes.rows.find((r) => r.node.key === key);

@@ -375,6 +375,50 @@ func (q *Queries) GetEntityTypeByID(ctx context.Context, arg GetEntityTypeByIDPa
 	return i, err
 }
 
+const getEntityTypeByIDForUpdate = `-- name: GetEntityTypeByIDForUpdate :one
+SELECT id, project_id, key, label, label_plural, description, color, icon, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entity_types
+WHERE project_id = $1::uuid AND id = $2::uuid
+FOR UPDATE
+`
+
+type GetEntityTypeByIDForUpdateParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+// RemoveEntityType's read of the type it is about to delete, taken with
+// an exclusive row lock held to the end of the transaction.
+//
+// The other half of GetEntityTypeByKeyForKeyShare's ordering: the
+// removal has to take `entity_types` before it touches `entities`, or
+// the two writers still cross. `FOR UPDATE` and not something weaker
+// because this transaction is going to delete the row, and `FOR UPDATE`
+// conflicts with the `FOR KEY SHARE` an entity write holds — which is
+// precisely the mutual exclusion that makes the order matter. An entity
+// write already in flight is waited for here, at the first lock, rather
+// than met head-on at the second.
+func (q *Queries) GetEntityTypeByIDForUpdate(ctx context.Context, arg GetEntityTypeByIDForUpdateParams) (EntityType, error) {
+	row := q.db.QueryRow(ctx, getEntityTypeByIDForUpdate, arg.ProjectID, arg.ID)
+	var i EntityType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.LabelPlural,
+		&i.Description,
+		&i.Color,
+		&i.Icon,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
 const getEntityTypeByKey = `-- name: GetEntityTypeByKey :one
 SELECT id, project_id, key, label, label_plural, description, color, icon, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entity_types
 WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
@@ -387,6 +431,69 @@ type GetEntityTypeByKeyParams struct {
 
 func (q *Queries) GetEntityTypeByKey(ctx context.Context, arg GetEntityTypeByKeyParams) (EntityType, error) {
 	row := q.db.QueryRow(ctx, getEntityTypeByKey, arg.ProjectID, arg.Key)
+	var i EntityType
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Label,
+		&i.LabelPlural,
+		&i.Description,
+		&i.Color,
+		&i.Icon,
+		&i.FieldSchema,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getEntityTypeByKeyForKeyShare = `-- name: GetEntityTypeByKeyForKeyShare :one
+SELECT id, project_id, key, label, label_plural, description, color, icon, field_schema, version, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entity_types
+WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
+FOR KEY SHARE
+`
+
+type GetEntityTypeByKeyForKeyShareParams struct {
+	ProjectID uuid.UUID
+	Key       string
+}
+
+// UpsertEntity's read of the type it is writing an entity into, taken
+// with a share lock on the type's row and held to the end of the
+// transaction.
+//
+// **Lock order is load-bearing, and this statement is where the entity
+// write takes the first of its two locks.** `entities.entity_type_id`
+// is a foreign key into `entity_types`, so the `INSERT ... ON CONFLICT`
+// at the end of the write takes `FOR KEY SHARE` on the parent row
+// anyway — after `GetEntityByKeyForUpdate` has already locked the
+// entity row. `RemoveEntityType(cascade)` runs the other way round: it
+// deletes the entities and then the type, and the type's `DELETE` runs
+// an `ON DELETE RESTRICT` check that takes `FOR KEY SHARE` back on
+// `entities`. Two writers, two locks, opposite orders — measured at
+// eight deadlocks in fifteen seconds across eight workers, with
+// `DeleteEntityType` and `DeleteEntitiesOfType` as the victims. Taking
+// the parent lock here, before the entity row, makes both writers take
+// `entity_types` first, which is the same rule
+// LockEndpointEntityTypes' comment records for the relation-type pair.
+//
+// FOR KEY SHARE and not FOR SHARE or FOR UPDATE: it is exactly the lock
+// the foreign key will take a few statements later, so this adds no
+// conflict that the write did not already have — two entity writes into
+// one type still run concurrently, and only something that wants to
+// delete or re-key the type itself waits. A stronger mode would
+// serialise every entity write of a type against every other, which is
+// the common case in a seeding batch.
+//
+// The cost is the mirror of the one LockEndpointEntityTypes records: a
+// long-running entity write parks a removal of its type until it ends.
+// Removals are rare and the alternative is the deadlock above.
+func (q *Queries) GetEntityTypeByKeyForKeyShare(ctx context.Context, arg GetEntityTypeByKeyForKeyShareParams) (EntityType, error) {
+	row := q.db.QueryRow(ctx, getEntityTypeByKeyForKeyShare, arg.ProjectID, arg.Key)
 	var i EntityType
 	err := row.Scan(
 		&i.ID,

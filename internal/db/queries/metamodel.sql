@@ -239,6 +239,57 @@ SELECT * FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
 FOR UPDATE;
 
+-- name: GetEntityTypeByKeyForKeyShare :one
+-- UpsertEntity's read of the type it is writing an entity into, taken
+-- with a share lock on the type's row and held to the end of the
+-- transaction.
+--
+-- **Lock order is load-bearing, and this statement is where the entity
+-- write takes the first of its two locks.** `entities.entity_type_id`
+-- is a foreign key into `entity_types`, so the `INSERT ... ON CONFLICT`
+-- at the end of the write takes `FOR KEY SHARE` on the parent row
+-- anyway — after `GetEntityByKeyForUpdate` has already locked the
+-- entity row. `RemoveEntityType(cascade)` runs the other way round: it
+-- deletes the entities and then the type, and the type's `DELETE` runs
+-- an `ON DELETE RESTRICT` check that takes `FOR KEY SHARE` back on
+-- `entities`. Two writers, two locks, opposite orders — measured at
+-- eight deadlocks in fifteen seconds across eight workers, with
+-- `DeleteEntityType` and `DeleteEntitiesOfType` as the victims. Taking
+-- the parent lock here, before the entity row, makes both writers take
+-- `entity_types` first, which is the same rule
+-- LockEndpointEntityTypes' comment records for the relation-type pair.
+--
+-- FOR KEY SHARE and not FOR SHARE or FOR UPDATE: it is exactly the lock
+-- the foreign key will take a few statements later, so this adds no
+-- conflict that the write did not already have — two entity writes into
+-- one type still run concurrently, and only something that wants to
+-- delete or re-key the type itself waits. A stronger mode would
+-- serialise every entity write of a type against every other, which is
+-- the common case in a seeding batch.
+--
+-- The cost is the mirror of the one LockEndpointEntityTypes records: a
+-- long-running entity write parks a removal of its type until it ends.
+-- Removals are rare and the alternative is the deadlock above.
+SELECT * FROM entity_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
+FOR KEY SHARE;
+
+-- name: GetEntityTypeByIDForUpdate :one
+-- RemoveEntityType's read of the type it is about to delete, taken with
+-- an exclusive row lock held to the end of the transaction.
+--
+-- The other half of GetEntityTypeByKeyForKeyShare's ordering: the
+-- removal has to take `entity_types` before it touches `entities`, or
+-- the two writers still cross. `FOR UPDATE` and not something weaker
+-- because this transaction is going to delete the row, and `FOR UPDATE`
+-- conflicts with the `FOR KEY SHARE` an entity write holds — which is
+-- precisely the mutual exclusion that makes the order matter. An entity
+-- write already in flight is waited for here, at the first lock, rather
+-- than met head-on at the second.
+SELECT * FROM entity_types
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid
+FOR UPDATE;
+
 -- name: UpsertEntity :one
 -- The same shape as UpsertEntityType, for the same reasons, and that
 -- statement's comment carries the full argument. In short:

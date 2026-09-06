@@ -231,7 +231,17 @@ func (s *Service) upsertEntityWith(ctx context.Context, q *dbq.Queries, projectI
 	// a row this call only reads, so a malformed one has one honest
 	// answer — there is no such type — and it already gets it below.
 
-	typ, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{ProjectID: projectID, Key: in.TypeKey})
+	// **The type's row is locked before the entity's, and that ordering
+	// is load-bearing.** The write ends in an INSERT ... ON CONFLICT whose
+	// foreign key takes FOR KEY SHARE on this same row regardless; taking
+	// it here, before GetEntityByKeyForUpdate below, is what keeps this
+	// writer and RemoveEntityType(cascade) — which locks entity_types
+	// first too, since its own read is FOR UPDATE — from holding what the
+	// other is waiting for. GetEntityTypeByKeyForKeyShare's comment
+	// carries the measurement and the argument for the lock mode.
+	typ, err := q.GetEntityTypeByKeyForKeyShare(ctx, dbq.GetEntityTypeByKeyForKeyShareParams{
+		ProjectID: projectID, Key: in.TypeKey,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return upsertedEntity{}, fmt.Errorf("%w: no entity type %q in this game", ErrNotFound, in.TypeKey)
 	}

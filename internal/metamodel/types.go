@@ -307,7 +307,19 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		// keyed "" is gone. The id alone would have been a defensible
 		// payload, but entityTypeEvent declares a key field and a client
 		// reading one cannot tell "not carried" from "empty".
-		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{ProjectID: projectID, ID: id})
+		//
+		// **Locked, and locked before anything touches `entities`.** The
+		// lock is what puts this writer and `UpsertEntity` in the same
+		// order over the same two tables: an entity write takes
+		// `FOR KEY SHARE` on this row and then `FOR UPDATE` on its own
+		// entity row, so a removal that took the entity rows first (the
+		// `DeleteEntitiesOfType` below, and the `ON DELETE RESTRICT`
+		// check inside `DeleteEntityType`, which reads `entities` back
+		// `FOR KEY SHARE`) and this row second closed a cycle. See
+		// GetEntityTypeByIDForUpdate and GetEntityTypeByKeyForKeyShare.
+		typ, err := q.GetEntityTypeByIDForUpdate(ctx, dbq.GetEntityTypeByIDForUpdateParams{
+			ProjectID: projectID, ID: id,
+		})
 		if err != nil {
 			return notFoundByID(err, "entity type", id, "lookup entity type")
 		}

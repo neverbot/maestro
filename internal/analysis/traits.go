@@ -340,10 +340,12 @@ func TraitDescription() string {
 // added to the vocabulary with no meaning here fails a test rather than
 // reaching an agent as a bare name.
 var traitMeanings = map[string]string{
-	"prerequisite_of": "the source must be reached before the target; the gate points " +
-		"forwards along the edge",
-	"unlocks": "the source makes the target available; the gate points forwards too, " +
-		"but the dependency runs the other way and this engine normalises it",
+	"prerequisite_of": "the **target** must be satisfied before the source, which is " +
+		"the edge read as \"A requires B\". The engine follows it target\u2192source when it " +
+		"normalises, so a gate declared this way points backwards along the edge",
+	"unlocks": "the **source** must be satisfied before the target, which is the edge " +
+		"read as \"A unlocks B\". It is followed source\u2192target, which is already the " +
+		"normalised direction, so nothing about it is reversed",
 	"containment": "the target is inside the source, so reaching the source reaches " +
 		"everything it holds",
 	"ordering": "the edges of this type impose a sequence on what they join",

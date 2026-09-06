@@ -15,11 +15,12 @@
 //
 // **Callers as of this commit:** internal/views -- whose compiler routes
 // every traversal step deeper than one hop through WalkCTE and splices
-// the result into its own statement (see builder.adopt there).
+// the result into its own statement (see builder.adopt there) -- and
+// internal/analysis, whose reachability closure runs Direction Any with
+// the per-type gating direction in EdgePredicate (see normalisedWalk
+// there).
 //
-// **Not a caller yet:** internal/analysis -- the package exists, and its
-// reachability closure compiles into this walk in the commit after the
-// one that added CarryRelationPath for it.
+// **Not a caller yet:** none.
 //
 // Those two lines are stated rather than implied, because a package
 // comment claiming callers it cannot point at is the "documentation

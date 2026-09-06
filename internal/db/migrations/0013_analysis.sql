@@ -4,8 +4,12 @@
 -- that carries a stored verdict.
 --
 -- Numbered 0013 rather than the plan's 0012 because the interface
--- sub-project took 0012 (0012_drop_layout_seed.sql). goose orders by
--- number, so nothing else moves.
+-- sub-project took 0012. goose orders by number, so nothing else moves.
+-- (The number and not the name: internal/web's
+-- TestNoSourceFileNamesALayoutSeed greps every source file in the
+-- repository for the identifier that migration removed, allowing only
+-- the two files that are its own history, and a filename quoted here
+-- for convenience would have widened that guard for nothing.)
 --
 -- What is pinned by a test, and where. Every name below is a test in
 -- internal/db/analysis_schema_test.go:
@@ -132,7 +136,24 @@ ALTER TABLE relation_types
 --       TestTwoConcurrentWritesToOneGameBothLandAndTheCounterMovesTwice
 --       measures it rather than reasoning about it, recording the
 --       observed wall time so the next person to argue about
---       serialisation argues with data.
+--       serialisation argues with data: a second writer blocked for
+--       153 ms behind a transaction deliberately held open for 150 ms,
+--       which is the first transaction's remaining lifetime and not a
+--       cost of its own.
+--
+--       **What that cost actually means, found by a test rather than
+--       predicted here.** An open transaction that has written *anything*
+--       to a game now holds a lock on the whole game, not merely on the
+--       rows it touched. internal/metamodel's
+--       TestACancelledBatchDoesNotReportTheItemInFlightAsAServerFault had
+--       a rival transaction hold a contended row by updating it, and the
+--       batch under test then blocked on the game rather than on that
+--       row -- a true report of where it stopped and the wrong fixture
+--       for that test, which now takes the row lock with SELECT FOR
+--       UPDATE and says why. Nothing in the product holds a write
+--       transaction open across a round trip, so the exposure is bounded
+--       by how long one write takes; whoever adds a long-running write
+--       transaction inherits this.
 --   (c) Writes to *different* games touch different rows and do not
 --       contend at all.
 --

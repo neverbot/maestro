@@ -1043,9 +1043,18 @@ func TestACancelledBatchDoesNotReportTheItemInFlightAsAServerFault(t *testing.T)
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = rival.Rollback(base) }()
+	// **A row lock and not a write**, and the difference is
+	// 0013_analysis.sql's doing. Since the design counter arrived, every
+	// write to a game also updates that game's projects row, so an open
+	// transaction that has *written* holds a lock on the whole game and
+	// the batch below would block on item 0 rather than on item 1 --
+	// which is a true report of where it stopped and the wrong fixture
+	// for this test, whose subject is an item whose own row is
+	// contended. SELECT FOR UPDATE takes exactly the lock this test
+	// means: item 1's row, and nothing wider.
 	if _, err := rival.Exec(base,
-		`UPDATE entities SET name = 'Theirs' WHERE id = $1`, blocked.ID); err != nil {
-		t.Fatalf("rival update: %v", err)
+		`SELECT id FROM entities WHERE id = $1 FOR UPDATE`, blocked.ID); err != nil {
+		t.Fatalf("rival row lock: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(base)

@@ -89,7 +89,9 @@ func TestTheZipHoldsExactlyTheTree(t *testing.T) {
 			t.Fatalf("opening %s: %v", entry.Name, err)
 		}
 		body, err := io.ReadAll(rc)
-		rc.Close()
+		if closeErr := rc.Close(); closeErr != nil {
+			t.Fatalf("closing %s: %v", entry.Name, closeErr)
+		}
 		if err != nil {
 			t.Fatalf("reading %s: %v", entry.Name, err)
 		}

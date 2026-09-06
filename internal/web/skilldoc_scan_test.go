@@ -415,20 +415,13 @@ func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
 // fails, and a tool that quietly stops being taught fails too. Task 12
 // asserts the list is empty.
 var notYetTaughtOutsideTheIndex = []string{
-	"docs.delete", "docs.diff", "docs.history",
-	"docs.kinds", "docs.links.add", "docs.links.list",
-	"docs.links.remove", "docs.list", "docs.move",
-	"docs.read", "docs.read_version", "docs.revert",
-	"docs.write", "docs.write_many", "entities.get",
-	"entities.list", "entities.remove", "entities.repair",
-	"games.get", "games.list", "relation_types.get",
-	"relation_types.list", "relation_types.remove", "relations.get",
-	"relations.list", "relations.remove", "relations.repair",
-	"search", "types.get", "types.list",
-	"types.remove", "views.clear_positions", "views.get",
-	"views.list", "views.list_assets", "views.remove",
-	"views.run", "views.set_background", "views.set_positions",
-	"views.upsert", "views.validate",
+	"entities.get", "entities.remove", "games.get",
+	"games.list", "relation_types.get", "relation_types.list",
+	"relation_types.remove", "relations.get", "relations.remove",
+	"types.get", "types.list", "types.remove",
+	"views.clear_positions", "views.get", "views.list",
+	"views.list_assets", "views.remove", "views.set_background",
+	"views.set_positions",
 }
 
 // TestEveryRegisteredToolIsRoutedFromTheBundle asserts every registered

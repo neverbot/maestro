@@ -144,27 +144,10 @@ changed under you unless you changed it.
 | You are about to… | Read |
 |---|---|
 | find which of the tools exists | `reference/tools.md` |
+| declare a field type, or wonder what one costs later | `reference/fields.md` |
+| read an error and pick a recovery | `reference/errors.md` |
+| write a query or a saved view | `reference/queries.md` |
+| attach prose to an entity | `reference/documents.md` |
 
 Nothing in this bundle is required, and a game none of its examples
 matches is the normal case.
-
-## Appendix: the closed vocabularies
-
-Two more lists you choose between before a description helps you, each
-compared against its Go declaration on every build in both directions.
-
-Renderers, for drawing a saved view:
-
-```vocab:renderers
-graph layered nested map table timeline
-```
-
-Error codes a game-content tool can answer with. Each one names a
-different recovery:
-
-```vocab:error_codes
-unauthorized internal_error not_found bad_request scope_violation
-retryable version_conflict schema_violation invalid_schema invalid_input
-endpoint_type_mismatch in_use query_invalid renderer_requirements
-limit_exceeded query_stale
-```

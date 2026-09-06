@@ -37,26 +37,16 @@ import { Graph } from "../vendor/graphlib.mjs";
 import { layout } from "../vendor/dagre.mjs";
 
 // addressOf is an entity's identity, everywhere in this front end: the
-// `(type, key)` pair, never the id. internal/web/static/client.js writes
-// positions by that pair, render/twin.js addresses its rows by it, and
-// internal/views' own Position carries it instead of an id "so a caller
-// can round-trip it without ever having read the game's ids".
+// `(type, key)` pair, never the id.
 //
-// It is JSON rather than `type + "/" + key` so that a type or a key
-// containing the separator cannot forge another entity's address —
-// render/twin.js's row key is built the same way for the same reason,
-// and internal/web/jstest/layout_test.mjs joins the two modules on it
-// rather than trusting two spellings to stay equal.
-//
-// It lives in the engine because the engine is what turns an entity into
-// a graph vertex, and a graph vertex needs one string. compose.js
-// re-exports it so a caller has one import for the whole layer.
-export function addressOf(node) {
-  return JSON.stringify([
-    typeof node.type === "string" ? node.type : "",
-    typeof node.key === "string" ? node.key : "",
-  ]);
-}
+// It moved to ../address.js when the first renderer needed it, and this
+// re-export is why every caller in this directory still has one import
+// for the whole layer. The reason for the move is in that file: a
+// renderer looks a placement up by address, and reaching this module for
+// the function would put the vendored dagre on the main thread to build
+// a string.
+import { addressOf } from "../address.js";
+export { addressOf };
 
 // The ranked drawing's shape. Spec §5.2 chose a ranked engine over a
 // force one because a game's content graph is overwhelmingly directional
@@ -89,6 +79,19 @@ export const DEFAULT_NODE_HEIGHT = 32;
 // product uses (internal/web/static/client.js writes positions by it,
 // render/twin.js addresses its rows by it) and never an id.
 //
+// A node may also carry a `cluster`: the value of the renderer's
+// `cluster_by` slot, as text. **Clustering draws nothing** — no
+// enclosure, no heading, no legend row — and its whole effect is here,
+// as a dagre parent, which keeps the nodes sharing a value near each
+// other. That is exactly the difference between it and `group_by`,
+// which draws an enclosure and never reaches this function, and it is
+// the difference a designer is most likely to trip over.
+//
+// A cluster parent is a graph vertex like any other, so it takes part in
+// the sort for the reason everything else does; and it is **not** in
+// `placements`, because the picture has no such node and a renderer
+// handed one would draw a box for a value.
+//
 // Returns `{placements, width, height}`. `placements` are
 // `{key, x, y, width, height}` where `key` is the address string, sorted
 // by it, and `x`/`y` are the box's **centre**, which is what dagre
@@ -96,7 +99,8 @@ export const DEFAULT_NODE_HEIGHT = 32;
 // emitter rather than once per renderer.
 export function layoutGraph(nodes, edges, options = {}) {
   const boxes = normaliseNodes(nodes);
-  const graph = new Graph({ compound: false, directed: true, multigraph: true });
+  const clustered = boxes.some((box) => box.cluster !== null);
+  const graph = new Graph({ compound: clustered, directed: true, multigraph: true });
   graph.setGraph({ ...DEFAULT_LAYOUT_OPTIONS, ...options });
   graph.setDefaultEdgeLabel(() => ({}));
 
@@ -104,6 +108,18 @@ export function layoutGraph(nodes, edges, options = {}) {
   // address order and `links` is sorted the same way.
   for (const box of boxes) {
     graph.setNode(box.key, { width: box.width, height: box.height });
+  }
+  // The cluster parents, in the order their names sort, and each node
+  // attached to its own. `clusterVertex` prefixes the value so a cluster
+  // called `["quest","boss"]` cannot collide with the entity of that
+  // address.
+  if (clustered) {
+    const names = [...new Set(boxes.filter((box) => box.cluster !== null).map((box) => box.cluster))];
+    names.sort(compare);
+    for (const name of names) graph.setNode(clusterVertex(name), {});
+    for (const box of boxes) {
+      if (box.cluster !== null) graph.setParent(box.key, clusterVertex(box.cluster));
+    }
   }
   for (const link of normaliseEdges(edges, boxes)) {
     // A name on the edge, so two relations between the same pair are two
@@ -151,6 +167,10 @@ function normaliseNodes(nodes) {
       key,
       width: positive(node.width, DEFAULT_NODE_WIDTH),
       height: positive(node.height, DEFAULT_NODE_HEIGHT),
+      // An empty cluster name is not a cluster: it is what a node whose
+      // `cluster_by` slot found nothing has, and putting every such node
+      // in one parent would invent a group out of an absence.
+      cluster: typeof node.cluster === "string" && node.cluster !== "" ? node.cluster : null,
     });
   }
   boxes.sort(byKey);
@@ -178,7 +198,7 @@ function normaliseEdges(edges, boxes) {
     const target = endpoint(edge.target);
     if (source === null || target === null) continue;
     if (!known.has(source) || !known.has(target)) continue;
-    links.push({ source, target, name: typeof edge.type === "string" ? edge.type : "" });
+    links.push({ source, target, name: edgeName(edge.type) });
   }
   links.sort(
     (a, b) =>
@@ -187,12 +207,38 @@ function normaliseEdges(edges, boxes) {
   return links;
 }
 
+// edgeName is the name a relation gets as a dagre edge, and it is never
+// the empty string.
+//
+// The name is what keeps two relations between one pair from
+// overwriting each other. An untyped edge used to take `""`, which reads
+// as a name in a multigraph and **throws inside dagre's compound
+// layout** — "Cannot set properties of undefined (setting 'points')" —
+// so the day `cluster_by` arrived every untyped edge would have taken
+// the whole picture down with it. The sentinel carries a colon, which
+// internal/metamodel refuses in a relation type key, so it cannot
+// collide with a real type.
+const UNTYPED_EDGE = ":untyped";
+
+function edgeName(type) {
+  return typeof type === "string" && type !== "" ? type : UNTYPED_EDGE;
+}
+
 function endpoint(value) {
   if (typeof value === "string") return value === "" ? null : value;
   if (value && typeof value === "object" && typeof value.key === "string" && value.key !== "") {
     return addressOf(value);
   }
   return null;
+}
+
+// clusterVertex is a cluster's name as a graph vertex. The prefix is
+// what keeps the namespace of cluster values and the namespace of entity
+// addresses apart: both are strings in one dagre graph, and a cluster
+// whose text happened to be an address would silently become that node's
+// parent — or, worse, itself.
+function clusterVertex(name) {
+  return "cluster:" + name;
 }
 
 function byKey(a, b) {

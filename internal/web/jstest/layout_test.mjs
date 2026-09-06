@@ -198,6 +198,93 @@ check("theEngineIsDeterministic", () => {
   assert(first.placements.length === nodes.length, "every node was placed");
 });
 
+// clusterGraph is six nodes in two interleaved clusters with one edge,
+// arranged so that clustering has somewhere to move things *to*: the
+// three `a` nodes and the three `b` nodes alternate in address order, so
+// an engine that ignored the clustering leaves them interleaved and one
+// that honoured it does not.
+function clusterGraph(clustered) {
+  const nodes = ["a1", "b1", "a2", "b2", "a3", "b3"].map((key) => ({
+    ...node("quest", key),
+    ...(clustered ? { cluster: key.startsWith("a") ? "alliance" : "horde" } : {}),
+  }));
+  return { nodes, edges: [edge({ type: "quest", key: "a1" }, { type: "quest", key: "a2" })] };
+}
+
+check("clusteringMovesTheLayoutAndAddsNoNode", () => {
+  // `cluster_by` draws nothing at all — no enclosure, no heading, no
+  // legend row — so the only way it can be anything but a lie is here,
+  // in the arrangement. This is the assertion that keeps "draws nothing"
+  // from decaying into "does nothing".
+  const plain = layoutGraph(clusterGraph(false).nodes, clusterGraph(false).edges);
+  const clustered = layoutGraph(clusterGraph(true).nodes, clusterGraph(true).edges);
+  assert(
+    coordinatesOf(clustered) !== coordinatesOf(plain),
+    "clustering changed no coordinate; the parameter reached nothing",
+  );
+
+  // And it added nothing to the picture: a cluster is a vertex in the
+  // engine's graph, and a renderer handed one would draw a box for a
+  // *value*.
+  assertEqual(clustered.placements.length, 6, "a cluster is not a node");
+  assertDeepEqual(
+    clustered.placements.map((p) => p.key).filter((key) => key.includes("cluster")),
+    [],
+    "and no cluster vertex reaches the placements",
+  );
+
+  // Deterministic with clustering on, including the shuffle: the
+  // compound path inserts parents of its own, and inserting them in the
+  // order the caller's nodes happened to arrive in would be the coupling
+  // the engine's sort exists to remove.
+  const again = layoutGraph(shuffled(clusterGraph(true).nodes), clusterGraph(true).edges);
+  assertEqual(coordinatesOf(again), coordinatesOf(clustered), "the same clustered input, shuffled");
+
+  // The two `b` nodes with no edge between them are adjacent, which is
+  // what clustering is *for* and what tells this apart from a layout
+  // that merely differs.
+  const at = new Map(clustered.placements.map((p) => [p.key, p]));
+  const b = ["b1", "b2", "b3"].map((key) => at.get(addressOf({ type: "quest", key })));
+  assert(
+    b.every((p) => Math.abs(p.y - b[0].y) < 1e-9),
+    "the cluster's members share a rank",
+  );
+});
+
+check("anEmptyClusterValueIsNotACluster", () => {
+  // A node whose `cluster_by` slot found nothing carries the empty
+  // string. Putting every such node in one parent would invent a group
+  // out of an absence — the same distinction the palette makes with its
+  // `unset` legend row rather than a ninth hue.
+  const { nodes, edges } = clusterGraph(false);
+  const empty = nodes.map((n) => ({ ...n, cluster: "" }));
+  assertEqual(
+    coordinatesOf(layoutGraph(empty, edges)),
+    coordinatesOf(layoutGraph(nodes, edges)),
+    "an empty cluster name laid out differently from no cluster name",
+  );
+});
+
+check("anUntypedEdgeSurvivesAClusteredLayout", () => {
+  // The regression the clustering work found: dagre's compound layout
+  // throws on an edge whose *name* is the empty string, which is what
+  // every edge carrying no relation type used to get. A `graph` view
+  // with cluster_by on and one untyped edge would have taken the whole
+  // picture down with "Cannot set properties of undefined".
+  const nodes = [
+    { ...node("quest", "a"), cluster: "alliance" },
+    { ...node("quest", "b"), cluster: "alliance" },
+  ];
+  const result = layoutGraph(nodes, [
+    { source: { type: "quest", key: "a" }, target: { type: "quest", key: "b" } },
+  ]);
+  assertEqual(result.placements.length, 2, "an untyped edge in a cluster laid out");
+  assert(
+    result.placements.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+    "with finite coordinates",
+  );
+});
+
 check("theEngineRanksAlongTheEdges", () => {
   // The one behavioural claim §5.2 makes about choosing a ranked engine:
   // a directional game graph draws as a hierarchy. Without this the

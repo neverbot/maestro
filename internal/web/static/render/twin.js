@@ -40,6 +40,12 @@
 // internal/web/static_frame_test.go.
 
 import { labelFor } from "../palette.js";
+// The row's identity, and the value the twin compares against to know
+// which row is selected. It is the product's one address function
+// (../address.js) rather than a spelling of its own: the canvas joins a
+// selected row to a laid-out node on this string, and two spellings of
+// it would fail that join silently.
+import { addressOf } from "../address.js";
 
 // ABSENT_TEXT is what a projection slot that found nothing looks like.
 //
@@ -212,13 +218,6 @@ function present(column, value) {
 
 function absent(column) {
   return { column, text: ABSENT_TEXT, absent: true, outside: false, note: "" };
-}
-
-// addressOf is the row's identity, and the value the twin compares
-// against to know which row is selected. JSON so that a type or a key
-// carrying the separator cannot forge another row's address.
-function addressOf(node) {
-  return JSON.stringify([text(node.type), text(node.key)]);
 }
 
 function isObject(value) {

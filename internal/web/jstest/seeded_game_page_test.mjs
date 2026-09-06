@@ -105,7 +105,7 @@ globalThis.fetch = async (url) => {
   if (url === "/api/games") {
     return { ok: true, status: 200, json: async () => ({ games: [game] }) };
   }
-  if (url === `/api/games/${game.id}/summary`) {
+  if (url === `/api/games/${game.slug}/summary`) {
     return { ok: true, status: 200, json: async () => summary };
   }
   return { ok: false, status: 404, json: async () => ({ error: "not_found", message: "unexpected fetch: " + url }) };

@@ -70,7 +70,7 @@ func TestDeleteGameMapsProjectNotFoundTo404(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	rec := httptest.NewRecorder()
 	srv.handleDeleteGame(rec, req, newSessionCaller(owner.ID, false), scope)
 

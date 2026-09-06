@@ -120,7 +120,7 @@ func TestMCPEndToEndOverHTTP(t *testing.T) {
 
 	foreign, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "games.get",
-		Arguments: map[string]any{"project_id": theirs.ID.String()},
+		Arguments: map[string]any{"game": theirs.Slug},
 	})
 	if err != nil {
 		t.Fatalf("CallTool(games.get): %v", err)
@@ -141,11 +141,11 @@ func TestMCPEndToEndOverHTTP(t *testing.T) {
 	}
 }
 
-// TestMCPGamesGetAcceptsAMatchingProjectIDConfirmation pins the
+// TestMCPGamesGetAcceptsAMatchingGameConfirmation pins the
 // "optional but checked" middle position ScopedArgs implements: an agent
-// that states the project id it expects, and states it correctly, is not
+// that states the game it expects, and states it correctly, is not
 // refused for stating it.
-func TestMCPGamesGetAcceptsAMatchingProjectIDConfirmation(t *testing.T) {
+func TestMCPGamesGetAcceptsAMatchingGameConfirmation(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
@@ -168,13 +168,13 @@ func TestMCPGamesGetAcceptsAMatchingProjectIDConfirmation(t *testing.T) {
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "games.get",
-		Arguments: map[string]any{"project_id": mine.ID.String()},
+		Arguments: map[string]any{"game": mine.Slug},
 	})
 	if err != nil {
 		t.Fatalf("CallTool(games.get): %v", err)
 	}
 	if result.IsError {
-		t.Fatalf("games.get refused a project_id matching the token's own binding: %+v", result.Content)
+		t.Fatalf("games.get refused a game matching the token's own binding: %+v", result.Content)
 	}
 }
 
@@ -206,18 +206,18 @@ func TestMCPInputValidationFailuresAreProseNotACode(t *testing.T) {
 
 	session := connectMCP(t, httpSrv.URL, token)
 
-	// project_id's schema (inferred from ScopedArgs.ProjectID's Go type)
-	// is a string; a number is a schema violation caught before
+	// `game`'s schema (inferred from ScopedArgs.Game's Go type) is a
+	// string; a number is a schema violation caught before
 	// addScopedTool's own wrapper — or any tool handler — ever runs.
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "games.get",
-		Arguments: map[string]any{"project_id": 12345},
+		Arguments: map[string]any{"game": 12345},
 	})
 	if err != nil {
 		t.Fatalf("CallTool(games.get): %v", err)
 	}
 	if !result.IsError {
-		t.Fatal("a malformed project_id must be refused")
+		t.Fatal("a malformed game must be refused")
 	}
 	if len(result.Content) == 0 {
 		t.Fatal("no content on the validation failure")

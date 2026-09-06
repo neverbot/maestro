@@ -588,7 +588,63 @@ and refuses both, `docs.links.list` reads the join from either side and
 refuses neither and both — and neither of those is two names for one
 row. It also carries one open inconsistency of exactly this shape,
 routes addressing a game by uuid while the page addresses it by slug,
-and a second would make that worse rather than better.
+and a second would make that worse rather than better. **That
+inconsistency is closed, 2026-09-06, in the direction this argument
+points — see "A game is addressed by its slug" below.**
+
+### A game is addressed by its slug
+
+**Decided 2026-09-06.** Creating a game asks for a slug and a name, the
+page is served at `/g/{slug}`, and every REST route under the games path
+then took the game's **uuid** — the project middleware parsed the path
+value as one, so a slug there answered "no such game": true, but reading
+as though the game did not exist rather than as though the identifier
+was the wrong kind. A person who had just created a game and was looking
+at it by name had to go and find a uuid before they could mint a token
+or seed anything, and an agent handed a token bound to one game still had
+to learn that game's uuid before its first REST call.
+
+**The slug replaces the uuid; both forms are not accepted.** The filing
+proposed accepting either, and this refuses that for exactly the reason
+the row decision above refuses it: two names for one thing cost every
+call site a decision and an "exactly one of" refusal path and buy a
+caller nothing. A game is not an exception to that rule — if anything it
+is the clearest case of it. A slug is unique per instance under a
+case-folding index, immutable (there is no rename), and already the
+address a human types; `validateSlug` refuses any slug that `uuid.Parse`
+accepts, so the two spellings can never be confused for one another.
+There is nothing a uuid can address here that a slug cannot. Nothing is
+released and no caller outside this repository depended on the uuid form.
+
+Three consequences, each decided rather than inherited:
+
+- **A refusal names what was tried.** `no game named "azeroth" is
+  available to you`, and a value that parses as a uuid additionally gets
+  "a game is addressed by its slug — the name in its /g/ URL — and not by
+  its id", which is the sentence that helps a caller holding the right
+  game and the wrong name for it.
+- **"No such game" and "a game you are not in" are one answer.** A uuid
+  is not guessable, so the old routes could safely answer a non-member
+  with "you are not a member of this game"; a slug is a name someone
+  chose, so the same answer would be an enumeration oracle a stranger
+  could walk. `projects.BySlugForUser` joins membership into the lookup
+  so both collapse to one `not_found` — the shape Task 8's Correction 12
+  specified when it removed the bare `BySlug`, now built.
+- **A token caller is compared, not resolved.** Its game is fixed at the
+  moment the token was minted, so the slug it typed is checked against
+  its own binding and never looked up; a mismatch is a `scope_violation`
+  naming both games, which is honest because both are the caller's own.
+
+The optional `project_id` confirmation on both surfaces became `game`
+and takes a slug in the same change. Leaving it demanding a uuid would
+have made it the only place in the product where a caller had to learn
+one — the rule established and not carried one step, which is the defect
+class this repository keeps finding.
+
+The ids have not gone anywhere here either: `whoami` and `games.get`
+still return `project_id`, every event still carries one, and
+`ProjectScope` is still built around one. The id is simply not what a
+caller types.
 
 The ids have not gone anywhere: every reader still returns them, every
 removal event still carries them, and the stored endpoint columns are

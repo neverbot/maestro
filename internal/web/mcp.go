@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/google/uuid"
@@ -228,30 +230,41 @@ func MCPGamesList(ctx context.Context, deps MCPDeps, caller Caller) (GamesListOu
 	}, nil
 }
 
-// ScopedArgs is embedded in every scoped tool's input type. project_id is
+// ScopedArgs is embedded in every scoped tool's input type. `game` is
 // optional: omitted, the tool acts on the caller's own bound game exactly
-// as if it had not been asked; supplied, it must equal that binding or
+// as if it had not been asked; supplied, it must name that binding or
 // the call fails with scope_violation before the tool's own handler ever
 // runs — it is never used to select which project to query. This gives
 // an agent juggling two tokens for two games a way to state which one it
 // meant to use and be told immediately when it guessed wrong (Nottario
 // requires an equivalent field for the same reason), without turning a
-// caller-supplied id into a lookup key the way this task's first draft
+// caller-supplied name into a lookup key the way this task's first draft
 // of games.get did — see addScopedTool's own doc comment for why that
 // shape was the actual risk a quality review flagged, not merely a
 // missing check.
 type ScopedArgs struct {
-	ProjectID *string `json:"project_id,omitempty"`
+	// Game is the game's slug, as a confirmation and never as a
+	// selector: the caller's game comes from its token binding, and this
+	// says which game the caller *believes* it is working in.
+	//
+	// **It was `project_id` and took a uuid.** It changed with the REST
+	// routes, in the same change and for the same reason: a game is
+	// addressed by its slug now, and leaving one field on one surface
+	// still demanding a uuid would have made this the only place in the
+	// product where a caller had to learn one — the rule established and
+	// not carried one step. The uuid is still in every answer; it is
+	// simply not what a caller types.
+	Game *string `json:"game,omitempty"`
 }
 
-func (a ScopedArgs) requestedProjectID() *string { return a.ProjectID }
+func (a ScopedArgs) requestedGame() *string { return a.Game }
 
-// statedProjectProblem is the one place either surface decides what a
-// stated project_id means. It answers with the wire code a refusal
-// carries, or "" when there is nothing to refuse: absent is silence,
-// a value that is not a uuid names no game at all and is therefore the
-// caller's own malformed argument, and a well-formed id that is not the
-// one the caller is working in is a scope violation.
+// statedGameProblem is the one place either surface decides what a
+// stated `game` means. It answers with the wire code a refusal carries,
+// or "" when there is nothing to refuse: absent is silence, an empty
+// string names no game at all and is therefore the caller's own
+// malformed argument, and any other spelling that is not the game the
+// caller is working in is a scope violation.
 //
 // It is a shared function rather than two matching switches because the
 // REST mirror claims to enforce "the rule ScopedArgs states", and a
@@ -261,26 +274,36 @@ func (a ScopedArgs) requestedProjectID() *string { return a.ProjectID }
 // surface still writes its own message: "this token is bound to another
 // game" is true of a token and meaningless to a designer with a session
 // cookie. The decision is shared; the wording is local.
-func statedProjectProblem(stated *string, bound uuid.UUID) string {
+//
+// **The comparison folds case**, matching projects_slug_key and matching
+// the path segment on the REST routes: a caller that confirmed "Azeroth"
+// while working in "azeroth" has confirmed the right game, and refusing
+// it would make this field harder to satisfy than the address beside it.
+//
+// Where the uuid version of this had three shapes — absent, unparseable,
+// wrong — a slug has two, because there is no spelling of a slug that is
+// malformed rather than simply wrong. The empty string is kept as its
+// own refusal for the reason the review that added it gave: silently
+// accepting `""` is how the field stops being a confirmation at all.
+func statedGameProblem(stated *string, boundSlug string) string {
 	if stated == nil {
 		return ""
 	}
-	id, err := uuid.Parse(*stated)
-	if err != nil {
+	if *stated == "" {
 		return errCodeBadRequest
 	}
-	if id != bound {
+	if !strings.EqualFold(*stated, boundSlug) {
 		return errCodeScopeViolation
 	}
 	return ""
 }
 
 // scopedInput is what addScopedTool requires of its In type parameter:
-// the ability to report the optional project_id confirmation ScopedArgs
+// the ability to report the optional `game` confirmation ScopedArgs
 // carries. Embedding ScopedArgs satisfies this automatically, by Go's
 // usual method promotion.
 type scopedInput interface {
-	requestedProjectID() *string
+	requestedGame() *string
 }
 
 type whoamiInput struct{ ScopedArgs }
@@ -290,7 +313,7 @@ type gamesGetInput struct{ ScopedArgs }
 // addScopedTool registers a tool whose handler needs the caller's own
 // resolved project id, not a raw Caller: it resolves the caller once,
 // enforces game isolation once (both the token's own binding and, if the
-// agent supplied one, that its stated project_id agrees with it), maps a
+// agent supplied one, that its stated `game` agrees with it), maps a
 // domain error once, and suppresses structured output on every error
 // path once (see mcpErrorResult's own doc comment, and this task's plan
 // corrections, for why a fabricated success payload riding along with an
@@ -347,11 +370,25 @@ func addScopedTool[In scopedInput, Out any](s *Server, srv *mcp.Server, deps MCP
 		if !ok {
 			return mcpErrorResult(errCodeScopeViolation, "this caller has no game binding", nil), nil, nil
 		}
-		switch statedProjectProblem(in.requestedProjectID(), projectID) {
-		case errCodeBadRequest:
-			return mcpErrorResult(errCodeBadRequest, "project_id must be a valid uuid", nil), nil, nil
-		case errCodeScopeViolation:
-			return mcpErrorResult(errCodeScopeViolation, "this token is bound to another game", nil), nil, nil
+		// The bound game's slug is read only when the caller stated one,
+		// so the confirmation field costs a query exactly when it is
+		// used and nothing at all otherwise. The REST mirror pays
+		// nothing either way: requireProject resolved the game *by* its
+		// slug, so ProjectScope already carries it.
+		if stated := in.requestedGame(); stated != nil {
+			bound, err := deps.Projects.ByID(ctx, projectID)
+			if err != nil {
+				return mcpErrorFor(ctx, tool.Name, caller, err), nil, nil
+			}
+			switch statedGameProblem(stated, bound.Slug) {
+			case errCodeBadRequest:
+				return mcpErrorResult(errCodeBadRequest,
+					"game must name a game: pass this game's slug, or leave it out", nil), nil, nil
+			case errCodeScopeViolation:
+				return mcpErrorResult(errCodeScopeViolation, fmt.Sprintf(
+					"this token is bound to the game %q, and this request names %q",
+					bound.Slug, *stated), nil), nil, nil
+			}
 		}
 		out, err := handler(ctx, deps, projectID, in)
 		if err != nil {
@@ -388,8 +425,13 @@ func (s *Server) newMCPServer() *mcp.Server {
 	deps := s.deps()
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
-		Name:         "whoami",
-		Description:  "Report the calling identity: user, admin flag, and the single game this token is bound to.",
+		Name: "whoami",
+		Description: "Report the calling identity: user, admin flag, and the single game this " +
+			"token is bound to. **project_slug is that game's address** — it is what the " +
+			"REST routes take in /api/games/{game}/…, what /g/{game} shows a designer, and " +
+			"the value the optional `game` argument on every other tool is checked against. " +
+			"project_id is returned too and is not an address: nothing on either surface " +
+			"takes it.",
 		OutputSchema: whoamiOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, _ uuid.UUID, _ whoamiInput) (WhoamiOutput, error) {
@@ -408,8 +450,10 @@ func (s *Server) newMCPServer() *mcp.Server {
 	})
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
-		Name:         "games.get",
-		Description:  "Look up the caller's own game. Refuses any game outside the caller's own scope, instance admins included.",
+		Name: "games.get",
+		Description: "Look up the caller's own game: its slug, its name and its id. Refuses " +
+			"any game outside the caller's own scope, instance admins included. The slug " +
+			"is the address — see whoami.",
 		OutputSchema: gameOutputSchema,
 		Annotations:  readOnlyTool(),
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, _ gamesGetInput) (GameOutput, error) {

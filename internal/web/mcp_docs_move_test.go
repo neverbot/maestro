@@ -226,7 +226,7 @@ func TestTheMoveRefusalsReachTheSurfaceWithTheirFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := jsonRequest(http.MethodPost,
-				"/api/games/"+f.game.String()+"/docs/move", tc.body)
+				"/api/games/"+f.gameSlug+"/docs/move", tc.body)
 			req.Header.Set("Authorization", "Bearer "+f.token)
 			rec := httptest.NewRecorder()
 			f.srv.ServeHTTP(rec, req)
@@ -241,7 +241,7 @@ func TestTheMoveRefusalsReachTheSurfaceWithTheirFields(t *testing.T) {
 	}
 	// The "two bad paths" case above must carry *both* ends, which is the
 	// whole reason pathProblemsAt exists; the table only asserts one.
-	req := jsonRequest(http.MethodPost, "/api/games/"+f.game.String()+"/docs/move",
+	req := jsonRequest(http.MethodPost, "/api/games/"+f.gameSlug+"/docs/move",
 		`{"from":"/leading","to":"trailing/","expected_version":1}`)
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	rec := httptest.NewRecorder()
@@ -327,7 +327,7 @@ func TestTheRESTMirrorsOfMoveAndKinds(t *testing.T) {
 		t.Fatalf("docs.write: %v", err)
 	}
 
-	base := "/api/games/" + f.game.String() + "/docs"
+	base := "/api/games/" + f.gameSlug + "/docs"
 
 	req := jsonRequest(http.MethodPost, base+"/move",
 		`{"from":"lore/dusk.md","to":"zones/dusk.md","expected_version":1}`)

@@ -1305,7 +1305,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 }
 
 // TestADocsToolCallIsRefusedForAnotherGamesIDOverTheWire pins that the
-// optional project_id confirmation is checked for these tools too — the
+// optional `game` confirmation is checked for these tools too — the
 // check addScopedTool makes, exercised at a docs tool so it is not only
 // the metamodel's that is covered.
 func TestADocsToolCallIsRefusedForAnotherGamesIDOverTheWire(t *testing.T) {
@@ -1315,7 +1315,7 @@ func TestADocsToolCallIsRefusedForAnotherGamesIDOverTheWire(t *testing.T) {
 	session := connectMCP(t, httpSrv.URL, f.token)
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "docs.list", Arguments: map[string]any{"project_id": f.other.String()},
+		Name: "docs.list", Arguments: map[string]any{"game": f.otherSlug},
 	})
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)

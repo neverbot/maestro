@@ -132,12 +132,12 @@ func decodeContentBody(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 // checkStatedProject enforces, on this surface, the rule ScopedArgs
-// states for the MCP one: an optional project_id in the body is a
+// states for the MCP one: an optional `game` in the body is a
 // confirmation, never a selector. Present and disagreeing with the game
 // in the URL, the call is refused; present and agreeing, it is accepted;
 // absent, nothing happens.
 //
-// Silently ignoring a disagreeing project_id would be the alternative,
+// Silently ignoring a disagreeing `game` would be the alternative,
 // and it is the dangerous one: a client that has lost track of which
 // game it is editing would be told its write succeeded, in the other
 // game, which is exactly the mistake the field exists to catch.
@@ -148,14 +148,14 @@ func decodeContentBody(w http.ResponseWriter, r *http.Request, v any) bool {
 // surface's own: the caller here holds a session, not a token, and the
 // URL is what it disagreed with.
 func checkStatedProject(w http.ResponseWriter, scope ProjectScope, in scopedInput) bool {
-	switch statedProjectProblem(in.requestedProjectID(), scope.ProjectID) {
+	switch statedGameProblem(in.requestedGame(), scope.Slug) {
 	case errCodeBadRequest:
 		writeError(w, http.StatusBadRequest, errCodeBadRequest,
-			"project_id must be a valid uuid")
+			"game must name a game: pass this game's slug, or leave it out")
 		return false
 	case errCodeScopeViolation:
 		writeError(w, http.StatusForbidden, errCodeScopeViolation,
-			"the project_id in this request names a different game than the URL")
+			"the game in this request names a different game than the URL")
 		return false
 	}
 	return true
@@ -825,7 +825,7 @@ func querySingle(w http.ResponseWriter, r *http.Request, name string) (raw strin
 // parameter written with no value is refused rather than read as absent.
 //
 // That is the same judgement checkStatedProject makes about an empty
-// `project_id` — an empty confirmation confirms nothing — applied to the
+// `game` — an empty confirmation confirms nothing — applied to the
 // query string, and it holds here for the same reason. `?invalid=` used
 // to answer with the whole listing, so a designer whose client dropped
 // the value of the filter naming the rows that no longer fit their type

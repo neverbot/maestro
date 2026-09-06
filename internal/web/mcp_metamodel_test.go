@@ -61,12 +61,14 @@ func newMetamodelTestServer(t *testing.T) (*web.Server, *identity.Service, *proj
 // and a second game the same user owns, to prove isolation is about the
 // token's binding and not about ownership.
 type metamodelFixture struct {
-	deps   web.MCPDeps
-	caller web.Caller
-	game   uuid.UUID
-	other  uuid.UUID
-	token  string
-	srv    *web.Server
+	deps      web.MCPDeps
+	caller    web.Caller
+	game      uuid.UUID
+	gameSlug  string
+	other     uuid.UUID
+	otherSlug string
+	token     string
+	srv       *web.Server
 	// markdown is the prose domain behind f.deps, handed out so a test
 	// can seed documents the way the metamodel ones seed entities.
 	markdown *markdown.Service
@@ -102,12 +104,14 @@ func newMetamodelFixture(t *testing.T) metamodelFixture {
 		t.Fatalf("CallerForToken: %v", err)
 	}
 	return metamodelFixture{
-		deps:   web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
-		caller: caller,
-		game:   game.ID,
-		other:  other.ID,
-		token:  token,
-		srv:    srv,
+		deps:      web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
+		caller:    caller,
+		game:      game.ID,
+		gameSlug:  game.Slug,
+		other:     other.ID,
+		otherSlug: other.Slug,
+		token:     token,
+		srv:       srv,
 
 		markdown: md,
 	}

@@ -670,12 +670,12 @@ function describeDocKinds(body) {
 // rather than showing a wrong vocabulary: the documents below are the
 // page's subject and a missing summary above them is a smaller lie than
 // a stale one.
-async function renderDocKinds(gameID) {
+async function renderDocKinds(game) {
   const el = document.getElementById("doc-kinds");
   if (!el) {
     return;
   }
-  const result = await fetchAPI(`/api/games/${gameID}/docs/kinds`);
+  const result = await fetchAPI(`/api/games/${game}/docs/kinds`);
   if (!result.ok) {
     el.hidden = true;
     return;
@@ -696,7 +696,7 @@ async function renderDocKinds(gameID) {
 // empty list and a request that never answered look identical on a page
 // that renders a plausible blank, and only one of them means "this game
 // has no documents".
-async function renderDocuments(gameID, slug, role) {
+async function renderDocuments(game, slug, role) {
   const listEl = document.getElementById("docs");
   const emptyEl = document.getElementById("docs-empty");
   const errorEl = document.getElementById("docs-error");
@@ -711,7 +711,7 @@ async function renderDocuments(gameID, slug, role) {
 
   // The vocabulary first, because it describes the list below it and a
   // reader scanning down should meet it before the rows.
-  await renderDocKinds(gameID);
+  await renderDocKinds(game);
 
   let cursor = null;
   let rendered = 0;
@@ -719,7 +719,7 @@ async function renderDocuments(gameID, slug, role) {
   async function loadPage() {
     if (moreEl) moreEl.disabled = true;
     const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-    const result = await fetchAPI(`/api/games/${gameID}/docs${query}`);
+    const result = await fetchAPI(`/api/games/${game}/docs${query}`);
     if (!result.ok) {
       if (result.expired) {
         goToLogin();
@@ -775,9 +775,9 @@ async function renderDocuments(gameID, slug, role) {
 // message where the totals would have gone: a page that says what went
 // wrong beats one that silently shows an empty catalogue, which is
 // indistinguishable from a game with nothing in it.
-async function renderGameSummary(gameID, slug) {
+async function renderGameSummary(game, slug) {
   const summaryEl = document.getElementById("game-summary");
-  const result = await fetchAPI(`/api/games/${gameID}/summary`);
+  const result = await fetchAPI(`/api/games/${game}/summary`);
   if (!result.ok) {
     if (result.expired) {
       goToLogin();
@@ -845,7 +845,7 @@ async function renderGameSummary(gameID, slug) {
     ),
   );
 
-  await renderDocuments(gameID, slug, summary.role);
+  await renderDocuments(game, slug, summary.role);
 
   const content = document.getElementById("game-content");
   if (content) {
@@ -855,11 +855,17 @@ async function renderGameSummary(gameID, slug) {
   }
 }
 
-// game.html: resolve this page's own name from GET /api/games — there is
-// no server-side slug resolution on this route (Task 8's Round 2
-// Correction 12 — /g/{slug} only ever serves this static shell), so the
-// slug comes from the URL the browser already has, and the name comes
-// from whichever row in the list matches it.
+// game.html: resolve this page's own name from GET /api/games — /g/{slug}
+// only ever serves this static shell, so the slug comes from the URL the
+// browser already has and the name comes from whichever row in the list
+// matches it.
+//
+// **The list is still fetched, and it is no longer fetched for an id.**
+// The API routes take the slug now, the same value this URL carries, so
+// nothing here has to translate one address into another; what the list
+// still supplies is the game's *name* for the heading, and the fact that
+// the slug names a game this user can reach at all — which is what tells
+// "Game not found" apart from a blank page.
 const gameNameEl = document.getElementById("game-name");
 if (gameNameEl) {
   renderHeader();
@@ -890,7 +896,14 @@ if (gameNameEl) {
       // that cannot be reached; see LAST_GAME_KEY's own comment above for
       // why a wrong remembered value is never merely harmless.
       if (slug) rememberGame(slug);
-      await renderGameSummary(game.id, slug);
+      // The game's *stored* slug, not the one out of the URL: the
+      // routes match it without regard to case, but a page that echoed
+      // the caller's own casing back into every request would send
+      // "/g/Azeroth" to "/api/games/Azeroth/..." and read as though
+      // that were the game's address. The id is no longer used
+      // anywhere on this page — the API takes the slug now, exactly as
+      // this URL does.
+      await renderGameSummary(game.slug, slug);
     } else {
       gameNameEl.textContent = "Game not found";
       if (summaryEl) {

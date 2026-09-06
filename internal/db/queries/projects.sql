@@ -6,6 +6,34 @@ RETURNING *;
 -- name: GetProjectBySlug :one
 SELECT * FROM projects WHERE lower(slug) = lower(sqlc.arg('slug')::text);
 
+-- name: GetProjectBySlugForUser :one
+-- The slug lookup every caller-facing path uses, and the reason
+-- GetProjectBySlug above has no Go caller of its own.
+--
+-- **The join is the whole point and it is a security property, not an
+-- optimisation.** A slug is a name a human chose and typed, so it is
+-- guessable in a way a uuid is not; resolving one without a membership
+-- check and *then* judging standing would let a stranger tell "azeroth
+-- exists and you are not in it" from "there is no azeroth", one guess at
+-- a time. Joining membership into the lookup collapses both into "no
+-- rows", which is the answer projects.ErrNotAMember's own doc comment
+-- already argues for and the shape Task 8's Correction 12 specified when
+-- it removed the bare BySlug this replaces.
+--
+-- The role comes back with the project because the caller that needs one
+-- needs the other in the same breath (internal/web's requireProject),
+-- and two queries would be two chances for a demotion to land between
+-- them -- the exact time-of-check-to-time-of-use window requireProject's
+-- own doc comment records closing once already.
+--
+-- lower(slug) on both sides, matching the case-insensitive uniqueness a
+-- slug already has: /g/Azeroth and /g/azeroth are one game.
+SELECT p.id, p.slug, p.name, m.role
+FROM projects p
+JOIN memberships m ON m.project_id = p.id
+WHERE lower(p.slug) = lower(sqlc.arg('slug')::text)
+  AND m.user_id = sqlc.arg('user_id')::uuid;
+
 -- name: GetProjectByID :one
 SELECT * FROM projects WHERE id = sqlc.arg('id')::uuid;
 

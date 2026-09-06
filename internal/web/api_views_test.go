@@ -34,16 +34,18 @@ import (
 // subscriber over the endpoint a browser actually subscribes to.
 
 type viewsRESTFixture struct {
-	srv     *web.Server
-	ids     *identity.Service
-	proj    *projects.Service
-	views   *views.Service
-	meta    *metamodel.Service
-	game    uuid.UUID
-	other   uuid.UUID
-	ownerID uuid.UUID
-	cookie  *http.Cookie
-	hub     *realtime.Hub
+	srv       *web.Server
+	ids       *identity.Service
+	proj      *projects.Service
+	views     *views.Service
+	meta      *metamodel.Service
+	game      uuid.UUID
+	gameSlug  string
+	other     uuid.UUID
+	otherSlug string
+	ownerID   uuid.UUID
+	cookie    *http.Cookie
+	hub       *realtime.Hub
 }
 
 // newViewsRESTFixture wires a server the way cmd/maestro does: one hub,
@@ -86,7 +88,8 @@ func newViewsRESTFixture(t *testing.T) viewsRESTFixture {
 	}
 	f := viewsRESTFixture{
 		srv: srv, ids: ids, proj: projSvc, views: vs, meta: mm,
-		game: game.ID, other: other.ID, ownerID: owner.ID, hub: hub,
+		game: game.ID, gameSlug: game.Slug, other: other.ID, otherSlug: other.Slug,
+		ownerID: owner.ID, hub: hub,
 		cookie: loginAs(t, srv, "owner@studio.com"),
 	}
 	f.seed(t)
@@ -115,7 +118,7 @@ func (f viewsRESTFixture) seed(t *testing.T) {
 }
 
 func (f viewsRESTFixture) path(suffix string) string {
-	return "/api/games/" + f.game.String() + suffix
+	return "/api/games/" + f.gameSlug + suffix
 }
 
 // call makes one request as the given cookie, with a JSON body when one
@@ -153,7 +156,7 @@ func (f viewsRESTFixture) uploadAsset(t *testing.T, filename string) string {
 	t.Helper()
 	body := bytes.NewReader(testPNG(t, 24, 16))
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/games/"+f.game.String()+"/view-assets?filename="+filename, body)
+		"/api/games/"+f.gameSlug+"/view-assets?filename="+filename, body)
 	req.Header.Set("Content-Type", "image/png")
 	req.AddCookie(f.cookie)
 	rec := httptest.NewRecorder()
@@ -446,8 +449,8 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 	// Uploaded before the streams open, so the upload's own traffic
 	// cannot arrive as a frame this test then reads as a view event.
 	background := f.uploadAsset(t, "ground.png")
-	viewerStream := openStream(t, ts, f.game.String(), viewerCookie.Value)
-	agentStream := openTokenStream(t, ts, f.game.String(), secret)
+	viewerStream := openStream(t, ts, f.gameSlug, viewerCookie.Value)
+	agentStream := openTokenStream(t, ts, f.gameSlug, secret)
 
 	// Every write goes through the *route*, not through the service:
 	// this test is about the wiring, and a direct service call would
@@ -627,20 +630,20 @@ func TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute(t *t
 		{"/views/by-key/route/background", map[string]any{}},
 	} {
 		t.Run(route.suffix, func(t *testing.T) {
-			// The control first: the same body with no project_id at all
+			// The control first: the same body with no `game` at all
 			// is accepted, so the refusal below is about the field and
 			// not about the request being malformed.
 			if rec := f.call(t, f.cookie, http.MethodPost, f.path(route.suffix),
 				route.body); rec.Code != http.StatusOK {
-				t.Fatalf("without a project_id = %d, want 200: %s", rec.Code, rec.Body.String())
+				t.Fatalf("without a game = %d, want 200: %s", rec.Code, rec.Body.String())
 			}
-			body := map[string]any{"project_id": f.other.String()}
+			body := map[string]any{"game": f.otherSlug}
 			for k, v := range route.body {
 				body[k] = v
 			}
 			rec := f.call(t, f.cookie, http.MethodPost, f.path(route.suffix), body)
 			if rec.Code != http.StatusForbidden {
-				t.Fatalf("a project_id naming another game = %d, want 403: %s",
+				t.Fatalf("a game naming another game = %d, want 403: %s",
 					rec.Code, rec.Body.String())
 			}
 			var answer struct {

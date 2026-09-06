@@ -18,9 +18,9 @@ import (
 // see TestEventsStreamDeliversPublishedEvent's own doc comment for why)
 // authenticated as cookie, past its initial ": connected\n\n" comment
 // frame, and returns a reader positioned to read the next real event.
-func openStream(t *testing.T, ts *httptest.Server, projectID, cookie string) *bufio.Reader {
+func openStream(t *testing.T, ts *httptest.Server, gameSlug, cookie string) *bufio.Reader {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+projectID+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+gameSlug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -50,9 +50,9 @@ func openStream(t *testing.T, ts *httptest.Server, projectID, cookie string) *bu
 // TestChangeRolePublishesMemberUpdated and its siblings never exercised,
 // which is exactly the gap that let a token subscriber receive another
 // agent's token.minted event before this task's second review round.
-func openTokenStream(t *testing.T, ts *httptest.Server, projectID, token string) *bufio.Reader {
+func openTokenStream(t *testing.T, ts *httptest.Server, gameSlug, token string) *bufio.Reader {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+projectID+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+gameSlug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -106,9 +106,9 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	viewerReader := openStream(t, ts, project.ID.String(), viewerCookie.Value)
+	viewerReader := openStream(t, ts, project.Slug, viewerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.ID.String()+"/members/"+member.ID.String(),
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.Slug+"/members/"+member.ID.String(),
 		strings.NewReader(`{"role":"editor"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -156,9 +156,9 @@ func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"/members/"+member.ID.String(), nil)
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"/members/"+member.ID.String(), nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -200,9 +200,9 @@ func TestDeleteGamePublishesGameDeleted(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -250,10 +250,10 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
-	viewerReader := openStream(t, ts, project.ID.String(), viewerCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
+	viewerReader := openStream(t, ts, project.Slug, viewerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/tokens", strings.NewReader(`{"label":"agent"}`))
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"agent"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -310,9 +310,9 @@ func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"/tokens/"+tok.ID.String(), nil)
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"/tokens/"+tok.ID.String(), nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -359,10 +359,10 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
-	editorReader := openStream(t, ts, project.ID.String(), editorCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
+	editorReader := openStream(t, ts, project.Slug, editorCookie.Value)
 
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/invites",
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
 		strings.NewReader(`{"email":"new@studio.com","role":"viewer"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -434,10 +434,10 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	tokenReader := openTokenStream(t, ts, project.ID.String(), agentToken)
+	tokenReader := openTokenStream(t, ts, project.Slug, agentToken)
 
 	// Trigger a member.updated (HumanOnly) via a real PATCH request.
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.ID.String()+"/members/"+other.ID.String(),
+	req, err := http.NewRequest(http.MethodPatch, ts.URL+"/api/games/"+project.Slug+"/members/"+other.ID.String(),
 		strings.NewReader(`{"role":"editor"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -455,7 +455,7 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 
 	// Trigger a token.minted (HumanOnly, and MinRole editor which the
 	// token subscriber's own Role would otherwise satisfy).
-	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/tokens", strings.NewReader(`{"label":"second agent"}`))
+	req, err = http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"second agent"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -472,7 +472,7 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 
 	// Delete the game: eventGameDeleted is not HumanOnly, so this must
 	// be the first thing the token stream actually receives.
-	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -513,9 +513,9 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/invites",
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
 		strings.NewReader(`{"email":"third@studio.com","role":"viewer"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -541,7 +541,7 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 		t.Fatalf("Kind = %q, want invite.created", kind)
 	}
 
-	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.ID.String()+"/invites/"+created.ID, nil)
+	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/games/"+project.Slug+"/invites/"+created.ID, nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -589,9 +589,9 @@ func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testi
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
 
-	ownerReader := openStream(t, ts, project.ID.String(), ownerCookie.Value)
+	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.ID.String()+"/invites",
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
 		strings.NewReader(`{"email":"","role":"viewer"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)

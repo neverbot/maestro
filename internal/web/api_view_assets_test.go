@@ -34,13 +34,15 @@ import (
 // one game cannot reach another's images through a leaked id.
 
 type assetFixture struct {
-	srv     *web.Server
-	ids     *identity.Service
-	proj    *projects.Service
-	game    uuid.UUID
-	other   uuid.UUID
-	ownerID uuid.UUID
-	cookie  *http.Cookie
+	srv       *web.Server
+	ids       *identity.Service
+	proj      *projects.Service
+	game      uuid.UUID
+	gameSlug  string
+	other     uuid.UUID
+	otherSlug string
+	ownerID   uuid.UUID
+	cookie    *http.Cookie
 }
 
 func newAssetFixture(t *testing.T) assetFixture {
@@ -76,7 +78,8 @@ func newAssetFixture(t *testing.T) assetFixture {
 		t.Fatalf("Create the second game: %v", err)
 	}
 	return assetFixture{
-		srv: srv, ids: ids, proj: projSvc, game: game.ID, other: other.ID,
+		srv: srv, ids: ids, proj: projSvc,
+		game: game.ID, gameSlug: game.Slug, other: other.ID, otherSlug: other.Slug,
 		ownerID: owner.ID, cookie: loginAs(t, srv, "owner@studio.com"),
 	}
 }
@@ -96,16 +99,16 @@ func (f assetFixture) send(t *testing.T, cookie *http.Cookie, method, path strin
 	return rec
 }
 
-func (f assetFixture) uploadPath(game uuid.UUID, filename string) string {
-	return "/api/games/" + game.String() + "/view-assets?filename=" + filename
+func (f assetFixture) uploadPath(gameSlug, filename string) string {
+	return "/api/games/" + gameSlug + "/view-assets?filename=" + filename
 }
 
 // upload posts one image and returns the decoded answer.
-func (f assetFixture) upload(t *testing.T, game uuid.UUID, filename, contentType string,
+func (f assetFixture) upload(t *testing.T, gameSlug, filename, contentType string,
 	raw []byte,
 ) web.ViewAssetOutput {
 	t.Helper()
-	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(game, filename),
+	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(gameSlug, filename),
 		contentType, raw)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload %s = %d: %s", filename, rec.Code, rec.Body.String())
@@ -155,7 +158,7 @@ func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 		{"map.jpg", testPNG(t, 37, 19), "image/png"},
 		{"map.png", testJPEG(t, 48, 21), "image/jpeg"},
 	} {
-		asset := f.upload(t, f.game, tc.filename, "application/octet-stream", tc.raw)
+		asset := f.upload(t, f.gameSlug, tc.filename, "application/octet-stream", tc.raw)
 		if asset.Mime != tc.wantMime {
 			t.Fatalf("%s stored as %q, want %q", tc.filename, asset.Mime, tc.wantMime)
 		}
@@ -203,7 +206,7 @@ func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 	f := newAssetFixture(t)
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
-	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.game, "world-map.png"),
+	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.gameSlug, "world-map.png"),
 		"image/png", svg)
 	assertError(t, rec, http.StatusBadRequest, "invalid_input", "/bytes")
 	if !strings.Contains(rec.Body.String(), "SVG") {
@@ -212,7 +215,7 @@ func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 	}
 	// Nothing was stored, so a second request cannot serve it.
 	rec = f.send(t, f.cookie, http.MethodGet,
-		"/api/games/"+f.game.String()+"/view-assets", "", nil)
+		"/api/games/"+f.gameSlug+"/view-assets", "", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -242,7 +245,7 @@ func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 	f := newAssetFixture(t)
 	oversize := make([]byte, views.MaxAssetBytes+1024)
 	copy(oversize, testPNG(t, 8, 8))
-	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.game, "enormous.png"),
+	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.gameSlug, "enormous.png"),
 		"image/png", oversize)
 	assertError(t, rec, http.StatusBadRequest, "invalid_input", "/bytes")
 	// The advice, not merely the status: a designer whose world map is
@@ -254,7 +257,7 @@ func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 	// The control, and it is not a formality: a transport bound set one
 	// byte too tight would refuse every legitimate image and this test
 	// would still pass without it.
-	f.upload(t, f.game, "fine.png", "image/png", testPNG(t, 8, 8))
+	f.upload(t, f.gameSlug, "fine.png", "image/png", testPNG(t, 8, 8))
 }
 
 // TestAnAssetOfAnotherGameIsNotServedOverHTTP is the isolation sweep for
@@ -266,9 +269,9 @@ func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 // another's page.
 func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	f := newAssetFixture(t)
-	theirs := f.upload(t, f.other, "le-mans.png", "image/png", testPNG(t, 12, 8))
+	theirs := f.upload(t, f.otherSlug, "le-mans.png", "image/png", testPNG(t, 12, 8))
 
-	crossed := "/api/games/" + f.game.String() + "/view-assets/" + theirs.ID
+	crossed := "/api/games/" + f.gameSlug + "/view-assets/" + theirs.ID
 	if rec := f.send(t, f.cookie, http.MethodGet, crossed, "", nil); rec.Code !=
 		http.StatusNotFound {
 		t.Fatalf("serving across games = %d, want 404: %s", rec.Code, rec.Body.String())
@@ -279,7 +282,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	}
 	// The control: the same id under its own game is served and then
 	// deleted, so the two refusals above are about the game.
-	own := "/api/games/" + f.other.String() + "/view-assets/" + theirs.ID
+	own := "/api/games/" + f.otherSlug + "/view-assets/" + theirs.ID
 	if rec := f.send(t, f.cookie, http.MethodGet, own, "", nil); rec.Code != http.StatusOK {
 		t.Fatalf("serving its own game = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -292,7 +295,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 	}
 	// The listing is scoped the same way.
 	rec := f.send(t, f.cookie, http.MethodGet,
-		"/api/games/"+f.game.String()+"/view-assets", "", nil)
+		"/api/games/"+f.gameSlug+"/view-assets", "", nil)
 	var listing struct {
 		Assets []web.ViewAssetOutput `json:"assets"`
 	}
@@ -312,7 +315,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
 	f := newAssetFixture(t)
 	ctx := context.Background()
-	asset := f.upload(t, f.game, "azeroth.png", "image/png", testPNG(t, 20, 10))
+	asset := f.upload(t, f.gameSlug, "azeroth.png", "image/png", testPNG(t, 20, 10))
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
 		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
@@ -329,7 +332,7 @@ func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
 		http.StatusOK {
 		t.Fatalf("a viewer must see the background: %d %s", rec.Code, rec.Body.String())
 	}
-	rec := f.send(t, cookie, http.MethodPost, f.uploadPath(f.game, "sneaky.png"),
+	rec := f.send(t, cookie, http.MethodPost, f.uploadPath(f.gameSlug, "sneaky.png"),
 		"image/png", testPNG(t, 8, 8))
 	assertError(t, rec, http.StatusForbidden, "forbidden", "")
 }
@@ -385,7 +388,7 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 		Projects: f.proj,
 	})
 	req := httptest.NewRequest(http.MethodGet,
-		"/api/games/"+f.game.String()+"/view-assets", nil)
+		"/api/games/"+f.gameSlug+"/view-assets", nil)
 	req.AddCookie(loginAs(t, bare, "owner@studio.com"))
 	rec := httptest.NewRecorder()
 	bare.ServeHTTP(rec, req)
@@ -409,13 +412,13 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 	f := newAssetFixture(t)
 	for i := 0; i < 5; i++ {
-		f.upload(t, f.game, fmt.Sprintf("map-%d.png", i), "image/png", testPNG(t, 8+i, 8))
+		f.upload(t, f.gameSlug, fmt.Sprintf("map-%d.png", i), "image/png", testPNG(t, 8+i, 8))
 	}
 
 	list := func(query string) (ids []string, next string) {
 		t.Helper()
 		rec := f.send(t, f.cookie, http.MethodGet,
-			"/api/games/"+f.game.String()+"/view-assets"+query, "", nil)
+			"/api/games/"+f.gameSlug+"/view-assets"+query, "", nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("list%s = %d: %s", query, rec.Code, rec.Body.String())
 		}

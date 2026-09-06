@@ -783,7 +783,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
-		ts.URL+"/api/games/"+game.ID.String()+"/events", nil)
+		ts.URL+"/api/games/"+game.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
@@ -804,7 +804,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 			t.Fatalf("marshal: %v", err)
 		}
 		req, err := http.NewRequest(http.MethodPost,
-			ts.URL+"/api/games/"+game.ID.String()+suffix, strings.NewReader(string(raw)))
+			ts.URL+"/api/games/"+game.Slug+suffix, strings.NewReader(string(raw)))
 		if err != nil {
 			t.Fatalf("NewRequest: %v", err)
 		}
@@ -890,7 +890,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	// And a delete, over the route whose arguments travel in the query
 	// string.
 	del, err := http.NewRequest(http.MethodDelete,
-		ts.URL+"/api/games/"+game.ID.String()+
+		ts.URL+"/api/games/"+game.Slug+
 			"/docs/one?path=lore%2Fduskwood&expected_version=3", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
@@ -962,7 +962,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	post := func(suffix, body string) {
 		t.Helper()
 		req, err := http.NewRequest(http.MethodPost,
-			ts.URL+"/api/games/"+game.ID.String()+suffix, strings.NewReader(body))
+			ts.URL+"/api/games/"+game.Slug+suffix, strings.NewReader(body))
 		if err != nil {
 			t.Fatalf("NewRequest: %v", err)
 		}
@@ -984,7 +984,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet,
-		ts.URL+"/api/games/"+game.ID.String()+"/events", nil)
+		ts.URL+"/api/games/"+game.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
@@ -1111,7 +1111,7 @@ func TestAProseRouteOnAnInstanceWithoutTheServiceIsRefused(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+game.ID.String()+"/docs", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+game.Slug+"/docs", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)

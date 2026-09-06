@@ -245,7 +245,7 @@ async function runCase({
     if (url === "/api/games") {
       return { ok: true, status: 200, json: async () => ({ games: [GAME] }) };
     }
-    const base = `/api/games/${GAME.id}`;
+    const base = `/api/games/${GAME.slug}`;
     if (url.startsWith(`${base}/docs/rendered`)) {
       return { ok: renderedStatus === 200, status: renderedStatus, json: async () => rendered };
     }

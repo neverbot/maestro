@@ -263,7 +263,7 @@ func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"email":"designer@studio.com","role":"editor"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"designer@studio.com","role":"editor"}`))
 	createReq.AddCookie(cookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -287,7 +287,7 @@ func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 		t.Fatalf("role = %q, want editor", created.Role)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/invites", nil)
 	listReq.AddCookie(cookie)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
@@ -364,7 +364,7 @@ func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "editor@studio.com")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"role":"viewer"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"role":"viewer"}`))
 	createReq.AddCookie(cookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -373,7 +373,7 @@ func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 		t.Fatalf("create: status = %d, want 403: %s", createRec.Code, createRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/invites", nil)
 	listReq.AddCookie(cookie)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
@@ -381,7 +381,7 @@ func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 		t.Fatalf("list: status = %d, want 403: %s", listRec.Code, listRec.Body.String())
 	}
 
-	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/invites/"+existing.ID.String(), nil)
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/invites/"+existing.ID.String(), nil)
 	revokeReq.AddCookie(cookie)
 	revokeRec := httptest.NewRecorder()
 	srv.ServeHTTP(revokeRec, revokeReq)
@@ -400,7 +400,7 @@ func TestOwnerCanInviteAsOwner(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"email":"cofounder@studio.com","role":"owner"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"cofounder@studio.com","role":"owner"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -438,7 +438,7 @@ func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 	founderCookie := loginAs(t, srv, "founder@studio.com")
 	cofounderCookie := loginAs(t, srv, "cofounder@studio.com")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"email":"third@studio.com","role":"owner"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"third@studio.com","role":"owner"}`))
 	createReq.AddCookie(founderCookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -463,7 +463,7 @@ func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 
 	// The co-founder — who did not mint it — can still attribute it, and
 	// sees it as live.
-	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/invites", nil)
 	listReq.AddCookie(cofounderCookie)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
@@ -495,7 +495,7 @@ func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 
 	// The co-founder revokes it; it must now list as revoked, not
 	// disappear and not read as still live.
-	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/invites/"+created.ID, nil)
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/invites/"+created.ID, nil)
 	revokeReq.AddCookie(cofounderCookie)
 	revokeRec := httptest.NewRecorder()
 	srv.ServeHTTP(revokeRec, revokeReq)
@@ -504,7 +504,7 @@ func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 	}
 
 	listRec2 := httptest.NewRecorder()
-	listReq2 := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq2 := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/invites", nil)
 	listReq2.AddCookie(founderCookie)
 	srv.ServeHTTP(listRec2, listReq2)
 	var listedAfter struct {
@@ -548,7 +548,7 @@ func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 	cookie := loginAs(t, srv, "owner@studio.com")
 
 	for name, inviteID := range map[string]string{"unknown": uuid.NewString(), "foreign": foreignInvite.ID.String()} {
-		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.ID.String()+"/invites/"+inviteID, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.Slug+"/invites/"+inviteID, nil)
 		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -588,29 +588,33 @@ func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "outsider@studio.com")
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/invites", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/invites", nil)
 	listReq.AddCookie(cookie)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusForbidden {
-		t.Fatalf("list: status = %d, want 403: %s", listRec.Code, listRec.Body.String())
+	// 404 and not 403, since a game is addressed by its slug: a slug
+	// is guessable where a uuid was not, so "that game exists and you
+	// are not in it" and "there is no such game" are deliberately one
+	// answer (resolveGameRef).
+	if listRec.Code != http.StatusNotFound {
+		t.Fatalf("list: status = %d, want 404: %s", listRec.Code, listRec.Body.String())
 	}
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"role":"viewer"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"role":"viewer"}`))
 	createReq.AddCookie(cookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusForbidden {
-		t.Fatalf("create: status = %d, want 403: %s", createRec.Code, createRec.Body.String())
+	if createRec.Code != http.StatusNotFound {
+		t.Fatalf("create: status = %d, want 404: %s", createRec.Code, createRec.Body.String())
 	}
 
-	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/invites/"+existing.ID.String(), nil)
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/invites/"+existing.ID.String(), nil)
 	revokeReq.AddCookie(cookie)
 	revokeRec := httptest.NewRecorder()
 	srv.ServeHTTP(revokeRec, revokeReq)
-	if revokeRec.Code != http.StatusForbidden {
-		t.Fatalf("revoke: status = %d, want 403: %s", revokeRec.Code, revokeRec.Body.String())
+	if revokeRec.Code != http.StatusNotFound {
+		t.Fatalf("revoke: status = %d, want 404: %s", revokeRec.Code, revokeRec.Body.String())
 	}
 }
 
@@ -623,7 +627,7 @@ func TestProjectInviteCreationRejectsInvalidRole(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/invites", strings.NewReader(`{"role":"superadmin"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"role":"superadmin"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

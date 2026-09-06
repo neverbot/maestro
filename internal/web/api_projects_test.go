@@ -3,8 +3,10 @@ package web_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -238,14 +240,17 @@ func TestTokenCreationRequiresMembership(t *testing.T) {
 
 	cookie := loginAs(t, srv, "stranger@studio.com")
 	body := strings.NewReader(`{"label":"sneaky"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/tokens", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", body)
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
+	// 404 and not 403, since a game is addressed by its slug: a
+	// stranger must not be able to tell a game they are not in from
+	// one that does not exist (resolveGameRef).
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
 
@@ -258,7 +263,7 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 	cookie := loginAs(t, srv, "owner@studio.com")
 
 	body := strings.NewReader(`{"label":"seed agent"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/tokens", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", body)
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -282,7 +287,7 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 		t.Fatal("token_hint was empty on creation")
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/tokens", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/tokens", nil)
 	listReq.AddCookie(cookie)
 	listRec := httptest.NewRecorder()
 	srv.ServeHTTP(listRec, listReq)
@@ -329,7 +334,7 @@ func TestViewerCannotCreateToken(t *testing.T) {
 
 	cookie := loginAs(t, srv, "viewer@studio.com")
 	body := strings.NewReader(`{"label":"sneaky"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/tokens", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", body)
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -360,7 +365,7 @@ func TestViewerCanRevokeToken(t *testing.T) {
 	}
 	ownerCookie := loginAs(t, srv, "owner@studio.com")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.ID.String()+"/tokens", strings.NewReader(`{"label":"agent"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"agent"}`))
 	createReq.AddCookie(ownerCookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -377,7 +382,7 @@ func TestViewerCanRevokeToken(t *testing.T) {
 	}
 
 	viewerCookie := loginAs(t, srv, "viewer@studio.com")
-	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/tokens/"+created.ID, nil)
+	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/tokens/"+created.ID, nil)
 	revokeReq.AddCookie(viewerCookie)
 	revokeRec := httptest.NewRecorder()
 	srv.ServeHTTP(revokeRec, revokeReq)
@@ -414,7 +419,7 @@ func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
 	cookie := loginAs(t, srv, "owner@studio.com")
 
 	for name, tokenID := range map[string]string{"unknown": uuid.NewString(), "foreign": foreignRow.ID.String()} {
-		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.ID.String()+"/tokens/"+tokenID, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.Slug+"/tokens/"+tokenID, nil)
 		req.AddCookie(cookie)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
@@ -444,7 +449,7 @@ func TestTokenEndpointsRejectTokenCaller(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/tokens", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/tokens", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -465,13 +470,16 @@ func TestListMembersRequiresMembership(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 
 	cookie := loginAs(t, srv, "stranger@studio.com")
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/members", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
+	// 404 and not 403, since a game is addressed by its slug: a
+	// stranger must not be able to tell a game they are not in from
+	// one that does not exist (resolveGameRef).
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 }
 
@@ -483,7 +491,7 @@ func TestListMembersNeverLeaksEmail(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/members", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -514,7 +522,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	// An editor may not promote or demote anyone, including themselves.
 	editorCookie := loginAs(t, srv, "editor@studio.com")
 	body := strings.NewReader(`{"role":"owner"}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.ID.String()+"/members/"+other.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+other.ID.String(), body)
 	req.AddCookie(editorCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -526,7 +534,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	// The owner may.
 	ownerCookie := loginAs(t, srv, "owner@studio.com")
 	body = strings.NewReader(`{"role":"viewer"}`)
-	req = httptest.NewRequest(http.MethodPatch, "/api/games/"+project.ID.String()+"/members/"+editor.ID.String(), body)
+	req = httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+editor.ID.String(), body)
 	req.AddCookie(ownerCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec = httptest.NewRecorder()
@@ -557,7 +565,7 @@ func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
 
 	cookie := loginAs(t, srv, "owner@studio.com")
 	body := strings.NewReader(`{"role":"viewer"}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.ID.String()+"/members/"+editor.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+editor.ID.String(), body)
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -586,7 +594,7 @@ func TestChangeRoleOnSoleOwnerReportsLastOwner(t *testing.T) {
 	cookie := loginAs(t, srv, "owner@studio.com")
 
 	body := strings.NewReader(`{"role":"viewer"}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.ID.String()+"/members/"+owner.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+owner.ID.String(), body)
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -621,7 +629,7 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	// the (here, empty) list of tokens the removal revoked, not a bare
 	// 204 — see handleRemoveMember's own doc comment.
 	viewerCookie := loginAs(t, srv, "viewer@studio.com")
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/members/"+viewer.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+viewer.ID.String(), nil)
 	req.AddCookie(viewerCookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -640,7 +648,7 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 
 	// The sole remaining owner may not remove themselves.
 	ownerCookie := loginAs(t, srv, "owner@studio.com")
-	req = httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/members/"+owner.ID.String(), nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+owner.ID.String(), nil)
 	req.AddCookie(ownerCookie)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -680,7 +688,7 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 	}
 
 	cookie := loginAs(t, srv, "owner@studio.com")
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/members/"+editor.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+editor.ID.String(), nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -721,7 +729,7 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 	}
 
 	editorCookie := loginAs(t, srv, "editor@studio.com")
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"/members/"+viewer.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+viewer.ID.String(), nil)
 	req.AddCookie(editorCookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -742,7 +750,7 @@ func TestTokenCallerCannotManageMembers(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/members", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -795,7 +803,7 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 
 	projPool.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/members", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -818,7 +826,7 @@ func TestOwnerCanDeleteGame(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -849,8 +857,8 @@ func TestDeleteGameRequiresMatchingConfirmSlug(t *testing.T) {
 		name string
 		url  string
 	}{
-		{"missing", "/api/games/" + project.ID.String()},
-		{"mismatched", "/api/games/" + project.ID.String() + "?confirm=notazeroth"},
+		{"missing", "/api/games/" + project.Slug},
+		{"mismatched", "/api/games/" + project.Slug + "?confirm=notazeroth"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -886,7 +894,7 @@ func TestNonOwnerCannotDeleteGame(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "editor@studio.com")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -915,7 +923,7 @@ func TestTokenCallerCannotDeleteGame(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -941,28 +949,48 @@ func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "stranger@studio.com")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
+	// 404 and not 403, since a game is addressed by its slug: a
+	// stranger must not be able to tell a game they are not in from
+	// one that does not exist (resolveGameRef).
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
 	}
 	if _, err := projSvc.RoleOf(ctx, owner.ID, project.ID); err != nil {
 		t.Fatalf("RoleOf after refused delete: %v, want the game to still exist", err)
 	}
 
-	fakeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+uuid.New().String(), nil)
+	// The same request against a name that is nobody's game answers the
+	// same way. It cannot answer with the *same bytes* — the refusal
+	// names the value that was tried, which is the caller's own input —
+	// so what is asserted is that the answer is a function of that input
+	// and of nothing else: same status, same code, and a message built
+	// from the same sentence. A stranger walking slugs learns nothing
+	// from the difference between these two, which is the whole property.
+	fakeReq := httptest.NewRequest(http.MethodDelete, "/api/games/not-a-real-game", nil)
 	fakeReq.AddCookie(cookie)
 	fakeRec := httptest.NewRecorder()
 	srv.ServeHTTP(fakeRec, fakeReq)
 
 	if fakeRec.Code != rec.Code {
-		t.Fatalf("fabricated id status = %d, real game status = %d, want equal (no leak)", fakeRec.Code, rec.Code)
+		t.Fatalf("fabricated slug status = %d, real game status = %d, want equal (no leak)", fakeRec.Code, rec.Code)
 	}
-	if fakeRec.Body.String() != rec.Body.String() {
-		t.Fatalf("fabricated id body = %q, real game body = %q, want equal (no leak)", fakeRec.Body.String(), rec.Body.String())
+	for ref, body := range map[string]string{
+		project.Slug:      rec.Body.String(),
+		"not-a-real-game": fakeRec.Body.String(),
+	} {
+		quoted, err := json.Marshal("no game named " + strconv.Quote(ref) + " is available to you")
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		want := fmt.Sprintf(`{"error":"not_found","message":%s}`, quoted)
+		if strings.TrimSpace(body) != want {
+			t.Fatalf("%q answered %s, want %s (no leak)", ref, body, want)
+		}
 	}
 }
 
@@ -981,7 +1009,7 @@ func TestDeletingGameRevokesItsTokens(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -1018,7 +1046,7 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	cookie := loginAs(t, srv, "owner@studio.com")
 
-	first := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String()+"?confirm=azeroth", nil)
+	first := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	first.AddCookie(cookie)
 	firstRec := httptest.NewRecorder()
 	srv.ServeHTTP(firstRec, first)
@@ -1031,11 +1059,14 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 	// the comment above), so an absent confirm here still proves the
 	// same 403 this test is pinning, not a false pass from the 400
 	// TestDeleteGameRequiresMatchingConfirmSlug already covers.
-	second := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.ID.String(), nil)
+	second := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	second.AddCookie(cookie)
 	secondRec := httptest.NewRecorder()
 	srv.ServeHTTP(secondRec, second)
-	if secondRec.Code != http.StatusForbidden {
-		t.Fatalf("second delete status = %d, want 403 (membership already gone), body: %s", secondRec.Code, secondRec.Body.String())
+	// 404 and not 403, since a game is addressed by its slug: a
+	// stranger must not be able to tell a game they are not in from
+	// one that does not exist (resolveGameRef).
+	if secondRec.Code != http.StatusNotFound {
+		t.Fatalf("second delete status = %d, want 404 (membership already gone), body: %s", secondRec.Code, secondRec.Body.String())
 	}
 }

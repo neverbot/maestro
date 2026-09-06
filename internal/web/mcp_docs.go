@@ -124,7 +124,7 @@ type DocsWriteManyInput struct {
 // DocsWriteItemInput is one write of a batch: DocsWriteInput without the
 // two things that cannot mean anything in a batch.
 //
-// It carries no project_id, because the batch states the game once, and
+// It carries no `game`, because the batch states the game once, and
 // no include_current, because a batch failure is an index, a key, a code
 // and a message with nowhere for a body to travel — see
 // markdown.WriteMany. Every other argument, including expected_version,

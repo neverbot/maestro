@@ -159,6 +159,59 @@ func (q *Queries) GetProjectBySlug(ctx context.Context, slug string) (Project, e
 	return i, err
 }
 
+const getProjectBySlugForUser = `-- name: GetProjectBySlugForUser :one
+SELECT p.id, p.slug, p.name, m.role
+FROM projects p
+JOIN memberships m ON m.project_id = p.id
+WHERE lower(p.slug) = lower($1::text)
+  AND m.user_id = $2::uuid
+`
+
+type GetProjectBySlugForUserParams struct {
+	Slug   string
+	UserID uuid.UUID
+}
+
+type GetProjectBySlugForUserRow struct {
+	ID   uuid.UUID
+	Slug string
+	Name string
+	Role string
+}
+
+// The slug lookup every caller-facing path uses, and the reason
+// GetProjectBySlug above has no Go caller of its own.
+//
+// **The join is the whole point and it is a security property, not an
+// optimisation.** A slug is a name a human chose and typed, so it is
+// guessable in a way a uuid is not; resolving one without a membership
+// check and *then* judging standing would let a stranger tell "azeroth
+// exists and you are not in it" from "there is no azeroth", one guess at
+// a time. Joining membership into the lookup collapses both into "no
+// rows", which is the answer projects.ErrNotAMember's own doc comment
+// already argues for and the shape Task 8's Correction 12 specified when
+// it removed the bare BySlug this replaces.
+//
+// The role comes back with the project because the caller that needs one
+// needs the other in the same breath (internal/web's requireProject),
+// and two queries would be two chances for a demotion to land between
+// them -- the exact time-of-check-to-time-of-use window requireProject's
+// own doc comment records closing once already.
+//
+// lower(slug) on both sides, matching the case-insensitive uniqueness a
+// slug already has: /g/Azeroth and /g/azeroth are one game.
+func (q *Queries) GetProjectBySlugForUser(ctx context.Context, arg GetProjectBySlugForUserParams) (GetProjectBySlugForUserRow, error) {
+	row := q.db.QueryRow(ctx, getProjectBySlugForUser, arg.Slug, arg.UserID)
+	var i GetProjectBySlugForUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.Role,
+	)
+	return i, err
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT u.id, u.display_name, m.role
 FROM memberships m

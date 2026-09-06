@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -135,8 +136,20 @@ func (s *Server) handleCreateGame(w http.ResponseWriter, r *http.Request, caller
 // branch on IsToken to decide whether Role even means anything.
 type ProjectScope struct {
 	ProjectID uuid.UUID
-	Role      string
-	IsToken   bool
+
+	// Slug is the game's stored slug — the address the caller used to
+	// reach this handler, in the spelling the game actually carries.
+	//
+	// It is here because it is now the game's *address*, and a handler
+	// that has to name the game it is working in should not have to ask
+	// the database for the name it was just addressed by. checkStatedProject
+	// is the first caller: the optional `game` confirmation field is
+	// compared against this, which is why that check costs no query on
+	// this surface where its MCP twin costs one.
+	Slug string
+
+	Role    string
+	IsToken bool
 }
 
 // requireProject wraps a project-scoped handler, resolving {game} and the
@@ -177,19 +190,15 @@ type ProjectScope struct {
 // that distinction is checked by a test, not just a naming convention.
 func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Caller, ProjectScope)) func(http.ResponseWriter, *http.Request, Caller) {
 	return func(w http.ResponseWriter, r *http.Request, caller Caller) {
-		projectID, err := uuid.Parse(r.PathValue("game"))
-		if err != nil {
-			writeError(w, http.StatusNotFound, errCodeNotFound, "no such game")
-			return
-		}
-
-		scope, err := s.resolveProjectScope(r.Context(), caller, projectID)
+		ref := r.PathValue("game")
+		scope, err := s.resolveGameRef(r.Context(), caller, ref)
+		var wrongGame *boundElsewhereError
 		switch {
-		case errors.Is(err, errScopeViolation):
-			writeError(w, http.StatusForbidden, errCodeScopeViolation, "this token is bound to another game")
+		case errors.As(err, &wrongGame):
+			writeError(w, http.StatusForbidden, errCodeScopeViolation, wrongGame.Error())
 			return
-		case errors.Is(err, errNotMember):
-			writeError(w, http.StatusForbidden, errCodeForbidden, "you are not a member of this game")
+		case errors.Is(err, errNoSuchGame):
+			writeError(w, http.StatusNotFound, errCodeNotFound, noSuchGameMessage(ref))
 			return
 		case err != nil:
 			// Not a verdict about this caller: RoleOf's own lookup
@@ -201,12 +210,121 @@ func (s *Server) requireProject(h func(http.ResponseWriter, *http.Request, Calle
 			// actually evaluated. See resolveProjectScope's own doc
 			// comment for the split.
 			slog.ErrorContext(r.Context(), "resolve project scope failed",
-				"project_id", projectID, "user_id", caller.UserID, "error", err)
+				"game", ref, "user_id", caller.UserID, "error", err)
 			writeError(w, http.StatusInternalServerError, errCodeInternal, "could not verify game membership")
 			return
 		}
 		h(w, r, caller, scope)
 	}
+}
+
+// resolveGameRef turns the `{game}` path segment into a scope.
+//
+// **A game is addressed by its slug, and by nothing else.** That is a
+// decision, and it is the same one the metamodel took for rows: keys
+// replace ids rather than being accepted beside them, because a second
+// name for one row costs every call site an "exactly one of" branch and
+// buys a caller nothing. The core spec's Addressing section named this
+// surface as the one open inconsistency of that shape still in the
+// repository — the routes took a uuid while /g/{slug} took a slug — and
+// this closes it in the direction the argument points. The uuid has not
+// gone anywhere: every answer still returns it, every event still
+// carries it, ProjectScope is still built around it. It is simply no
+// longer how a caller names a game.
+//
+// A slug is a better key than an entity key is, not a worse one. It is
+// unique per instance under a case-folding index, it is immutable (this
+// package offers no rename), validateSlug refuses anything uuid.Parse
+// accepts so the two spellings can never be confused, and it is already
+// the address a human types into a browser. There is nothing a uuid can
+// address here that a slug cannot.
+//
+// The two caller kinds are resolved differently and the difference is
+// the whole reason this is one function:
+//
+//   - **A token caller is compared against its own binding**, never
+//     looked up. Its game is fixed at the moment the token was minted,
+//     so resolving the slug it typed would answer a question nobody
+//     asked; what matters is whether the slug names the game it is bound
+//     to. Anything else is a scope violation, exactly as any other uuid
+//     was before — and the refusal now names both games, which is honest
+//     precisely because both are the caller's own (its binding, and what
+//     it typed).
+//   - **A session caller is resolved through BySlugForUser**, which
+//     joins membership into the lookup. Both "no such game" and "a real
+//     game you are not in" come back as one answer, on purpose: a slug
+//     is guessable where a uuid is not, so answering them differently
+//     would be an enumeration oracle a stranger could walk. That is why
+//     the old "you are not a member of this game" refusal is gone from
+//     this path — it was safe to say about an unguessable uuid and is
+//     not safe to say about a name.
+func (s *Server) resolveGameRef(ctx context.Context, caller Caller, ref string) (ProjectScope, error) {
+	if bound, ok := caller.ScopedProject(); ok {
+		project, err := s.opts.Projects.ByID(ctx, bound)
+		if err != nil {
+			return ProjectScope{}, err
+		}
+		if !strings.EqualFold(project.Slug, ref) {
+			return ProjectScope{}, &boundElsewhereError{bound: project.Slug, requested: ref}
+		}
+		return ProjectScope{
+			ProjectID: project.ID, Slug: project.Slug,
+			Role: string(roles.Editor), IsToken: true,
+		}, nil
+	}
+
+	membership, err := s.opts.Projects.BySlugForUser(ctx, ref, caller.UserID)
+	switch {
+	case errors.Is(err, projects.ErrProjectNotFound):
+		return ProjectScope{}, errNoSuchGame
+	case err != nil:
+		return ProjectScope{}, err
+	}
+	return ProjectScope{
+		ProjectID: membership.Project.ID, Slug: membership.Project.Slug,
+		Role: membership.Role, IsToken: false,
+	}, nil
+}
+
+// errNoSuchGame is resolveGameRef's "this caller cannot reach a game by
+// that name", covering both halves of the non-oracle above. The message
+// a caller sees is noSuchGameMessage's, because it names the value that
+// was tried and the sentinel cannot.
+var errNoSuchGame = errors.New("no game by that name is available to this caller")
+
+// boundElsewhereError is a token caller naming a game other than the one
+// its token is bound to. It carries both slugs so the refusal can say
+// which is which; neither is a fact the caller did not already hold.
+type boundElsewhereError struct {
+	bound     string
+	requested string
+}
+
+func (e *boundElsewhereError) Error() string {
+	return fmt.Sprintf("this token is bound to the game %q, and this request names %q",
+		e.bound, e.requested)
+}
+
+// noSuchGameMessage says what was tried rather than only that it failed.
+//
+// A bare "no such game" was true of an unparseable uuid and read as
+// though the game did not exist rather than as though the identifier was
+// the wrong kind — the complaint this change exists to answer. So the
+// value is named back, and a value that is a uuid gets the sentence that
+// actually helps: the caller is holding the right game and the wrong
+// name for it. validateSlug refuses any slug that uuid.Parse accepts, so
+// this branch can never misfire on a real game's address.
+//
+// The wording is "available to you" rather than "does not exist",
+// because resolveGameRef cannot tell those apart for a session caller
+// and must not appear to. TestASlugThatNamesNothingAndOneYouAreNotInAre
+// TheSameRefusal pins that they read identically.
+func noSuchGameMessage(ref string) string {
+	if _, err := uuid.Parse(ref); err == nil {
+		return fmt.Sprintf("no game named %q is available to you: a game is addressed by "+
+			"its slug — the name in its /g/ URL — and not by its id", ref)
+	}
+	return fmt.Sprintf("no game named %q is available to you", ref)
 }
 
 // errScopeViolation and errNotMember are resolveProjectScope's two
@@ -225,16 +343,27 @@ var (
 	errNotMember      = errors.New("not a member of this game")
 )
 
-// resolveProjectScope resolves caller's standing in projectID: the
-// answer requireProject needs once, at admission, and — since Task 14 —
-// the exact same answer handleEvents (events.go) needs again on every
-// heartbeat tick, to notice a membership change on an otherwise-idle
-// long-lived connection without either caller re-deriving the token/
-// membership distinction itself. Factored out for that reuse, not
-// merely to shorten requireProject: a re-check that asked a
-// slightly-different question than the original admission check would
-// be exactly the kind of drift this project has been finding for
-// fourteen tasks running.
+// resolveProjectScope re-resolves caller's standing in a game it is
+// already admitted to: the answer handleEvents (events.go) needs on
+// every heartbeat tick, to notice a membership change on an
+// otherwise-idle long-lived connection without re-deriving the
+// token/membership distinction itself.
+//
+// **It takes a whole ProjectScope and answers with one, and that is not
+// a stylistic choice.** It is a re-check of a game already resolved, so
+// it is handed the game rather than an address to look up: the slug the
+// caller was admitted under travels through unchanged, where a function
+// rebuilding a scope from a bare id would silently blank it on every
+// heartbeat and leave a stream holding a game with no address. Admission
+// itself is resolveGameRef's job, above — it is what turns a slug into a
+// game in the first place, and it is deliberately *not* this function,
+// because a re-check has no address to resolve and must not perform a
+// second guessable-name lookup on a stream that is already open.
+//
+// The two do agree about the part that matters, which is the standing:
+// both give a token caller roles.Editor without a lookup and refuse a
+// binding that does not match, and both look a session caller's role up
+// fresh.
 //
 // A token caller's ProjectID must equal projectID exactly (errScopeViolation
 // otherwise) — see Caller.ScopedProject's own doc comment for why an
@@ -259,15 +388,18 @@ var (
 // repeating. A token caller's Role is always roles.Editor, never looked
 // up — see this function's former home in requireProject's own doc
 // comment (still above) for why that is deliberate, not a shortcut.
-func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, projectID uuid.UUID) (ProjectScope, error) {
+func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, game ProjectScope) (ProjectScope, error) {
 	if scoped, ok := caller.ScopedProject(); ok {
-		if scoped != projectID {
+		if scoped != game.ProjectID {
 			return ProjectScope{}, errScopeViolation
 		}
-		return ProjectScope{ProjectID: projectID, Role: string(roles.Editor), IsToken: true}, nil
+		return ProjectScope{
+			ProjectID: game.ProjectID, Slug: game.Slug,
+			Role: string(roles.Editor), IsToken: true,
+		}, nil
 	}
 
-	role, err := s.opts.Projects.RoleOf(ctx, caller.UserID, projectID)
+	role, err := s.opts.Projects.RoleOf(ctx, caller.UserID, game.ProjectID)
 	switch {
 	case errors.Is(err, projects.ErrNotAMember):
 		return ProjectScope{}, errNotMember
@@ -277,7 +409,7 @@ func (s *Server) resolveProjectScope(ctx context.Context, caller Caller, project
 		// caller logging it does not see that phrase twice.
 		return ProjectScope{}, err
 	}
-	return ProjectScope{ProjectID: projectID, Role: role, IsToken: false}, nil
+	return ProjectScope{ProjectID: game.ProjectID, Slug: game.Slug, Role: role, IsToken: false}, nil
 }
 
 func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
@@ -449,10 +581,15 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 // Requires the caller to echo the game's slug as ?confirm=<slug>,
 // refused with 400 otherwise. Not a confirmation dialog relocated to
 // the API — a client that wants a dialog still builds one — but a real
-// safety property: it is structurally impossible to delete the wrong
-// game because an id was mis-pasted, since the request also has to name
-// the game correctly. The lookup this needs doubles as what the
-// deletion log line (below) reports the game by, rather than a bare id.
+// safety property: the request has to name the game twice for the
+// deletion to land. **That used to read as "id in the path, name in the
+// query", and since the routes started taking the slug it reads as the
+// same string twice.** It is kept, and it is kept deliberately: the
+// gesture this gate exists for is a caller having to *type the name of
+// the thing it is destroying*, which is exactly what it still is, and a
+// URL a client assembled from a variable is not a URL a human confirmed.
+// The one thing it stopped protecting against is a mis-pasted id, and
+// that is because a mis-pasted id no longer addresses anything.
 //
 // A 204 with no body, not a report of what was revoked the way
 // handleRemoveMember and handleChangeRole answer: those endpoints leave

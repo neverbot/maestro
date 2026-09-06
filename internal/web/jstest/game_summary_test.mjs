@@ -179,7 +179,7 @@ async function runCase({
     if (url === "/api/games") {
       return { ok: true, status: 200, json: async () => ({ games: [game] }) };
     }
-    if (url === `/api/games/${game.id}/summary`) {
+    if (url === `/api/games/${game.slug}/summary`) {
       return {
         ok: summaryStatus === 200,
         status: summaryStatus,
@@ -187,7 +187,7 @@ async function runCase({
       };
     }
     // Before the /docs prefix below, which would otherwise swallow it.
-    if (url === `/api/games/${game.id}/docs/kinds`) {
+    if (url === `/api/games/${game.slug}/docs/kinds`) {
       if (kindsStatus !== 200) {
         return {
           ok: false,
@@ -197,7 +197,7 @@ async function runCase({
       }
       return { ok: true, status: 200, json: async () => kinds };
     }
-    if (url.startsWith(`/api/games/${game.id}/docs`)) {
+    if (url.startsWith(`/api/games/${game.slug}/docs`)) {
       if (docsStatus !== 200) {
         return {
           ok: false,

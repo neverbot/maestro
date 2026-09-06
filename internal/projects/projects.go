@@ -366,6 +366,53 @@ func (s *Service) RoleOf(ctx context.Context, userID, projectID uuid.UUID) (stri
 	return role, nil
 }
 
+// Membership is a project a user is in, together with the role they
+// hold in it. It is what BySlugForUser answers with, because the caller
+// that resolves a game by name needs both facts at once and asking for
+// them separately is two chances for a demotion to land between them.
+type Membership struct {
+	Project Project
+	Role    string
+}
+
+// BySlugForUser resolves a game by the name a human types, scoped to the
+// user asking.
+//
+// **It is the only slug lookup this package offers, and the scoping is
+// not a convenience.** A slug is a name someone chose — "azeroth",
+// "le-mans" — so it is guessable in a way a uuid is not, and a lookup
+// that resolved one first and judged standing second would be an
+// enumeration oracle: a stranger could tell "that game exists and I am
+// not in it" from "there is no such game", one guess at a time. The
+// query joins membership, so both collapse into no rows and both come
+// back as ErrProjectNotFound. That is the shape Task 8's Correction 12
+// specified when it removed the bare BySlug this replaces, recorded
+// there as "the moment one is added, it must call BySlugForUser, never
+// the unexported form"; this is that moment.
+//
+// It answers with the role as well as the project, so internal/web's
+// requireProject resolves a game and the caller's standing in it in one
+// round trip rather than two.
+//
+// ErrProjectNotFound, not ErrNotAMember: the two are indistinguishable
+// here by construction, and returning the sentinel that names a *verdict
+// about the caller* would be a claim this function cannot make.
+func (s *Service) BySlugForUser(ctx context.Context, slug string, userID uuid.UUID) (Membership, error) {
+	row, err := s.q.GetProjectBySlugForUser(ctx, dbq.GetProjectBySlugForUserParams{
+		Slug: slug, UserID: userID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Membership{}, ErrProjectNotFound
+		}
+		return Membership{}, fmt.Errorf("lookup project by slug: %w", err)
+	}
+	return Membership{
+		Project: Project{ID: row.ID, Slug: row.Slug, Name: row.Name},
+		Role:    row.Role,
+	}, nil
+}
+
 // ByID resolves a project from its id, with no membership check: unlike a
 // human-chosen slug, a UUID is not a guessable name, so a raw id lookup
 // is not an enumeration oracle the way a hypothetical slug-keyed lookup

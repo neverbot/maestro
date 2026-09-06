@@ -133,7 +133,10 @@ func loginAdmin(t *testing.T, base string) *http.Cookie {
 	return cookies[0]
 }
 
-// createGame creates a game as the given session caller and returns its id.
+// createGame creates a game as the given session caller and returns its
+// slug — the address every route under /api/games/{game} takes, and the
+// address /g/{game} shows a designer. The id comes back in the same
+// answer and nothing here needs it.
 func createGame(t *testing.T, base string, session *http.Cookie, slug, name string) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"slug": slug, "name": name})
@@ -155,23 +158,27 @@ func createGame(t *testing.T, base string, session *http.Cookie, slug, name stri
 		t.Fatalf("create game status = %d, want 201", resp.StatusCode)
 	}
 	var out struct {
-		ID string `json:"id"`
+		ID   string `json:"id"`
+		Slug string `json:"slug"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode create game response: %v", err)
 	}
-	return out.ID
+	if out.Slug == "" {
+		t.Fatalf("create game answered no slug, and the slug is the address: %+v", out)
+	}
+	return out.Slug
 }
 
-// mintToken creates an API token for gameID as the given session caller
+// mintToken creates an API token for a game, addressed by slug, as the given session caller
 // and returns its clear (bearer) value.
-func mintToken(t *testing.T, base string, session *http.Cookie, gameID string) string {
+func mintToken(t *testing.T, base string, session *http.Cookie, gameSlug string) string {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"label": "test-agent"})
 	if err != nil {
 		t.Fatalf("marshal create token body: %v", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, base+"/api/games/"+gameID+"/tokens", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, base+"/api/games/"+gameSlug+"/tokens", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("NewRequest POST tokens: %v", err)
 	}
@@ -245,12 +252,12 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 	base, cancel, done := startRunningServer(t)
 
 	session := loginAdmin(t, base)
-	gameID := createGame(t, base, session, "azeroth", "Azeroth")
-	token := mintToken(t, base, session, gameID)
+	gameSlug := createGame(t, base, session, "azeroth", "Azeroth")
+	token := mintToken(t, base, session, gameSlug)
 
 	// Open one long-lived SSE stream ahead of the burst below, exactly the
 	// shape web.Server.Close exists to end promptly on shutdown.
-	sseReq, err := http.NewRequest(http.MethodGet, base+"/api/games/"+gameID+"/events", nil)
+	sseReq, err := http.NewRequest(http.MethodGet, base+"/api/games/"+gameSlug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest GET events: %v", err)
 	}
@@ -506,8 +513,8 @@ func TestTheRunningBinaryServesTheGameContentTools(t *testing.T) {
 	}()
 
 	session := loginAdmin(t, base)
-	gameID := createGame(t, base, session, "azeroth", "Azeroth")
-	token := mintToken(t, base, session, gameID)
+	gameSlug := createGame(t, base, session, "azeroth", "Azeroth")
+	token := mintToken(t, base, session, gameSlug)
 
 	ctx := context.Background()
 	client := mcp.NewClient(&mcp.Implementation{Name: "wiring-test", Version: "0.0.1"}, nil)

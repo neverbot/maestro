@@ -25,15 +25,16 @@ import (
 // as a browser does: a session cookie, a JSON body, and the URL the SPA
 // would have built.
 type restFixture struct {
-	srv     *web.Server
-	ids     *identity.Service
-	proj    *projects.Service
-	mm      *metamodel.Service
-	md      *markdown.Service
-	game    uuid.UUID
-	ownerID uuid.UUID
-	cookie  *http.Cookie
-	agent   web.Caller
+	srv      *web.Server
+	ids      *identity.Service
+	proj     *projects.Service
+	mm       *metamodel.Service
+	md       *markdown.Service
+	game     uuid.UUID
+	gameSlug string
+	ownerID  uuid.UUID
+	cookie   *http.Cookie
+	agent    web.Caller
 }
 
 func newRESTFixture(t *testing.T) restFixture {
@@ -63,8 +64,9 @@ func newRESTFixture(t *testing.T) restFixture {
 	}
 	return restFixture{
 		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md,
-		game: game.ID, ownerID: owner.ID, cookie: loginAs(t, srv, "owner@studio.com"),
-		agent: agent,
+		game: game.ID, gameSlug: game.Slug, ownerID: owner.ID,
+		cookie: loginAs(t, srv, "owner@studio.com"),
+		agent:  agent,
 	}
 }
 
@@ -119,7 +121,7 @@ func (f restFixture) raw(t *testing.T, method, suffix, body string) *httptest.Re
 }
 
 func (f restFixture) path(suffix string) string {
-	return "/api/games/" + f.game.String() + suffix
+	return "/api/games/" + f.gameSlug + suffix
 }
 
 // as is call with the fixture's own owner cookie.
@@ -201,8 +203,12 @@ func TestRESTTypesRequireMembership(t *testing.T) {
 	}
 	stranger := loginAs(t, f.srv, "stranger@studio.com")
 
+	// A stranger is told the game is not available to them, in the same
+	// words a game that does not exist gets: a game is addressed by its
+	// slug now and a slug is guessable, so the two must not be told
+	// apart (resolveGameRef).
 	rec := f.call(t, stranger, http.MethodGet, f.path("/types"), nil)
-	assertError(t, rec, http.StatusForbidden, "forbidden", "")
+	assertError(t, rec, http.StatusNotFound, "not_found", "")
 }
 
 func TestRESTCreateAndListTypes(t *testing.T) {
@@ -458,7 +464,7 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 		// the refusal cannot be blamed on the request itself. Every
 		// wildcard but {game} is filled with a value that resolves to
 		// nothing: the check has to happen before any of it is read.
-		path = strings.ReplaceAll(path, "{game}", f.game.String())
+		path = strings.ReplaceAll(path, "{game}", f.gameSlug)
 		path = wildcards.ReplaceAllString(path, uuid.NewString())
 		var body any
 		if method != http.MethodDelete {
@@ -481,12 +487,12 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 // wildcards matches a ServeMux path wildcard, for the table above.
 var wildcards = regexp.MustCompile(`\{[^}]+\}`)
 
-// TestAStatedProjectIDMustAgreeWithTheURL mirrors ScopedArgs's own rule
+// TestAStatedGameMustAgreeWithTheURL mirrors ScopedArgs's own rule
 // onto this surface. A body naming a different game than the URL is a
 // caller that has lost track of which game it is editing, and answering
 // it by silently ignoring the field — which is what "the URL wins" would
 // mean in practice — is how content lands in the wrong game.
-func TestAStatedProjectIDMustAgreeWithTheURL(t *testing.T) {
+func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 	f := newRESTFixture(t)
 	other, err := f.proj.Create(context.Background(), "le-mans", "Le Mans", f.ownerID)
 	if err != nil {
@@ -494,19 +500,31 @@ func TestAStatedProjectIDMustAgreeWithTheURL(t *testing.T) {
 	}
 
 	rec := f.as(t, http.MethodPost, "/types", map[string]any{
-		"project_id": other.ID.String(),
-		"key":        "quest", "label": "Quest", "label_plural": "Quests",
+		"game": other.Slug,
+		"key":  "quest", "label": "Quest", "label_plural": "Quests",
 	})
 	assertError(t, rec, http.StatusForbidden, "scope_violation", "")
 
 	// And the same body naming this game is accepted, so the check is a
 	// disagreement check and not a blanket refusal of the field.
 	ok := f.as(t, http.MethodPost, "/types", map[string]any{
-		"project_id": f.game.String(),
-		"key":        "quest", "label": "Quest", "label_plural": "Quests",
+		"game": f.gameSlug,
+		"key":  "quest", "label": "Quest", "label_plural": "Quests",
 	})
 	if ok.Code != http.StatusOK {
-		t.Fatalf("agreeing project_id = %d: %s", ok.Code, ok.Body.String())
+		t.Fatalf("agreeing game = %d: %s", ok.Code, ok.Body.String())
+	}
+
+	// The confirmation folds case, like the address beside it: a caller
+	// that confirmed "Azeroth" while working in "azeroth" confirmed the
+	// right game, and refusing it would make the field harder to satisfy
+	// than the URL it is checked against.
+	folded := f.as(t, http.MethodPost, "/types", map[string]any{
+		"game": strings.ToUpper(f.gameSlug),
+		"key":  "zone", "label": "Zone", "label_plural": "Zones",
+	})
+	if folded.Code != http.StatusOK {
+		t.Fatalf("a differently-cased game confirmation = %d: %s", folded.Code, folded.Body.String())
 	}
 }
 
@@ -626,7 +644,7 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 	cookie := loginAs(t, f.srv, "outsider@studio.com")
 
 	// Their own game answers, and holds none of this game's types.
-	own := f.call(t, cookie, http.MethodGet, "/api/games/"+theirs.ID.String()+"/types", nil)
+	own := f.call(t, cookie, http.MethodGet, "/api/games/"+theirs.Slug+"/types", nil)
 	if own.Code != http.StatusOK {
 		t.Fatalf("own game = %d: %s", own.Code, own.Body.String())
 	}
@@ -638,9 +656,11 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 		t.Fatalf("items = %d, want another game's types to be invisible", len(payload.Items))
 	}
 
-	// This game does not.
+	// This game does not, and says so in the words a game that does not
+	// exist gets: a slug is guessable, so the two are one answer
+	// (resolveGameRef).
 	assertError(t, f.call(t, cookie, http.MethodGet, f.path("/types/by-key/quest"), nil),
-		http.StatusForbidden, "forbidden", "")
+		http.StatusNotFound, "not_found", "")
 }
 
 // TestTheGameSummaryCountsContentWithoutListingIt is the home page's
@@ -901,42 +921,50 @@ func TestTheInvalidFilterIsTriStateAndRefusesAnythingElse(t *testing.T) {
 	}
 }
 
-// TestAStatedProjectIDIsJudgedTheWayTheMCPSurfaceJudgesIt closes the two
+// TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt closes the two
 // divergences a review found between checkStatedProject and the rule
 // ScopedArgs states, both of which this surface used to get wrong: a
-// project_id that is not a uuid names no game at all, so calling it "a
-// different game than the URL" is false and `scope_violation` is the
-// wrong code; and an empty project_id is not the same as no project_id —
+// value naming no game at all is the caller's own argument rather than
+// "a different game than the URL", so `scope_violation` was the wrong
+// code; and an empty confirmation is not the same as no confirmation —
 // the MCP surface refuses it, and accepting it here made the field's
 // presence mean nothing.
-func TestAStatedProjectIDIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
+//
+// The field is `game` and takes a slug since the routes started taking
+// one. A slug has no malformed spelling the way a uuid did — anything
+// that is not this game's name is simply another game's — so the
+// bad_request arm is now the empty string alone, which is the arm this
+// test was written to protect in the first place.
+func TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
 	f := newRESTFixture(t)
-	declare := func(projectID any) *httptest.ResponseRecorder {
+	declare := func(game any) *httptest.ResponseRecorder {
 		return f.as(t, http.MethodPost, "/types", map[string]any{
-			"project_id": projectID,
-			"key":        "quest", "label": "Quest", "label_plural": "Quests",
+			"game": game,
+			"key":  "quest", "label": "Quest", "label_plural": "Quests",
 		})
 	}
 
-	// Not a uuid: the caller's own argument, not a scope violation.
-	body := assertError(t, declare("not-a-uuid"), http.StatusBadRequest, "bad_request", "")
-	if !strings.Contains(body.Message, "uuid") {
-		t.Errorf("message = %q, want it to say the value is not a uuid", body.Message)
+	// Empty: present and naming nothing. The field is a confirmation,
+	// and an empty confirmation confirms nothing.
+	body := assertError(t, declare(""), http.StatusBadRequest, "bad_request", "")
+	if !strings.Contains(body.Message, "slug") {
+		t.Errorf("message = %q, want it to say what to pass", body.Message)
 	}
 
-	// Empty: present and unparseable, which is the same refusal. The
-	// field is a confirmation, and an empty confirmation confirms
-	// nothing.
-	assertError(t, declare(""), http.StatusBadRequest, "bad_request", "")
+	// A name that is not a game at all is a scope violation and not a
+	// bad_request: from this surface's point of view it is simply not
+	// the game in the URL, and saying so does not require looking it up
+	// (which would be the enumeration oracle resolveGameRef avoids).
+	assertError(t, declare("no-such-game"), http.StatusForbidden, "scope_violation", "")
 
 	// And the rule the field exists for still holds in both directions.
 	other, err := f.proj.Create(context.Background(), "monza", "Monza", f.ownerID)
 	if err != nil {
 		t.Fatalf("Create other game: %v", err)
 	}
-	assertError(t, declare(other.ID.String()), http.StatusForbidden, "scope_violation", "")
-	if rec := declare(f.game.String()); rec.Code != http.StatusOK {
-		t.Fatalf("agreeing project_id = %d: %s", rec.Code, rec.Body.String())
+	assertError(t, declare(other.Slug), http.StatusForbidden, "scope_violation", "")
+	if rec := declare(f.gameSlug); rec.Code != http.StatusOK {
+		t.Fatalf("agreeing game = %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

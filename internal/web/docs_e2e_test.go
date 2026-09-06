@@ -104,16 +104,17 @@ const e2eLeadMerged = "---\n" +
 // proseWorld is one game, everything that writes into it, and a second
 // game whose token is used for nothing but the isolation sweep.
 type proseWorld struct {
-	srv    *web.Server
-	deps   web.MCPDeps
-	agent  web.Caller // the lore agent's token, bound to game
-	rival  web.Caller // a second agent's token, same game
-	guest  web.Caller // a token bound to otherGame and to nothing else
-	game   uuid.UUID
-	other  uuid.UUID
-	token  string       // the lore agent's secret, for the HTTP session
-	cookie *http.Cookie // the designer: a session caller with the editor role
-	typeID map[string]uuid.UUID
+	srv      *web.Server
+	deps     web.MCPDeps
+	agent    web.Caller // the lore agent's token, bound to game
+	rival    web.Caller // a second agent's token, same game
+	guest    web.Caller // a token bound to otherGame and to nothing else
+	game     uuid.UUID
+	gameSlug string
+	other    uuid.UUID
+	token    string       // the lore agent's secret, for the HTTP session
+	cookie   *http.Cookie // the designer: a session caller with the editor role
+	typeID   map[string]uuid.UUID
 }
 
 // rest sends one request as the designer's session, at the game's own
@@ -132,7 +133,7 @@ func (w proseWorld) rest(t *testing.T, method, suffix string, body any) *httptes
 	} else {
 		reader = strings.NewReader("")
 	}
-	req := httptest.NewRequest(method, "/api/games/"+w.game.String()+suffix, reader)
+	req := httptest.NewRequest(method, "/api/games/"+w.gameSlug+suffix, reader)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -198,16 +199,17 @@ func newProseWorld(t *testing.T) *proseWorld {
 	guest, _ := mint(other.ID, "le mans agent")
 
 	w := &proseWorld{
-		srv:    srv,
-		deps:   web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
-		agent:  agent,
-		rival:  rival,
-		guest:  guest,
-		game:   game.ID,
-		other:  other.ID,
-		token:  agentSecret,
-		cookie: loginAs(t, srv, "ana@studio.com"),
-		typeID: map[string]uuid.UUID{},
+		srv:      srv,
+		deps:     web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
+		agent:    agent,
+		rival:    rival,
+		guest:    guest,
+		game:     game.ID,
+		gameSlug: game.Slug,
+		other:    other.ID,
+		token:    agentSecret,
+		cookie:   loginAs(t, srv, "ana@studio.com"),
+		typeID:   map[string]uuid.UUID{},
 	}
 	w.seedEntities(t)
 	return w
@@ -1145,7 +1147,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	}
 
 	written := call("docs.write", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript, "content": e2eLeadV1,
+		"game": w.gameSlug, "path": e2eLeadScript, "content": e2eLeadV1,
 		"kind": "script", "message": "over the wire", "expected_version": 0,
 		"links": []map[string]any{
 			{"entity_type": "quest", "entity_key": e2eLeadQuest, "role": "script"},
@@ -1165,11 +1167,11 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	// A conflict, read as an agent reads it: the wire's own details
 	// object, carrying the version to merge onto and the body to merge.
 	call("docs.write", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript, "content": e2eLeadV2,
+		"game": w.gameSlug, "path": e2eLeadScript, "content": e2eLeadV2,
 		"message": "act two", "expected_version": 1,
 	})
 	conflict := call("docs.write", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript, "content": e2eLeadV1,
+		"game": w.gameSlug, "path": e2eLeadScript, "content": e2eLeadV1,
 		"message": "stale", "expected_version": 1,
 	})
 	if !conflict.IsError {
@@ -1201,7 +1203,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 	// And the reads an agent makes next, over the same transport.
 	var history web.DocsHistoryOutput
 	decodeStructured(t, call("docs.history", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript,
+		"game": w.gameSlug, "path": e2eLeadScript,
 	}), &history)
 	if len(history.Items) != 2 || history.Items[0].AuthorKind != "token" {
 		t.Fatalf("docs.history over the wire = %+v", history.Items)
@@ -1209,7 +1211,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 
 	var diff web.DocsDiffOutput
 	decodeStructured(t, call("docs.diff", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript, "from_version": 1, "to_version": 2,
+		"game": w.gameSlug, "path": e2eLeadScript, "from_version": 1, "to_version": 2,
 	}), &diff)
 	if diff.Coarse || !strings.Contains(diff.Unified, "+# Act two") {
 		t.Fatalf("docs.diff over the wire = %+v", diff)
@@ -1217,7 +1219,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 
 	var reverted web.DocumentOutput
 	decodeStructured(t, call("docs.revert", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript, "to_version": 1, "expected_version": 2,
+		"game": w.gameSlug, "path": e2eLeadScript, "to_version": 1, "expected_version": 2,
 	}), &reverted)
 	if reverted.Version != 3 {
 		t.Fatalf("docs.revert over the wire landed at %d, want 3", reverted.Version)
@@ -1225,14 +1227,14 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 
 	var fromDoc web.DocsLinksOutput
 	decodeStructured(t, call("docs.links.list", map[string]any{
-		"project_id": w.game.String(), "path": e2eLeadScript,
+		"game": w.gameSlug, "path": e2eLeadScript,
 	}), &fromDoc)
 	if len(fromDoc.Entities) != 1 || fromDoc.Entities[0].EntityKey != e2eLeadQuest {
 		t.Fatalf("docs.links.list by path over the wire = %+v", fromDoc)
 	}
 	var fromEntity web.DocsLinksOutput
 	decodeStructured(t, call("docs.links.list", map[string]any{
-		"project_id": w.game.String(), "entity_type": "quest", "entity_key": e2eLeadQuest,
+		"game": w.gameSlug, "entity_type": "quest", "entity_key": e2eLeadQuest,
 	}), &fromEntity)
 	if len(fromEntity.Documents) != 1 || fromEntity.Documents[0].Path != e2eLeadScript {
 		t.Fatalf("docs.links.list by entity over the wire = %+v", fromEntity)
@@ -1240,7 +1242,7 @@ func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
 
 	var found web.SearchOutput
 	decodeStructured(t, call("search", map[string]any{
-		"project_id": w.game.String(), "query": "Defias",
+		"game": w.gameSlug, "query": "Defias",
 	}), &found)
 	kinds := map[string]int{}
 	for _, hit := range found.Items {

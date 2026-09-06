@@ -154,9 +154,12 @@ if (titleEl) {
     titleEl.textContent = "No document asked for";
     showFailure("This address names no document. Open one from the game's Documents list.");
   } else {
-    // The game's id, from the same list every other page resolves a slug
-    // against: there is no server-side slug resolution on /g/{slug}
-    // (Task 8's Round 2 Correction 12) and this page adds none.
+    // The game's row, from the same list every other page resolves a
+    // slug against: /g/{slug} serves a static shell and resolves nothing
+    // server-side, and this page adds none. It is fetched for the game's
+    // name and to confirm the slug reaches a game at all — not, since
+    // the routes started taking slugs, to translate one address into
+    // another.
     const games = await fetchGames();
     if (!games.ok) {
       if (games.expired) {
@@ -171,7 +174,8 @@ if (titleEl) {
         titleEl.textContent = "Game not found";
         showFailure("You may not have access to this game, or it no longer exists.");
       } else {
-        await renderDocument(game.id, docPath);
+        // The stored slug, for the reason app.js's own call says.
+        await renderDocument(game.slug, docPath);
       }
     }
   }
@@ -185,13 +189,13 @@ if (titleEl) {
 // The reading view comes first and its failure is the page's failure:
 // there is nothing worth showing beside a document that could not be
 // read.
-async function renderDocument(gameID, docPath) {
+async function renderDocument(game, docPath) {
   const titleEl = document.getElementById("doc-title");
   const metaEl = document.getElementById("doc-meta");
   const bodyEl = document.getElementById("doc-body");
 
   const rendered = await fetchAPI(
-    `/api/games/${gameID}/docs/rendered?path=${encodeURIComponent(docPath)}`,
+    `/api/games/${game}/docs/rendered?path=${encodeURIComponent(docPath)}`,
   );
   if (!rendered.ok) {
     if (rendered.expired) {
@@ -208,7 +212,7 @@ async function renderDocument(gameID, docPath) {
   // Loaded before the meta line rather than after the body, because the
   // meta line names the document's last author and describeAuthor falls
   // back to this map for a user the server could not resolve.
-  const membersByID = await loadMembers(gameID);
+  const membersByID = await loadMembers(game);
   if (titleEl) titleEl.textContent = doc.title || doc.path || docPath;
   if (metaEl) {
     // The kind is optional on the wire, so the line is assembled from
@@ -242,8 +246,8 @@ async function renderDocument(gameID, docPath) {
 
   fillEntities(Array.isArray(doc.links) ? doc.links : []);
 
-  const role = await loadRole(gameID);
-  await renderHistory(gameID, docPath, version, membersByID, role);
+  const role = await loadRole(game);
+  await renderHistory(game, docPath, version, membersByID, role);
 
   const content = document.getElementById("doc-content");
   if (content) {
@@ -279,8 +283,8 @@ function fillEntities(links) {
 // "a former member" where a name would have been, which is the same
 // sentence a departed author gets and is honest in both cases — the page
 // genuinely does not know who that id is.
-async function loadMembers(gameID) {
-  const result = await fetchAPI(`/api/games/${gameID}/members`);
+async function loadMembers(game) {
+  const result = await fetchAPI(`/api/games/${game}/members`);
   const byID = new Map();
   if (!result.ok) {
     return byID;
@@ -304,8 +308,8 @@ async function loadMembers(gameID) {
 // therefore falls back to showing the button — the server is the check,
 // and a page that hid every action whenever a side request failed would
 // be lying about what the reader may do.
-async function loadRole(gameID) {
-  const result = await fetchAPI(`/api/games/${gameID}/summary`);
+async function loadRole(game) {
+  const result = await fetchAPI(`/api/games/${game}/summary`);
   if (!result.ok) {
     return null;
   }
@@ -321,7 +325,7 @@ async function loadRole(gameID) {
 // any other write, so if somebody else saved while this page was open
 // the server answers version_conflict and the page says so rather than
 // overwriting them.
-async function renderHistory(gameID, docPath, currentVersion, membersByID, role) {
+async function renderHistory(game, docPath, currentVersion, membersByID, role) {
   const listEl = document.getElementById("doc-history");
   const errorEl = document.getElementById("doc-history-error");
   const moreEl = document.getElementById("doc-history-more");
@@ -352,7 +356,7 @@ async function renderHistory(gameID, docPath, currentVersion, membersByID, role)
     if (moreEl) moreEl.disabled = true;
     const query = new URLSearchParams({ path: docPath });
     if (cursor) query.set("cursor", cursor);
-    const result = await fetchAPI(`/api/games/${gameID}/docs/history?${query.toString()}`);
+    const result = await fetchAPI(`/api/games/${game}/docs/history?${query.toString()}`);
     if (!result.ok) {
       if (result.expired) {
         goToLogin();
@@ -374,7 +378,7 @@ async function renderHistory(gameID, docPath, currentVersion, membersByID, role)
     const body = result.body ?? {};
     const items = Array.isArray(body.items) ? body.items : [];
     for (const item of items) {
-      listEl.append(historyRow(gameID, docPath, currentVersion, item, membersByID, role));
+      listEl.append(historyRow(game, docPath, currentVersion, item, membersByID, role));
       addOption(fromEl, item.version);
       addOption(toEl, item.version);
     }
@@ -401,13 +405,13 @@ async function renderHistory(gameID, docPath, currentVersion, membersByID, role)
     fromEl.selectedIndex = 1;
     toEl.selectedIndex = 0;
   }
-  wireCompareForm(gameID, docPath);
+  wireCompareForm(game, docPath);
 }
 
 // historyRow is one version: its number, its message, when it landed and
 // who wrote it, plus a revert button on every version but the current
 // one.
-function historyRow(gameID, docPath, currentVersion, version, membersByID, role) {
+function historyRow(game, docPath, currentVersion, version, membersByID, role) {
   const item = document.createElement("li");
 
   const number = document.createElement("span");
@@ -444,7 +448,7 @@ function historyRow(gameID, docPath, currentVersion, version, membersByID, role)
     revert.textContent = `Restore version ${version.version}`;
     revert.addEventListener("click", async () => {
       revert.disabled = true;
-      const result = await postJSON(`/api/games/${gameID}/docs/revert`, {
+      const result = await postJSON(`/api/games/${game}/docs/revert`, {
         path: docPath,
         to_version: Number(version.version),
         // The version this page was drawn from, not the one being
@@ -527,7 +531,7 @@ function describeComparison(comparison) {
 // wireCompareForm turns the two pickers into a request to
 // /docs/comparison, whose html is the second and last thing on this page
 // that goes in as markup.
-function wireCompareForm(gameID, docPath) {
+function wireCompareForm(game, docPath) {
   const form = document.getElementById("compare-form");
   const fromEl = document.getElementById("compare-from");
   const toEl = document.getElementById("compare-to");
@@ -549,7 +553,7 @@ function wireCompareForm(gameID, docPath) {
       from_version: fromEl.value,
       to_version: toEl.value,
     });
-    const result = await fetchAPI(`/api/games/${gameID}/docs/comparison?${query.toString()}`);
+    const result = await fetchAPI(`/api/games/${game}/docs/comparison?${query.toString()}`);
     if (!result.ok) {
       if (result.expired) {
         goToLogin();

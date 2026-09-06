@@ -376,7 +376,7 @@ func (s *Server) revalidateStreamAccess(r *http.Request, scope ProjectScope) (Pr
 		return ProjectScope{}, "no credential present", false
 	}
 
-	newScope, err := s.resolveProjectScope(ctx, caller, scope.ProjectID)
+	newScope, err := s.resolveProjectScope(ctx, caller, scope)
 	switch {
 	case errors.Is(err, errNotMember), errors.Is(err, errScopeViolation):
 		// A real, definitive rejection — resolveProjectScope's own doc

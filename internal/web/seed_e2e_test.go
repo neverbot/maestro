@@ -72,12 +72,13 @@ var licenceTiers = []string{"bronze", "silver", "gold", "platinum"}
 // seeded is a whole game plus everything the caller that seeded it
 // needs to keep talking to it.
 type seeded struct {
-	srv     *web.Server
-	deps    web.MCPDeps
-	caller  web.Caller
-	game    uuid.UUID
-	cookie  *http.Cookie
-	typeIDs map[string]uuid.UUID
+	srv      *web.Server
+	deps     web.MCPDeps
+	caller   web.Caller
+	game     uuid.UUID
+	gameSlug string
+	cookie   *http.Cookie
+	typeIDs  map[string]uuid.UUID
 	// races is the bulk report of the 200-race batch, kept because the
 	// read-then-write loop below is exactly the thing it exists for.
 	races []metamodel.BulkWrite
@@ -127,12 +128,13 @@ func seedRacingGame(t *testing.T) *seeded {
 		t.Fatalf("CallerForToken: %v", err)
 	}
 	s := &seeded{
-		srv:     srv,
-		deps:    web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
-		caller:  caller,
-		game:    game.ID,
-		cookie:  loginAs(t, srv, "designer@studio.com"),
-		typeIDs: map[string]uuid.UUID{},
+		srv:      srv,
+		deps:     web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Markdown: md},
+		caller:   caller,
+		game:     game.ID,
+		gameSlug: game.Slug,
+		cookie:   loginAs(t, srv, "designer@studio.com"),
+		typeIDs:  map[string]uuid.UUID{},
 	}
 
 	s.declareTypes(t)
@@ -1447,7 +1449,7 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 	})
 
 	t.Run("the game home page renders this game", func(t *testing.T) {
-		rec := s.get(t, "/api/games/"+s.game.String()+"/summary")
+		rec := s.get(t, "/api/games/"+s.gameSlug+"/summary")
 		if rec.Code != http.StatusOK {
 			t.Fatalf("summary = %d: %s", rec.Code, rec.Body.String())
 		}

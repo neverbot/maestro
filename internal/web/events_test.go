@@ -133,13 +133,15 @@ func TestEventsStreamRequiresMembership(t *testing.T) {
 	}
 	cookie := loginAs(t, srv, "stranger@studio.com")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.ID.String()+"/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/events", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body = %s", rec.Code, rec.Body.String())
+	// 404, not 403: see resolveGameRef — a slug naming a game you are not
+	// in and a slug naming nothing must read the same.
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -171,7 +173,7 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
@@ -242,7 +244,7 @@ func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequestWithContext: %v", err)
 	}
@@ -293,7 +295,7 @@ func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -348,7 +350,7 @@ func TestEventsStreamClosesOnTokenRevokedMidStream(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -409,7 +411,7 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -490,7 +492,7 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -553,7 +555,7 @@ func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -611,7 +613,7 @@ func TestEventsStreamClosesOnServerClose(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.ID.String()+"/events", nil)
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/api/games/"+project.Slug+"/events", nil)
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}

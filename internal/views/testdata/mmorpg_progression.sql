@@ -12,6 +12,7 @@ t0 (id, set_name, from_id, via_relation, depth) AS (
     JOIN relations r
       ON r.project_id = $1
      AND r.relation_type_id = ANY($7::uuid[])
+     AND r.invalid = false
      AND r.target_id = near.id
      AND true
     JOIN entities far
@@ -33,7 +34,7 @@ w1 (id, depth, path, via_relation, from_id, closed) AS (
      AND r.relation_type_id = ANY($9::uuid[])
      AND r.id IS DISTINCT FROM w.via_relation
      AND r.source_id = w.id
-     AND ((r.relation_type_id = $8))
+     AND (((r.relation_type_id = $8)) AND r.invalid = false)
     JOIN entities far
       ON far.id = (r.target_id)
      AND far.project_id = $1
@@ -59,6 +60,7 @@ t2 (id, set_name, from_id, via_relation, depth) AS (
     JOIN relations r
       ON r.project_id = $1
      AND r.relation_type_id = ANY($19::uuid[])
+     AND r.invalid = false
      AND r.source_id = near.id
      AND true
     JOIN entities far
@@ -111,18 +113,21 @@ edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
            r.source_id, r.target_id, NULL::jsonb, $32::integer, t0.depth, NULL::jsonb, NULL::boolean
     FROM t0
     JOIN relations r ON r.id = t0.via_relation AND r.project_id = $1
+      AND r.invalid = false
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
   UNION
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
            r.source_id, r.target_id, NULL::jsonb, $33::integer, t1.depth, NULL::jsonb, NULL::boolean
     FROM t1
     JOIN relations r ON r.id = t1.via_relation AND r.project_id = $1
+      AND r.invalid = false
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
   UNION
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
            r.source_id, r.target_id, NULL::jsonb, $34::integer, t2.depth, NULL::jsonb, NULL::boolean
     FROM t2
     JOIN relations r ON r.id = t2.via_relation AND r.project_id = $1
+      AND r.invalid = false
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
         ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous)
         ORDER BY all_rows.id, all_rows.rank, all_rows.depth

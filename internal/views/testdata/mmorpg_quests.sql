@@ -12,6 +12,7 @@ t0 (id, set_name, from_id, via_relation, depth) AS (
     JOIN relations r
       ON r.project_id = $1
      AND r.relation_type_id = ANY($11::uuid[])
+     AND r.invalid = false
      AND r.target_id = near.id
      AND true
     JOIN entities far
@@ -40,6 +41,7 @@ node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
                          AND far.invalid = false
         WHERE rel.project_id = $1
           AND rel.relation_type_id = $15
+          AND rel.invalid = false
           AND rel.source_id = e.id
         GROUP BY far.id, far.name
         ORDER BY far.name, far.id
@@ -60,6 +62,7 @@ node_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
                          AND far.invalid = false
         WHERE rel.project_id = $1
           AND rel.relation_type_id = $15
+          AND rel.invalid = false
           AND rel.source_id = e.id
         GROUP BY far.id, far.name
         ORDER BY far.name, far.id
@@ -80,6 +83,7 @@ edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
            r.source_id, r.target_id, NULL::jsonb, $22::integer, t0.depth, NULL::jsonb, NULL::boolean
     FROM t0
     JOIN relations r ON r.id = t0.via_relation AND r.project_id = $1
+      AND r.invalid = false
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
   UNION
     SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
@@ -88,6 +92,7 @@ edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
     WHERE r.project_id = $1
       AND r.relation_type_id = ANY($24::uuid[])
+      AND r.invalid = false
       AND (r.source_id IN (SELECT id FROM t0) AND r.target_id IN (SELECT id FROM t0))
         ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous)
         ORDER BY all_rows.id, all_rows.rank, all_rows.depth

@@ -223,7 +223,8 @@ any), cardinality, own `field_schema` (edges carry data: "requires
 Mothwing Cloak"), optional `semantic_role`, `version`.
 
 **`relations`** — `relation_type_id`, source entity, target entity,
-`fields` (jsonb).
+`fields` (jsonb, validated against the relation type's schema),
+`invalid`, `version`.
 
 `semantic_role` is one of `prerequisite`, `unlock`, `containment`,
 `spatial`, `availability`, `reward`, or null, enforced by a `CHECK` on
@@ -408,17 +409,46 @@ likewise. Deleting an entity deletes its relations.
 ### Schema evolution
 
 When a type's `field_schema` changes — a new required field, say —
-existing entities are neither rejected nor back-filled with invented
-values. They are flagged as invalid and `entities.list` can filter for
-them (`invalid: true`) so a human or agent repairs them deliberately.
+existing rows are neither rejected nor back-filled with invented
+values. They are flagged as invalid so a human or agent repairs them
+deliberately.
+
+**The rule is the same for entities and for relations**, because both
+carry a `field_schema` and both have their `fields` judged against it by
+the same validator. Editing an `entity_type`'s schema re-checks that
+type's entities; editing a `relation_type`'s re-checks that type's
+edges. Either listing filters for the flagged rows (`invalid: true` on
+`entities.list` and on `relations.list`), the game summary counts them
+per type and in its totals, and the view query language excludes them
+from a picture unless `include_invalid` is set — on edges as well as on
+nodes, so a view never draws a relationship whose own fields the game no
+longer states.
+
+Rewriting a flagged row with values that fit clears the flag, and so
+does widening the schema back: the sweep clears as readily as it sets,
+or a designer's list of things to fix would never empty. The sweep
+writes nothing but the flag — no values, no `version`, and no
+`updated_at` on a row whose verdict has not changed — because a
+validation pass is a verdict about content, not an edit of it.
+
+*(Edges gained `invalid` in migration 0009; before it, editing a
+relation type's schema left every existing edge silently unjudged.)*
 
 ### Concurrency
 
-Every type and entity carries an integer `version`; every update passes
+Every row of all four tables — entity types, entities, relation types
+and relations — carries an integer `version`; every update passes
 `expected_version`. A conflict returns `version_conflict` **with the
 current version**, so the caller re-reads, merges and retries. This is
 Nottario's optimistic-concurrency pattern applied to the whole domain,
 and it matters here because several agents seed content in parallel.
+
+*(Relations gained `version` in migration 0009. Before it an edge was
+last-writer-wins, which mattered most exactly where the schema pushes
+multiplicity: an edge is unique per `(type, source, target)`, so two
+meanings between one pair of entities go into the edge's own fields, and
+those fields were the one place in the metamodel with no protection
+against a concurrent write.)*
 
 ### Audit
 

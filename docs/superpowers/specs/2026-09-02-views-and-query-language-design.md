@@ -552,8 +552,23 @@ jsonb_typeof(e.fields -> $n) = 'number'
 Rows with `invalid = true` are **excluded by default**, with
 `include_invalid: true` on the query to opt in. Rationale: a view is a
 picture a designer will trust, and half-migrated rows silently altering
-its shape is worse than their absence, which the invalid-entity list in
-`entities.list` already surfaces properly.
+its shape is worse than their absence, which the invalid-row listings in
+`entities.list` and `relations.list` already surface properly.
+
+**This covers edges as well as nodes**, on the one switch: since
+migration 0009 a relation carries the same `invalid` flag an entity
+does, set by the same sweep when its relation type's `field_schema`
+stops fitting the values the edge holds. Every place the compiler names
+the `relations` table carries the exclusion — a step's own join, a
+multi-hop walk (where it prunes the recursion, so nothing behind an
+excluded edge is drawn either — an edge filtered on the way out would
+leave a floating node), both `edges[]` collection points, and the
+one-hop related attribute in `project`. An edge whose own fields the
+game no longer states is a relationship a picture must not assert.
+
+`@invalid` is therefore comparable in an `edge_where` and drawable as an
+`label_from`, alongside `@type` and `@created_at`. `@name` and `@key`
+remain refused on an edge: a relation still has neither.
 
 ### 4.3 Bounds
 

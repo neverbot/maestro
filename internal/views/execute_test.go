@@ -2,6 +2,7 @@ package views
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -616,5 +617,151 @@ func TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows(t *testing.T) {
 	sort.Strings(got)
 	if strings.Join(got, ",") != "defias,elwynn,hogger" {
 		t.Fatalf("without to_type the zone is reached too, got %v", got)
+	}
+}
+
+// TestNoArmOfAPictureDrawsAnEdgeThatNoLongerValidates is the edge twin of
+// TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows, and it exists
+// because until 0009 an edge could not be flagged at all: a relation type
+// carries a field schema, an edge's values are validated against it, and
+// nothing re-judged them when the schema changed.
+//
+// **It exercises every arm of the compiler that names the `relations`
+// table**, in one fixture, because that is the failure this repository
+// keeps repeating: a rule established in one arm and not carried to the
+// others. The arms are
+//
+//   - `hop`, a one-hop step's own JOIN;
+//   - `walk`, a multi-hop step, where the exclusion rides in the edge
+//     predicate and prunes the recursion rather than filtering its output
+//     — an edge dropped on the way out would leave the node behind it
+//     drawn with nothing joining it to the picture;
+//   - `edges[].from_step`, the edges a step walked;
+//   - `edges[].between`, relations drawn between two sets;
+//   - `project`'s one-hop related attribute, where an edge nobody drew
+//     still colours a node.
+//
+// Each is asserted with `include_invalid` as its own control, so a green
+// assertion cannot be a fixture that was empty either way.
+func TestNoArmOfAPictureDrawsAnEdgeThatNoLongerValidates(t *testing.T) {
+	g, _ := newGame(t)
+	// hogger -> elwynn is the edge that stops validating. defias ->
+	// westfall is the same relation type, left alone, and it is what
+	// makes every assertion below about the flag rather than about the
+	// relation type.
+	if _, err := g.pool.Exec(t.Context(),
+		`UPDATE relations SET invalid = true
+		   WHERE project_id = $1
+		     AND source_id = (SELECT id FROM entities WHERE project_id = $1 AND key = 'hogger')
+		     AND target_id = (SELECT id FROM entities WHERE project_id = $1 AND key = 'elwynn')`,
+		g.projectID); err != nil {
+		t.Fatalf("flag the edge: %v", err)
+	}
+	// A second hop for the walk arm to cross: elwynn takes_place_in
+	// westfall is nonsense as game content and is exactly what a walk
+	// needs — a valid edge on the far side of the flagged one.
+	g.relate(t, "takes_place_in", "zone", "elwynn", "zone", "westfall")
+
+	nodes := func(doc string) string {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
+		if err != nil {
+			t.Fatalf("run %s: %v", doc, err)
+		}
+		got := keysOf(res.Nodes)
+		sort.Strings(got)
+		return strings.Join(got, ",")
+	}
+	edges := func(doc string) int {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{Query: mustParse(t, doc)})
+		if err != nil {
+			t.Fatalf("run %s: %v", doc, err)
+		}
+		return len(res.Edges)
+	}
+
+	// --- hop: a one-hop step must not follow the flagged edge. ---
+	const hopDoc = `{"v":1,%s"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"takes_place_in","as":"where"}],
+		"nodes":[{"set":"where"}]}`
+	if got := nodes(fmt.Sprintf(hopDoc, "")); got != "westfall" {
+		t.Fatalf("a step followed an edge that no longer validates: %v", got)
+	}
+	if got := nodes(fmt.Sprintf(hopDoc, `"include_invalid":true,`)); got != "elwynn,westfall" {
+		t.Fatalf("include_invalid must lift the exclusion on a step's edge, got %v", got)
+	}
+
+	// --- walk: the exclusion prunes the recursion, so nothing behind the
+	// flagged edge is reached either. Without pruning, westfall would be
+	// reached twice over — once directly, once through elwynn — and the
+	// difference would be invisible; the control is what makes it visible,
+	// because with the exclusion lifted elwynn appears.
+	const walkDoc = `{"v":1,%s"from":[{"type":"quest","as":"q",
+		  "where":{"field":"@key","op":"eq","value":"hogger"}}],
+		"traverse":[{"from":"q","via":"takes_place_in","as":"chain","depth":{"max":3}}],
+		"nodes":[{"set":"chain"}]}`
+	if got := nodes(fmt.Sprintf(walkDoc, "")); got != "" {
+		t.Fatalf("a walk crossed an edge that no longer validates and drew %v", got)
+	}
+	if got := nodes(fmt.Sprintf(walkDoc, `"include_invalid":true,`)); got != "elwynn,westfall" {
+		t.Fatalf("include_invalid must let the walk cross, got %v", got)
+	}
+
+	// --- edges[].from_step and edges[].between: the two collection
+	// points that draw relations. from_step reads the step, which has
+	// already pruned; between reads the table itself.
+	const betweenDoc = `{"v":1,%s"from":[{"type":"quest","as":"q"},{"type":"zone","as":"z"}],
+		"nodes":[{"set":"q"},{"set":"z"}],
+		"edges":[{"via":"takes_place_in","between":["q","z"]}]}`
+	if got := edges(fmt.Sprintf(betweenDoc, "")); got != 1 {
+		t.Fatalf("a between entry drew %d edges, want only the one that still validates", got)
+	}
+	if got := edges(fmt.Sprintf(betweenDoc, `"include_invalid":true,`)); got != 2 {
+		t.Fatalf("include_invalid must draw both, got %d", got)
+	}
+
+	const fromStepDoc = `{"v":1,%s"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"takes_place_in","as":"where"}],
+		"nodes":[{"set":"where"}],"edges":[{"from_step":"where"}]}`
+	if got := edges(fmt.Sprintf(fromStepDoc, "")); got != 1 {
+		t.Fatalf("a from_step entry drew %d edges, want only the one that still validates", got)
+	}
+	if got := edges(fmt.Sprintf(fromStepDoc, `"include_invalid":true,`)); got != 2 {
+		t.Fatalf("include_invalid must draw both, got %d", got)
+	}
+
+	// --- project: a one-hop related attribute must not colour a node
+	// across an edge that no longer validates. hogger's zone is reached
+	// only through the flagged edge, so its slot goes empty; defias's is
+	// reached through the intact one and stays filled, which is what
+	// makes this about the flag.
+	colours := func(extra string) map[string]any {
+		t.Helper()
+		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
+			Query: mustParse(t, `{"v":1,`+extra+`"from":[{"type":"quest","as":"q"}],
+				"nodes":[{"set":"q"}],
+				"project":{"color_by":{"related":{"via":"takes_place_in",
+				  "direction":"out","attr":"@key"}}}}`)})
+		if err != nil {
+			t.Fatalf("run the projection: %v", err)
+		}
+		out := map[string]any{}
+		for _, node := range res.Nodes {
+			out[node.Key] = node.Attrs["color_by"]
+		}
+		return out
+	}
+	got := colours("")
+	if got["hogger"] != nil {
+		t.Fatalf("a node was coloured across an edge that no longer validates: %v", got["hogger"])
+	}
+	if got["defias"] != "westfall" {
+		t.Fatalf("the intact edge stopped colouring its node: %v — the assertion above "+
+			"would pass on an empty fixture", got["defias"])
+	}
+	if got := colours(`"include_invalid":true,`); got["hogger"] != "elwynn" {
+		t.Fatalf("include_invalid must lift the exclusion on a related attribute, got %v",
+			got["hogger"])
 	}
 }

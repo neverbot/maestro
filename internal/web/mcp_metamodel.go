@@ -1457,6 +1457,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"any type. semantic_role is what a view uses to know what the edge means: it is "+
 				"optional, and when given it is one of %s — anything else is invalid_input at "+
 				"path `semantic_role`, listing these same values. "+
+				"field_schema declares the fields every edge of the type carries and is what "+
+				"edge values are judged against; changing it re-checks every existing edge "+
+				"and marks the ones that no longer fit as invalid rather than deleting them "+
+				"or filling in the missing values, exactly as types.upsert does for "+
+				"entities. relations.list's `invalid` filter is how to find them. "+
 				"Idempotent by key; expected_version is required to update an existing type.",
 			quotedList(metamodel.SemanticRoles)),
 		OutputSchema: relationTypeDetailOutputSchema,

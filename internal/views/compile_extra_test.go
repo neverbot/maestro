@@ -49,20 +49,25 @@ func resolveOnly(t *testing.T, g *game, doc string) error {
 
 // TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas is the refusal a
 // relation's missing columns need. A relation has an id, a type, two
-// endpoints, its declared fields and its timestamps — 0004_metamodel.sql
-// — so @name, @key and @invalid compile to columns Postgres does not
-// have, and without this refusal the whole view fails with a SQL error
-// instead of a pointer.
+// endpoints, its declared fields, its validity flag and its timestamps —
+// 0004_metamodel.sql plus 0009 — so @name and @key compile to columns
+// Postgres does not have, and without this refusal the whole view fails
+// with a SQL error instead of a pointer.
+//
+// **@invalid moved from the refused list to the controls**, and that is
+// 0009: an edge now carries the same flag an entity does, so "the edges a
+// schema edit broke" is a picture the language can draw. Leaving it
+// refused would have made the flag visible on half the graph.
 func TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas(t *testing.T) {
 	g, _ := newGame(t)
-	for _, name := range []string{"@name", "@key", "@invalid"} {
+	for _, name := range []string{"@name", "@key"} {
 		err := resolveOnly(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
 			"traverse":[{"from":"q","via":"requires","as":"needs",
 			  "edge_where":{"field":"`+name+`","op":"eq","value":"x"}}]}`)
 		oneProblem(t, err, "/traverse/0/edge_where/field", "cannot be compared on a relation")
 	}
-	// The controls: the two built-ins a relation does carry, in the same
-	// position, both of which must resolve *and* compile.
+	// The controls: the three built-ins a relation does carry, in the
+	// same position, each of which must resolve *and* compile.
 	for _, doc := range []string{
 		`{"v":1,"from":[{"type":"quest","as":"q"}],
 		  "traverse":[{"from":"q","via":"requires","as":"needs",
@@ -70,10 +75,22 @@ func TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas(t *testing.T) {
 		`{"v":1,"from":[{"type":"quest","as":"q"}],
 		  "traverse":[{"from":"q","via":"requires","as":"needs",
 		    "edge_where":{"field":"@created_at","op":"lt","value":"2030-01-01T00:00:00Z"}}]}`,
+		`{"v":1,"from":[{"type":"quest","as":"q"}],"include_invalid":true,
+		  "traverse":[{"from":"q","via":"requires","as":"needs",
+		    "edge_where":{"field":"@invalid","op":"eq","value":true}}]}`,
 	} {
 		if _, _ = compileOf(t, g, doc); t.Failed() {
 			t.Fatalf("the control must resolve and compile: %s", doc)
 		}
+	}
+	// **@invalid is drawable on an edge as well as comparable**, which is
+	// the other half of the same column: a designer auditing a schema
+	// edit wants the broken edges labelled in the picture, not only
+	// filtered out of it.
+	if _, _ = compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
+		"traverse":[{"from":"q","via":"requires","as":"needs"}],
+		"edges":[{"from_step":"needs","label_from":"@invalid"}]}`); t.Failed() {
+		t.Fatal("@invalid must be drawable as an edge label")
 	}
 }
 

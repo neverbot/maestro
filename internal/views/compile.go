@@ -322,11 +322,32 @@ func (c *compiler) fieldsOf(alias frag) frag {
 // invalidFilter is the clause that keeps rows the metamodel flagged as no
 // longer fitting their schema out of a picture, unless the document asked
 // for them.
+//
+// **It applies to relations as well as to entities**, and it did not
+// before 0009 gave edges an `invalid` column. `include_invalid` is one
+// switch over the whole picture, so a document that excludes half-migrated
+// quests must not go on drawing the half-migrated edges between them: a
+// step that draws an edge whose fields no longer validate is exactly the
+// wrong picture this language exists to guard against, and it is worse on
+// an edge than on a node, because an edge is what a reader reads a
+// *relationship* off. Every place this compiler names the `relations`
+// table now carries the clause, on the same switch.
 func (c *compiler) invalidFilter(alias frag) frag {
 	if c.r.Query.IncludeInvalid {
 		return ""
 	}
 	return sprintf("\n     AND %s.invalid = false", alias)
+}
+
+// invalidFilterEdge is invalidFilter at the indentation the two edge
+// collection points use. The rule is invalidFilter's and the switch is
+// the same field; only the whitespace differs, which is why this is three
+// lines beside it rather than a second decision.
+func (c *compiler) invalidFilterEdge(alias frag) frag {
+	if c.r.Query.IncludeInvalid {
+		return ""
+	}
+	return sprintf("\n      AND %s.invalid = false", alias)
 }
 
 // selector emits one seed set:
@@ -454,7 +475,7 @@ func (c *compiler) hop(i int, name frag, from cteRef) (frag, error) {
     FROM %s near
     JOIN relations r
       ON r.project_id = $1
-     AND r.relation_type_id = ANY(%s::uuid[])
+     AND r.relation_type_id = ANY(%s::uuid[])%s
      AND %s
      AND %s
     JOIN entities far
@@ -462,7 +483,20 @@ func (c *compiler) hop(i int, name frag, from cteRef) (frag, error) {
      AND far.project_id = $1%s%s
     WHERE %s
 )`, name, far, c.b.bind(step.Name), from.name, c.b.bind(step.RelationTypeIDs),
-		near, edgeWhere, far, c.invalidFilter("far"), toType, nodeWhere), nil
+		c.invalidFilter("r"), near, edgeWhere, far, c.invalidFilter("far"), toType, nodeWhere), nil
+}
+
+// invalidEdgeInWalk is the invalid-edge exclusion as a bare predicate,
+// for the one place it travels as a predicate rather than as a JOIN
+// clause: graph.WalkCTE takes it as EdgePredicate. `r` is the alias that
+// package gives the relation in its recursion, which walk() asserts the
+// rest of its assumptions about by asking graph.ReadFrom for the CTE
+// name rather than guessing it.
+func (c *compiler) invalidEdgeInWalk() frag {
+	if c.r.Query.IncludeInvalid {
+		return ""
+	}
+	return "r.invalid = false"
 }
 
 // walkDirection maps this language's direction onto internal/graph's.
@@ -541,6 +575,27 @@ func (c *compiler) walk(i int, name frag, from cteRef) (frag, error) {
 		edgeWhere, edgeArgs, err = c.subPredicate(leafScope{alias: "r", edge: true}, step.EdgeWhere)
 		if err != nil {
 			return "", err
+		}
+	}
+	// **The invalid-edge exclusion rides in the edge predicate, which is
+	// to say it prunes the recursion**, and that is the opposite of where
+	// the *node* exclusion goes. The asymmetry is the same one the doc
+	// comment above argues for edge_where against to_type: a condition on
+	// the entity a hop reached is applied outside, so a walk can pass
+	// *through* a node of the wrong type to reach one of the right type;
+	// a condition on the relation each hop walks is applied inside,
+	// because an edge the document excluded is an edge the walk must not
+	// follow. Filtering invalid edges on the way out instead would leave
+	// the nodes reached only through one of them in the picture with
+	// nothing joining them to it — a floating node, which is a worse
+	// answer than either their presence or their absence. graph.WalkCTE
+	// ANDs this into the same JOIN as edge_where and renumbers the
+	// placeholders; this clause has none.
+	if filter := c.invalidEdgeInWalk(); filter != "" {
+		if edgeWhere == "" {
+			edgeWhere = filter
+		} else {
+			edgeWhere = sprintf("(%s) AND %s", edgeWhere, filter)
 		}
 	}
 	// The two CTE names are built here as fragments, from a constant
@@ -850,12 +905,23 @@ func (c *compiler) edge(i int) (frag, error) {
 					"step, or draw relations between sets with \"via\" and \"between\"",
 					spec.Spec.FromStep))
 		}
+		// The invalid-edge clause here is **redundant and kept anyway**,
+		// and this says so rather than implying it does work: the step
+		// this arm reads from has already excluded invalid edges — hop()
+		// in its JOIN, walk() inside the recursion — so every
+		// via_relation reaching here is one the step chose to follow.
+		// Removing it changes no result and can be caught by no test. It
+		// stays for the reason the metamodel's own redundant project
+		// filters stay: a statement that is safe only because of how
+		// today's producer happens to fill its input is a trap for
+		// tomorrow's, and the next reader adding an edge arm copies the
+		// shape in front of them.
 		return sprintf(`SELECT r.id, NULL::text, NULL::text, rt.key, NULL::text, NULL::text,
            r.source_id, r.target_id, %s, %s::integer, %s.depth, %s, NULL::boolean
     FROM %s
-    JOIN relations r ON r.id = %s.via_relation AND r.project_id = $1
+    JOIN relations r ON r.id = %s.via_relation AND r.project_id = $1%s
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1`,
-			fields, rank, ref.name, label, ref.name, ref.name), nil
+			fields, rank, ref.name, label, ref.name, ref.name, c.invalidFilterEdge("r")), nil
 	}
 
 	side := func(j int) (frag, error) {
@@ -903,8 +969,9 @@ func (c *compiler) edge(i int) (frag, error) {
     FROM relations r
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
     WHERE r.project_id = $1
-      AND r.relation_type_id = ANY(%s::uuid[])
-      AND %s`, fields, rank, label, c.b.bind(spec.RelationTypeIDs), endpoints), nil
+      AND r.relation_type_id = ANY(%s::uuid[])%s
+      AND %s`, fields, rank, label, c.b.bind(spec.RelationTypeIDs),
+		c.invalidFilterEdge("r"), endpoints), nil
 }
 
 // leafScope is what a predicate is being compiled against: the alias its
@@ -1095,12 +1162,15 @@ func (c *compiler) operand(sc leafScope, leaf *ResolvedLeaf) (operandOf, error) 
 // typeLeaf handles it.
 func builtinColumn(sc leafScope, name string) (frag, error) {
 	if sc.edge {
-		if name == AttrCreatedAt {
-			return sprintf("%s.created_at", sc.alias), nil
+		// @invalid joined @created_at here when 0009 gave relations the
+		// column; fieldScope.builtin is the resolution-time half of the
+		// same rule and carries the argument.
+		if name == AttrCreatedAt || name == AttrInvalid {
+			return sprintf("%s.%s", sc.alias, columnOfBuiltin(name)), nil
 		}
 		return "", fmt.Errorf("%s cannot be compared on a relation: an edge carries its type, "+
-			"its creation time and its declared fields, and has no key, name or invalid flag "+
-			"of its own — compare %s or %s here", name, AttrType, AttrCreatedAt)
+			"its creation time, its validity and its declared fields, and has no key or name "+
+			"of its own — compare %s, %s or %s here", name, AttrType, AttrCreatedAt, AttrInvalid)
 	}
 	switch name {
 	case AttrName:
@@ -1114,6 +1184,17 @@ func builtinColumn(sc leafScope, name string) (frag, error) {
 	}
 	return "", fmt.Errorf("%q is not a built-in: the built-ins are %s",
 		name, strings.Join(builtinNames, ", "))
+}
+
+// columnOfBuiltin names the column behind the two built-ins an edge and
+// an entity both have. It exists so the edge arm above spells neither of
+// them a second time: `created_at` and `invalid` are the same columns on
+// both tables, and a copy is how one of them drifts.
+func columnOfBuiltin(name string) frag {
+	if name == AttrInvalid {
+		return "invalid"
+	}
+	return "created_at"
 }
 
 // typeLeaf compiles @type.

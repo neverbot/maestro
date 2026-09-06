@@ -33,6 +33,7 @@ edge_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields
     JOIN relation_types rt ON rt.id = r.relation_type_id AND rt.project_id = $1
     WHERE r.project_id = $1
       AND r.relation_type_id = ANY($11::uuid[])
+      AND r.invalid = false
       AND (r.source_id IN (SELECT id FROM s0) AND r.target_id IN (SELECT id FROM s0))
         ) AS all_rows (id, key, name, type_key, set_name, role, source_id, target_id, fields, rank, depth, attrs, ambiguous)
         ORDER BY all_rows.id, all_rows.rank, all_rows.depth

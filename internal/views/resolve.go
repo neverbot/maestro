@@ -547,11 +547,19 @@ type fieldScope struct {
 	open bool
 	// edge marks a position whose rows are relations rather than
 	// entities. A relation has an id, a type, two endpoints, its declared
-	// fields and its timestamps and nothing else (0004_metamodel.sql), so
-	// @name, @key and @invalid name no column there and would compile to
-	// SQL Postgres refuses.
+	// fields, its validity flag and its timestamps and nothing else
+	// (0004_metamodel.sql plus 0009), so @name and @key name no column
+	// there and would compile to SQL Postgres refuses.
+	//
+	// **@invalid used to be refused here too, and 0009 is why it is not.**
+	// An edge now carries the same flag an entity does, set by the same
+	// sweep when a relation type's field schema stops fitting the values
+	// an edge holds. Leaving it refused would have meant a designer could
+	// draw "the quests that no longer fit" and not "the edges that no
+	// longer fit" — a flag visible on half the graph.
 	// TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas pins the
-	// refusal, with @type and @created_at as its controls.
+	// refusal that remains, with @type, @created_at and @invalid as its
+	// controls.
 	edge bool
 }
 
@@ -560,13 +568,13 @@ func (sc fieldScope) builtin(name string) error {
 	if !sc.edge {
 		return nil
 	}
-	if name == AttrType || name == AttrCreatedAt {
+	if name == AttrType || name == AttrCreatedAt || name == AttrInvalid {
 		return nil
 	}
 	return fmt.Errorf("%s cannot be compared on a relation: an edge carries its type, its "+
-		"creation time and its declared fields, and has no key, name or invalid flag of its "+
-		"own — compare %s or %s here, or a field this relation type declares",
-		name, AttrType, AttrCreatedAt)
+		"creation time, its validity and its declared fields, and has no key or name of its "+
+		"own — compare %s, %s or %s here, or a field this relation type declares",
+		name, AttrType, AttrCreatedAt, AttrInvalid)
 }
 
 // field finds the declaration a key has across every schema in scope,

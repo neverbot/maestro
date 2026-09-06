@@ -606,13 +606,13 @@ func (c *compiler) relatedHop(alias, name frag, slot ResolvedAttr) (frag, error)
         JOIN entities far ON %s
                          AND far.project_id = $1%s%s%s
         WHERE rel.project_id = $1
-          AND rel.relation_type_id = %s
+          AND rel.relation_type_id = %s%s
           AND %s
         GROUP BY %s
         ORDER BY far.name, far.id
         LIMIT 1
     ) AS %s ON true`, value, target, typeFilter, c.invalidFilterHop(), typeJoin,
-		c.b.bind(*hop.RelationTypeID), anchor, groupBy, name), nil
+		c.b.bind(*hop.RelationTypeID), c.invalidFilterHopEdge(), anchor, groupBy, name), nil
 }
 
 // invalidFilterHop keeps a far entity the metamodel flagged as no longer
@@ -625,6 +625,21 @@ func (c *compiler) invalidFilterHop() frag {
 		return ""
 	}
 	return "\n                         AND far.invalid = false"
+}
+
+// invalidFilterHopEdge is the same rule for the *relation* this hop
+// follows, which since 0009 can be flagged too.
+//
+// It is the twin of invalidFilterHop and not an afterthought: a colour
+// read across an edge whose own fields no longer validate is a colour
+// read across a relationship the game no longer states, and a picture
+// that excludes invalid quests must not be coloured through an invalid
+// `takes_place_in`. Both ends of the hop are judged, or neither is.
+func (c *compiler) invalidFilterHopEdge() frag {
+	if c.r.Query.IncludeInvalid {
+		return ""
+	}
+	return "\n          AND rel.invalid = false"
 }
 
 // edgeLabel is the label an edges[] entry asked to be drawn on each
@@ -644,13 +659,19 @@ func (c *compiler) edgeLabel(spec *ResolvedEdge, relationAlias, typeAlias frag) 
 		value = sprintf("to_jsonb(%s.key)", typeAlias)
 	case spec.LabelFrom == AttrCreatedAt:
 		value = sprintf("to_jsonb(%s.created_at)", relationAlias)
+	case spec.LabelFrom == AttrInvalid:
+		// Since 0009 an edge has this column, so it can be drawn on one:
+		// a designer auditing a schema edit wants the broken edges
+		// labelled as such in the picture, not only findable through a
+		// listing. fieldScope.builtin is what lets resolution reach here.
+		value = sprintf("to_jsonb(%s.invalid)", relationAlias)
 	case strings.HasPrefix(spec.LabelFrom, "@"):
 		// Unreachable through Resolve, which refuses the built-ins a
 		// relation has no column for; reachable from a hand-built
 		// *Resolved.
 		return "", invalidQuery("", fmt.Sprintf(
-			"%s cannot be drawn on a relation: an edge carries its type, its creation time "+
-				"and its declared fields, and has no key, name or invalid flag of its own",
+			"%s cannot be drawn on a relation: an edge carries its type, its creation time, "+
+				"its validity and its declared fields, and has no key or name of its own",
 			spec.LabelFrom))
 	default:
 		value = sprintf("%s.fields -> %s", relationAlias, c.b.bind(spec.LabelFrom))

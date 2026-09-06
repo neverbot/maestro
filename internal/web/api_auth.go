@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,10 +79,38 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	dec := json.NewDecoder(r.Body)
+	// A member no input on this surface has is refused, never dropped.
+	//
+	// encoding/json's default is to discard what it does not recognise,
+	// and that default is the wrong one everywhere here: a caller that
+	// sent `layotu_mode` is told its write succeeded, with the mode it
+	// asked for silently not applied, and a caller that sent an argument
+	// the server used to take -- the per-view layout seed removed in
+	// Task 17 -- is told the same, which is worse: it had a meaning once.
+	// The MCP surface has refused this from the first day,
+	// for free: the SDK infers `additionalProperties: false` from the Go
+	// struct, so a member that is not a field is a schema violation
+	// before any handler runs. This is the same rule on the other path,
+	// which is where this project's recurring defect lives.
+	// TestNoSurfaceAcceptsALayoutSeed drives one removed member at both.
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeError(w, http.StatusRequestEntityTooLarge, errCodeRequestTooLarge, "request body too large")
+			return false
+		}
+		// encoding/json reports this as a bare error with no type of its
+		// own, so the name is read back out of the message. Naming the
+		// member matters more here than in most refusals: the caller
+		// believes it sent something meaningful, and "malformed JSON
+		// body" over a body that parsed cleanly is both false and
+		// unactionable.
+		if name, ok := unknownFieldName(err); ok {
+			problem := "is not a member of this request"
+			writeCodedError(w, http.StatusBadRequest, errCodeBadRequest,
+				name+" "+problem,
+				map[string]any{"fields": []map[string]string{{"path": name, "message": problem}}})
 			return false
 		}
 		var wrongType *json.UnmarshalTypeError
@@ -127,6 +156,27 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 		return false
 	}
 	return true
+}
+
+// unknownFieldName pulls the member's name out of the error
+// DisallowUnknownFields produces, which encoding/json builds as
+// `json: unknown field "name"` and gives no type to. Reading a message
+// is fragile, so the fallback is the ordinary malformed-body refusal
+// rather than a wrong name: a caller told "malformed JSON body" is at
+// least not told about a field that does not exist.
+// TestARequestBodyWithAnUnknownMemberIsRefusedByName pins the parse.
+func unknownFieldName(err error) (string, bool) {
+	const prefix = "json: unknown field "
+	msg := err.Error()
+	rest, found := strings.CutPrefix(msg, prefix)
+	if !found {
+		return "", false
+	}
+	name, unquoteErr := strconv.Unquote(rest)
+	if unquoteErr != nil {
+		return "", false
+	}
+	return name, true
 }
 
 // wrongTypeProblem says what was wrong with a value encoding/json

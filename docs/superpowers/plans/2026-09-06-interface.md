@@ -772,7 +772,7 @@ back as events it cannot distinguish from anyone else's — the payload
 carries no writer identity — and that is made fine rather than worked
 around: a re-read is idempotent and the three rules keep it cheap.
 
-- [ ] Tests (`internal/web/jstest/client_test.mjs`, driven by
+- [x] Tests (`internal/web/jstest/client_test.mjs`, driven by
   `TestTheDataClientRules`):
   `fortyPositionEventsCauseOneReread` — forty events inside the window,
   assert exactly one fetch; `arereadIsDeferredWhileDragging` — event
@@ -797,7 +797,7 @@ around: a re-read is idempotent and the three rules keep it cheap.
   pointer and a message, asserted character-for-character on the returned
   object; `unknownEventKindsAreIgnoredAndRecorded`.
 
-- [ ] See red: remove the `pendingWrites` term from the deferral guard
+- [x] See red: remove the `pendingWrites` term from the deferral guard
   and watch `aRereadIsDeferredWhileAWriteIsUnacknowledged` fail with one
   fetch instead of zero; make `applyEvent` return `reread` for
   `view.upserted` and watch two tests fail (the band test and the viewer
@@ -810,6 +810,160 @@ git add internal/web/static/client.js internal/web/jstest/client_test.mjs \
         internal/web/static_appjs_browser_test.go
 git commit -m "feat(web): one data client for views, with the SSE rules the events payload forces"
 ```
+
+#### Corrections made during implementation
+
+1. **The stream is read through the same `fetchImpl` as every call, with
+   this module's own SSE frame parser, rather than through an
+   `EventSource`.** Three of this task's own demands are unmeetable with
+   an `EventSource`. It swallows comment lines inside the browser, so
+   `heartbeatCommentsAreNotEvents` would have been an assertion about
+   Firefox rather than about our code; it reconnects on its own schedule,
+   so `theStreamReconnectsWhenTheServerClosesIt` would have asserted the
+   browser's backoff and not the one this task is asked to write against
+   `defaultSSEMaxLifetime`; and it would have been a second network
+   primitive in a module whose whole claim is that it is the only one.
+   With one primitive, "no other module fetches" is a source guard over
+   one word rather than a list of spellings that a new API could grow
+   past. The cost is `parseFrames`, about thirty lines, which is exported
+   and asserted directly — a heartbeat, a frame split across two chunks,
+   and a comment line inside a frame that must not forge its payload.
+
+2. **`resync` is a fifth rule, and the task's list does not name it.**
+   `internal/web/events.go` writes a synthetic `resync` frame whenever a
+   subscription's buffer overflowed — its whole meaning is "you missed
+   something, go and re-read" — and the task's "anything else → ignore"
+   would have sent the one signal the server gives about its own gaps to
+   the default arm. It is `reread` over `everything`, with the reason
+   `stream.gap`. This is the standing failure pattern of this project (a
+   rule established and not carried one step along) and it was landing
+   inside the task that establishes the rules.
+
+3. **A decision carries a *target* as well as a verdict**, because two of
+   the task's own rules are both `reread` and are not the same call. A
+   placement re-runs the picture; a `type.renamed` re-reads the **view
+   row only** and must not silently re-run, which the task states and
+   which a single `reread` cannot express. The four targets are
+   `picture`, `view`, `prose` and `everything`, plus `nothing` for an
+   ignore, and `aRenameOverTheWireReadsTheRowAndDoesNotRunTheQuery`
+   asserts the two calls are different calls.
+
+4. **A decision never carries a `version`, and `applyEvent` uses `state`
+   for relevance.** `view.upserted` does carry one, and its own doc
+   comment in `internal/views/events.go` says what it is: the token a
+   *write* must carry, never a snapshot to render. Passing it through
+   would put a value a caller could store where the rule says only
+   identity may go, so the reducer drops it and the re-read returns the
+   current one. `theClientNeverPatchesFromAPayload` runs every kind with
+   a poison value in every non-identity slot and asserts nothing but the
+   named identity fields appears anywhere in the decision — and it deep
+   **freezes** the state it passes in, so a reducer that patched would
+   throw rather than merely fail an assertion.
+
+5. **The error object carries `details` and `status` beside the three
+   fields.** A query refusal can name several problems (`details.fields`)
+   and a staleness report carries its own diagnostics
+   (`details.stale`), so handing on only the first pointer would hide the
+   rest; `details` travels whole and unmodified, `pointer` is the first
+   address the refusal named. `status` is there for the case the task
+   does not discuss: a transport failure or an unreadable body. That
+   answer comes back with an **empty code and an empty message** rather
+   than an invented sentence — the module has no prose and does not grow
+   any for this — and the surface that renders negative states (Task 4)
+   owns the words. `anUnreadableAnswerGetsNoInventedSentence` pins it.
+
+6. **The rule against composing a sentence is held by shape, in
+   `internal/web/static_client_test.go` — a fourth file this task did not
+   name.** Stating the rule in a comment is the thing this plan's
+   preamble calls a mechanism nothing reads, and the property has no
+   runtime signature: a client that composed one sentence would pass
+   every harness check that did not provoke that exact refusal. So: **no
+   string literal in `client.js` carries whitespace, and none is longer
+   than 48 characters.** A sentence has spaces; a path segment, a header
+   name, an event kind, a decision and a reason do not — which is why the
+   module's own reasons are spelled `placement.moved` and
+   `kind.unhandled`. The length bound is the second half, because the
+   scanner reads `\n` as its two characters (the frame separator `"\n\n"`
+   is protocol, not prose) and a sentence could otherwise hide behind
+   escapes. `TestTheSentenceGuardReadsWhatItClaimsTo` is the guard on the
+   guard, in both directions: it pins literals the module is known to
+   contain, and it feeds the scanner a fixture carrying two sentences —
+   one of them in a comment, which must *not* be read — and asserts it
+   finds exactly the two in code. The one place the module genuinely
+   needs a space is the optional one after an SSE field's colon, and it
+   is spelled `charCodeAt(0) === 32`.
+
+7. **The same file holds the fetch perimeter, which is the guard that
+   keeps Task 2's network scan meaning what it says.** That scan asks
+   *where* a module reaches; this task creates the module that reaches at
+   all, so a second guard asks *which* module:
+   `TestOnlyTheDataClientAndTheShippedBundleFetch` reads every own module
+   for `fetch`, `EventSource`, `XMLHttpRequest`, `WebSocket`,
+   `sendBeacon` and `importScripts`, and admits exactly two — `client.js`
+   and the shipped `app.js`, whose wrappers the four existing shells
+   already call. `doc.js` is deliberately not on the list even though it
+   is a page, because it reaches the server only through app.js's
+   wrappers, which is what makes the list mean something. Every entry
+   must also *name a file that exists and really does fetch*, so an
+   allowance cannot outlive its reason and sit there for the next module.
+   `TestTheDataClientNavigatesNothing` is the third: the module names no
+   `location`, `pushState`, `replaceState` or `window.open`, which is the
+   half of `aRemovedEventNavigatesNothing` that holds for every event
+   rather than for the one the harness sends.
+
+8. **A URL binds text, always, and a declaration converts it.**
+   `readParams` returns strings for everything, including `20`: a URL
+   carries no types, and guessing would collapse `20` and `"20"` into one
+   value, which is a distinction the envelope preserves and the palette
+   spends a legend row on. `typeParams(declarations, text)` is where the
+   query document's own `params` — `text`, `number`, `bool` — turn text
+   into values, and **a value it cannot convert passes through
+   unchanged** so the server refuses it with its own pointer and its own
+   sentence rather than this module refusing it with a copy of a rule
+   that lives elsewhere. `writeParams` keeps the page's own query keys,
+   so binding a parameter does not silently drop a tab or a cursor.
+
+9. **The coalescing window is not a resetting debounce.** A resetting one
+   is reset forever by an agent writing steadily, and the picture would
+   never catch up; the window opens on the first event and closes once,
+   so a re-read happens at most `REREAD_DEBOUNCE_MS` after the first
+   event that asked for one.
+
+10. **The `client` signature gained three injected seams beyond the
+    task's `{slug, fetchImpl, now}`: `setTimer`, `clearTimer` and
+    `random`.** A 750ms window and a reconnect backoff cannot be asserted
+    on a real clock without sleeping, and a harness that sleeps is a
+    harness that flakes. Every one of them defaults to the browser's own.
+
+11. **A comment skip that no mutation could turn red came out again.**
+    `parseFrame` began with an explicit `line.startsWith(":")` skip for
+    heartbeat comments. Removing it changed the parse of no input anybody
+    can write — a comment line has nothing before its colon, so its field
+    name is empty and is neither `event` nor `data` — which makes it a
+    guard no test could ever fail on. What carries the rule instead is
+    the empty-block check, whose removal *does* turn
+    `heartbeatCommentsAreNotEvents` and `aHeartbeatOverTheWireTakesNoDecision`
+    red, and a new frame case asserting a comment line inside a frame
+    cannot forge that frame's payload. It shipped in a follow-up commit
+    rather than being quietly fixed, because the first version of this
+    task shipped it.
+
+12. **A reconnection schedules a re-read; the first connection does not.**
+    The hub keeps no history (`realtime.Hub`'s own doc comment, and
+    `handleEvents`'s), so everything published while this client was away
+    is gone and the server's own contract is that a reconnected client
+    refetches over REST. The first connection is the exception because
+    the page has just run its view, and a re-read there would be a
+    duplicate request on every page load.
+
+13. **The harness checks keep the plan's names, with the leading article
+    normalised** (`aRereadIsDeferredWhileDragging`), and the two the plan
+    spells with a Go `Test` prefix —
+    `TestAViewerGetsTheSameReloadBandAsAnEditor` and
+    `TestTheClientNeverSendsAnEntityID` — are JavaScript checks inside
+    `client_test.mjs`, because both are properties of the module and not
+    of any route. The whole harness is driven from Go by
+    `TestTheDataClientRules`.
 
 ---
 

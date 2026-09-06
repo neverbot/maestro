@@ -409,8 +409,27 @@ func (s *Service) EntitiesByIDs(ctx context.Context, projectID uuid.UUID, ids []
 	return byID, nil
 }
 
-// RemoveEntity deletes one entity. Its relations go with it, by cascade.
-func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) error {
+// RemoveEntity deletes one entity by the address it was written under:
+// its type's key and its own key. Its edges go with it, by cascade.
+//
+// **It took a uuid until Metamodel 14.** Every other tool on this
+// surface addresses a row the way a designer names it, so an agent
+// holding the (type key, key) it had just written paid a resolving read
+// before every removal — measured by Task 9's seeding run and recorded
+// as a limitation there. The resolution has not gone away; it has moved
+// inside this transaction, where it costs no round trip and cannot race
+// the delete it precedes.
+//
+// The id is still returned by every reader and by the removal event, so
+// nothing that had one has lost it. What it is no longer is the address.
+func (s *Service) RemoveEntity(ctx context.Context, projectID uuid.UUID, typeKey, key string) error {
+	var problems []FieldError
+	problems = append(problems, rowKeyProblems("type_key", typeKey)...)
+	problems = append(problems, rowKeyProblems("key", key)...)
+	if len(problems) > 0 {
+		return &ValidationError{Code: codeInvalidInput, Fields: problems}
+	}
+
 	// Read the row, and its type, before deleting: entity.removed
 	// declares the same {id, type_key, key} identity entity.upserted
 	// does, and a removal announced with an empty key tells a client a row
@@ -418,34 +437,38 @@ func (s *Service) RemoveEntity(ctx context.Context, projectID, id uuid.UUID) err
 	// tell "not carried" from "empty".
 	var removed entityEvent
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
-		row, err := q.GetEntityByID(ctx, dbq.GetEntityByIDParams{ProjectID: projectID, ID: id})
-		if err != nil {
-			return notFoundByID(err, "entity", id, "lookup entity")
-		}
-		// The generic helper, deliberately: this id comes from the row
-		// just read and not from the caller, so there is no key to name.
-		// `entities.entity_type_id` is `ON DELETE RESTRICT`, which does
-		// not make this read safe: `RemoveEntityType(cascade)` deletes the
-		// entities first and the type second, and the read above takes no
-		// row lock, so under READ COMMITTED the type can vanish between
-		// the two statements. No-rows is reachable only that way — the row
-		// just read is being deleted by the same cascade — and `not_found`
-		// is the answer this call owes its caller either way. See the same
-		// note in RemoveRelation.
-		typ, err := q.GetEntityTypeByID(ctx, dbq.GetEntityTypeByIDParams{
-			ProjectID: projectID, ID: row.EntityTypeID,
+		typ, err := q.GetEntityTypeByKey(ctx, dbq.GetEntityTypeByKeyParams{
+			ProjectID: projectID, Key: typeKey,
 		})
-		if err != nil {
-			return notFound(err, "lookup entity type")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no entity type %q in this game", ErrNotFound, typeKey)
 		}
+		if err != nil {
+			return fmt.Errorf("lookup entity type: %w", err)
+		}
+		row, err := q.GetEntityByKey(ctx, dbq.GetEntityByKeyParams{
+			ProjectID: projectID, EntityTypeID: typ.ID, Key: key,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no %s %q in this game", ErrNotFound, typ.Key, key)
+		}
+		if err != nil {
+			return fmt.Errorf("lookup entity: %w", err)
+		}
+		// The stored spellings, not the caller's: keys are matched
+		// without regard to case, and an event that echoed the request
+		// would name an identity no other reader of the game sees.
 		removed = entityEvent{ID: row.ID, TypeKey: typ.Key, Key: row.Key}
 
-		rows, err := q.DeleteEntity(ctx, dbq.DeleteEntityParams{ProjectID: projectID, ID: id})
+		rows, err := q.DeleteEntity(ctx, dbq.DeleteEntityParams{ProjectID: projectID, ID: row.ID})
 		if err != nil {
 			return fmt.Errorf("delete entity: %w", err)
 		}
 		if rows == 0 {
-			return missingByID("entity", id)
+			// Reachable only against a concurrent removal of the same
+			// row — the read above takes no lock — and not_found is the
+			// answer this call owes either way.
+			return fmt.Errorf("%w: no %s %q in this game", ErrNotFound, typ.Key, key)
 		}
 		return nil
 	})

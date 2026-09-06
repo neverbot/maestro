@@ -552,7 +552,7 @@ func TestAnEdgeSchemaEditIsRepairedTheSameWay(t *testing.T) {
 	}
 	relType, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []uuid.UUID{byKey["quest"]}, TargetTypeIDs: []uuid.UUID{byKey["zone"]},
+		SourceTypeKeys: []string{"quest"}, TargetTypeKeys: []string{"zone"},
 	})
 	if err != nil {
 		t.Fatalf("declare relation type: %v", err)
@@ -570,8 +570,8 @@ func TestAnEdgeSchemaEditIsRepairedTheSameWay(t *testing.T) {
 	version := relType.Version
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs:   []uuid.UUID{byKey["quest"]},
-		TargetTypeIDs:   []uuid.UUID{byKey["zone"]},
+		SourceTypeKeys:  []string{"quest"},
+		TargetTypeKeys:  []string{"zone"},
 		Schema:          metamodel.Schema{{Key: "act", Type: metamodel.FieldNumber, Required: true}},
 		ExpectedVersion: &version,
 	}); err != nil {

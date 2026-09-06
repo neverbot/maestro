@@ -93,12 +93,21 @@ type RelationInput struct {
 // contract — every cursor in this package obeys it — including why one
 // cannot be forged into another game's rows.
 type RelationFilter struct {
-	TypeKey  string
-	Invalid  *bool
-	SourceID *uuid.UUID
-	TargetID *uuid.UUID
-	Cursor   string
-	Limit    int32
+	TypeKey string
+	Invalid *bool
+	// Source and Target narrow to the edges at one endpoint, addressed
+	// the way every other tool on this surface addresses an entity.
+	//
+	// **They were entity uuids until Metamodel 14.** An agent that has
+	// just written an edge holds the two refs and not the two ids, so
+	// filtering by endpoint cost it a resolving read — Task 9's seeding
+	// run measured exactly that round trip. The resolution now happens
+	// here, and the ids the listing filters on are still what the answer
+	// carries, because an edge's row holds them.
+	Source *Ref
+	Target *Ref
+	Cursor string
+	Limit  int32
 }
 
 // RelationPage is one page of edges plus the cursor for the next, in the
@@ -627,9 +636,50 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	params := dbq.ListRelationsParams{
 		ProjectID: projectID,
 		Invalid:   f.Invalid,
-		SourceID:  f.SourceID,
-		TargetID:  f.TargetID,
 		Limit:     limit,
+	}
+	// The two endpoint refs, resolved before the listing runs. A ref that
+	// names no entity is not_found rather than an empty page: "this game
+	// holds no edge at that entity" and "this game holds no such entity"
+	// are different answers, and only one of them is worth a second call.
+	//
+	// **Both halves of both refs are pattern-checked first**, the rule the
+	// TypeKey filter below already follows and for the same reason: a key
+	// is caller-supplied text and EntityByKey passes it to Postgres
+	// unbounded, so a NUL byte would come back as SQLSTATE 22021 — an
+	// internal_error over the caller's own argument. Every problem is
+	// collected before any is reported, so a caller with two bad refs
+	// fixes both in one round trip.
+	var endpointProblems []FieldError
+	for _, end := range []struct {
+		path string
+		ref  *Ref
+	}{{"source", f.Source}, {"target", f.Target}} {
+		if end.ref == nil {
+			continue
+		}
+		endpointProblems = append(endpointProblems,
+			rowKeyProblems(end.path+".type_key", end.ref.TypeKey)...)
+		endpointProblems = append(endpointProblems,
+			rowKeyProblems(end.path+".key", end.ref.Key)...)
+	}
+	if len(endpointProblems) > 0 {
+		return RelationPage{}, &ValidationError{Code: codeInvalidInput, Fields: endpointProblems}
+	}
+	for _, end := range []struct {
+		path string
+		ref  *Ref
+		id   **uuid.UUID
+	}{{"source", f.Source, &params.SourceID}, {"target", f.Target, &params.TargetID}} {
+		if end.ref == nil {
+			continue
+		}
+		row, err := s.EntityByKey(ctx, projectID, end.ref.TypeKey, end.ref.Key)
+		if err != nil {
+			return RelationPage{}, fmt.Errorf("%s: %w", end.path, err)
+		}
+		id := row.ID
+		*end.id = &id
 	}
 	typePart := ""
 	if f.TypeKey != "" {
@@ -656,8 +706,11 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	// the two entity listings: every filter of a listing shares one sort
 	// order, so a cursor carried from "the invalid edges" to "all edges"
 	// would page perfectly and answer a different question.
+	// The endpoint filters go into the fingerprint *resolved*, not as
+	// spelled, which is the rule ListEntities' traversal states: two
+	// spellings of one key are one listing and must share one cursor.
 	fingerprint := fingerprintOf(projectID.String(), "relations", typePart,
-		endpointFilterPart(f.SourceID), endpointFilterPart(f.TargetID),
+		endpointFilterPart(params.SourceID), endpointFilterPart(params.TargetID),
 		invalidFilterPart(f.Invalid))
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
@@ -813,48 +866,87 @@ func relationPageSize(limit int32) int32 {
 	return pageSize(limit, defaultRelationPage, maxRelationPage)
 }
 
-// RemoveRelation deletes one edge, reading it and its type first so that
-// relation.removed declares the same identity relation.upserted does. A
-// removal announced with an empty type key tells a client an edge of a
-// type it has never seen is gone, and a client reading a declared field
-// cannot tell "not carried" from "empty".
-func (s *Service) RemoveRelation(ctx context.Context, projectID, id uuid.UUID) error {
+// RemoveRelation deletes one edge by the address it was written under:
+// its relation type's key and both endpoints as (type key, key) refs.
+//
+// **It took a uuid until Metamodel 14**, and it is now the same address
+// relations.upsert writes an edge with and relations.get reads it by —
+// see RemoveEntity for the argument, which is the same one. The
+// resolution moved inside this transaction rather than disappearing.
+//
+// It reads the edge before deleting so that relation.removed declares
+// the same identity relation.upserted does; a removal announced with an
+// empty type key tells a client an edge of a type it has never seen is
+// gone.
+func (s *Service) RemoveRelation(ctx context.Context, projectID uuid.UUID,
+	typeKey string, source, target Ref,
+) error {
+	var problems []FieldError
+	for _, part := range []struct{ path, key string }{
+		{"type_key", typeKey},
+		{"source.type_key", source.TypeKey}, {"source.key", source.Key},
+		{"target.type_key", target.TypeKey}, {"target.key", target.Key},
+	} {
+		problems = append(problems, rowKeyProblems(part.path, part.key)...)
+	}
+	if len(problems) > 0 {
+		return &ValidationError{Code: codeInvalidInput, Fields: problems}
+	}
+
 	var removed relationEvent
 	err := s.withTx(ctx, func(q *dbq.Queries) error {
-		row, err := q.GetRelationByID(ctx, dbq.GetRelationByIDParams{ProjectID: projectID, ID: id})
-		if err != nil {
-			return notFoundByID(err, "relation", id, "lookup relation")
-		}
-		// The generic helper is right here, unlike on every by-key
-		// accessor: this id comes from the row just read, not from the
-		// caller, so there is no key to name and nothing for a caller to
-		// fix. `relations.relation_type_id` is `ON DELETE RESTRICT`, which
-		// is *not* what keeps this read from coming back empty: RESTRICT
-		// refuses a delete that would orphan an edge, and
-		// `RemoveRelationType(cascade)` deletes the edges first and the
-		// type second, so it never trips. The first read above takes no
-		// row lock either, so under READ COMMITTED the type can be gone by
-		// the time this statement runs. No-rows is therefore reachable —
-		// only against a cascading removal of this edge's own type, where
-		// the edge is being deleted too and `not_found` is the answer this
-		// call was going to give a moment later anyway.
-		typ, err := q.GetRelationTypeByID(ctx, dbq.GetRelationTypeByIDParams{
-			ProjectID: projectID, ID: row.RelationTypeID,
+		relType, err := q.GetRelationTypeByKey(ctx, dbq.GetRelationTypeByKeyParams{
+			ProjectID: projectID, Key: typeKey,
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: no relation type %q in this game", ErrNotFound, typeKey)
+		}
 		if err != nil {
-			return notFound(err, "lookup relation type")
+			return fmt.Errorf("lookup relation type: %w", err)
+		}
+		// Both ends resolved before either is reported, the rule
+		// upsertRelationWith argues: an agent holding two bad ends fixes
+		// the one it was told about, resends, and is told about the
+		// other.
+		sourceEnd, sourceErr := endpointEntity(ctx, q, projectID, "source", source)
+		targetEnd, targetErr := endpointEntity(ctx, q, projectID, "target", target)
+		if err := bothEndpoints(sourceErr, targetErr); err != nil {
+			return err
+		}
+
+		row, err := q.GetRelationByEdge(ctx, dbq.GetRelationByEdgeParams{
+			ProjectID:      projectID,
+			RelationTypeID: relType.ID,
+			SourceID:       sourceEnd.row.ID,
+			TargetID:       targetEnd.row.ID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The stored spellings, not the caller's; RelationByEdge
+			// carries the argument and this message matches its wording
+			// deliberately, so a designer who reads the edge and then
+			// fails to remove it sees one sentence rather than two.
+			return fmt.Errorf(
+				"%w: no %q edge from %s %q to %s %q in this game",
+				ErrNotFound, relType.Key,
+				sourceEnd.typ.Key, sourceEnd.row.Key, targetEnd.typ.Key, targetEnd.row.Key)
+		}
+		if err != nil {
+			return fmt.Errorf("lookup relation: %w", err)
 		}
 		removed = relationEvent{
-			ID: row.ID, TypeKey: typ.Key,
+			ID: row.ID, TypeKey: relType.Key,
 			SourceID: row.SourceID, TargetID: row.TargetID,
 		}
 
-		rows, err := q.DeleteRelation(ctx, dbq.DeleteRelationParams{ProjectID: projectID, ID: id})
+		rows, err := q.DeleteRelation(ctx, dbq.DeleteRelationParams{ProjectID: projectID, ID: row.ID})
 		if err != nil {
 			return fmt.Errorf("delete relation: %w", err)
 		}
 		if rows == 0 {
-			return missingByID("relation", id)
+			return fmt.Errorf(
+				"%w: no %q edge from %s %q to %s %q in this game",
+				ErrNotFound, relType.Key,
+				sourceEnd.typ.Key, sourceEnd.row.Key, targetEnd.typ.Key, targetEnd.row.Key)
 		}
 		return nil
 	})

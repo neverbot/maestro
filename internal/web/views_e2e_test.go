@@ -273,14 +273,13 @@ func (w *e2eWorld) seed(t *testing.T) {
 		w.typeID[spec.Key] = out.ID
 	}
 
-	quest, zone, class := w.typeID["quest"].String(), w.typeID["zone"].String(), w.typeID["class"].String()
 	for _, spec := range []web.RelationTypesUpsertInput{
 		{Key: "available_to", Label: "Available to",
-			SourceTypeIDs: []string{quest}, TargetTypeIDs: []string{class}},
+			SourceTypeKeys: []string{"quest"}, TargetTypeKeys: []string{"class"}},
 		{Key: "requires", Label: "Requires",
-			SourceTypeIDs: []string{quest}, TargetTypeIDs: []string{quest}},
+			SourceTypeKeys: []string{"quest"}, TargetTypeKeys: []string{"quest"}},
 		{Key: "takes_place_in", Label: "Takes place in",
-			SourceTypeIDs: []string{quest}, TargetTypeIDs: []string{zone}},
+			SourceTypeKeys: []string{"quest"}, TargetTypeKeys: []string{"zone"}},
 	} {
 		if _, err := web.MCPRelationTypesUpsert(ctx, w.deps, w.agent, w.game, spec); err != nil {
 			t.Fatalf("relation_types.upsert %s: %v", spec.Key, err)
@@ -911,12 +910,12 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 
 	for _, zone := range []string{"elwynn", "westfall"} {
 		if _, err := web.MCPEntitiesRemove(ctx, w.deps, w.agent, w.game,
-			web.EntitiesRemoveInput{ID: w.entity["zone/"+zone].String()}); err != nil {
+			web.EntitiesRemoveInput{TypeKey: "zone", Key: zone}); err != nil {
 			t.Fatalf("entities.remove %s: %v", zone, err)
 		}
 	}
 	removed, err := web.MCPTypesRemove(ctx, w.deps, w.agent, w.game, web.TypesRemoveInput{
-		ID: w.typeID["zone"].String(),
+		Key: "zone",
 	})
 	if err != nil {
 		t.Fatalf("types.remove zone: %v", err)

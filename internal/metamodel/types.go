@@ -245,6 +245,14 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 // re-declaring it with the list it currently holds is refused as
 // `invalid_input`.
 //
+// *(Metamodel 14 changed only how that last sentence reaches a caller:
+// an endpoint rule is stated and read back as entity type **keys**, and
+// an id with no type left to name is dropped from the answer rather
+// than rendered as an empty key. So a dangling id would now be invisible
+// to a re-declaration rather than fatal to it — which makes the prune
+// more important, not less, because the row would otherwise hold a rule
+// nothing reports.)*
+//
 // **Pruning here rather than a real referential constraint**, and that is
 // the choice rather than the cheap way out of it. A referential
 // constraint over these lists does not exist in Postgres: it would mean

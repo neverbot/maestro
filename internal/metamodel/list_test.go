@@ -150,7 +150,7 @@ func TestAPageIsNotShiftedByAConcurrentWrite(t *testing.T) {
 
 	// A deletion inside the page already read, and an insertion that sorts
 	// before the cursor's position.
-	if err := svc.RemoveEntity(ctx, project, first.Entities[1].ID); err != nil {
+	if err := svc.RemoveEntity(ctx, project, "quest", first.Entities[1].Key); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
@@ -187,7 +187,7 @@ func TestACursorSurvivesTheRowItNamesBeingDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
-	if err := svc.RemoveEntity(ctx, project, first.Entities[2].ID); err != nil {
+	if err := svc.RemoveEntity(ctx, project, "quest", first.Entities[2].Key); err != nil {
 		t.Fatalf("remove the row the cursor names: %v", err)
 	}
 
@@ -1089,8 +1089,10 @@ func TestARelationCursorBelongsToItsOwnFilter(t *testing.T) {
 		filter metamodel.RelationFilter
 	}{
 		{"narrowed by type", metamodel.RelationFilter{TypeKey: "requires", Limit: 1}},
-		{"narrowed by source", metamodel.RelationFilter{SourceID: &hogger.ID, Limit: 1}},
-		{"narrowed by target", metamodel.RelationFilter{TargetID: &hogger.ID, Limit: 1}},
+		{"narrowed by source", metamodel.RelationFilter{
+			Source: &metamodel.Ref{TypeKey: "quest", Key: hogger.Key}, Limit: 1}},
+		{"narrowed by target", metamodel.RelationFilter{
+			Target: &metamodel.Ref{TypeKey: "quest", Key: hogger.Key}, Limit: 1}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := tc.filter

@@ -135,8 +135,24 @@ DELETE FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
 -- name: LockEndpointEntityTypes :many
--- Reads the entity types an endpoint rule names, and holds a share lock
--- on each until the reading transaction ends.
+-- Reads the entity types an endpoint rule names, by key, and holds a
+-- share lock on each until the reading transaction ends.
+--
+-- **It matches on keys and returns both key and id**, which is the whole
+-- of Metamodel 14's endpoint change on this side. A relation type stores
+-- its endpoint rules as entity type ids — that is right, and it does not
+-- change: an id is what the prune below can remove and what nothing but
+-- a deletion can invalidate. What changed is that a *caller* no longer
+-- has to hold them. UpsertRelationType takes keys, this statement is
+-- where they become ids, and it happens inside the same transaction and
+-- under the same lock the check already needed, so the translation costs
+-- no round trip and no extra lock.
+--
+-- Keys are matched with `lower(key) = ANY (...)`, which is the unique
+-- index `entity_types_key_key (project_id, lower(key))` and the same
+-- case-folding every other key lookup in this file uses. The caller
+-- lowers the array it passes; entity type keys are ASCII by
+-- rowKeyPattern, so Go's fold and SQL's agree.
 --
 -- The read is what UpsertRelationType checks its endpoint lists against;
 -- the lock is what stops RemoveEntityType from deleting one of them
@@ -178,9 +194,9 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 --     a concurrent *edit* of the entity type itself waits, and no
 --     deadlock was found: entity_types is always locked before
 --     relation_types on both paths (see above).
-SELECT id FROM entity_types
+SELECT id, key FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid
-  AND id = ANY (sqlc.arg('ids')::uuid[])
+  AND lower(key) = ANY (sqlc.arg('keys')::text[])
 FOR SHARE;
 
 -- name: PruneEntityTypeFromEndpointLists :many
@@ -431,6 +447,13 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 FOR UPDATE;
 
 -- name: GetEntityByID :one
+-- **No production caller since Metamodel 14**, which moved the entity
+-- removal onto (type key, key) and took the last one with it. It stays
+-- because the project filter is what
+-- TestEntitiesAreScopedToTheirProject drives directly: the isolation
+-- claim is about this statement, not about a Go caller, and the day
+-- something needs a by-id read again it must not be re-added without
+-- one.
 SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
@@ -628,6 +651,9 @@ ORDER BY r.created_at, r.id
 LIMIT sqlc.arg('limit')::int;
 
 -- name: GetRelationByID :one
+-- No production caller since Metamodel 14, for the reason GetEntityByID
+-- records, and kept for the same one: the isolation tests drive this
+-- statement's project filter directly.
 SELECT * FROM relations
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 

@@ -244,6 +244,13 @@ type GetEntityByIDParams struct {
 	ID        uuid.UUID
 }
 
+// **No production caller since Metamodel 14**, which moved the entity
+// removal onto (type key, key) and took the last one with it. It stays
+// because the project filter is what
+// TestEntitiesAreScopedToTheirProject drives directly: the isolation
+// claim is about this statement, not about a Go caller, and the day
+// something needs a by-id read again it must not be re-added without
+// one.
 func (q *Queries) GetEntityByID(ctx context.Context, arg GetEntityByIDParams) (Entity, error) {
 	row := q.db.QueryRow(ctx, getEntityByID, arg.ProjectID, arg.ID)
 	var i Entity
@@ -665,6 +672,9 @@ type GetRelationByIDParams struct {
 	ID        uuid.UUID
 }
 
+// No production caller since Metamodel 14, for the reason GetEntityByID
+// records, and kept for the same one: the isolation tests drive this
+// statement's project filter directly.
 func (q *Queries) GetRelationByID(ctx context.Context, arg GetRelationByIDParams) (Relation, error) {
 	row := q.db.QueryRow(ctx, getRelationByID, arg.ProjectID, arg.ID)
 	var i Relation
@@ -1443,19 +1453,40 @@ func (q *Queries) ListRelations(ctx context.Context, arg ListRelationsParams) ([
 }
 
 const lockEndpointEntityTypes = `-- name: LockEndpointEntityTypes :many
-SELECT id FROM entity_types
+SELECT id, key FROM entity_types
 WHERE project_id = $1::uuid
-  AND id = ANY ($2::uuid[])
+  AND lower(key) = ANY ($2::text[])
 FOR SHARE
 `
 
 type LockEndpointEntityTypesParams struct {
 	ProjectID uuid.UUID
-	Ids       []uuid.UUID
+	Keys      []string
 }
 
-// Reads the entity types an endpoint rule names, and holds a share lock
-// on each until the reading transaction ends.
+type LockEndpointEntityTypesRow struct {
+	ID  uuid.UUID
+	Key string
+}
+
+// Reads the entity types an endpoint rule names, by key, and holds a
+// share lock on each until the reading transaction ends.
+//
+// **It matches on keys and returns both key and id**, which is the whole
+// of Metamodel 14's endpoint change on this side. A relation type stores
+// its endpoint rules as entity type ids — that is right, and it does not
+// change: an id is what the prune below can remove and what nothing but
+// a deletion can invalidate. What changed is that a *caller* no longer
+// has to hold them. UpsertRelationType takes keys, this statement is
+// where they become ids, and it happens inside the same transaction and
+// under the same lock the check already needed, so the translation costs
+// no round trip and no extra lock.
+//
+// Keys are matched with `lower(key) = ANY (...)`, which is the unique
+// index `entity_types_key_key (project_id, lower(key))` and the same
+// case-folding every other key lookup in this file uses. The caller
+// lowers the array it passes; entity type keys are ASCII by
+// rowKeyPattern, so Go's fold and SQL's agree.
 //
 // The read is what UpsertRelationType checks its endpoint lists against;
 // the lock is what stops RemoveEntityType from deleting one of them
@@ -1497,19 +1528,19 @@ type LockEndpointEntityTypesParams struct {
 //     a concurrent *edit* of the entity type itself waits, and no
 //     deadlock was found: entity_types is always locked before
 //     relation_types on both paths (see above).
-func (q *Queries) LockEndpointEntityTypes(ctx context.Context, arg LockEndpointEntityTypesParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, lockEndpointEntityTypes, arg.ProjectID, arg.Ids)
+func (q *Queries) LockEndpointEntityTypes(ctx context.Context, arg LockEndpointEntityTypesParams) ([]LockEndpointEntityTypesRow, error) {
+	rows, err := q.db.Query(ctx, lockEndpointEntityTypes, arg.ProjectID, arg.Keys)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []LockEndpointEntityTypesRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i LockEndpointEntityTypesRow
+		if err := rows.Scan(&i.ID, &i.Key); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -8,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/neverbot/maestro/internal/markdown"
 	"github.com/neverbot/maestro/internal/metamodel"
@@ -38,12 +41,17 @@ import (
 // meaning the day a /types/new page is added, because Go's ServeMux
 // prefers a literal segment over a wildcard without saying so. Every
 // row here is therefore addressed through a fixed discriminator:
-// /types/by-key/{key}, /types/by-id/{id}, /entities/by-key/{type}/{key},
-// /entities/by-id/{id}. The discriminator sits where no key ever sits,
-// so no key can collide with it — "by-key" and "by-id" are themselves
-// perfectly legal keys, and
+// /types/by-key/{key}, /entities/by-key/{type}/{key}. The discriminator
+// sits where no key ever sits, so no key can collide with it —
+// "by-key" and "by-id" are themselves perfectly legal keys, and
 // TestARouteShapedKeyIsStillAddressable declares a type for each of the
-// dangerous words and addresses it both ways. The two alternatives
+// dangerous words, reads it and removes it.
+//
+// **Metamodel 14 removed the by-id half.** The four removals took uuids
+// and now take keys, so `by-key` is the only discriminator this surface
+// has; the shape it discriminates against is unchanged, and the segment
+// stays because what makes it safe is that a key never sits where a
+// literal could claim it. The two alternatives
 // keys.go recorded — a reserved-word list in the domain, or resolving
 // the ambiguity in the router — were both rejected for the same reason:
 // they make a designer's vocabulary hostage to a routing table, and a
@@ -377,7 +385,7 @@ func (s *Server) handleRemoveType(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 	out, err := typesRemove(r.Context(), s.deps(), caller, scope.ProjectID, TypesRemoveInput{
-		ID: r.PathValue("id"), Cascade: cascade,
+		Key: r.PathValue("key"), Cascade: cascade,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -438,7 +446,7 @@ func (s *Server) handleRemoveRelationType(w http.ResponseWriter, r *http.Request
 		return
 	}
 	out, err := relationTypesRemove(r.Context(), s.deps(), caller, scope.ProjectID, RelationTypesRemoveInput{
-		ID: r.PathValue("id"), Cascade: cascade,
+		Key: r.PathValue("key"), Cascade: cascade,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
@@ -586,7 +594,7 @@ func (s *Server) handleRemoveEntity(w http.ResponseWriter, r *http.Request, call
 		return
 	}
 	out, err := entitiesRemove(r.Context(), s.deps(), caller, scope.ProjectID,
-		EntitiesRemoveInput{ID: r.PathValue("id")})
+		EntitiesRemoveInput{TypeKey: r.PathValue("type"), Key: r.PathValue("key")})
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
@@ -609,18 +617,32 @@ func (s *Server) handleListRelations(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	in := RelationsListInput{Limit: limit, Verbose: verbose}
+	var source, target RefInput
 	for _, part := range []struct {
 		name  string
 		field *string
 	}{
-		{"type_key", &in.TypeKey}, {"source_id", &in.SourceID},
-		{"target_id", &in.TargetID}, {"cursor", &in.Cursor},
+		{"type_key", &in.TypeKey}, {"cursor", &in.Cursor},
+		{"source_type_key", &source.TypeKey}, {"source_key", &source.Key},
+		{"target_type_key", &target.TypeKey}, {"target_key", &target.Key},
 	} {
 		value, ok := queryString(w, r, part.name)
 		if !ok {
 			return
 		}
 		*part.field = value
+	}
+	// An endpoint filter is present when either half of its ref is
+	// written, not when both are: half a ref is a caller's mistake and
+	// the domain answers it as one, at the path that is wrong. Dropping
+	// it silently would answer a narrowed question with the whole
+	// listing, which is this surface's own "wrong answer that looks like
+	// a right one".
+	if source != (RefInput{}) {
+		in.Source = &source
+	}
+	if target != (RefInput{}) {
+		in.Target = &target
 	}
 	// The same tri-state parse the entity listing's own invalid filter
 	// takes, so `?invalid=true` means the same thing on both routes and a
@@ -697,8 +719,22 @@ func (s *Server) handleRemoveRelation(w http.ResponseWriter, r *http.Request, ca
 	if !s.requireContentService(w) {
 		return
 	}
-	out, err := relationsRemove(r.Context(), s.deps(), caller, scope.ProjectID,
-		RelationsRemoveInput{ID: r.PathValue("id")})
+	in := RelationsRemoveInput{}
+	for _, part := range []struct {
+		name  string
+		field *string
+	}{
+		{"type_key", &in.TypeKey},
+		{"source_type_key", &in.Source.TypeKey}, {"source_key", &in.Source.Key},
+		{"target_type_key", &in.Target.TypeKey}, {"target_key", &in.Target.Key},
+	} {
+		value, ok := queryString(w, r, part.name)
+		if !ok {
+			return
+		}
+		*part.field = value
+	}
+	out, err := relationsRemove(r.Context(), s.deps(), caller, scope.ProjectID, in)
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
@@ -1044,9 +1080,7 @@ func queryRelatedTo(w http.ResponseWriter, r *http.Request) (*RelatedToInput, bo
 // opening a game needs to see what is in it before they can decide
 // anything, which is not a need an agent has.
 type GameSummaryOutput struct {
-	EntityTypes   []EntityTypeSummary   `json:"entity_types"`
-	RelationTypes []RelationTypeSummary `json:"relation_types"`
-	Totals        GameTotals            `json:"totals"`
+	GameCountsOutput
 
 	// Role is the caller's own role in this game, and it is here for the
 	// page's words rather than for its data. The empty state has to tell
@@ -1059,6 +1093,27 @@ type GameSummaryOutput struct {
 	// and no query. It is never a permission — every refusal is still
 	// the server's, made again on the next request.
 	Role string `json:"role"`
+}
+
+// GameCountsOutput is the counted half of a game summary: one row per
+// declared type with what the game holds of it, plus three totals.
+//
+// **It is a type of its own because it is what both surfaces answer
+// with, and `role` is what only one of them has.** The REST page needs
+// the caller's own role to word its empty state; an agent over MCP has a
+// token, not a membership row, and a `"role": ""` would be a field that
+// says nothing. GameSummaryOutput embeds this, so the page's JSON is
+// byte-for-byte what it was.
+//
+// **Metamodel 14 put it on MCP, and nothing else changed.** Task 9's
+// seeding run found that nothing on the agent surface counted: answering
+// "how many races are there" was a full paged walk — five calls in the
+// seeded game — while this page had the number the whole time from two
+// grouped queries. The queries existed; only the exposure was missing.
+type GameCountsOutput struct {
+	EntityTypes   []EntityTypeSummary   `json:"entity_types"`
+	RelationTypes []RelationTypeSummary `json:"relation_types"`
+	Totals        GameTotals            `json:"totals"`
 }
 
 // EntityTypeSummary is one declared entity type and what the game holds
@@ -1104,35 +1159,56 @@ func (s *Server) handleGameSummary(w http.ResponseWriter, r *http.Request, _ Cal
 	if !s.requireContentService(w) {
 		return
 	}
-	ctx := r.Context()
-	entityTypes, err := s.opts.Metamodel.ListEntityTypes(ctx, scope.ProjectID)
+	counts, err := gameCounts(r.Context(), s.deps(), scope.ProjectID)
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
 	}
-	relationTypes, err := s.opts.Metamodel.ListRelationTypes(ctx, scope.ProjectID)
+	writeJSON(w, http.StatusOK, GameSummaryOutput{GameCountsOutput: counts, Role: scope.Role})
+}
+
+// gameCounts is the four queries and the assembly both surfaces share.
+//
+// Four queries, none of which grows with the game's content: the two
+// type listings and the two grouped counts. So a game holding four
+// hundred entities answers exactly as fast, and as small, as one holding
+// four, which is why this needs no page and no cursor.
+//
+// **Prose is deliberately not counted here.** The markdown domain is
+// optional (MCPDeps.Markdown may be nil) and a document has no declared
+// type to group by, so there is no row this shape could carry; more to
+// the point, adding a count to one of the two surfaces this function
+// serves and not the other is exactly the drift one shared assembly
+// exists to prevent. docs.list answers "how much prose is under this
+// path" by paging it.
+func gameCounts(ctx context.Context, deps MCPDeps, projectID uuid.UUID) (GameCountsOutput, error) {
+	entityTypes, err := deps.Metamodel.ListEntityTypes(ctx, projectID)
 	if err != nil {
-		s.writeDomainError(w, r, err)
-		return
+		return GameCountsOutput{}, err
 	}
-	entityCounts, err := s.opts.Metamodel.EntityCountsByType(ctx, scope.ProjectID)
+	relationTypes, err := deps.Metamodel.ListRelationTypes(ctx, projectID)
 	if err != nil {
-		s.writeDomainError(w, r, err)
-		return
+		return GameCountsOutput{}, err
 	}
-	relationCounts, err := s.opts.Metamodel.RelationCountsByType(ctx, scope.ProjectID)
+	entityCounts, err := deps.Metamodel.EntityCountsByType(ctx, projectID)
 	if err != nil {
-		s.writeDomainError(w, r, err)
-		return
+		return GameCountsOutput{}, err
+	}
+	relationCounts, err := deps.Metamodel.RelationCountsByType(ctx, projectID)
+	if err != nil {
+		return GameCountsOutput{}, err
+	}
+	names := make(map[uuid.UUID]string, len(entityTypes))
+	for _, row := range entityTypes {
+		names[row.ID] = row.Key
 	}
 
 	// Both slices are made, never left nil: a nil slice marshals to JSON
-	// null, and a page iterating "the types this game has" must not have
-	// to tell "none" from "the server said nothing".
-	out := GameSummaryOutput{
+	// null, and a client iterating "the types this game has" must not
+	// have to tell "none" from "the server said nothing".
+	out := GameCountsOutput{
 		EntityTypes:   make([]EntityTypeSummary, 0, len(entityTypes)),
 		RelationTypes: make([]RelationTypeSummary, 0, len(relationTypes)),
-		Role:          scope.Role,
 	}
 	for _, row := range entityTypes {
 		counts := entityCounts[row.ID]
@@ -1156,5 +1232,5 @@ func (s *Server) handleGameSummary(w http.ResponseWriter, r *http.Request, _ Cal
 	// the header and the table on the page can never disagree — and a
 	// type with no entities contributes a zero from the map's own zero
 	// value, which is the honest answer for a type nobody has filled.
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }

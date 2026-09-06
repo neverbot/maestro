@@ -72,20 +72,11 @@ func TestRelationEndpointsAreCheckedAgainstTheirType(t *testing.T) {
 	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
-	quest, err := svc.EntityTypeByKey(ctx, project, "quest")
-	if err != nil {
-		t.Fatalf("quest type: %v", err)
-	}
-	zone, err := svc.EntityTypeByKey(ctx, project, "zone")
-	if err != nil {
-		t.Fatalf("zone type: %v", err)
-	}
-
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []uuid.UUID{quest.ID},
-		TargetTypeIDs: []uuid.UUID{zone.ID},
-		SemanticRole:  "spatial",
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{"zone"},
+		SemanticRole:   "spatial",
 	}); err != nil {
 		t.Fatalf("UpsertRelationType: %v", err)
 	}
@@ -99,7 +90,7 @@ func TestRelationEndpointsAreCheckedAgainstTheirType(t *testing.T) {
 	}
 
 	// A Class is not an allowed source for this relation type.
-	_, err = svc.UpsertRelation(ctx, project, metamodel.RelationInput{
+	_, err := svc.UpsertRelation(ctx, project, metamodel.RelationInput{
 		TypeKey: "takes_place_in",
 		Source:  metamodel.Ref{TypeKey: "class", Key: "mage"},
 		Target:  metamodel.Ref{TypeKey: "zone", Key: "elwynn"},
@@ -447,21 +438,16 @@ func TestARelationTypeEndpointListMustNameTypesOfThisGame(t *testing.T) {
 	if err != nil {
 		t.Fatalf("their type: %v", err)
 	}
-	quest, err := svc.EntityTypeByKey(ctx, mine, "quest")
-	if err != nil {
-		t.Fatalf("quest type: %v", err)
-	}
-
 	_, err = svc.UpsertRelationType(ctx, mine, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []uuid.UUID{quest.ID},
-		TargetTypeIDs: []uuid.UUID{foreign.ID},
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{foreign.Key},
 	})
 	if !errors.Is(err, metamodel.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput", err)
 	}
-	requireFieldError(t, err, "target_type_ids[0]",
-		"names no entity type of this game: "+foreign.ID.String())
+	requireFieldError(t, err, "target_type_keys[0]",
+		"names no entity type of this game: "+foreign.Key)
 
 	if _, err := svc.RelationTypeByKey(ctx, mine, "takes_place_in"); !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("the refused declaration must store nothing, got %v", err)
@@ -535,7 +521,7 @@ func TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput(t *testing.T)
 	// returns on its own, no polling or second goroutine required.
 	_, err = timeoutSvc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		TargetTypeIDs: []uuid.UUID{zone.ID},
+		TargetTypeKeys: []string{"zone"},
 	})
 	if err == nil {
 		t.Fatal("UpsertRelationType succeeded; the endpoint lock did not block it")
@@ -718,11 +704,7 @@ func TestDeletingAnEntityDeletesItsRelations(t *testing.T) {
 		t.Fatalf("UpsertRelation: %v", err)
 	}
 
-	hogger, err := svc.EntityByKey(ctx, project, "quest", "hogger")
-	if err != nil {
-		t.Fatalf("EntityByKey: %v", err)
-	}
-	if err := svc.RemoveEntity(ctx, project, hogger.ID); err != nil {
+	if err := svc.RemoveEntity(ctx, project, "quest", "hogger"); err != nil {
 		t.Fatalf("RemoveEntity: %v", err)
 	}
 
@@ -780,7 +762,7 @@ func TestRemoveRelationTypeRefusesWhileItHasEdges(t *testing.T) {
 }
 
 // TestRelationsAreScopedToTheirProject pins the isolation of the
-// statements that address a relation by an id, and of the listing.
+// statements that address one relation, and of the listing.
 func TestRelationsAreScopedToTheirProject(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)
@@ -793,12 +775,11 @@ func TestRelationsAreScopedToTheirProject(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertRelationType: %v", err)
 	}
-	edge, err := svc.UpsertRelation(ctx, mine, metamodel.RelationInput{
+	if _, err := svc.UpsertRelation(ctx, mine, metamodel.RelationInput{
 		TypeKey: "requires",
 		Source:  metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"},
 		Target:  metamodel.Ref{TypeKey: "quest", Key: "hogger"},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("UpsertRelation: %v", err)
 	}
 
@@ -809,11 +790,14 @@ func TestRelationsAreScopedToTheirProject(t *testing.T) {
 	if len(rels.Relations) != 0 {
 		t.Fatalf("another game's listing returned %d edges", len(rels.Relations))
 	}
-	// A leaked id is not enough: the removal filters on the project too.
-	if err := svc.RemoveRelation(ctx, theirs, edge.ID); !errors.Is(err, metamodel.ErrNotFound) {
+	// Knowing the address is not enough: the removal filters on the
+	// project too, and the other game does not even hold the type.
+	kobold := metamodel.Ref{TypeKey: "quest", Key: "kobold-camp"}
+	hogger := metamodel.Ref{TypeKey: "quest", Key: "hogger"}
+	if err := svc.RemoveRelation(ctx, theirs, "requires", kobold, hogger); !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
-	if err := svc.RemoveRelation(ctx, mine, edge.ID); err != nil {
+	if err := svc.RemoveRelation(ctx, mine, "requires", kobold, hogger); err != nil {
 		t.Fatalf("the owning game must be able to remove it: %v", err)
 	}
 }
@@ -957,9 +941,12 @@ func TestListRelationsFiltersByTypeAndEndpoint(t *testing.T) {
 	}{
 		{"unfiltered", metamodel.RelationFilter{}, 3},
 		{"by type", metamodel.RelationFilter{TypeKey: "connects_to"}, 2},
-		{"by source", metamodel.RelationFilter{SourceID: &kobold.ID}, 1},
-		{"by target", metamodel.RelationFilter{TargetID: &hogger.ID}, 2},
-		{"by type and target", metamodel.RelationFilter{TypeKey: "connects_to", TargetID: &hogger.ID}, 1},
+		{"by source", metamodel.RelationFilter{
+			Source: &metamodel.Ref{TypeKey: "quest", Key: kobold.Key}}, 1},
+		{"by target", metamodel.RelationFilter{
+			Target: &metamodel.Ref{TypeKey: "quest", Key: hogger.Key}}, 2},
+		{"by type and target", metamodel.RelationFilter{TypeKey: "connects_to",
+			Target: &metamodel.Ref{TypeKey: "quest", Key: hogger.Key}}, 1},
 		// A limit the caller chose is the limit it gets: neither 0 nor
 		// the default, so a listing that ignored Limit or folded every
 		// value onto a bound would return all three.
@@ -1394,7 +1381,7 @@ func TestRelationEventsReachEveryMemberOfTheGameIncludingAgents(t *testing.T) {
 		}
 	}
 
-	if err := svc.RemoveRelation(ctx, project, edge.ID); err != nil {
+	if err := svc.RemoveRelation(ctx, project, "requires", kobold, hogger); err != nil {
 		t.Fatalf("RemoveRelation: %v", err)
 	}
 	for name, sub := range map[string]*realtime.Subscription{"viewer": viewer, "agent": agent} {
@@ -1772,8 +1759,8 @@ func TestRemovingAnEntityTypePrunesItFromEveryEndpointList(t *testing.T) {
 	}
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []uuid.UUID{quest.ID},
-		TargetTypeIDs: []uuid.UUID{zone.ID},
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{"zone"},
 	}); err != nil {
 		t.Fatalf("UpsertRelationType: %v", err)
 	}
@@ -1805,8 +1792,7 @@ func TestRemovingAnEntityTypePrunesItFromEveryEndpointList(t *testing.T) {
 	// the row was to know the new type's id out of band.
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs:   stored.SourceTypeIds,
-		TargetTypeIDs:   stored.TargetTypeIds,
+		SourceTypeKeys:  []string{"quest"},
 		ExpectedVersion: &stored.Version,
 	}); err != nil {
 		t.Fatalf("a relation type could not be re-declared with the list it holds: %v", err)
@@ -1976,18 +1962,10 @@ func TestBothBadEndsOfAnEdgeAreAnsweredInOnePass(t *testing.T) {
 	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
-	quest, err := svc.EntityTypeByKey(ctx, project, "quest")
-	if err != nil {
-		t.Fatalf("quest type: %v", err)
-	}
-	zone, err := svc.EntityTypeByKey(ctx, project, "zone")
-	if err != nil {
-		t.Fatalf("zone type: %v", err)
-	}
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []uuid.UUID{quest.ID},
-		TargetTypeIDs: []uuid.UUID{zone.ID},
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{"zone"},
 	}); err != nil {
 		t.Fatalf("UpsertRelationType: %v", err)
 	}
@@ -2178,27 +2156,54 @@ func TestARemovalSaysWhatItCouldNotFindAndWhatStillHoldsIt(t *testing.T) {
 	project := newProject(t, pool)
 	seedWorld(t, svc, project)
 
+	// The two type removals still take an id, because the views service
+	// needs one to find the saved views a removal breaks and takes it
+	// before the delete; Metamodel 14 moved the *tools* onto keys and
+	// left the resolution on the server, which is where this function
+	// sits. The two content removals now address a row the way every
+	// other reader does, so what their messages have to name is the
+	// address the caller sent rather than an id it never had.
 	ghost := uuid.New()
+	gRef := metamodel.Ref{TypeKey: "quest", Key: "ghost"}
+	seedTakesPlaceIn(t, svc, project)
 	for _, tc := range []struct {
-		name, what string
-		remove     func() error
+		name   string
+		want   []string
+		remove func() error
 	}{
-		{"an entity type", "entity type", func() error {
+		{"an entity type", []string{"entity type", ghost.String()}, func() error {
 			return svc.RemoveEntityType(ctx, project, ghost, false)
 		}},
-		{"a relation type", "relation type", func() error {
+		{"a relation type", []string{"relation type", ghost.String()}, func() error {
 			return svc.RemoveRelationType(ctx, project, ghost, false)
 		}},
-		{"an entity", "entity", func() error { return svc.RemoveEntity(ctx, project, ghost) }},
-		{"a relation", "relation", func() error { return svc.RemoveRelation(ctx, project, ghost) }},
+		{"an entity", []string{"quest", "ghost"}, func() error {
+			return svc.RemoveEntity(ctx, project, "quest", "ghost")
+		}},
+		{"an entity under an undeclared type", []string{"entity type", "monster"}, func() error {
+			return svc.RemoveEntity(ctx, project, "monster", "ghost")
+		}},
+		{"a relation of an undeclared type", []string{"relation type", "eats"}, func() error {
+			return svc.RemoveRelation(ctx, project, "eats", gRef, gRef)
+		}},
+		{"a relation whose endpoints are not there", []string{"quest", "ghost"}, func() error {
+			return svc.RemoveRelation(ctx, project, "takes_place_in", gRef, gRef)
+		}},
+		{"a relation between two real entities that has no edge", []string{"takes_place_in", "hogger"}, func() error {
+			return svc.RemoveRelation(ctx, project, "takes_place_in",
+				metamodel.Ref{TypeKey: "quest", Key: "hogger"},
+				metamodel.Ref{TypeKey: "zone", Key: "elwynn"})
+		}},
 	} {
 		t.Run("removing "+tc.name+" that is not there names it", func(t *testing.T) {
 			err := tc.remove()
 			if !errors.Is(err, metamodel.ErrNotFound) {
 				t.Fatalf("err = %v, want ErrNotFound", err)
 			}
-			if !strings.Contains(err.Error(), tc.what) || !strings.Contains(err.Error(), ghost.String()) {
-				t.Fatalf("message = %q, want it to name the %s and the id", err, tc.what)
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("message = %q, want it to name %q", err, want)
+				}
 			}
 			if err.Error() == "not_found" {
 				t.Fatalf("message = %q, which is the code repeated as prose", err)
@@ -2223,7 +2228,6 @@ func TestARemovalSaysWhatItCouldNotFindAndWhatStillHoldsIt(t *testing.T) {
 		}
 	}
 
-	seedTakesPlaceIn(t, svc, project)
 	relate(t, svc, project, "takes_place_in",
 		metamodel.Ref{TypeKey: "quest", Key: "hogger"},
 		metamodel.Ref{TypeKey: "zone", Key: "elwynn"})

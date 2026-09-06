@@ -361,24 +361,23 @@ func TestAPrunedEndpointListIsAnnouncedToTheRowsOwnSubscribers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed zone: %v", err)
 	}
-	quest, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
+	if _, err := svc.UpsertEntityType(ctx, project, metamodel.EntityTypeInput{
 		Key: "quest", Label: "Quest", LabelPlural: "Quests",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("seed quest: %v", err)
 	}
 	takesPlaceIn, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []uuid.UUID{quest.ID},
-		TargetTypeIDs: []uuid.UUID{zone.ID},
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{"zone"},
 	})
 	if err != nil {
 		t.Fatalf("seed takes_place_in: %v", err)
 	}
 	if _, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
 		Key: "requires", Label: "requires",
-		SourceTypeIDs: []uuid.UUID{quest.ID},
-		TargetTypeIDs: []uuid.UUID{quest.ID},
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{"quest"},
 	}); err != nil {
 		t.Fatalf("seed requires: %v", err)
 	}
@@ -453,13 +452,13 @@ func TestPrunedEndpointListsArePublishedInSortOrderNotDatabaseOrder(t *testing.T
 	// arrive apple_rel-then-Zone_rel — the reverse of what the sort
 	// guarantees.
 	zoneRel, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
-		Key: "Zone_rel", Label: "Zone_rel", TargetTypeIDs: []uuid.UUID{zone.ID},
+		Key: "Zone_rel", Label: "Zone_rel", TargetTypeKeys: []string{"zone"},
 	})
 	if err != nil {
 		t.Fatalf("seed Zone_rel: %v", err)
 	}
 	appleRel, err := svc.UpsertRelationType(ctx, project, metamodel.RelationTypeInput{
-		Key: "apple_rel", Label: "apple_rel", TargetTypeIDs: []uuid.UUID{zone.ID},
+		Key: "apple_rel", Label: "apple_rel", TargetTypeKeys: []string{"zone"},
 	})
 	if err != nil {
 		t.Fatalf("seed apple_rel: %v", err)

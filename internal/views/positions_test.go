@@ -165,11 +165,7 @@ func TestDeletingAnEntityDropsItsPositionAndKeepsTheView(t *testing.T) {
 	if err := g.views.SetPositions(ctx, g.projectID, "route", placed()); err != nil {
 		t.Fatalf("set positions: %v", err)
 	}
-	hogger, err := g.meta.EntityByKey(ctx, g.projectID, "quest", "hogger")
-	if err != nil {
-		t.Fatalf("read hogger: %v", err)
-	}
-	if err := g.meta.RemoveEntity(ctx, g.projectID, hogger.ID); err != nil {
+	if err := g.meta.RemoveEntity(ctx, g.projectID, "quest", "hogger"); err != nil {
 		t.Fatalf("remove hogger: %v", err)
 	}
 

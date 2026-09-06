@@ -228,21 +228,20 @@ func (s *seeded) declareTypes(t *testing.T) {
 func (s *seeded) declareRelationTypes(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	id := func(key string) string { return s.typeIDs[key].String() }
 	specs := []web.RelationTypesUpsertInput{
 		{
 			Key: "takes_place_in", Label: "takes place in",
-			SourceTypeIDs: []string{id("race")}, TargetTypeIDs: []string{id("circuit")},
+			SourceTypeKeys: []string{"race"}, TargetTypeKeys: []string{"circuit"},
 			SemanticRole: "spatial",
 		},
 		{
 			Key: "part_of", Label: "part of",
-			SourceTypeIDs: []string{id("race")}, TargetTypeIDs: []string{id("championship")},
+			SourceTypeKeys: []string{"race"}, TargetTypeKeys: []string{"championship"},
 			SemanticRole: "containment",
 		},
 		{
 			Key: "drives", Label: "drives",
-			SourceTypeIDs: []string{id("driver")}, TargetTypeIDs: []string{id("car")},
+			SourceTypeKeys: []string{"driver"}, TargetTypeKeys: []string{"car"},
 			// An edge with a schema of its own.
 			Schema: []web.FieldInput{
 				{Key: "seat", Type: "enum", Options: []string{"race", "reserve"}, Default: "race"},
@@ -251,24 +250,24 @@ func (s *seeded) declareRelationTypes(t *testing.T) {
 		},
 		{
 			Key: "eligible_for", Label: "eligible for",
-			SourceTypeIDs: []string{id("car")}, TargetTypeIDs: []string{id("race")},
+			SourceTypeKeys: []string{"car"}, TargetTypeKeys: []string{"race"},
 			SemanticRole: "availability",
 		},
 		{
 			Key: "requires_licence", Label: "requires licence",
-			SourceTypeIDs: []string{id("race")}, TargetTypeIDs: []string{id("licence")},
+			SourceTypeKeys: []string{"race"}, TargetTypeKeys: []string{"licence"},
 			SemanticRole: "prerequisite",
 		},
 		{
 			// Self-referencing: licence to licence.
 			Key: "supersedes", Label: "supersedes",
-			SourceTypeIDs: []string{id("licence")}, TargetTypeIDs: []string{id("licence")},
+			SourceTypeKeys: []string{"licence"}, TargetTypeKeys: []string{"licence"},
 			SemanticRole: "unlock",
 		},
 		{
 			// Self-referencing again, and dense: every driver has one.
 			Key: "teammate_of", Label: "teammate of",
-			SourceTypeIDs: []string{id("driver")}, TargetTypeIDs: []string{id("driver")},
+			SourceTypeKeys: []string{"driver"}, TargetTypeKeys: []string{"driver"},
 		},
 		{
 			// No endpoint rules at all: anything may sit at either end.
@@ -1163,7 +1162,9 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 		}
 		// Clean up the one row that landed so the counts below stand.
 		if _, err := web.MCPEntitiesRemove(ctx, s.deps, s.caller, s.game,
-			web.EntitiesRemoveInput{ID: out.Written[0].ID.String()}); err != nil {
+			web.EntitiesRemoveInput{
+				TypeKey: out.Written[0].TypeKey, Key: out.Written[0].Key,
+			}); err != nil {
 			t.Fatalf("entities.remove: %v", err)
 		}
 
@@ -1278,73 +1279,170 @@ func TestSeedARacingGameEndToEnd(t *testing.T) {
 	})
 
 	// TestSeedARacingGameEndToEnd's job is to find out what seeding a real
-	// game costs, so the gaps it found are pinned here rather than only
-	// written up. Each of these passes today and describes something an
-	// agent has to work around; a change that closes one of them should
-	// fail here and be deleted from this list.
-	t.Run("what the surface makes an agent do the long way", func(t *testing.T) {
-		// 1. **Nothing on this surface counts.** There is no tool that
-		// answers "how many races are there"; the REST home page has
-		// EntityCountsByType and an agent has only the listing, so a
-		// count is a full walk of every page.
-		pages, total := 0, 0
-		in := web.EntitiesListInput{TypeKey: "race", Limit: 50}
-		for {
-			page, err := web.MCPEntitiesList(ctx, s.deps, s.caller, s.game, in)
-			if err != nil {
-				t.Fatalf("entities.list: %v", err)
-			}
-			pages, total = pages+1, total+len(page.Items)
-			if page.NextCursor == nil {
-				break
-			}
-			in.Cursor = *page.NextCursor
+	// game costs, so the gaps it found were pinned here rather than only
+	// written up: each one passed, described something an agent had to
+	// work around, and was to be deleted when it was closed.
+	//
+	// **They are all closed.** Metamodel 13 indexed row keys and made
+	// search slim; Metamodel 14 put counting on the agent surface and
+	// moved the last four uuid-addressed tools, the relation listing's
+	// endpoint filters and a relation type's endpoint rules onto keys.
+	// What is here now is the positive form of each: the call an agent
+	// actually makes, over the same two-hundred-row game that measured
+	// the cost of not having it.
+	t.Run("what the surface used to make an agent do the long way", func(t *testing.T) {
+		// 1. **Counting was a full paged walk** — five calls to add up
+		// the races, while the game home page had the number the whole
+		// time. One call now, and it answers for every type at once.
+		counts, err := web.MCPGameCounts(ctx, s.deps, s.caller, s.game, web.GameCountsInput{})
+		if err != nil {
+			t.Fatalf("games.counts: %v", err)
 		}
-		if total != seedRaces || pages != seedRaces/50+1 {
-			t.Fatalf("counting %d races took %d pages", total, pages)
+		byType := map[string]int64{}
+		for _, row := range counts.EntityTypes {
+			byType[row.Key] = row.EntityCount
+			if row.InvalidCount != 0 {
+				t.Fatalf("%s carries %d invalid rows", row.Key, row.InvalidCount)
+			}
+		}
+		if byType["race"] != seedRaces || byType["driver"] != seedDrivers {
+			t.Fatalf("games.counts read %+v", byType)
+		}
+		if counts.Totals.Entities != seedEntities {
+			t.Fatalf("games.counts totals %d entities, want %d",
+				counts.Totals.Entities, seedEntities)
+		}
+		// The relation half is counted too, which is the "carry the rule
+		// one step along" half: a count that answered for entities alone
+		// would answer half the game.
+		edges := map[string]int64{}
+		for _, row := range counts.RelationTypes {
+			edges[row.Key] = row.RelationCount
+		}
+		if edges["takes_place_in"] != seedRaces || edges["mentions"] != 21 {
+			t.Fatalf("games.counts read %+v for edges", edges)
+		}
+		// And the number the page shows is the number the tool gives,
+		// because both come out of one assembly.
+		var totals int64
+		for _, row := range counts.RelationTypes {
+			totals += row.RelationCount
+		}
+		if totals != counts.Totals.Relations {
+			t.Fatalf("the per-type edge counts sum to %d and the total says %d",
+				totals, counts.Totals.Relations)
 		}
 
-		// 2. **Two of the seventeen tools address rows by uuid only.**
-		// entities.remove and relations.remove take an id, and
-		// relations.list filters endpoints by id, so an agent holding the
-		// (type key, key) every other tool speaks has to resolve it
-		// first. Here is that extra round trip. relations.get, added by
-		// Metamodel 12, is addressed by key, so the one read this case
-		// used to stand for is no longer among them.
-		race, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
-			web.EntitiesGetInput{TypeKey: "race", Key: "race-000"})
-		if err != nil {
-			t.Fatalf("entities.get: %v", err)
-		}
+		// 2. **Four tools and two filters addressed rows by uuid**, so an
+		// agent holding the (type key, key) every other tool speaks paid
+		// a resolving read before each. Here is the same neighbourhood
+		// walk, in one call, with no read in front of it.
 		out, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
-			web.RelationsListInput{SourceID: race.ID.String(), Limit: 50})
+			web.RelationsListInput{
+				Source: &web.RefInput{TypeKey: "race", Key: "race-000"}, Limit: 50,
+			})
 		if err != nil {
 			t.Fatalf("relations.list by source: %v", err)
 		}
 		if len(out.Items) != 3 {
 			t.Fatalf("race-000 has %d outgoing edges, want 3", len(out.Items))
 		}
+		// The ids are still on the wire — they are just not the address.
+		for _, item := range out.Items {
+			if item.SourceID == uuid.Nil || item.Source == nil {
+				t.Fatalf("an edge lost half of its endpoint identity: %+v", item)
+			}
+		}
+		// A ref that names no entity is not_found, not an empty page: an
+		// empty page is what a mistyped key used to produce.
+		if _, err := web.MCPRelationsList(ctx, s.deps, s.caller, s.game,
+			web.RelationsListInput{
+				Source: &web.RefInput{TypeKey: "race", Key: "race-999"}, Limit: 50,
+			}); err == nil {
+			t.Fatalf("filtering by an entity that does not exist was answered with a page")
+		}
 
-		// 3. **A relation type states its endpoints as entity type ids**,
-		// so a second seeding session — one that did not itself declare
-		// the types and so never saw the ids — has to call types.list and
-		// build the key-to-id map by hand before it can declare or edit a
-		// single relation type.
-		listed, err := web.MCPTypesList(ctx, s.deps, s.caller, s.game, web.TypesListInput{})
-		if err != nil {
-			t.Fatalf("types.list: %v", err)
-		}
-		byKey := map[string]uuid.UUID{}
-		for _, row := range listed.Items {
-			byKey[row.Key] = row.ID
-		}
+		// 3. **A relation type stated its endpoints as entity type ids**,
+		// so a second session had to call types.list and build a
+		// key-to-id map before it could declare or edit one. It reads
+		// back the keys it was declared with now, and — the half that
+		// makes it worth having — what it reads back is what it can send
+		// again.
 		detail, err := web.MCPRelationTypesGet(ctx, s.deps, s.caller, s.game,
 			web.RelationTypesGetInput{Key: "takes_place_in"})
 		if err != nil {
 			t.Fatalf("relation_types.get: %v", err)
 		}
-		if len(detail.SourceTypeIDs) != 1 || detail.SourceTypeIDs[0] != byKey["race"] {
-			t.Fatalf("a relation type's endpoints are stated as ids an agent must translate: %+v", detail)
+		if len(detail.SourceTypeKeys) != 1 || detail.SourceTypeKeys[0] != "race" ||
+			len(detail.TargetTypeKeys) != 1 || detail.TargetTypeKeys[0] != "circuit" {
+			t.Fatalf("endpoint rules read back as %+v", detail)
+		}
+		// The schema is left out deliberately: this is about the endpoint
+		// rules travelling out and back, and takes_place_in declares no
+		// fields, so re-sending it without one changes nothing.
+		if _, err := web.MCPRelationTypesUpsert(ctx, s.deps, s.caller, s.game,
+			web.RelationTypesUpsertInput{
+				Key: detail.Key, Label: detail.Label,
+				SourceTypeKeys:  detail.SourceTypeKeys,
+				TargetTypeKeys:  detail.TargetTypeKeys,
+				SemanticRole:    detail.SemanticRole,
+				ExpectedVersion: &detail.Version,
+			}); err != nil {
+			t.Fatalf("a relation type could not be re-declared from what it answered with: %v", err)
+		}
+
+		// 4. And the removals, by the address the rows were written
+		// under. The edge first, then one of its endpoints; both are
+		// re-seeded afterwards so the counts above still stand for the
+		// cases below.
+		if _, err := web.MCPRelationsRemove(ctx, s.deps, s.caller, s.game,
+			web.RelationsRemoveInput{
+				TypeKey: "takes_place_in",
+				Source:  web.RefInput{TypeKey: "race", Key: "race-000"},
+				Target:  web.RefInput{TypeKey: "circuit", Key: "circuit-000"},
+			}); err != nil {
+			t.Fatalf("relations.remove: %v", err)
+		}
+		if _, err := web.MCPEntitiesRemove(ctx, s.deps, s.caller, s.game,
+			web.EntitiesRemoveInput{TypeKey: "race", Key: "race-000"}); err != nil {
+			t.Fatalf("entities.remove: %v", err)
+		}
+		if _, err := web.MCPEntitiesGet(ctx, s.deps, s.caller, s.game,
+			web.EntitiesGetInput{TypeKey: "race", Key: "race-000"}); err == nil {
+			t.Fatalf("the removed race is still readable")
+		}
+		// Put the game back, so the page below counts the game this test
+		// seeded rather than the one this case took a row out of. The
+		// re-seed is also the proof that the removal really removed:
+		// the row is created fresh, at version 1, rather than updated.
+		back, err := web.MCPEntitiesUpsert(ctx, s.deps, s.caller, s.game, web.EntitiesUpsertInput{
+			Mode: string(metamodel.BulkAtomic),
+			Items: []web.EntityItemInput{{
+				TypeKey: "race", Key: "race-000", Name: "Race 000",
+				Fields: map[string]any{"laps": float64(10)},
+			}},
+		})
+		if err != nil {
+			t.Fatalf("re-seed race-000: %v", err)
+		}
+		if len(back.Written) != 1 || back.Written[0].Version != 1 {
+			t.Fatalf("the re-seeded race landed as %+v, want a fresh row at version 1", back.Written)
+		}
+		if _, err := web.MCPRelationsUpsert(ctx, s.deps, s.caller, s.game, web.RelationsUpsertInput{
+			Mode: string(metamodel.BulkAtomic),
+			Items: []web.RelationItemInput{
+				{TypeKey: "takes_place_in", Source: ref("race", "race-000"), Target: ref("circuit", "circuit-000")},
+				{TypeKey: "part_of", Source: ref("race", "race-000"),
+					Target: ref("championship", "championship-00")},
+				{TypeKey: "requires_licence", Source: ref("race", "race-000"),
+					Target: ref("licence", "licence-"+licenceTiers[0])},
+				// The incoming one too. Deleting an entity takes every
+				// edge touching it, in both directions, and putting the
+				// game back means putting all four back.
+				{TypeKey: "eligible_for", Source: ref("car", "car-000"), Target: ref("race", "race-000")},
+			},
+		}); err != nil {
+			t.Fatalf("re-seed race-000's edges: %v", err)
 		}
 	})
 

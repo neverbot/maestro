@@ -9529,6 +9529,195 @@ case, because it is what the repair costs when there is no repair.
 
 ---
 
+### Metamodel 14: an agent cannot count, and pays a resolving read for mixed addressing
+
+**Status: done.** One new tool and its shared assembly, six argument
+shapes moved from uuids to keys, four REST routes re-shaped, and eleven
+tests — three of them existing ones that could no longer say what they
+used to say.
+
+All three halves come from Task 9's seeding run, and all three are the
+same defect in different clothes: the surface knew something an agent
+could not ask it for.
+
+#### Counting
+
+**`games.counts`**, one call, answering "how many races are there" with
+one row per declared entity type and per declared relation type — each
+with how many rows instance it and how many of those a schema edit
+flagged — plus three totals. Before it, that question was a full paged
+walk: five calls in the seeded game, while the REST home page had the
+number the whole time from two grouped queries.
+
+**Only the exposure was missing, so only the exposure was added.** The
+page's handler was split into `gameCounts`, which both surfaces now call,
+and a `GameCountsOutput` the page embeds. The page keeps `role` — it
+needs the caller's own membership to word its empty state — and the tool
+does not carry it, because an agent has a token rather than a membership
+row and a `"role": ""` would be a field that says nothing. One assembly
+means the page and the tool cannot report different numbers, and
+`TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo` calls both against
+one game and compares them.
+
+**Both kinds are counted**, which is where "a rule not carried one step
+along" would have bitten: entity types alone would answer half the game,
+and since 0009 an edge is flagged by the same sweep an entity is. The
+seeded run asserts the per-type edge counts sum to the total.
+
+**Prose deliberately is not.** The markdown service is optional and a
+document has no declared type to group by, so there is no row this shape
+could carry — and adding a count to one of the two surfaces this
+assembly serves and not the other is exactly the drift one assembly
+exists to prevent.
+
+#### Addressing: the decision, and the argument
+
+**Keys replace ids. They are not accepted beside them.**
+
+What moved: `entities.remove`, `relations.remove`, `types.remove` and
+`relation_types.remove` took uuids; `relations.list` filtered its two
+endpoints by entity uuid. Task 9 named the first three; **`types.remove`
+and `relation_types.remove` it did not, and they were in exactly the same
+state** — a finding applied to the tools it happened to list and not to
+the ones it missed is the defect this repository produces most, so all
+five moved together.
+
+The argument for replacing rather than accepting both:
+
+1. **A key here is not a nickname for an id.** It is immutable — the
+   first spelling stored stands, and `keyRespellingError` refuses a
+   respelling *after* the write — and unique per game and type. So there
+   is nothing an id can address that a key cannot, and this is a total
+   replacement rather than a convenience alias.
+2. **A second spelling costs at every call site and buys nothing.** An
+   "exactly one of" refusal path, two branches in every tool description,
+   a decision for every caller. This repository already pays that in two
+   places, and in both the two spellings are two genuinely different
+   *questions*: `views.run` takes a saved key or an inline query and
+   refuses both, and `docs.links.list` reads the join from either side
+   and refuses neither and both. Two names for one row is not that.
+3. **It would make an existing inconsistency worse.** The routes address
+   a game by uuid while `/g/{slug}` addresses it by slug, and there is
+   still no server-side slug resolution (Task 8's corrections record it).
+   Adding a second dual-addressing surface is the wrong direction from
+   there.
+4. **Nothing is lost.** Every reader still returns the ids, every removal
+   event still carries them, and the stored endpoint columns are still
+   `uuid[]` — which is right, because an id is what a deleted type's
+   prune can remove from an endpoint list.
+   `TestEveryAddressOnThisSurfaceIsAKey` asserts both halves: the rows
+   really go by their address, and the ids are still on the wire.
+
+**The resolution did not disappear; it moved to where it costs nothing.**
+`RemoveEntity` and `RemoveRelation` resolve inside their own
+transaction, so what used to be a round trip is now two statements that
+cannot race the delete they precede. The two type removals resolve in the
+web layer, and that is the one place it is right to: the views service
+needs the type's id to find the saved views a removal breaks, and it has
+to take that list *before* the delete, because `view_refs`' foreign key
+is `ON DELETE SET NULL`.
+
+**On REST the last `by-id` segment is gone.** The content routes are
+`by-key` throughout; an edge, which has no key of its own, is addressed
+by `GET`/`DELETE /relations/one` with the same five query parameters on
+both — the address `relations.upsert` writes it under. The endpoint
+filters travel as `source_type_key`/`source_key` and their target twins,
+and **half a ref is refused rather than read as no filter**: answering a
+narrowed question with the whole listing is this surface's own wrong
+answer that looks like a right one.
+`TestTheRESTMirrorAddressesRowsByKeyToo` drives every one of those
+routes.
+
+#### Endpoint rules as keys
+
+`source_type_ids`/`target_type_ids` became `source_type_keys`/
+`target_type_keys` on the way in and on the way back. A second seeding
+session had to call `types.list` and build a key-to-id map before it
+could declare or edit one relation type; now what it reads back is what
+it can send again, which
+`TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith` asserts by
+round-tripping a declaration through its own answer.
+
+- The translation is one statement: `LockEndpointEntityTypes` matches on
+  `lower(key)` — the unique index — and returns `(id, key)`, inside the
+  same transaction and under the same `FOR SHARE` lock the endpoint check
+  already needed. No extra round trip and no new lock, so the lock-order
+  argument that statement carries is untouched.
+- The answer states the **stored** spelling, not the caller's, which is
+  the rule every event and every message on this surface follows.
+- **A key repeated inside one list is refused**, at the later element's
+  own indexed path. The database would have stored the duplicate id
+  happily; an endpoint list is a set — "these types may be a source" — so
+  naming one twice cannot mean anything a caller intended, and silently
+  folding it would leave the answer disagreeing with what was sent.
+- An undeclared list is `[]` and never `null`, the rule this surface
+  applies to every list it hands back.
+
+#### Three existing tests that could no longer say what they said
+
+- `TestMCPMalformedIDIsTheCallersOwnArgument` drove three tools that took
+  uuids and now drives none of them: a key that names nothing is
+  `not_found`, a different answer to a different question. What is left
+  is the shape the rule still applies to — an endpoint list naming the
+  *element* at fault — plus the new repeated-key refusal.
+- `TestARouteShapedKeyIsStillAddressable` removed each route-shaped type
+  through `by-id`. It removes through `by-key` now, so a key spelled like
+  a route has to survive the removal as well as the read.
+- `TestARemovalSaysWhatItCouldNotFindAndWhatStillHoldsIt` asserted that
+  all four removals name the id they could not find. Two of them have no
+  id to name any more, so they name the address the caller sent — and the
+  table grew the two cases only key addressing can have: a type key that
+  names no type, and a real pair of entities with no edge between them.
+- Task 9's `what the surface makes an agent do the long way` block is
+  gone, replaced by its positive form: the same three findings, driven as
+  the calls an agent now makes, over the same two-hundred-row game.
+
+#### Mutation, applied
+
+- **The repeated-endpoint-key refusal disabled.**
+  `TestMCPMalformedIDIsTheCallersOwnArgument` red: `err = <nil>, want the
+  repeated element named`.
+- **`relationTypeDetailOf` given an empty id-to-key map**, so endpoint
+  rules answer with `[]`.
+  `TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith` red:
+  `endpoint rules read back as {… SourceTypeKeys:[] TargetTypeKeys:[] …}`,
+  and the seeded end-to-end run red at the same place.
+- **The counts assembly stops adding the relation totals.**
+  `TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo` red:
+  `Totals:{Entities:2 Relations:0 Invalid:0}`; the seeded run red with
+  `the per-type edge counts sum to 1044 and the total says 0` — which is
+  the cross-check that catches a total drifting from the rows it is
+  summed from.
+- **An endpoint filter naming no entity silently ignored instead of
+  refused.** `TestEveryAddressOnThisSurfaceIsAKey` red: `an endpoint
+  filter naming no entity was answered with a page`, and the seeded run
+  red with the same sentence.
+- **`RemoveEntity` stops deleting** (the statement replaced with a
+  success). `TestRemoveEntity` red: `err = <nil>, want ErrNotFound after
+  removal`; `TestEveryAddressOnThisSurfaceIsAKey` red one step later,
+  `types.remove: in_use: the entity type "quest" still has 1 entities`,
+  which is the removal being observed through a *different* tool rather
+  than through its own return value.
+- **The endpoint refs' pattern check disabled.**
+  `TestEveryAddressOnThisSurfaceIsAKey` red with exactly the failure the
+  check exists to prevent: `source: lookup entity: ERROR: invalid byte
+  sequence for encoding "UTF8": 0x00 (SQLSTATE 22021)` — an
+  internal_error over the caller's own argument. The check was owed by
+  the rule the `type_key` filter beside it already follows, and adding
+  the endpoint filters without it would have been that rule not carried
+  one step along inside the very change that carried the addressing
+  rule.
+- **The endpoint *keys*' pattern check disabled**, which is the same rule
+  at the third new place caller-supplied text reaches SQL.
+  `TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith` red:
+  `lock endpoint entity types (source_type_keys): ERROR: invalid byte
+  sequence for encoding "UTF8": 0x00 (SQLSTATE 22021)` — and note it
+  fails over the *list*, because the keys travel as one `text[]`, so
+  without the check one bad element takes the good ones down with it and
+  the report cannot say which.
+
+---
+
 ## Self-review notes
 
 Checked against `2026-08-31-core-and-metamodel-design.md`, section by section:

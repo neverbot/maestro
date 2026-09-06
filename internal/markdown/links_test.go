@@ -396,11 +396,7 @@ func TestDeletingAnEntityDropsItsLinksAndLeavesTheDocument(t *testing.T) {
 		t.Fatalf("LinkAdd: %v", err)
 	}
 
-	entity, err := entities.EntityByKey(ctx, game, "quest", "wanted-hogger")
-	if err != nil {
-		t.Fatalf("EntityByKey: %v", err)
-	}
-	if err := entities.RemoveEntity(ctx, game, entity.ID); err != nil {
+	if err := entities.RemoveEntity(ctx, game, "quest", "wanted-hogger"); err != nil {
 		t.Fatalf("RemoveEntity: %v", err)
 	}
 

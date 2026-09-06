@@ -65,10 +65,12 @@ const maxRowKeyLen = 64
 // file, a route shape that cannot collide, or accepting the collision
 // and resolving it in the router. The REST surface addresses every row
 // behind a fixed discriminator — /api/games/{game}/types/by-key/{key},
-// .../types/by-id/{id}, .../entities/by-key/{type}/{key} — so a key
-// never occupies a segment a literal could also claim, and "by-key" and
-// "by-id" are themselves perfectly legal keys, because the discriminator
-// sits one segment earlier than any key ever does. A word list was
+// .../entities/by-key/{type}/{key} — so a key never occupies a segment
+// a literal could also claim, and "by-key" and "by-id" are themselves
+// perfectly legal keys, because the discriminator sits one segment
+// earlier than any key ever does. (Metamodel 14 moved the removals onto
+// keys, so `by-id` no longer appears on this surface at all; the shape
+// and its argument are unchanged.) A word list was
 // rejected for the reason this comment already gave: it would forbid
 // "new" to a game with a perfectly good reason to name a type that, and
 // a key rule tightened after a game is seeded costs renames. Resolving

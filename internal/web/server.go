@@ -316,26 +316,33 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("DELETE /api/games/{game}/invites/{invite}", s.handleRevokeProjectInvite)
 
 	// The game-content surface (api_metamodel.go), mirroring the metamodel
-	// MCP tools one for one. Every row addressed by key or id sits behind a fixed
-	// by-key/by-id segment; see that file's header for why the obvious
+	// MCP tools one for one. Every row addressed by key sits behind a
+	// fixed by-key segment; see that file's header for why the obvious
 	// /types/{key} shape was rejected.
+	//
+	// **There is no by-id segment left.** Metamodel 14 moved the four
+	// removals and the relation listing's endpoint filters onto keys, so
+	// the whole content surface now addresses a row exactly one way. An
+	// edge has no key of its own, so its two by-address routes are
+	// /relations/one with the same five query parameters on both — the
+	// address relations.upsert writes it under.
 	s.registerContentRoute("GET /api/games/{game}/types", s.handleListTypes)
 	s.registerContentRoute("POST /api/games/{game}/types", s.handleUpsertType)
 	s.registerContentRoute("GET /api/games/{game}/types/by-key/{key}", s.handleGetType)
-	s.registerContentRoute("DELETE /api/games/{game}/types/by-id/{id}", s.handleRemoveType)
+	s.registerContentRoute("DELETE /api/games/{game}/types/by-key/{key}", s.handleRemoveType)
 	s.registerContentRoute("GET /api/games/{game}/relation-types", s.handleListRelationTypes)
 	s.registerContentRoute("POST /api/games/{game}/relation-types", s.handleUpsertRelationType)
 	s.registerContentRoute("GET /api/games/{game}/relation-types/by-key/{key}", s.handleGetRelationType)
-	s.registerContentRoute("DELETE /api/games/{game}/relation-types/by-id/{id}", s.handleRemoveRelationType)
+	s.registerContentRoute("DELETE /api/games/{game}/relation-types/by-key/{key}", s.handleRemoveRelationType)
 	s.registerContentRoute("GET /api/games/{game}/entities", s.handleListEntities)
 	s.registerContentRoute("POST /api/games/{game}/entities", s.handleUpsertEntities)
 	s.registerContentRoute("GET /api/games/{game}/entities/by-key/{type}/{key}", s.handleGetEntity)
-	s.registerContentRoute("DELETE /api/games/{game}/entities/by-id/{id}", s.handleRemoveEntity)
+	s.registerContentRoute("DELETE /api/games/{game}/entities/by-key/{type}/{key}", s.handleRemoveEntity)
 	s.registerContentRoute("POST /api/games/{game}/entities/repair", s.handleRepairEntities)
 	s.registerContentRoute("GET /api/games/{game}/relations", s.handleListRelations)
 	s.registerContentRoute("GET /api/games/{game}/relations/one", s.handleGetRelation)
 	s.registerContentRoute("POST /api/games/{game}/relations", s.handleUpsertRelations)
-	s.registerContentRoute("DELETE /api/games/{game}/relations/by-id/{id}", s.handleRemoveRelation)
+	s.registerContentRoute("DELETE /api/games/{game}/relations/one", s.handleRemoveRelation)
 	s.registerContentRoute("POST /api/games/{game}/relations/repair", s.handleRepairRelations)
 	s.registerContentRoute("GET /api/games/{game}/search", s.handleSearch)
 	s.registerContentRoute("GET /api/games/{game}/summary", s.handleGameSummary)

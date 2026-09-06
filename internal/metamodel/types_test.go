@@ -1417,7 +1417,7 @@ func TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID(t *testing
 	go func() {
 		_, err := svc.UpsertRelationType(context.Background(), project, metamodel.RelationTypeInput{
 			Key: "takes_place_in", Label: "takes place in",
-			TargetTypeIDs: []uuid.UUID{zone.ID},
+			TargetTypeKeys: []string{zone.Key},
 		})
 		upsertErr <- err
 	}()

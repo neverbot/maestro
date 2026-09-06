@@ -33,6 +33,7 @@ type restFixture struct {
 	game    uuid.UUID
 	ownerID uuid.UUID
 	cookie  *http.Cookie
+	agent   web.Caller
 }
 
 func newRESTFixture(t *testing.T) restFixture {
@@ -50,11 +51,34 @@ func newRESTFixture(t *testing.T) restFixture {
 	if err != nil {
 		t.Fatalf("Create game: %v", err)
 	}
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: game.ID, UserID: owner.ID, Label: "agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	agent, err := web.CallerForToken(ctx, ids, token)
+	if err != nil {
+		t.Fatalf("CallerForToken: %v", err)
+	}
 	return restFixture{
 		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md,
 		game: game.ID, ownerID: owner.ID, cookie: loginAs(t, srv, "owner@studio.com"),
+		agent: agent,
 	}
 }
+
+// deps and caller let a REST test reach a tool core directly, which is
+// what the tests that compare the two surfaces' answers need: the page
+// and the tool are one assembly, and proving they agree means calling
+// both against one game. The caller is a token caller because
+// requireScope refuses a session one, which is the whole of what
+// separates the two surfaces at this layer.
+func (f restFixture) deps() web.MCPDeps {
+	return web.MCPDeps{Identity: f.ids, Projects: f.proj, Metamodel: f.mm, Markdown: f.md}
+}
+
+func (f restFixture) caller() web.Caller { return f.agent }
 
 // call sends one request as the given cookie holder and hands back the
 // recorder. body is nil for a GET.
@@ -276,7 +300,7 @@ func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
 // proved rather than argued: row keys permit `new`, `index`, `id`,
 // `null`, `games` and `types`, so the route shape must not put a key in
 // a position where a literal segment could ever claim it. Every key
-// here sits behind a fixed `by-key` (or `by-id`) discriminator, which is
+// here sits behind a fixed `by-key` discriminator, which is
 // the segment no key can occupy, so none of these can collide with
 // anything this router serves — including with the discriminators
 // themselves, which are perfectly legal keys too.
@@ -304,10 +328,10 @@ func TestARouteShapedKeyIsStillAddressable(t *testing.T) {
 		if detail.Key != key {
 			t.Fatalf("get %q answered with %q", key, detail.Key)
 		}
-		// And the id route reaches the same row: a removal addressed by
-		// id must not be able to land on a different type than the one
-		// the key route just showed.
-		removed := f.as(t, http.MethodDelete, "/types/by-id/"+detail.ID, nil)
+		// And the removal reaches the same row: since Metamodel 14 the
+		// removal is addressed by key too, so a key shaped like a route
+		// has to survive it as well as the read.
+		removed := f.as(t, http.MethodDelete, "/types/by-key/"+key, nil)
 		if removed.Code != http.StatusOK {
 			t.Fatalf("remove %q = %d: %s", key, removed.Code, removed.Body.String())
 		}
@@ -499,10 +523,13 @@ func TestRESTListingBoundsComeThroughUnchanged(t *testing.T) {
 		http.StatusBadRequest, "invalid_input", "limit")
 	assertError(t, f.as(t, http.MethodGet, "/search?query="+strings.Repeat("a", metamodel.MaxSearchQuery+1), nil),
 		http.StatusBadRequest, "invalid_input", "query")
-	assertError(t, f.as(t, http.MethodGet, "/relations?source_id=nope", nil),
-		http.StatusBadRequest, "invalid_input", "source_id")
-	assertError(t, f.as(t, http.MethodDelete, "/entities/by-id/nope", nil),
-		http.StatusBadRequest, "invalid_input", "id")
+	// The endpoint filter takes a ref now, and a ref naming no entity is
+	// not_found rather than a malformed uuid: the parameter is a key, and
+	// a key that names nothing is a real question with a real answer.
+	assertError(t, f.as(t, http.MethodGet, "/relations?source_type_key=quest&source_key=nope", nil),
+		http.StatusNotFound, "not_found", "")
+	assertError(t, f.as(t, http.MethodDelete, "/entities/by-key/quest/nope", nil),
+		http.StatusNotFound, "not_found", "")
 }
 
 // TestRESTRelationsListNamesItsEndpointsByRef chases Task 7's finding 18
@@ -523,7 +550,7 @@ func TestRESTRelationsListNamesItsEndpointsByRef(t *testing.T) {
 
 	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
 		"key": "takes_place_in", "label": "takes place in",
-		"source_type_ids": []string{questID.ID}, "target_type_ids": []string{zoneID.ID},
+		"source_type_keys": []string{"quest"}, "target_type_keys": []string{"zone"},
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("relation type = %d: %s", rec.Code, rec.Body.String())
 	}
@@ -1263,12 +1290,12 @@ func TestRemovingATypeStillInUseIsAConflict(t *testing.T) {
 	}
 	decodeBody(t, f.as(t, http.MethodGet, "/types/by-key/quest", nil), &declared)
 
-	rec := f.as(t, http.MethodDelete, "/types/by-id/"+declared.ID, nil)
+	rec := f.as(t, http.MethodDelete, "/types/by-key/quest", nil)
 	assertError(t, rec, http.StatusConflict, "in_use", "")
 
 	// And with cascade the same removal succeeds, so the conflict is
 	// about the entities and not about the route.
-	if rec := f.as(t, http.MethodDelete, "/types/by-id/"+declared.ID+"?cascade=true", nil); rec.Code != http.StatusOK {
+	if rec := f.as(t, http.MethodDelete, "/types/by-key/quest?cascade=true", nil); rec.Code != http.StatusOK {
 		t.Fatalf("cascade remove = %d: %s", rec.Code, rec.Body.String())
 	}
 }
@@ -1293,7 +1320,7 @@ func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
 
 	if rec := f.as(t, http.MethodPost, "/relation-types", map[string]any{
 		"key": "connects_to", "label": "connects to",
-		"source_type_ids": []string{zoneID.ID}, "target_type_ids": []string{zoneID.ID},
+		"source_type_keys": []string{"zone"}, "target_type_keys": []string{"zone"},
 		"field_schema": []any{map[string]any{"key": "requires_ability", "type": "text"}},
 	}); rec.Code != http.StatusOK {
 		t.Fatalf("relation type = %d: %s", rec.Code, rec.Body.String())

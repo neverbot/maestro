@@ -501,11 +501,27 @@ REST exists for the web UI and is not promised stable.
 
 ### MCP tools (`maestro.*`)
 
-Context — `whoami`, `games.list`, `games.get`.
+Context — `whoami`, `games.list`, `games.get`, `games.counts`.
+
+`games.counts` was added by Metamodel 14 and is the whole of "how many
+races are there": one row per declared entity type and per declared
+relation type with what the game holds of it, plus three totals. Task 9
+found that nothing on the agent surface counted, so answering that
+question was a full paged walk — five calls in a two-hundred-row game —
+while the REST home page had the number from two grouped queries. Both
+surfaces now go through one assembly, so the page and the tool cannot
+report different numbers. Its cost does not grow with the game's
+content, which is why it has no page and no cursor.
 
 Schema — `types.list`, `types.get`, `types.upsert`, `types.remove`,
 `relation_types.list`, `relation_types.get`, `relation_types.upsert`,
 `relation_types.remove`.
+
+A relation type's endpoint rules are stated and read back as entity type
+**keys** (`source_type_keys`, `target_type_keys`), not ids — see
+"Addressing" below. A key naming no type of the game, or one an earlier
+element of the same list already named, is `invalid_input` at that
+element's own indexed path: an endpoint list is a set.
 
 Content — `entities.list`, `entities.get`, `entities.upsert`,
 `entities.remove`, `entities.repair`, `relations.list`,
@@ -545,6 +561,47 @@ drives it:
   search is what an agent reaches for *before* it knows which row it
   wants. The flag gates entity hits only; a document hit has never
   carried a body.
+
+### Addressing
+
+**Every tool on this surface addresses a row by key, and none of them
+takes a uuid.** Metamodel 14 finished this: `entities.remove`,
+`relations.remove`, `types.remove` and `relation_types.remove` took ids,
+`relations.list` filtered its two endpoints by entity id, and a relation
+type stated its endpoint rules as entity type ids. Task 9's seeding run
+measured what that cost an agent that thinks in keys — which is what the
+skill bundle will teach, because keys are what the game's own vocabulary
+is written in: a resolving read before every one of those calls, and, for
+a second session that never saw the ids, a `types.list` plus a
+key-to-id map before it could declare a single relation type.
+
+**Keys *replace* ids rather than being accepted beside them**, and the
+argument is that a key here is not a nickname for an id. It is
+immutable — the first spelling stored stands, and a respelling is
+refused after the write — and unique per game and type, so there is
+nothing an id can address that a key cannot. Accepting both would buy a
+caller nothing and cost every call site an "exactly one of" refusal path,
+every description two branches, and every caller a decision. This
+repository already pays that where the two spellings are two genuinely
+different *questions* — `views.run` takes a saved key or an inline query
+and refuses both, `docs.links.list` reads the join from either side and
+refuses neither and both — and neither of those is two names for one
+row. It also carries one open inconsistency of exactly this shape,
+routes addressing a game by uuid while the page addresses it by slug,
+and a second would make that worse rather than better.
+
+The ids have not gone anywhere: every reader still returns them, every
+removal event still carries them, and the stored endpoint columns are
+still `uuid[]`, which is right — an id is what a deleted type's prune
+can remove from an endpoint list. They are simply no longer the address.
+An edge, which has no key of its own, is addressed by the triple it was
+written under: the relation type's key and both endpoints as
+`(type_key, key)` refs, on `relations.get`, `relations.remove` and
+`relations.list`'s endpoint filters alike.
+
+On REST the same change removed the last `by-id` segment: the content
+routes are `by-key` throughout, and an edge's two by-address routes are
+`GET`/`DELETE /relations/one` with the same five query parameters.
 
 ### Idempotency
 

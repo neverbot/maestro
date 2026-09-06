@@ -143,22 +143,49 @@ type TypesGetInput struct {
 // TypesRemoveInput removes one entity type. Cascade decides whether a
 // type that still has entities is refused (in_use) or taken down with
 // them.
+// TypesRemoveInput removes one entity type by key.
+//
+// **It took a uuid until Metamodel 14.** See EntitiesRemoveInput for the
+// argument; this tool was not among the three Task 9's seeding run
+// named, which is exactly why it is here — a rule applied to the tools a
+// finding happened to list, and not to the one it missed, is this
+// repository's most repeated defect.
 type TypesRemoveInput struct {
 	ScopedArgs
-	ID      string `json:"id"`
+	Key     string `json:"key"`
 	Cascade bool   `json:"cascade,omitempty"`
 }
 
 // RelationTypesUpsertInput is the argument shape of
-// relation_types.upsert. The two endpoint lists are entity type *ids*,
-// which types.upsert and types.list are where an agent gets them.
+// relation_types.upsert.
+//
+// **The two endpoint lists are entity type keys**, and they were entity
+// type *ids* until Metamodel 14. Task 9's seeding run found what that
+// cost: a second session — one that did not itself declare the types and
+// so never saw their ids — had to call types.list and build a
+// key-to-id map by hand before it could declare or edit a single
+// relation type. The ids were in the database the whole time; the wire
+// is where the translation belongs, and UpsertRelationType now does it
+// inside the same transaction and under the same lock the endpoint check
+// already needed.
+//
+// **Keys replace ids here rather than being accepted beside them.** The
+// argument is in the tool description and in the plan; the short of it
+// is that a key is not a nickname for an id in this game — it is
+// immutable, unique per game, and the address every other tool on this
+// surface speaks — so a second spelling would buy a caller nothing and
+// cost every reader of this struct a decision.
+//
+// The stored column is still uuid[], which does not change and should
+// not: an id is what the entity type removal's prune can remove from an
+// endpoint list, and nothing but a deletion can invalidate it.
 type RelationTypesUpsertInput struct {
 	ScopedArgs
 	Key             string       `json:"key"`
 	Label           string       `json:"label"`
 	Description     string       `json:"description,omitempty"`
-	SourceTypeIDs   []string     `json:"source_type_ids,omitempty"`
-	TargetTypeIDs   []string     `json:"target_type_ids,omitempty"`
+	SourceTypeKeys  []string     `json:"source_type_keys,omitempty"`
+	TargetTypeKeys  []string     `json:"target_type_keys,omitempty"`
 	SemanticRole    string       `json:"semantic_role,omitempty"`
 	Schema          []FieldInput `json:"field_schema,omitempty"`
 	ExpectedVersion *int32       `json:"expected_version,omitempty"`
@@ -171,9 +198,11 @@ type RelationTypesGetInput struct {
 }
 
 // RelationTypesRemoveInput removes one relation type by id.
+// RelationTypesRemoveInput removes one relation type by key; see
+// TypesRemoveInput.
 type RelationTypesRemoveInput struct {
 	ScopedArgs
-	ID      string `json:"id"`
+	Key     string `json:"key"`
 	Cascade bool   `json:"cascade,omitempty"`
 }
 
@@ -242,11 +271,39 @@ type EntitiesGetInput struct {
 	Key     string `json:"key"`
 }
 
-// EntitiesRemoveInput removes one entity by id. Its edges go with it, by
-// cascade.
+// EntitiesRemoveInput removes one entity by the address it was written
+// under. Its edges go with it, by cascade.
+//
+// **It took a uuid until Metamodel 14, and keys *replace* ids here
+// rather than being accepted beside them.** Task 9's seeding run
+// measured the cost of the old shape: an agent thinks in keys — they are
+// what the game's own vocabulary is written in, what every other tool
+// speaks and what every refusal quotes back — so removing a row it had
+// just written cost it a resolving read first.
+//
+// Accepting both was considered and rejected. A key here is not a
+// nickname for an id: it is immutable (the first spelling stored stands,
+// and a respelling is refused after the write), unique per game and
+// type, and therefore a *total* replacement rather than a convenience —
+// there is nothing an id can address that a key cannot. What a second
+// spelling would cost is real and paid at every call site: an
+// "exactly one of" refusal path, two branches in every description, and
+// a caller decision at each call. This repository already pays that
+// where the two spellings are two genuinely different questions —
+// views.run takes a saved key *or* an inline query and refuses both, and
+// docs.links.list reads the join from either side and refuses neither
+// and both — and neither of those is two names for one row. It also has
+// one open inconsistency of exactly this shape already, routes
+// addressing a game by uuid while the page addresses it by slug, and
+// adding a second would make that worse rather than better.
+//
+// The ids have not gone anywhere: every reader still returns them and
+// every removal event still carries them. They are simply no longer the
+// address.
 type EntitiesRemoveInput struct {
 	ScopedArgs
-	ID string `json:"id"`
+	TypeKey string `json:"type_key"`
+	Key     string `json:"key"`
 }
 
 // RelationsUpsertInput is the argument shape of relations.upsert.
@@ -293,13 +350,13 @@ type RefInput struct {
 // relation type's field_schema asks which of its edges that broke.
 type RelationsListInput struct {
 	ScopedArgs
-	TypeKey  string `json:"type_key,omitempty"`
-	Invalid  *bool  `json:"invalid,omitempty"`
-	SourceID string `json:"source_id,omitempty"`
-	TargetID string `json:"target_id,omitempty"`
-	Cursor   string `json:"cursor,omitempty"`
-	Limit    int32  `json:"limit,omitempty"`
-	Verbose  bool   `json:"verbose,omitempty"`
+	TypeKey string    `json:"type_key,omitempty"`
+	Invalid *bool     `json:"invalid,omitempty"`
+	Source  *RefInput `json:"source,omitempty"`
+	Target  *RefInput `json:"target,omitempty"`
+	Cursor  string    `json:"cursor,omitempty"`
+	Limit   int32     `json:"limit,omitempty"`
+	Verbose bool      `json:"verbose,omitempty"`
 }
 
 // RelationsGetInput reads one edge by the address it was written under:
@@ -320,9 +377,15 @@ type RelationsGetInput struct {
 }
 
 // RelationsRemoveInput removes one edge by id.
+// RelationsRemoveInput removes one edge by the address it was written
+// under: the relation type's key and both endpoints as (type_key, key)
+// refs. It is deliberately the same address relations.upsert writes with
+// and relations.get reads by; see EntitiesRemoveInput for the argument.
 type RelationsRemoveInput struct {
 	ScopedArgs
-	ID string `json:"id"`
+	TypeKey string   `json:"type_key"`
+	Source  RefInput `json:"source"`
+	Target  RefInput `json:"target"`
 }
 
 // --- Outputs ---
@@ -374,11 +437,11 @@ type RelationTypeOutput struct {
 // rules, its semantic role and its field schema.
 type RelationTypeDetailOutput struct {
 	RelationTypeOutput
-	Description   string           `json:"description"`
-	SourceTypeIDs []uuid.UUID      `json:"source_type_ids"`
-	TargetTypeIDs []uuid.UUID      `json:"target_type_ids"`
-	SemanticRole  string           `json:"semantic_role,omitempty"`
-	Schema        metamodel.Schema `json:"field_schema"`
+	Description    string           `json:"description"`
+	SourceTypeKeys []string         `json:"source_type_keys"`
+	TargetTypeKeys []string         `json:"target_type_keys"`
+	SemanticRole   string           `json:"semantic_role,omitempty"`
+	Schema         metamodel.Schema `json:"field_schema"`
 }
 
 // RelationTypesListOutput is relation_types.list's answer; see
@@ -658,6 +721,21 @@ func removeTypeReportingViews(ctx context.Context, deps MCPDeps, projectID uuid.
 
 // --- Tool implementations ---
 
+// GameCountsInput is the argument shape of games.counts. It takes
+// nothing but the scope every tool takes: a game counts itself whole,
+// and there is no filter that would make the answer smaller — it is one
+// row per declared type, which is a handful of hand-written rows however
+// much content the game holds.
+type GameCountsInput struct{ ScopedArgs }
+
+// MCPGameCounts implements games.counts.
+func MCPGameCounts(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, _ GameCountsInput) (GameCountsOutput, error) {
+	if err := requireScope(caller, projectID); err != nil {
+		return GameCountsOutput{}, err
+	}
+	return gameCounts(ctx, deps, projectID)
+}
+
 // MCPTypesUpsert implements types.upsert.
 func MCPTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesUpsertInput) (TypeDetailOutput, error) {
 	if err := requireScope(caller, projectID); err != nil {
@@ -745,11 +823,17 @@ func MCPTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID 
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See this file's header.
 func typesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in TypesRemoveInput) (TypeRemovedOutput, error) {
-	id, err := parseID("id", in.ID)
+	// Resolved here rather than in the domain, and this is the one
+	// removal where that is right: the views service needs the type's id
+	// to find the saved views that reference it, and it takes it *before*
+	// the deletion — view_refs' foreign key is ON DELETE SET NULL, so
+	// asking afterwards finds nothing. The read is the server's now
+	// either way, which is the whole point.
+	row, err := deps.Metamodel.EntityTypeByKey(ctx, projectID, in.Key)
 	if err != nil {
 		return TypeRemovedOutput{}, err
 	}
-	return removeTypeReportingViews(ctx, deps, projectID, views.KindEntityType, id, in.Cascade)
+	return removeTypeReportingViews(ctx, deps, projectID, views.KindEntityType, row.ID, in.Cascade)
 }
 
 // MCPRelationTypesUpsert implements relation_types.upsert.
@@ -768,20 +852,12 @@ func relationTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, proje
 	if err != nil {
 		return RelationTypeDetailOutput{}, err
 	}
-	sources, err := parseIDs("source_type_ids", in.SourceTypeIDs)
-	if err != nil {
-		return RelationTypeDetailOutput{}, err
-	}
-	targets, err := parseIDs("target_type_ids", in.TargetTypeIDs)
-	if err != nil {
-		return RelationTypeDetailOutput{}, err
-	}
 	row, err := deps.Metamodel.UpsertRelationType(ctx, projectID, metamodel.RelationTypeInput{
 		Key:             in.Key,
 		Label:           in.Label,
 		Description:     in.Description,
-		SourceTypeIDs:   sources,
-		TargetTypeIDs:   targets,
+		SourceTypeKeys:  in.SourceTypeKeys,
+		TargetTypeKeys:  in.TargetTypeKeys,
 		SemanticRole:    in.SemanticRole,
 		Schema:          schema,
 		ExpectedVersion: in.ExpectedVersion,
@@ -790,7 +866,11 @@ func relationTypesUpsert(ctx context.Context, deps MCPDeps, caller Caller, proje
 	if err != nil {
 		return RelationTypeDetailOutput{}, err
 	}
-	return relationTypeDetailOf(row)
+	names, err := entityTypeKeys(ctx, deps, projectID)
+	if err != nil {
+		return RelationTypeDetailOutput{}, err
+	}
+	return relationTypeDetailOf(row, names)
 }
 
 // MCPRelationTypesList implements relation_types.list.
@@ -832,7 +912,11 @@ func relationTypesGet(ctx context.Context, deps MCPDeps, caller Caller, projectI
 	if err != nil {
 		return RelationTypeDetailOutput{}, err
 	}
-	return relationTypeDetailOf(row)
+	names, err := entityTypeKeys(ctx, deps, projectID)
+	if err != nil {
+		return RelationTypeDetailOutput{}, err
+	}
+	return relationTypeDetailOf(row, names)
 }
 
 // MCPRelationTypesRemove implements relation_types.remove.
@@ -847,11 +931,11 @@ func MCPRelationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, pr
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See this file's header.
 func relationTypesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationTypesRemoveInput) (TypeRemovedOutput, error) {
-	id, err := parseID("id", in.ID)
+	row, err := deps.Metamodel.RelationTypeByKey(ctx, projectID, in.Key)
 	if err != nil {
 		return TypeRemovedOutput{}, err
 	}
-	return removeTypeReportingViews(ctx, deps, projectID, views.KindRelationType, id, in.Cascade)
+	return removeTypeReportingViews(ctx, deps, projectID, views.KindRelationType, row.ID, in.Cascade)
 }
 
 // MCPEntitiesUpsert implements entities.upsert.
@@ -1059,11 +1143,7 @@ func MCPEntitiesRemove(ctx context.Context, deps MCPDeps, caller Caller, project
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See this file's header.
 func entitiesRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in EntitiesRemoveInput) (RemovedOutput, error) {
-	id, err := parseID("id", in.ID)
-	if err != nil {
-		return RemovedOutput{}, err
-	}
-	if err := deps.Metamodel.RemoveEntity(ctx, projectID, id); err != nil {
+	if err := deps.Metamodel.RemoveEntity(ctx, projectID, in.TypeKey, in.Key); err != nil {
 		return RemovedOutput{}, err
 	}
 	return RemovedOutput{Removed: true}, nil
@@ -1129,19 +1209,15 @@ func relationsList(ctx context.Context, deps MCPDeps, caller Caller, projectID u
 		Cursor:  in.Cursor,
 		Limit:   in.Limit,
 	}
-	if in.SourceID != "" {
-		id, err := parseID("source_id", in.SourceID)
-		if err != nil {
-			return RelationsListOutput{}, err
-		}
-		filter.SourceID = &id
+	// The two endpoint filters, as refs. A nil pointer is "no opinion";
+	// the domain resolves a given ref to an entity id and answers
+	// not_found if it names none, so an empty page never stands in for a
+	// mistyped key.
+	if in.Source != nil {
+		filter.Source = &metamodel.Ref{TypeKey: in.Source.TypeKey, Key: in.Source.Key}
 	}
-	if in.TargetID != "" {
-		id, err := parseID("target_id", in.TargetID)
-		if err != nil {
-			return RelationsListOutput{}, err
-		}
-		filter.TargetID = &id
+	if in.Target != nil {
+		filter.Target = &metamodel.Ref{TypeKey: in.Target.TypeKey, Key: in.Target.Key}
 	}
 	page, err := deps.Metamodel.ListRelations(ctx, projectID, filter)
 	if err != nil {
@@ -1219,11 +1295,10 @@ func MCPRelationsRemove(ctx context.Context, deps MCPDeps, caller Caller, projec
 // REST mirror (api_metamodel.go), whose caller is a person whose
 // standing requireProject already resolved. See this file's header.
 func relationsRemove(ctx context.Context, deps MCPDeps, caller Caller, projectID uuid.UUID, in RelationsRemoveInput) (RemovedOutput, error) {
-	id, err := parseID("id", in.ID)
+	err := deps.Metamodel.RemoveRelation(ctx, projectID, in.TypeKey,
+		metamodel.Ref{TypeKey: in.Source.TypeKey, Key: in.Source.Key},
+		metamodel.Ref{TypeKey: in.Target.TypeKey, Key: in.Target.Key})
 	if err != nil {
-		return RemovedOutput{}, err
-	}
-	if err := deps.Metamodel.RemoveRelation(ctx, projectID, id); err != nil {
 		return RemovedOutput{}, err
 	}
 	return RemovedOutput{Removed: true}, nil
@@ -1249,23 +1324,6 @@ func parseID(path, raw string) (uuid.UUID, error) {
 		return uuid.Nil, invalidInput(path, "is not a valid uuid")
 	}
 	return id, nil
-}
-
-// parseIDs is parseID over a list, reporting the element's own index so
-// a caller sending twenty ids is told which one is wrong.
-func parseIDs(path string, raw []string) ([]uuid.UUID, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	ids := make([]uuid.UUID, 0, len(raw))
-	for i, value := range raw {
-		id, err := uuid.Parse(value)
-		if err != nil {
-			return nil, invalidInput(fmt.Sprintf("%s[%d]", path, i), "is not a valid uuid")
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
 }
 
 // invalidInput builds the refusal this file gives for a caller's own
@@ -1335,7 +1393,21 @@ func relationTypeOf(row dbq.RelationType) RelationTypeOutput {
 	return RelationTypeOutput{ID: row.ID, Key: row.Key, Label: row.Label, Version: row.Version}
 }
 
-func relationTypeDetailOf(row dbq.RelationType) (RelationTypeDetailOutput, error) {
+// relationTypeDetailOf builds one relation type's full answer. names is
+// the entity-type id-to-key map entityTypeKeys built for this game, and
+// it is what turns the stored endpoint ids back into the keys the input
+// speaks — the read half of Metamodel 14's endpoint change, without
+// which the tool would take keys and answer with ids.
+//
+// **An endpoint id missing from names is dropped, not rendered as an
+// empty key.** It is reachable: RemoveEntityType prunes a deleted type's
+// id out of every endpoint list in the same transaction, so the window
+// is small, but a page read against a replica or an id that outlived its
+// prune would otherwise produce `""` in a list of keys — a name no type
+// has, in a list a caller may send straight back to the writer. Dropping
+// it is the same judgement RelationOutput makes about an endpoint whose
+// entity is gone: absent, rather than named "".
+func relationTypeDetailOf(row dbq.RelationType, names map[uuid.UUID]string) (RelationTypeDetailOutput, error) {
 	schema, err := metamodel.ParseSchema(row.FieldSchema)
 	if err != nil {
 		return RelationTypeDetailOutput{}, fmt.Errorf("decode stored field schema: %w", err)
@@ -1346,20 +1418,28 @@ func relationTypeDetailOf(row dbq.RelationType) (RelationTypeDetailOutput, error
 	out := RelationTypeDetailOutput{
 		RelationTypeOutput: relationTypeOf(row),
 		Description:        row.Description,
-		SourceTypeIDs:      row.SourceTypeIds,
-		TargetTypeIDs:      row.TargetTypeIds,
+		SourceTypeKeys:     endpointKeysOf(row.SourceTypeIds, names),
+		TargetTypeKeys:     endpointKeysOf(row.TargetTypeIds, names),
 		Schema:             schema,
-	}
-	if out.SourceTypeIDs == nil {
-		out.SourceTypeIDs = []uuid.UUID{}
-	}
-	if out.TargetTypeIDs == nil {
-		out.TargetTypeIDs = []uuid.UUID{}
 	}
 	if row.SemanticRole != nil {
 		out.SemanticRole = *row.SemanticRole
 	}
 	return out, nil
+}
+
+// endpointKeysOf renders one stored endpoint list as keys. Always a
+// slice, never nil: an undeclared endpoint rule is `[]`, which is what
+// it means — this type accepts any — and a client must not have to tell
+// that from a server that said nothing.
+func endpointKeysOf(ids []uuid.UUID, names map[uuid.UUID]string) []string {
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if key, ok := names[id]; ok {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 // entityOf builds one entity's answer. names is the id-to-key map
@@ -1545,6 +1625,27 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 		metamodel.DefaultRepairBatch, metamodel.MaxRepairBatch)
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
+		Name: "games.counts",
+		Description: "How much of everything this game holds: one row per declared entity " +
+			"type and per declared relation type, each with how many rows instance it and " +
+			"how many of those are invalid, plus the three totals. This is the answer to " +
+			"\"how many races are there\" — one call, rather than walking entities.list to " +
+			"the last page and counting. " +
+			"invalid_count is the number a designer has to act on: rows a schema edit " +
+			"stopped fitting, kept and flagged rather than deleted. entities.list and " +
+			"relations.list with `invalid: true` are how to see which ones, and " +
+			"entities.repair and relations.repair are how to fix them in bulk. " +
+			"The cost does not grow with the game's content — four queries, one row per " +
+			"type — so there is no page and no cursor here. " +
+			"Prose is not counted: use docs.list for that.",
+		OutputSchema: gameCountsOutputSchema,
+		Annotations:  readOnlyTool(),
+	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in GameCountsInput) (GameCountsOutput, error) {
+		caller, _ := CallerFrom(ctx)
+		return MCPGameCounts(ctx, deps, caller, projectID, in)
+	})
+
+	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "types.upsert",
 		Description: "Declare or update an entity type: a kind of thing this game contains " +
 			"(Quest, Zone, Class; Driver, Car, Circuit). Maestro ships no built-in types — " +
@@ -1587,8 +1688,8 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "types.remove",
-		Description: "Remove an entity type, addressed by id (types.get and types.list " +
-			"return it). Without cascade, a type that still has entities is refused as " +
+		Description: "Remove an entity type, addressed by its key — the same handle " +
+			"types.get takes and entities.upsert writes against. Without cascade, a type that still has entities is refused as " +
 			"in_use. With cascade it takes its entities with it, and every edge touching " +
 			"one of them goes too. Removing a type also prunes its id out of every relation " +
 			"type's endpoint lists, which changes rules other content is judged against. " +
@@ -1607,10 +1708,14 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 		Name: "relation_types.upsert",
 		Description: fmt.Sprintf(
 			"Declare or update a relation type: a kind of directed edge between "+
-				"entities (takes_place_in, requires, unlocks, available_to). source_type_ids and "+
-				"target_type_ids are entity type ids — from types.get or types.list — and they "+
-				"are the rule every edge of this type is checked against; an empty list means "+
-				"any type. semantic_role is what a view uses to know what the edge means: it is "+
+				"entities (takes_place_in, requires, unlocks, available_to). source_type_keys "+
+				"and target_type_keys are entity type **keys** — the same handles "+
+				"entities.upsert speaks, not ids — and they are the rule every edge of this "+
+				"type is checked against; an omitted or empty list means any type. A key that "+
+				"names no type of this game is invalid_input at that element's own indexed "+
+				"path, and so is one that names a type an earlier element already named: an "+
+				"endpoint list is a set. The answer states the rules the same way, so what "+
+				"you read back is what you can send again. semantic_role is what a view uses to know what the edge means: it is "+
 				"optional, and when given it is one of %s — anything else is invalid_input at "+
 				"path `semantic_role`, listing these same values. "+
 				"field_schema declares the fields every edge of the type carries and is what "+
@@ -1652,7 +1757,8 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "relation_types.remove",
-		Description: "Remove a relation type by id. Without cascade, one that still has edges " +
+		Description: "Remove a relation type by its key, the address relation_types.get " +
+			"takes. Without cascade, one that still has edges " +
 			"is refused as in_use; with cascade every edge of the type goes with it. " +
 			"Deleting a type saved views reference is allowed, and broke_views lists them, " +
 			"one row per reference with the JSON pointer into that view's own query " +
@@ -1737,9 +1843,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "entities.remove",
-		Description: "Remove one entity, addressed by id (entities.get, entities.list and " +
-			"entities.upsert's written entries all return it). Every edge touching it goes " +
-			"with it, by cascade, and those edge removals are not announced one by one.",
+		Description: "Remove one entity, addressed by (type_key, key) — the address " +
+			"entities.get reads it by and entities.upsert wrote it under. Every edge " +
+			"touching it goes with it, by cascade, and those edge removals are not " +
+			"announced one by one. The row's id is still returned by every reader and by " +
+			"the removal event; it is simply not how you address a row.",
 		OutputSchema: removedOutputSchema,
 		Annotations:  &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: boolPtr(true)},
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in EntitiesRemoveInput) (RemovedOutput, error) {
@@ -1790,14 +1898,17 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"List a game's edges, optionally narrowed by relation type key, by invalid "+
 				"(edges whose values no longer fit their relation type's schema, the same "+
 				"filter entities.list takes) and by either "+
-				"endpoint's entity id. Paged by next_cursor exactly as entities.list is; "+
+				"endpoint, given as a `{type_key, key}` ref — the same address "+
+				"relations.upsert writes an edge with. A ref that names no entity is "+
+				"not_found rather than an empty page. Paged by next_cursor exactly as "+
+				"entities.list is; "+
 				"limit defaults to %d and is capped at %d, and a limit below one gets the "+
 				"default rather than an error. "+
 				"Each edge names both endpoints twice: `source_id`/`target_id`, the entity "+
-				"ids the row holds and the ones relations.remove and this tool's own "+
-				"endpoint filters take, and `source`/`target`, the (type_key, key, name) "+
-				"refs the edge was written with. An endpoint whose entity was removed while "+
-				"the page was being read has its id but no ref. "+
+				"ids the row holds, and `source`/`target`, the (type_key, key, name) "+
+				"refs the edge was written with — the refs are what this tool's own "+
+				"endpoint filters and relations.remove take. An endpoint whose entity was "+
+				"removed while the page was being read has its id but no ref. "+
 				"Every edge also carries `version`, which is what relations.upsert's "+
 				"expected_version takes, and `invalid`, which is true when editing the "+
 				"relation type's field_schema left the edge's stored values no longer "+
@@ -1840,8 +1951,11 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 
 	addScopedTool(s, srv, deps, &mcp.Tool{
 		Name: "relations.remove",
-		Description: "Remove one edge by id (relations.list and relations.upsert's written " +
-			"entries return it). The entities it joined are untouched.",
+		Description: "Remove one edge by the address it was written under: the relation " +
+			"type's key and both endpoints as (type_key, key) refs — the same address " +
+			"relations.get reads it by and relations.upsert wrote it with. The entities it " +
+			"joined are untouched. The edge's id is still returned by relations.list, " +
+			"relations.get and the removal event; it is simply not how you address one.",
 		OutputSchema: removedOutputSchema,
 		Annotations:  &mcp.ToolAnnotations{IdempotentHint: true, DestructiveHint: boolPtr(true)},
 	}, func(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in RelationsRemoveInput) (RemovedOutput, error) {
@@ -2045,17 +2159,17 @@ var relationTypeOutputSchema = &jsonschema.Schema{
 var relationTypeDetailOutputSchema = &jsonschema.Schema{
 	Type: "object",
 	Required: []string{"id", "key", "label", "version", "description",
-		"source_type_ids", "target_type_ids", "field_schema"},
+		"source_type_keys", "target_type_keys", "field_schema"},
 	Properties: map[string]*jsonschema.Schema{
-		"id":              stringSchema(),
-		"key":             stringSchema(),
-		"label":           stringSchema(),
-		"version":         {Type: "integer"},
-		"description":     stringSchema(),
-		"source_type_ids": arrayOf(stringSchema()),
-		"target_type_ids": arrayOf(stringSchema()),
-		"semantic_role":   stringSchema(),
-		"field_schema":    arrayOf(fieldSchemaItemSchema),
+		"id":               stringSchema(),
+		"key":              stringSchema(),
+		"label":            stringSchema(),
+		"version":          {Type: "integer"},
+		"description":      stringSchema(),
+		"source_type_keys": arrayOf(stringSchema()),
+		"target_type_keys": arrayOf(stringSchema()),
+		"semantic_role":    stringSchema(),
+		"field_schema":     arrayOf(fieldSchemaItemSchema),
 	},
 }
 
@@ -2277,6 +2391,49 @@ var relationsRepairOutputSchema = &jsonschema.Schema{
 			},
 		}),
 		"failed": arrayOf(bulkFailureSchema),
+	},
+}
+
+// gameCountsOutputSchema is games.counts' answer. Each row is a type's
+// slim shape plus its two counts, which is why the type properties are
+// spelled here rather than referenced: the hand-written schemas in this
+// file describe the wire and not the Go embedding that produces it.
+var gameCountsOutputSchema = &jsonschema.Schema{
+	Type:     "object",
+	Required: []string{"entity_types", "relation_types", "totals"},
+	Properties: map[string]*jsonschema.Schema{
+		"entity_types": arrayOf(&jsonschema.Schema{
+			Type: "object",
+			Required: []string{"id", "key", "label", "label_plural", "version",
+				"entity_count", "invalid_count"},
+			Properties: map[string]*jsonschema.Schema{
+				"id": stringSchema(), "key": stringSchema(),
+				"label": stringSchema(), "label_plural": stringSchema(),
+				"version":       {Type: "integer"},
+				"entity_count":  {Type: "integer"},
+				"invalid_count": {Type: "integer"},
+			},
+		}),
+		"relation_types": arrayOf(&jsonschema.Schema{
+			Type: "object",
+			Required: []string{"id", "key", "label", "version",
+				"relation_count", "invalid_count"},
+			Properties: map[string]*jsonschema.Schema{
+				"id": stringSchema(), "key": stringSchema(), "label": stringSchema(),
+				"version":        {Type: "integer"},
+				"relation_count": {Type: "integer"},
+				"invalid_count":  {Type: "integer"},
+			},
+		}),
+		"totals": {
+			Type:     "object",
+			Required: []string{"entities", "relations", "invalid"},
+			Properties: map[string]*jsonschema.Schema{
+				"entities":  {Type: "integer"},
+				"relations": {Type: "integer"},
+				"invalid":   {Type: "integer"},
+			},
+		},
 	},
 }
 

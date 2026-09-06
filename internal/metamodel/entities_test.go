@@ -802,7 +802,7 @@ func TestEntityEventsCarryTheStoredIdentity(t *testing.T) {
 
 	// A removal declares the same fields, so it has to fill them: an
 	// event carrying "" tells a client a row keyed empty string is gone.
-	if err := svc.RemoveEntity(ctx, project, row.ID); err != nil {
+	if err := svc.RemoveEntity(ctx, project, "quest", "hogger"); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
 	got = receive(t, sub)
@@ -822,21 +822,31 @@ func TestRemoveEntity(t *testing.T) {
 	project := newProject(t, pool)
 	seedQuestType(t, svc, project)
 
-	row, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+	if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
 		TypeKey: "quest", Key: "hogger", Name: "Hogger",
 		Fields: map[string]any{"min_level": float64(10)},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if err := svc.RemoveEntity(ctx, project, row.ID); err != nil {
+	if err := svc.RemoveEntity(ctx, project, "quest", "hogger"); err != nil {
 		t.Fatalf("RemoveEntity: %v", err)
 	}
 	if _, err := svc.EntityByKey(ctx, project, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound after removal", err)
 	}
-	if err := svc.RemoveEntity(ctx, project, uuid.New()); !errors.Is(err, metamodel.ErrNotFound) {
-		t.Fatalf("removing an unknown id: err = %v, want ErrNotFound", err)
+	if err := svc.RemoveEntity(ctx, project, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("removing it twice: err = %v, want ErrNotFound", err)
+	}
+	// A key that names no row, and a type key that names no type: two
+	// different not-founds, both named rather than generic, because an
+	// agent told only "not found" cannot tell which of the two to fix.
+	if err := svc.RemoveEntity(ctx, project, "quest", "kobold-camp"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("removing an unknown key: err = %v, want ErrNotFound", err)
+	}
+	if err := svc.RemoveEntity(ctx, project, "monster", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
+		t.Fatalf("removing under an undeclared type: err = %v, want ErrNotFound", err)
+	} else if !strings.Contains(err.Error(), `no entity type "monster"`) {
+		t.Fatalf("err = %v, want it to name the type that is missing", err)
 	}
 }
 
@@ -907,19 +917,18 @@ func TestEntitiesAreScopedToTheirProject(t *testing.T) {
 	seedQuestType(t, svc, mine)
 	seedQuestType(t, svc, theirs)
 
-	row, err := svc.UpsertEntity(ctx, mine, metamodel.EntityInput{
+	if _, err := svc.UpsertEntity(ctx, mine, metamodel.EntityInput{
 		TypeKey: "quest", Key: "hogger", Name: "Hogger",
 		Fields: map[string]any{"min_level": float64(10)},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	if _, err := svc.EntityByKey(ctx, theirs, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("an entity must not be visible from another project, got %v", err)
 	}
-	// Holding the id is not authority either.
-	if err := svc.RemoveEntity(ctx, theirs, row.ID); !errors.Is(err, metamodel.ErrNotFound) {
+	// Knowing the address is not authority either.
+	if err := svc.RemoveEntity(ctx, theirs, "quest", "hogger"); !errors.Is(err, metamodel.ErrNotFound) {
 		t.Fatalf("an entity must not be removable from another project, got %v", err)
 	}
 	if _, err := svc.EntityByKey(ctx, mine, "quest", "hogger"); err != nil {

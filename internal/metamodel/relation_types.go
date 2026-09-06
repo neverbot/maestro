@@ -32,8 +32,8 @@ type RelationTypeInput struct {
 	Key             string
 	Label           string
 	Description     string
-	SourceTypeIDs   []uuid.UUID
-	TargetTypeIDs   []uuid.UUID
+	SourceTypeKeys  []string
+	TargetTypeKeys  []string
 	SemanticRole    string
 	Schema          Schema
 	ExpectedVersion *int32
@@ -137,11 +137,11 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 		// a declaration naming two unknown types is fixed in one round
 		// trip. They are read inside the transaction because they are read
 		// against the same game the write lands in.
-		problems, err := checkEndpointTypes(ctx, q, projectID, "source_type_ids", in.SourceTypeIDs)
+		sourceIDs, problems, err := checkEndpointTypes(ctx, q, projectID, "source_type_keys", in.SourceTypeKeys)
 		if err != nil {
 			return err
 		}
-		targetProblems, err := checkEndpointTypes(ctx, q, projectID, "target_type_ids", in.TargetTypeIDs)
+		targetIDs, targetProblems, err := checkEndpointTypes(ctx, q, projectID, "target_type_keys", in.TargetTypeKeys)
 		if err != nil {
 			return err
 		}
@@ -176,8 +176,8 @@ func (s *Service) UpsertRelationType(ctx context.Context, projectID uuid.UUID, i
 			Key:              in.Key,
 			Label:            in.Label,
 			Description:      in.Description,
-			SourceTypeIds:    endpointList(in.SourceTypeIDs),
-			TargetTypeIds:    endpointList(in.TargetTypeIDs),
+			SourceTypeIds:    endpointList(sourceIDs),
+			TargetTypeIds:    endpointList(targetIDs),
 			FieldSchema:      raw,
 			ExpectedVersion:  expected,
 			UpdatedByUserID:  in.Actor.UserID,
@@ -299,31 +299,88 @@ func endpointList(ids []uuid.UUID) []uuid.UUID {
 // A failure to read at all is still attributed to the list and not an
 // element in spirit — nothing was checked, so no index is the one at
 // fault — but now as an opaque error rather than a field-shaped one.
-func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, path string, ids []uuid.UUID) ([]FieldError, error) {
-	if len(ids) == 0 {
-		return nil, nil
+func checkEndpointTypes(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
+	path string, keys []string,
+) ([]uuid.UUID, []FieldError, error) {
+	if len(keys) == 0 {
+		return nil, nil, nil
 	}
-	found, err := q.LockEndpointEntityTypes(ctx, dbq.LockEndpointEntityTypesParams{
-		ProjectID: projectID, Ids: ids,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("lock endpoint entity types (%s): %w", path, err)
+	// **Every element is pattern-checked before the query runs**, at its
+	// own indexed path, and a malformed one stops the query rather than
+	// merely joining the report. It has to: these keys reach Postgres as
+	// a `text[]`, so a NUL byte in one of them fails the whole statement
+	// with SQLSTATE 22021 — an internal_error over the caller's own
+	// argument, and over the *list* rather than the element. It is the
+	// same rule ListRelations' type_key and endpoint filters follow, and
+	// the same failure this repository has closed twice before.
+	//
+	// A malformed key could also have been left to fall out as "names no
+	// entity type of this game", which is true of it — but rowKeyProblems
+	// says *what* is wrong with it, and "no such type" sends a caller
+	// looking for a type rather than at the string it typed.
+	var malformed []FieldError
+	for i, key := range keys {
+		malformed = append(malformed, rowKeyProblems(fmt.Sprintf("%s[%d]", path, i), key)...)
 	}
-	known := make(map[uuid.UUID]struct{}, len(found))
-	for _, id := range found {
-		known[id] = struct{}{}
+	if len(malformed) > 0 {
+		return nil, malformed, nil
 	}
 
+	// Folded before the query and folded again to read the answer, so
+	// the caller's own spelling of a key finds the row and the message
+	// still quotes the caller's spelling back. Entity type keys are
+	// ASCII (rowKeyPattern, just enforced above), so this fold and SQL's
+	// lower() agree; the same premise FoldedIdentity rests on.
+	folded := make([]string, 0, len(keys))
+	for _, key := range keys {
+		folded = append(folded, strings.ToLower(key))
+	}
+	found, err := q.LockEndpointEntityTypes(ctx, dbq.LockEndpointEntityTypesParams{
+		ProjectID: projectID, Keys: folded,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("lock endpoint entity types (%s): %w", path, err)
+	}
+	known := make(map[string]uuid.UUID, len(found))
+	for _, row := range found {
+		known[strings.ToLower(row.Key)] = row.ID
+	}
+
+	// **A key repeated inside one list is refused rather than folded**,
+	// and the refusal is here rather than left to the database, which
+	// would store the duplicate id happily. An endpoint list is a set —
+	// "these types may be a source" — so naming one twice cannot mean
+	// anything a caller could have intended, and silently deduplicating
+	// it would leave the answer disagreeing with what was sent.
+	ids := make([]uuid.UUID, 0, len(keys))
+	seen := make(map[string]int, len(keys))
 	var problems []FieldError
-	for i, id := range ids {
-		if _, ok := known[id]; !ok {
+	for i, key := range keys {
+		lowered := folded[i]
+		id, ok := known[lowered]
+		if !ok {
 			problems = append(problems, FieldError{
 				Path:    fmt.Sprintf("%s[%d]", path, i),
-				Message: "names no entity type of this game: " + id.String(),
+				Message: "names no entity type of this game: " + key,
 			})
+			continue
 		}
+		if first, repeated := seen[lowered]; repeated {
+			problems = append(problems, FieldError{
+				Path: fmt.Sprintf("%s[%d]", path, i),
+				Message: fmt.Sprintf(
+					"names the same entity type as element %d; keys are matched without "+
+						"regard to case and an endpoint list is a set", first),
+			})
+			continue
+		}
+		seen[lowered] = i
+		ids = append(ids, id)
 	}
-	return problems, nil
+	if len(problems) > 0 {
+		return nil, problems, nil
+	}
+	return ids, nil, nil
 }
 
 // conflictOnRelationTypeKey names what stands in the way of a guarded

@@ -164,7 +164,6 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
-	id := uuid.New().String()
 
 	calls := map[string]func() error{
 		"types.upsert": func() error {
@@ -182,7 +181,7 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 			return err
 		},
 		"types.remove": func() error {
-			_, err := web.MCPTypesRemove(ctx, f.deps, f.caller, f.other, web.TypesRemoveInput{ID: id})
+			_, err := web.MCPTypesRemove(ctx, f.deps, f.caller, f.other, web.TypesRemoveInput{Key: "circuit"})
 			return err
 		},
 		"relation_types.upsert": func() error {
@@ -200,7 +199,7 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 			return err
 		},
 		"relation_types.remove": func() error {
-			_, err := web.MCPRelationTypesRemove(ctx, f.deps, f.caller, f.other, web.RelationTypesRemoveInput{ID: id})
+			_, err := web.MCPRelationTypesRemove(ctx, f.deps, f.caller, f.other, web.RelationTypesRemoveInput{Key: "races_on"})
 			return err
 		},
 		"entities.upsert": func() error {
@@ -218,7 +217,7 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 			return err
 		},
 		"entities.remove": func() error {
-			_, err := web.MCPEntitiesRemove(ctx, f.deps, f.caller, f.other, web.EntitiesRemoveInput{ID: id})
+			_, err := web.MCPEntitiesRemove(ctx, f.deps, f.caller, f.other, web.EntitiesRemoveInput{TypeKey: "circuit", Key: "spa"})
 			return err
 		},
 		"relations.upsert": func() error {
@@ -240,7 +239,15 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 			return err
 		},
 		"relations.remove": func() error {
-			_, err := web.MCPRelationsRemove(ctx, f.deps, f.caller, f.other, web.RelationsRemoveInput{ID: id})
+			_, err := web.MCPRelationsRemove(ctx, f.deps, f.caller, f.other, web.RelationsRemoveInput{
+				TypeKey: "races_on",
+				Source:  web.RefInput{TypeKey: "circuit", Key: "spa"},
+				Target:  web.RefInput{TypeKey: "circuit", Key: "monza"},
+			})
+			return err
+		},
+		"games.counts": func() error {
+			_, err := web.MCPGameCounts(ctx, f.deps, f.caller, f.other, web.GameCountsInput{})
 			return err
 		},
 		"entities.repair": func() error {
@@ -351,46 +358,52 @@ func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
-	for name, call := range map[string]func() error{
-		"types.remove": func() error {
-			_, err := web.MCPTypesRemove(ctx, f.deps, f.caller, f.game, web.TypesRemoveInput{ID: "not-a-uuid"})
-			return err
-		},
-		"entities.remove": func() error {
-			_, err := web.MCPEntitiesRemove(ctx, f.deps, f.caller, f.game, web.EntitiesRemoveInput{ID: "not-a-uuid"})
-			return err
-		},
-		"relations.list source_id": func() error {
-			_, err := web.MCPRelationsList(ctx, f.deps, f.caller, f.game, web.RelationsListInput{SourceID: "not-a-uuid"})
-			return err
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := call()
-			var mcpErr *web.MCPError
-			if !errors.As(err, &mcpErr) {
-				t.Fatalf("err = %v, want an *MCPError", err)
-			}
-			if mcpErr.Code != "invalid_input" {
-				t.Fatalf("code = %q, want invalid_input", mcpErr.Code)
-			}
-			if !strings.Contains(mcpErr.Message, "valid uuid") {
-				t.Fatalf("message = %q, want it to say what is wrong", mcpErr.Message)
-			}
-		})
+	// **This test used to drive three tools and now drives none of
+	// them**, which is Metamodel 14's whole point: types.remove,
+	// entities.remove and relations.list's endpoint filters all took a
+	// uuid, and a malformed one had to be reported as the caller's own
+	// argument rather than as a server fault. They take keys now, and a
+	// key that names nothing is not_found — a different answer to a
+	// different question.
+	//
+	// What is left is the shape the rule still applies to: an endpoint
+	// list names the *element* at fault and not just the list, so an
+	// agent with one bad key in five fixes that one.
+	if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+		Key: "circuit", Label: "Circuit", LabelPlural: "Circuits",
+	}); err != nil {
+		t.Fatalf("types.upsert: %v", err)
 	}
-
-	// An endpoint list names the element at fault, not just the list.
 	_, err := web.MCPRelationTypesUpsert(ctx, f.deps, f.caller, f.game, web.RelationTypesUpsertInput{
 		Key: "requires", Label: "requires",
-		SourceTypeIDs: []string{uuid.New().String(), "nope"},
+		SourceTypeKeys: []string{"circuit", "nope"},
 	})
-	var mcpErr *web.MCPError
-	if !errors.As(err, &mcpErr) || mcpErr.Code != "invalid_input" {
-		t.Fatalf("err = %v, want an invalid_input MCPError", err)
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) || invalid.Code != "invalid_input" {
+		t.Fatalf("err = %#v, want an invalid_input ValidationError", err)
 	}
-	if !strings.Contains(mcpErr.Message, "source_type_ids[1]") {
-		t.Fatalf("message = %q, want it to name the element at fault", mcpErr.Message)
+	if len(invalid.Fields) != 1 {
+		t.Fatalf("problems = %+v, want only the bad element", invalid.Fields)
+	}
+	if invalid.Fields[0].Path != "source_type_keys[1]" ||
+		!strings.Contains(invalid.Fields[0].Message, "nope") {
+		t.Fatalf("problem = %+v, want it to name the element at fault and the key",
+			invalid.Fields[0])
+	}
+	if _, err := web.MCPRelationTypesGet(ctx, f.deps, f.caller, f.game,
+		web.RelationTypesGetInput{Key: "requires"}); err == nil {
+		t.Fatalf("the refused declaration stored something")
+	}
+
+	// And a list that names one type twice, which the database would
+	// have stored happily: an endpoint list is a set.
+	_, err = web.MCPRelationTypesUpsert(ctx, f.deps, f.caller, f.game, web.RelationTypesUpsertInput{
+		Key: "requires", Label: "requires",
+		SourceTypeKeys: []string{"circuit", "CIRCUIT"},
+	})
+	if !errors.As(err, &invalid) || len(invalid.Fields) != 1 ||
+		invalid.Fields[0].Path != "source_type_keys[1]" {
+		t.Fatalf("err = %#v, want the repeated element named", err)
 	}
 }
 
@@ -421,6 +434,7 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 		names[tool.Name] = true
 	}
 	for _, want := range []string{
+		"games.counts",
 		"types.upsert", "types.list", "types.get", "types.remove",
 		"relation_types.upsert", "relation_types.list", "relation_types.get", "relation_types.remove",
 		"entities.upsert", "entities.list", "entities.get", "entities.remove",
@@ -457,9 +471,9 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 
 	callOK(t, session, "relation_types.upsert", map[string]any{
 		"key": "takes_place_in", "label": "takes place in",
-		"source_type_ids": []any{questType.ID},
-		"target_type_ids": []any{zoneType.ID},
-		"semantic_role":   "spatial",
+		"source_type_keys": []any{"quest"},
+		"target_type_keys": []any{"zone"},
+		"semantic_role":    "spatial",
 	})
 
 	var seeded struct {
@@ -589,7 +603,7 @@ func TestMCPMetamodelErrorsCarryTheirOwnCode(t *testing.T) {
 	// the endpoint rule being enforced and not a missing row.
 	callOK(t, session, "relation_types.upsert", map[string]any{
 		"key": "leads_to", "label": "leads to",
-		"target_type_ids": []any{zone.ID},
+		"target_type_keys": []any{"zone"},
 	})
 
 	for _, tc := range []struct {
@@ -608,8 +622,8 @@ func TestMCPMetamodelErrorsCarryTheirOwnCode(t *testing.T) {
 			map[string]any{"key": "not a key", "label": "B", "label_plural": "Bs"}, "invalid_input"},
 		{"an update with no version claim", "types.upsert",
 			map[string]any{"key": "quest", "label": "Quest", "label_plural": "Quests"}, "version_conflict"},
-		{"a type that is still in use", "types.remove",
-			map[string]any{"id": uuid.Nil.String()}, "not_found"},
+		{"a type that is not there", "types.remove",
+			map[string]any{"key": "nothing-here"}, "not_found"},
 		{"a query with no word in it", "search", map[string]any{"query": "..."}, "invalid_input"},
 		// An atomic batch reports its one bad row as an error rather
 		// than as a failed entry, which is the only path that puts a
@@ -651,13 +665,9 @@ func TestMCPMetamodelErrorsCarryTheirOwnCode(t *testing.T) {
 	}
 
 	// The one that is refused as in_use rather than not_found needs a
-	// real type id, so it is done separately.
-	var quest struct {
-		ID string `json:"id"`
-	}
-	decodeStructured(t, callOK(t, session, "types.get", map[string]any{"key": "quest"}), &quest)
+	// type that really has entities, so it is done separately.
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name: "types.remove", Arguments: map[string]any{"id": quest.ID},
+		Name: "types.remove", Arguments: map[string]any{"key": "quest"},
 	})
 	if err != nil {
 		t.Fatalf("CallTool(types.remove): %v", err)
@@ -986,22 +996,19 @@ func seedOneEdge(t *testing.T, f metamodelFixture) (source, target uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 
-	quest, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
-		Key: "quest", Label: "Quest", LabelPlural: "Quests",
-	})
-	if err != nil {
-		t.Fatalf("MCPTypesUpsert quest: %v", err)
-	}
-	zone, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
-		Key: "zone", Label: "Zone", LabelPlural: "Zones",
-	})
-	if err != nil {
-		t.Fatalf("MCPTypesUpsert zone: %v", err)
+	for _, spec := range []struct{ key, label, plural string }{
+		{"quest", "Quest", "Quests"}, {"zone", "Zone", "Zones"},
+	} {
+		if _, err := web.MCPTypesUpsert(ctx, f.deps, f.caller, f.game, web.TypesUpsertInput{
+			Key: spec.key, Label: spec.label, LabelPlural: spec.plural,
+		}); err != nil {
+			t.Fatalf("MCPTypesUpsert %s: %v", spec.key, err)
+		}
 	}
 	if _, err := web.MCPRelationTypesUpsert(ctx, f.deps, f.caller, f.game, web.RelationTypesUpsertInput{
 		Key: "takes_place_in", Label: "takes place in",
-		SourceTypeIDs: []string{quest.ID.String()},
-		TargetTypeIDs: []string{zone.ID.String()},
+		SourceTypeKeys: []string{"quest"},
+		TargetTypeKeys: []string{"zone"},
 		// The edge carries a declared field, because the tests below are
 		// about whether an edge's own values can be read back at all and
 		// a schemaless edge cannot tell a working reader from a broken

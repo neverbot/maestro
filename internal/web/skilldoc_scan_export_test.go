@@ -20,9 +20,7 @@ type ScannedSentence struct {
 func exportSentences(in []bundleSentence) []ScannedSentence {
 	out := make([]ScannedSentence, 0, len(in))
 	for _, s := range in {
-		out = append(out, ScannedSentence{
-			Path: s.Path, Line: s.Line, Text: s.Text, InQuote: s.InQuote, QuoteFor: s.QuoteFor,
-		})
+		out = append(out, ScannedSentence(s))
 	}
 	return out
 }
@@ -30,9 +28,7 @@ func exportSentences(in []bundleSentence) []ScannedSentence {
 func importSentences(in []ScannedSentence) []bundleSentence {
 	out := make([]bundleSentence, 0, len(in))
 	for _, s := range in {
-		out = append(out, bundleSentence{
-			Path: s.Path, Line: s.Line, Text: s.Text, InQuote: s.InQuote, QuoteFor: s.QuoteFor,
-		})
+		out = append(out, bundleSentence(s))
 	}
 	return out
 }
@@ -105,7 +101,7 @@ func BundleToolTokensForTest(fsys fs.FS) ([]BundleToolToken, error) {
 	}
 	out := make([]BundleToolToken, 0, len(tokens))
 	for _, token := range tokens {
-		out = append(out, BundleToolToken{Path: token.Path, Line: token.Line, Name: token.Name})
+		out = append(out, BundleToolToken(token))
 	}
 	return out, nil
 }
@@ -119,7 +115,7 @@ func BundleToolMentionsForTest(fsys fs.FS, registered map[string]string) ([]Bund
 	}
 	out := make([]BundleToolToken, 0, len(tokens))
 	for _, token := range tokens {
-		out = append(out, BundleToolToken{Path: token.Path, Line: token.Line, Name: token.Name})
+		out = append(out, BundleToolToken(token))
 	}
 	return out, nil
 }

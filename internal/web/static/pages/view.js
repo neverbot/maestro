@@ -43,10 +43,16 @@ import { frameFor } from "../render/scene.js";
 import { graphLayoutRequest, graphScene, RENDERER as RENDERER_GRAPH } from "../render/graph.js";
 import { layeredLayoutRequest, layeredScene, RENDERER as RENDERER_LAYERED } from "../render/layered.js";
 import { nestedScene, RENDERER as RENDERER_NESTED } from "../render/nested.js";
-import { mapScene, RENDERER as RENDERER_MAP } from "../render/map.js";
+import {
+  COORDINATES_FIELDS,
+  mapScene,
+  PARAM_COORDINATE_SOURCE,
+  RENDERER as RENDERER_MAP,
+} from "../render/map.js";
 import { tableScene, RENDERER as RENDERER_TABLE } from "../render/table.js";
 import { timelineScene, PARAM_AXIS_FIELD, RENDERER as RENDERER_TIMELINE } from "../render/timeline.js";
-import { gridFallback } from "../layout/compose.js";
+import { compose, gridFallback } from "../layout/compose.js";
+import { storedFrom } from "../positions.js";
 import { LAYOUT_BUDGET_MS, runWithBudget } from "../layout/budget.js";
 import { Arrangement, MstCanvas, worldDelta } from "../components/mst-canvas.js";
 import { MstGround } from "../components/mst-ground.js";
@@ -60,6 +66,7 @@ import {
   FIELD_RENDERER,
   MstSaveAs,
 } from "../components/mst-save-as.js";
+import { SELECT_EVENT } from "../components/mst-twin.js";
 import "../components/mst-view-frame.js";
 import "../components/mst-table.js";
 import { entityBody, readEntity } from "./entity.js";
@@ -128,10 +135,49 @@ const SCENES = {
   [RENDERER_GRAPH]: (envelope, layout, params) => graphScene(envelope, layout, params),
   [RENDERER_LAYERED]: (envelope, layout, params) => layeredScene(envelope, layout, params),
   [RENDERER_NESTED]: (envelope, layout, params, options) => nestedScene(envelope, params, options),
-  [RENDERER_MAP]: (envelope, layout, params, options) => mapScene(envelope, params, options),
+  [RENDERER_MAP]: (envelope, layout, params, options) =>
+    mapScene(envelope, params, { ...options, layout: mapComposition(envelope, options.row, params) }),
   [RENDERER_TIMELINE]: (envelope, layout, params, options) => timelineScene(envelope, params, options),
   [RENDERER_TABLE]: (envelope, layout, params, options) => tableScene(envelope, params, options),
 };
+
+// mapComposition is the composition a `manual` map reads, and it exists
+// because the map renderer was never given one.
+//
+// **The branch it feeds had been dead on the wire since Task 11.**
+// render/map.js's own header promises that on a map which *has* a saved
+// arrangement, a node new to it "is placed by the client, drawn with a
+// hollow anchor, and counted — *12 new nodes were placed
+// automatically*". `coordinatesFor` reads that from `options.layout`,
+// LAYOUT_REQUESTS above names only `graph` and `layered`, and the SCENES
+// entry for `map` used to pass `{background, axis, zoom}` and no layout
+// at all — so `placementsOf(options.layout)` was empty on every real
+// page and the exception could not fire. render_map_test.mjs passed a
+// composition by hand and proved the module; nothing proved the call.
+// Measured in a browser before the fix, on a map with four pinned rows
+// and twelve quests added afterwards: twelve shelf chips, zero hollow
+// anchors, and `scene.automatic` 0, so the band never appeared.
+//
+// It is composed here on the main thread rather than through the worker
+// because a map is not a graph: nothing about it wants dagre. What a
+// node with no stored row needs is *a* coordinate near the arrangement,
+// which is exactly `gridFallback` fitted by `compose` against the pins.
+//
+// `fields` maps get none, and that is not an optimisation: there the
+// game states every coordinate, `coordinatesFor` never looks at a
+// composition, and handing one over would be a placement nothing reads.
+export function mapComposition(envelope, row, params = {}) {
+  if (params && params[PARAM_COORDINATE_SOURCE] === COORDINATES_FIELDS) return null;
+  const nodes = (Array.isArray(envelope && envelope.nodes) ? envelope.nodes : [])
+    .filter((node) => node && typeof node === "object" && typeof node.key === "string" && node.key !== "")
+    .map((node) => ({ type: typeof node.type === "string" ? node.type : "", key: node.key }));
+  if (nodes.length === 0) return null;
+  return compose(
+    row && typeof row === "object" ? row.layout_mode : undefined,
+    { placements: gridFallback(nodes) },
+    storedFrom(envelope && envelope.positions),
+  );
+}
 
 // --- Reading the address ---------------------------------------------
 
@@ -493,6 +539,10 @@ async function draw(state, envelope, error, options) {
         background: backgroundOf(state.row, state.background),
         axis: state.axis,
         zoom: state.canvas.view.k,
+        // The saved row, for the one renderer that has to compose its own
+        // placements — see mapComposition. Every other SCENES entry
+        // ignores it.
+        row: state.row,
       })
     : null;
   state.scene = scene;
@@ -509,6 +559,10 @@ async function draw(state, envelope, error, options) {
     against: scene && scene.against !== undefined ? scene.against : null,
     cyclic: scene ? scene.cyclic === true : false,
     placedAutomatically: scene && scene.automatic ? scene.automatic : 0,
+    // The renderer's own colour key, on its way to the screen for the
+    // first time. Four of the six renderers have returned one since
+    // Tasks 8-13 and nothing read it; see scene.js's legendModel.
+    legend: scene && scene.legend ? scene.legend : null,
   });
   state.frame.params = state.params;
 
@@ -730,6 +784,35 @@ export function wire(doc, panelEl, slug, client, state) {
     if (held.address === null) return;
     state.arrangement.select(held.address, { shift: event.shiftKey === true });
     await openPanel(doc, panelEl, slug, client, held.address);
+  });
+
+  // The twin's selection, arriving here.
+  //
+  // **This listener is the fourth sighting of this sub-project's own
+  // recurring defect and was found in a browser, not by a harness.**
+  // mst-twin.js dispatches `mst-select` when a row takes focus, its
+  // header says "the selection travels as a DOM event so the canvas can
+  // highlight what the reader is standing on", and twin_test.mjs asserts
+  // the event goes out "under the name a canvas will listen for" — and
+  // nothing in the product listened for it. The consequence was the
+  // whole keyboard path of spec §8.1: a reader could tab through the
+  // twin and watch the rows mark themselves, then move to the canvas and
+  // find the arrow keys moved nothing and wrote nothing, because
+  // `Arrangement.selection` was still empty. Measured before the fix, on
+  // the seeded game: focusing the *Wanted: Hogger* row set
+  // `mst-twin.selected`, one ArrowRight on the focused surface left the
+  // node's `x` at 287 and sent zero writes.
+  //
+  // It is bound on the frame element rather than on the twin: the event
+  // is `composed`, so it crosses the frame's shadow boundary, and the
+  // twin is rebuilt on every draw while the frame is not — a listener on
+  // the twin would be a listener on whichever twin happened to exist
+  // when the page was wired.
+  state.frame.addEventListener(SELECT_EVENT, (event) => {
+    const node = event && event.detail ? event.detail : null;
+    if (!node || typeof node.type !== "string" || typeof node.key !== "string") return;
+    state.arrangement.select(JSON.stringify([node.type, node.key]));
+    canvas.showArrangement(state.arrangement);
   });
 
   // The keyboard is the same gesture as the mouse and goes through the

@@ -852,6 +852,7 @@ check("aNodeClickOpensThePanelAndDoesNotNavigate", async () => {
       },
     },
     ground: { root: fakeElement("div"), placing: null },
+    frame: fakeElement("mst-view-frame"),
   };
   wire(globalThis.document, dom.elements["entity-panel"], GAME.slug, client({ slug: GAME.slug }), state);
 
@@ -862,6 +863,64 @@ check("aNodeClickOpensThePanelAndDoesNotNavigate", async () => {
   assert(!dom.elements["entity-panel"].hidden, "the click did not open the panel");
   assertEqual(dom.navigations.length, 0, `a node click navigated: ${dom.navigations}`);
   assert(root.children.includes(surface), "the canvas was unmounted by a node click");
+});
+
+// **The twin's selection reaches the arrangement, and it goes through
+// `wire`.**
+//
+// twin_test.mjs asserts mst-twin dispatches `mst-select` "under the name
+// a canvas will listen for", and for four tasks nothing listened for it:
+// a reader could tab through the twin, watch the rows mark themselves,
+// move to the canvas and find the arrow keys moved nothing and wrote
+// nothing. Measured in a browser on the seeded game before the fix —
+// focusing the *Wanted: Hogger* row set `mst-twin.selected`, one
+// ArrowRight left the node's x at 287 and sent zero writes — which is the
+// whole keyboard path of spec §8.1, gone.
+//
+// So this check drives `wire` and not the listener, for save_as_test's
+// reason: a check that called the handler directly would stay green with
+// the one binding line deleted, which is the exact defect being closed.
+check("theTwinsSelectionReachesTheArrangementAtItsCallSite", async () => {
+  const dom = mount({ ids: ["entity-panel"], pathname: "/g/azeroth/v/world", routes: [] });
+  const { wire } = await load("view");
+  const { SELECT_EVENT } = await import("../static/components/mst-twin.js");
+
+  const selected = [];
+  const shown = [];
+  const surface = fakeElement("g");
+  const frame = fakeElement("mst-view-frame");
+  const state = {
+    canvas: {
+      shell: { surfaceHost: surface, panels: fakeElement("div") },
+      view: { k: 1 },
+      showArrangement(arrangement) {
+        shown.push(arrangement);
+      },
+    },
+    arrangement: {
+      select(address) {
+        selected.push(address);
+        return [address];
+      },
+      pointerDown() {
+        return null;
+      },
+    },
+    ground: { root: fakeElement("div"), placing: null },
+    frame,
+  };
+  wire(globalThis.document, dom.elements["entity-panel"], GAME.slug, null, state);
+
+  await frame.dispatch(SELECT_EVENT, { detail: { type: "quest", key: "hogger" } });
+  assertEqual(selected.length, 1, "focusing a twin row selected no node on the canvas");
+  assertEqual(selected[0], JSON.stringify(["quest", "hogger"]), "the twin's node arrived under the wrong address");
+  assertEqual(shown.length, 1, "the canvas was never told to redraw its selection");
+
+  // An event carrying no node is not a selection of nothing. The twin
+  // never sends one, and a listener that treated it as an address would
+  // clear a designer's selection on any stray event of the same name.
+  await frame.dispatch(SELECT_EVENT, { detail: null });
+  assertEqual(selected.length, 1, "an event with no node still reached the arrangement");
 });
 
 // --- What the game-summary harness held --------------------------------

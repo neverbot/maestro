@@ -29,6 +29,18 @@ import "./mst-twin.js";
 // what is true about it, and "what the button says" is not that.
 const RUN_ANYWAY_LABEL = "Run anyway (best effort)";
 
+// paintClass turns one legend row into the class that paints its swatch.
+// The stylesheet holds the eight hues, the hatch and the unset ring; this
+// only chooses between them, from the kind and index scene.js carried.
+function paintClass(row) {
+  // The token numbering starts at one and palette.js's slot index at
+  // zero, so the class is the index plus one: a rule named for the token
+  // it paints from is a rule a reader can check against styles.css.
+  if (row.kind === "hue" && Number.isInteger(row.index)) return "hue-" + (row.index + 1);
+  if (row.kind === "hatch") return "hatch";
+  return "unset";
+}
+
 export class MstViewFrame extends LitElement {
   static properties = {
     frame: { attribute: false },
@@ -104,6 +116,67 @@ export class MstViewFrame extends LitElement {
       margin-right: 0.4rem;
       background: var(--dropped);
     }
+    /* The colour key. It sits under the banner stack and over the
+       drawing, on the reading side of every sentence that qualifies the
+       picture, because a key read before the caveats is a key a reader
+       trusts more than the picture deserves. */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 1rem;
+      padding: 0.4rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      font-size: 0.85em;
+    }
+    .legend .row {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.35rem;
+    }
+    /* The swatch carries a border in every row, including the unset one:
+       --unset is transparent in both themes (palette.js says so), so a
+       borderless swatch for it would be a blank gap where a reader is
+       looking for a mark.
+
+       The eight paints are eight rules and not one style attribute
+       written from the model, because a style attribute is inline style
+       and this instance's policy refuses it silently — the defect this
+       whole legend exists to undo, repeated one layer down. scene.js's
+       legendModel carries the row's kind and index for exactly this. */
+    .legend .paint {
+      display: inline-block;
+      width: 0.7rem;
+      height: 0.7rem;
+      border: 1px solid var(--line-strong);
+    }
+    .legend .hue-1 { background: var(--data-1); }
+    .legend .hue-2 { background: var(--data-2); }
+    .legend .hue-3 { background: var(--data-3); }
+    .legend .hue-4 { background: var(--data-4); }
+    .legend .hue-5 { background: var(--data-5); }
+    .legend .hue-6 { background: var(--data-6); }
+    .legend .hue-7 { background: var(--data-7); }
+    .legend .hue-8 { background: var(--data-8); }
+    /* The tail is textured and not a ninth colour, for palette.js's
+       reason: a flat fill among eight flat fills reads as a ninth
+       category. The drawing hatches it with an SVG pattern; a swatch is
+       not an SVG, so it hatches with the same 45° stripe in CSS. */
+    .legend .hatch {
+      background: repeating-linear-gradient(
+        45deg,
+        var(--paper) 0 2px,
+        var(--line-strong) 2px 4px
+      );
+    }
+    .legend .unset {
+      background: var(--unset);
+      border-style: dashed;
+    }
+    .legend .count {
+      font-family: var(--mono);
+      font-size: 0.85em;
+      color: var(--muted);
+    }
     .panel {
       padding: 0.75rem;
       color: var(--ink);
@@ -160,7 +233,8 @@ export class MstViewFrame extends LitElement {
     if (!frame) return nothing;
     return html`
       ${this.titleStrip(frame.title)} ${this.parameterBar(frame.bar)}
-      ${(frame.banners || []).map((banner) => this.band(banner))} ${this.body(frame)}
+      ${(frame.banners || []).map((banner) => this.band(banner))} ${this.legend(frame.legend)}
+      ${this.body(frame)}
       ${this.footerStrip(frame.footer)}
     `;
   }
@@ -210,6 +284,25 @@ export class MstViewFrame extends LitElement {
               ${control.marked ? html`<span class="message">${control.message}</span>` : nothing}
             </div>
           `,
+        )}
+      </div>
+    `;
+  }
+
+  // The colour key. The rows, their paints and their counts are all
+  // scene.js's `legendModel`; this decides only that they sit in a row of
+  // chips. The count travels beside the label rather than only in the
+  // twin because "the eight most frequent values take the eight hues" is
+  // a rule a reader can only check against the numbers.
+  legend(legend) {
+    if (!legend || !legend.present) return nothing;
+    return html`
+      <div class="legend">
+        ${legend.rows.map(
+          (row) => html`<span class="row"
+            ><span class=${"paint " + paintClass(row)}></span
+            ><span>${row.label}</span><span class="count">${row.count}</span></span
+          >`,
         )}
       </div>
     `;

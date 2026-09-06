@@ -553,6 +553,9 @@ check("theViewPageWiresTheDialogAtItsCallSite", async () => {
   const state = {
     canvas: { shell: { surfaceHost: surface, panels: fakeElement("div") } },
     ground: { root: fakeElement("div"), placing: null },
+    // wire() binds the twin's selection event on the frame; this check is
+    // about the dialog and only needs somewhere for that to land.
+    frame: fakeElement("mst-view-frame"),
     saveAs: dialog,
   };
   wire(globalThis.document, null, SLUG, null, state);

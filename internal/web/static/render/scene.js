@@ -39,6 +39,7 @@
 // counts nodes and its sentence names nodes. Counting slots would be
 // inventing a distinction the server declined to carry.
 
+import { fillFor } from "../palette.js";
 import { twinFor } from "./twin.js";
 
 // --- The banner vocabulary -------------------------------------------
@@ -637,6 +638,54 @@ export function barFor(declarations, values, options = {}) {
   return { present: controls.length > 0, controls };
 }
 
+// legendModel is the colour key: the rows a renderer's `legend` already
+// carries, paired with the paint each one wears.
+//
+// **This exists because the legend was built and never drawn.** Four
+// renderers return `legend` from palette.js's `legendFor` — eight hue
+// rows ordered by frequency, a hatched tail, an `unset` row — every
+// renderer test asserts over it, and no component, page or emitter in
+// the product ever read it. A designer opening a `graph` with
+// `color_by` saw eight colours and nothing anywhere on the page saying
+// what any of them meant, which makes the hues decoration and the whole
+// of §2.3's colour discipline unreadable. Found by opening the seeded
+// game in a browser and searching the rendered page, both light DOM and
+// every shadow root, for a swatch: there was none.
+//
+// It is built here and not in the component for this file's standing
+// reason — a decision taken inside a component is a decision no test can
+// see — and it reads the paint off `fillFor` rather than re-deriving
+// one, so the swatch beside a label and the fill on the node are one
+// answer read twice and cannot drift.
+//
+// **It carries `kind` and `index` and not a CSS string**, and that is
+// the content security policy talking rather than taste. A `style`
+// attribute is inline style, this instance's policy refuses it with no
+// error of any kind (Task 15's third correction measured exactly that),
+// so a swatch painted from a value carried here would be a swatch with
+// no colour on every real page — the same defect this function exists to
+// undo. The two fields name one of a fixed, small set of paints, and the
+// component declares all of them in its own stylesheet.
+//
+// `present` is false rather than the object being null when a view
+// paints nothing (`map` returns `legend: null`, always) or when the
+// answer had no nodes: a key with no rows is a heading over an empty
+// box.
+export function legendModel(legend) {
+  const rows = legend && Array.isArray(legend.rows) ? legend.rows : [];
+  return {
+    present: rows.length > 0,
+    rows: rows.map((row) => ({
+      kind: text(row.kind),
+      label: text(row.label),
+      count: Number.isFinite(row.count) ? row.count : 0,
+      // The tail says how many values it swallowed in its own label
+      // (palette.js writes it), so this carries no second sentence.
+      index: fillFor(row).index,
+    })),
+  };
+}
+
 // --- The frame -------------------------------------------------------
 
 // frameFor is the whole model, and the one function the component reads.
@@ -683,6 +732,7 @@ export function frameFor(input = {}) {
         actions: [],
         message: "",
         ran: null,
+        legend: { present: false, rows: [] },
         footer: footerFor(null, input),
       };
     }
@@ -704,6 +754,7 @@ export function frameFor(input = {}) {
           : [],
       message: "",
       ran: null,
+      legend: { present: false, rows: [] },
       footer: footerFor(null, input),
     };
   }
@@ -733,6 +784,10 @@ export function frameFor(input = {}) {
     actions: [],
     message: empty ? "This view matched nothing." : "",
     ran: empty ? ranFor(view, params, input.sets) : null,
+    // The colour key, from the scene the page just drew. A refusal has
+    // none for the same reason it has no twin: there is no answer, and a
+    // key over a panel of diagnostics would read as an answer's key.
+    legend: empty ? { present: false, rows: [] } : legendModel(input.legend),
     footer,
   };
 }

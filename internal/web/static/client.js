@@ -163,6 +163,14 @@ function isOpen(state, key) {
 // link, so the binding has to survive a copy-paste into a colleague's
 // address bar, and it has to be told apart from the page's own query
 // keys.
+// CREATE_EXPECTED_VERSION is how this product spells "the row I am
+// writing must not exist yet": internal/views' own createExpectedVersion,
+// which is 0 because no stored view is ever at version 0. It is named
+// rather than written as a bare literal at the one call site that sends
+// it, where a 0 would read as a version number and means the opposite of
+// one.
+export const CREATE_EXPECTED_VERSION = 0;
+
 export const PARAM_PREFIX = "p.";
 
 // readParams pulls the bound parameters out of a query string.
@@ -584,6 +592,62 @@ export function client({
     return counted(() => send(base + "/views", body));
   }
 
+  // saveViewAs writes a **copy** of a saved view under a new key.
+  //
+  // It is a separate call from upsertView above and not an argument to
+  // it, because the two make opposite claims about what is on the
+  // server. upsertView carries the version it read and means "this row
+  // is at version N and I am changing it"; this one carries
+  // `expected_version: 0`, which internal/views spells as *this view must
+  // not exist yet* (its createExpectedVersion), and means "nothing may be
+  // at this key". A copy that overwrote whatever was already at the key
+  // it was given would be the one write in this front end that can
+  // destroy a view nobody asked it to touch, so the claim is made on the
+  // wire and the server enforces it.
+  //
+  // **The query goes across by reference and is never rebuilt.** That is
+  // the whole of what makes "the copy is the source's query" a fact
+  // rather than an intention: there is no builder in this product, a
+  // human alone cannot compose a query document, and a copy that
+  // serialised a reconstruction of the source's document would be a
+  // query editor with none of a query editor's design. The document that
+  // reaches JSON.stringify here is the object readView answered with.
+  async function saveViewAs(source, changes) {
+    const from = source && typeof source === "object" ? source : {};
+    const patch = changes && typeof changes === "object" ? changes : {};
+    const body = {
+      key: String(patch.key || ""),
+      name: String(patch.name || from.name || ""),
+      query: from.query,
+      renderer: String(patch.renderer || from.renderer || ""),
+      renderer_params: patch.rendererParams || {},
+      layout_mode: String(from.layout_mode || ""),
+      // internal/views' createExpectedVersion. Not a version number: no
+      // stored view is ever at version 0.
+      expected_version: CREATE_EXPECTED_VERSION,
+    };
+    // The description travels with the copy unless the caller replaces
+    // it: a copy that silently lost the sentence explaining what the
+    // view is for would be a view a colleague has to read a query to
+    // understand, and there is no query reader here either.
+    const description = typeof patch.description === "string" ? patch.description : from.description;
+    if (typeof description === "string" && description !== "") body.description = description;
+    return counted(() => send(base + "/views", body));
+  }
+
+  // renderers is the server's own renderer catalogue: the names, each
+  // renderer's knobs, each knob's kind and, for an enum, the spellings
+  // the server admits.
+  //
+  // It is a call rather than a constant because a catalogue spelled in
+  // this front end would be a second copy of internal/views' table —
+  // exactly the drift RendererDescription is generated to prevent, moved
+  // to where no Go test reads it. What a chooser offers is therefore
+  // what CheckRenderer will accept, by construction.
+  async function renderers() {
+    return get(base + "/views/renderers");
+  }
+
   // uploadAsset sends the image's bytes.
   //
   // The body is the file itself and the filename rides in the query
@@ -900,6 +964,8 @@ export function client({
     clearPositions,
     writeBackground,
     upsertView,
+    saveViewAs,
+    renderers,
     uploadAsset,
     listAssets,
     games,

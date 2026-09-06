@@ -30,6 +30,12 @@
      (Task 14). The shell holds the holes and no words of its own —
      a sentence typed here would be a second copy of one the frame&#39;s
      model already carries. -->
+<!-- The "Save as" dialog's hole. It is **outside** the drawing's
+     wrapper on purpose: that wrapper is aria-hidden because the text
+     twin is the accessible content of the answer, and a control a
+     keyboard can reach inside it is a control a screen reader will not
+     announce. A dialog is not part of the picture. -->
+<div id="save-as-root"></div>
 <div id="view-root"></div>
 <!-- The only thing this page says for itself, and only when the view
      could not be read at all: the frame needs an envelope or a refusal

@@ -538,6 +538,45 @@ func RendererNames() []string {
 	return out
 }
 
+// RendererCatalogue is the whole table, in its declared order, for a
+// caller that has to *offer* the catalogue rather than check against it.
+//
+// It exists because the "Save as" dialog (interface Task 16) lets a
+// designer change the renderer a copied query is drawn with, and a
+// dialog that carried its own list of six names, their parameters and
+// their admitted spellings would be a second copy of this table with a
+// date on it — the drift RendererDescription is generated to prevent,
+// re-made in JavaScript where no Go test can see it. So the browser
+// reads this, over internal/web's own route, and offers exactly what
+// CheckRenderer will accept.
+//
+// The entries are copies: Requires is a func the caller must not hold,
+// and Values is copied so an offering surface cannot edit the spellings
+// this package admits. Nothing here is a promise about *appearance* —
+// see this file's header — and a caller that needs a sentence about what
+// a knob does to a picture writes that sentence where the picture is
+// drawn.
+func RendererCatalogue() []Renderer {
+	out := make([]Renderer, 0, len(renderers))
+	for _, r := range renderers {
+		entry := Renderer{
+			Name:            r.Name,
+			Consumes:        r.Consumes,
+			Doc:             r.Doc,
+			RequiresDoc:     r.RequiresDoc,
+			ReadsBackground: r.ReadsBackground,
+			Params:          make([]RendererParam, 0, len(r.Params)),
+		}
+		for _, p := range r.Params {
+			copied := p
+			copied.Values = append([]string(nil), p.Values...)
+			entry.Params = append(entry.Params, copied)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // RendererParamKind is one parameter's declared kind, as the wire spells
 // it, or false when this catalogue has no such parameter.
 //

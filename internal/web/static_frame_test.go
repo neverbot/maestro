@@ -156,11 +156,30 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // it renders — every label, every cell, every group caption, the pager's
 // sentence — is an interpolation of render/table.js's model, which is
 // what the scan above reads the templates for.
+//
+// mst-save-as.js joined the list in Task 16, and it holds **no Lit
+// template at all** — so, like mst-canvas.js, the scan above passes over
+// it vacuously and the argument has to be made here. It carries words of
+// its own, and every one of them is the same kind of thing the ground's
+// picker carries: a control's label, and a precondition stated *before*
+// a designer spends anything on it. The three notes say what the dialog
+// does and does not do — the query is copied unchanged, a query is
+// changed by asking an agent over views.upsert, and the values set here
+// are the copy's opening binding rather than a rewrite of the query's
+// declared defaults — none of which is a state of an answer and none of
+// which any model could carry, because there is no answer here to have a
+// state. The key sentences are not this file's either: they are
+// internal/metamodel's rowKeyProblems, verbatim, and
+// internal/web/static_save_as_test.go pins all three and the pattern to
+// that source in both directions. The refusals themselves stay the
+// server's, and internal/web/jstest/save_as_test.mjs asserts a taken key
+// is rendered exactly as it arrived.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	found := componentFiles(t)
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
 		filepath.Join("static", "components", "mst-ground.js"),
+		filepath.Join("static", "components", "mst-save-as.js"),
 		filepath.Join("static", "components", "mst-table.js"),
 		filepath.Join("static", "components", "mst-twin.js"),
 		filepath.Join("static", "components", "mst-view-frame.js"),

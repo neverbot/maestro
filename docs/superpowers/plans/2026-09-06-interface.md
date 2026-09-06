@@ -3955,7 +3955,7 @@ What it must be honest about: a duplicate that is also wrong is a
 duplicate, not a repair, so the dialog says the query is copied unchanged
 and points at the agent workflow for changing it.
 
-- [ ] Tests: `theQueryDocumentIsCopiedByteForByte` — assert the request's
+- [x] Tests: `theQueryDocumentIsCopiedByteForByte` — assert the request's
   query is `===` the source's serialised document, which is what makes
   "no builder" true rather than aspirational;
   `onlyTheThreeEditableFieldsDiffer`; `aTakenKeyIsRefusedInTheServersWords`
@@ -3966,9 +3966,106 @@ and points at the agent workflow for changing it.
   the options were read, not hard-coded, since a hard-coded list is drift
   with a date on it; `theDialogSaysTheQueryIsUnchanged`.
 
-- [ ] See red: hard-code the renderer list and watch its test fail;
+- [x] See red: hard-code the renderer list and watch its test fail;
   mutate one character of the copied document and watch
   `theQueryDocumentIsCopiedByteForByte` fail.
+
+**Corrections found while doing this.**
+
+1. **"The declared parameters' defaults" cannot be editable and the query
+   cannot be copied byte for byte, and the plan asked for both.** A
+   query's parameter declarations — key, type *and default* — live inside
+   the query document (`internal/views/query.go`'s `ParamDecl`), so
+   editing a default is editing the document, and the same task's first
+   test asserts the document that reaches the wire is the source's own.
+   The resolution keeps the byte-for-byte rule, which is the one that
+   makes "no builder" true: what a designer edits is the binding the copy
+   **opens with**, carried in its address as `?p.x=…` exactly as every
+   other parameterised view in this product carries one, and the dialog
+   says so in as many words (`NOTE_DEFAULTS_ARE_A_BINDING`) rather than
+   letting a designer believe they have changed what the next person
+   sees. `theOpeningBindingIsCarriedInTheAddressAndNotInTheQuery` asserts
+   both halves: the sent document's `params` is the source's, and the
+   returned link carries the binding.
+
+2. **There was no catalogue for the browser to read.** The plan says the
+   renderer comes "from the catalogue the server already describes", and
+   the server described it to *agents* only: `views.RendererDescription()`
+   is generated prose inside two MCP tool descriptions, and no REST route
+   served the table. The alternatives were a list of six names in
+   JavaScript — drift with a date on it, in a language no Go test reads —
+   or a route. So `GET /api/games/{game}/views/renderers` was added
+   (`handleListRenderers`, `RenderersOutput`), backed by a new
+   `views.RendererCatalogue()`, and it carries each renderer's knobs,
+   their kinds, their required flags and an enum's admitted spellings —
+   everything a chooser needs to compose only documents `CheckRenderer`
+   will accept. `TestTheRendererCatalogueRouteServesTheWholeTable` holds
+   the route against the table in both directions.
+
+3. **A copy is not an update, and the version it claims is the
+   difference.** `client.upsertView` sends the version it read, which for
+   a copy would mean "overwrite whatever is at this key". The copy sends
+   `expected_version: 0` instead — internal/views' `createExpectedVersion`,
+   which spells *this view must not exist yet* — so a taken key is refused
+   by the server rather than silently overwritten. That is also what makes
+   `aTakenKeyIsRefusedInTheServersWords` a real refusal to render.
+   `saveViewAs` is therefore its own call and not an argument to
+   `upsertView`: the two make opposite claims about what is on the server.
+   `TestTheSaveAsDialogClaimsTheKeyIsFree` pins the constant to
+   internal/views' and asserts `saveViewAs` actually sends it.
+
+4. **The dialog is mounted outside the frame, which is this round's
+   fourth screen finding applied to a new surface rather than only to the
+   old ones.** `mst-view-frame` slots the drawing into an `aria-hidden`
+   div because the twin is the accessible content of the answer, so
+   anything appended to the frame inherits that — and the dialog is
+   nothing but focusable controls. It gets its own hole in `view.html`
+   (`#save-as-root`) and is never appended to the frame;
+   `TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper` holds
+   both.
+
+5. **The element is mounted, not its panel.** The first version mounted
+   `saveAs.root` — the inner tree — which leaves the shadow root, and the
+   constructible stylesheet adopted onto it, attached to nothing. That is
+   Task 15's own canvas-stylesheet finding one component later: a page
+   that renders and is unstyled, with nothing failing anywhere.
+
+**Mutations run, each verified applied and then reverted.**
+
+- `query: from.query` in `saveViewAs` rebuilt as
+  `Object.fromEntries(Object.entries(from.query).sort())` — a
+  re-serialisation that changes no value, only key order → **red**:
+  `theQueryDocumentIsCopiedByteForByte`. This is the mutation that
+  matters: the check reads the request body as *text*, so a document
+  taken apart and put back together fails it even though every decoded
+  value is identical.
+- One character of the copied document changed (`limits.nodes` 500 → 501)
+  → **red**, same check.
+- `rendererNames()` hard-coded to the six renderer modules this front end
+  ships → **red**: `theRendererChoiceComesFromTheServersCatalogue` ("got
+  graph,layered,nested,map,table,timeline, want graph,spiral"). The
+  fixture serves a renderer named `spiral`, which exists nowhere in
+  `internal/web/static`, so a hard-coded list cannot pass.
+- The key checks short-circuited → **red**:
+  `theKeyFieldRefusesAnIllegalKeyBeforeSending` ("`""` was sent to the
+  server").
+- `this.band = answer.error.message` replaced with a composed sentence →
+  **red**: `aTakenKeyIsRefusedInTheServersWords`.
+- `NOTE_QUERY_COPIED` dropped from the render → **red**:
+  `theDialogSaysTheQueryIsUnchanged`.
+- `wireSaveAs(state.saveAs)` commented out in `wire` → **green on the
+  first round**, which is the finding: every check drove `wireSaveAs`
+  directly, so the one line that connects a designer to the dialog was
+  unasserted — Task 15's defect exactly, at the call site.
+  `theViewPageWiresTheDialogAtItsCallSite` was added, drives the real
+  `wire`, and the same mutation is now red.
+- `KEY_PATTERN` narrowed to lowercase-only → **red**:
+  `TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply`.
+- `expected_version` sent as the source's version → **red**:
+  `TestTheSaveAsDialogClaimsTheKeyIsFree`.
+- The route serving one renderer fewer → **red**:
+  `TestTheRendererCatalogueRouteServesTheWholeTable` ("served 5, catalogue
+  holds 6").
 
 ```bash
 git add internal/web/static internal/web/jstest/save_as_test.mjs \

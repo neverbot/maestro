@@ -682,3 +682,38 @@ func TestTheTwoWrites(t *testing.T) {
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/writes_test.mjs")
 }
+
+// TestSaveAs drives internal/web/jstest/save_as_test.mjs, which imports
+// the real internal/web/static/components/mst-save-as.js and the real
+// internal/web/static/pages/view.js and drives them against the real
+// internal/web/static/client.js over a stubbed fetch that keeps every
+// request body as **text**.
+//
+// It is the evidence for the one view a human alone can make, and its
+// central property has no Go counterpart and could not have one: the
+// copied query must be the source's document *byte for byte*. On the
+// server the column is jsonb, which normalises whitespace, reorders an
+// object's keys and collapses duplicates, so a handler test compares
+// decoded values and would forgive exactly the defect this task exists
+// to prevent — a dialog that took a query document apart and put it back
+// together is a query builder, and this product deliberately has none.
+// The only place the bytes still exist is the browser, so the assertion
+// is on the request body string, and a mutation that merely reordered
+// the document's keys turns it red.
+//
+// The rest is the same shape: that an illegal key costs *no request*,
+// which is a count that does not exist once internal/web can see
+// anything; that the renderer chooser offers a catalogue the fixture
+// invents, which a hard-coded list of six could never do; and that a
+// designer's clicks reach the dialog through pages/view.js's own `wire`,
+// which is Task 15's finding held one task later.
+//
+// internal/web/static_save_as_test.go holds the halves no harness can
+// see: that the key rule the dialog states is the one internal/metamodel
+// applies, that the version it claims is internal/views' "must not exist
+// yet", that the dialog is mounted outside the frame's aria-hidden
+// wrapper, and that the renderer catalogue route serves the whole table.
+func TestSaveAs(t *testing.T) {
+	nodeOrSkip(t)
+	runJSTest(t, "jstest/save_as_test.mjs")
+}

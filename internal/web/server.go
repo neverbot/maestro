@@ -416,6 +416,7 @@ func NewServer(opts Options) *Server {
 	s.registerContentRoute("POST /api/games/{game}/views", s.handleUpsertView)
 	s.registerContentRoute("GET /api/games/{game}/views/by-key/{key}", s.handleGetView)
 	s.registerContentRoute("DELETE /api/games/{game}/views/by-key/{key}", s.handleRemoveView)
+	s.registerContentRoute("GET /api/games/{game}/views/renderers", s.handleListRenderers)
 	s.registerContentRoute("POST /api/games/{game}/views/run", s.handleRunView)
 	s.registerContentRoute("POST /api/games/{game}/views/validate", s.handleValidateView)
 	s.registerContentRoute("POST /api/games/{game}/views/by-key/{key}/positions", s.handleSetViewPositions)

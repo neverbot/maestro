@@ -50,6 +50,16 @@ import { gridFallback } from "../layout/compose.js";
 import { LAYOUT_BUDGET_MS, runWithBudget } from "../layout/budget.js";
 import { Arrangement, MstCanvas, worldDelta } from "../components/mst-canvas.js";
 import { MstGround } from "../components/mst-ground.js";
+import {
+  ACTION_CANCEL as SAVE_AS_CANCEL,
+  ACTION_OPEN as SAVE_AS_OPEN,
+  ACTION_SAVE as SAVE_AS_SAVE,
+  FIELD_DEFAULT,
+  FIELD_KEY,
+  FIELD_PARAM,
+  FIELD_RENDERER,
+  MstSaveAs,
+} from "../components/mst-save-as.js";
 import "../components/mst-view-frame.js";
 import "../components/mst-table.js";
 import { entityBody, readEntity } from "./entity.js";
@@ -382,6 +392,20 @@ function mount(doc, rootEl, slug, key, row, client, options) {
   const canvas = options.canvas || new MstCanvas({ document: doc });
   const table = doc.createElement("mst-table");
   const ground = options.ground || new MstGround({ document: doc, client, canvas, viewKey: key });
+  // The "Save as" dialog is mounted into its own hole in the shell and
+  // **not** into the frame: the frame's drawing wrapper is aria-hidden
+  // because the twin is the accessible content of the answer, and a
+  // button a keyboard can reach inside it is a button a screen reader
+  // will not announce.
+  const saveAs = options.saveAs
+    || new MstSaveAs({
+      document: doc,
+      client,
+      slug,
+      row,
+      params: readParams(options.search ?? globalThis.window.location.search),
+    });
+  mountSaveAs(doc, saveAs);
 
   frame.client = client;
   frame.append(canvas);
@@ -397,6 +421,7 @@ function mount(doc, rootEl, slug, key, row, client, options) {
     frame,
     table,
     ground,
+    saveAs,
     arrangement: null,
     scene: null,
     // The bound parameters, as text, straight off the URL. They are
@@ -735,6 +760,12 @@ export function wire(doc, panelEl, slug, client, state) {
     canvas.showArrangement(state.arrangement);
   });
 
+  // The "Save as" dialog, delegated on its own root for the same reason,
+  // and wired here rather than inside the component for the reason every
+  // other controller in this page is: a component that bound its own
+  // listeners could not be driven by a harness without a browser.
+  wireSaveAs(state.saveAs);
+
   // The ground panel, delegated on its own root for the same reason.
   state.ground.root.addEventListener("change", (event) => {
     const files = event.target && event.target.files ? event.target.files : null;
@@ -767,6 +798,61 @@ export function wire(doc, panelEl, slug, client, state) {
   if (doc.addEventListener) {
     doc.addEventListener("visibilitychange", () => client.setHidden(doc.hidden === true));
   }
+}
+
+// mountSaveAs puts the dialog in the shell's own hole, which is
+// **outside** the frame.
+//
+// It is a named function rather than three lines inside `mount` so that
+// a harness can drive it, and it is separate from `wireSaveAs` because
+// the two answer different questions: where the dialog is, and whether
+// anything reaches it.
+//
+// Where it is, is the point. `mst-view-frame` wraps the drawing in an
+// `aria-hidden` div because the text twin is the accessible content of
+// the answer; anything appended to the frame is slotted into that
+// wrapper, so a focusable control put there is one a keyboard can reach
+// and a screen reader will never announce. The dialog therefore has a
+// hole of its own in view.html and is never appended to the frame.
+export function mountSaveAs(doc, saveAs) {
+  const root = doc.getElementById("save-as-root");
+  if (!root || !saveAs) return null;
+  // The **element**, not its panel: the panel lives in the dialog's own
+  // shadow root, where the adopted stylesheet is, and mounting the panel
+  // alone would put an unstyled tree in the page and leave the shadow
+  // root — and its styles — attached to nothing.
+  root.replaceChildren(saveAs);
+  return root;
+}
+
+// wireSaveAs is the dialog's three buttons and its four kinds of field.
+//
+// It is exported because it is the whole of what makes the dialog a
+// product rather than a mechanism: internal/web/jstest/save_as_test.mjs
+// drives a designer's clicks and keystrokes through this function, which
+// is the seam Task 15's finding was about — a controller that works and
+// that no gesture reaches is a controller nobody has.
+export function wireSaveAs(saveAs) {
+  if (!saveAs || !saveAs.root || typeof saveAs.root.addEventListener !== "function") return null;
+  saveAs.root.addEventListener("click", async (event) => {
+    const action = event.target && event.target.getAttribute ? event.target.getAttribute("data-action") : null;
+    if (action === SAVE_AS_OPEN) await saveAs.show();
+    else if (action === SAVE_AS_SAVE) await saveAs.save();
+    else if (action === SAVE_AS_CANCEL) saveAs.hide();
+  });
+  const edit = (event) => {
+    const target = event.target;
+    if (!target || typeof target.getAttribute !== "function") return;
+    const field = target.getAttribute("data-field");
+    const value = typeof target.value === "string" ? target.value : "";
+    if (field === FIELD_KEY) saveAs.setKey(value);
+    else if (field === FIELD_RENDERER) saveAs.chooseRenderer(value);
+    else if (field === FIELD_PARAM) saveAs.setParam(target.getAttribute("data-param"), value);
+    else if (field === FIELD_DEFAULT) saveAs.setBinding(target.getAttribute("data-param"), value);
+  };
+  saveAs.root.addEventListener("input", edit);
+  saveAs.root.addEventListener("change", edit);
+  return saveAs;
 }
 
 const ARROWS = {

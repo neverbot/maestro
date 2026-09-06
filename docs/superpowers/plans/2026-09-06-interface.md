@@ -1467,7 +1467,7 @@ their coordinates, the engine runs over the new ones treating the
 retained ones as obstacles, and a full re-layout happens only on an
 explicit *re-arrange* or when the retained set is under half the new one.
 
-- [ ] Tests (`internal/web/jstest/layout_test.mjs`, driven by
+- [x] Tests (`internal/web/jstest/layout_test.mjs`, driven by
   `TestLayoutComposition`): `theEngineIsDeterministic` — the same input
   twice, byte-identical coordinates, and a third run with the node array
   shuffled asserting the same result, since the whole `manual` mode rests
@@ -1496,7 +1496,7 @@ explicit *re-arrange* or when the retained set is under half the new one.
   retained under half, assert a full re-layout;
   `layoutElapsedIsReportedToTheFrame`.
 
-- [ ] See red: delete the "no rotation" restriction from the fit and
+- [x] See red: delete the "no rotation" restriction from the fit and
   watch `theFitDoesNotRotate` fail; make `manual` write placements back
   and watch `manualDoesNotWriteBackPlacements` fail; change
   `LAYOUT_BUDGET_MS` to 3000 and watch the budget test fail **only** if
@@ -1510,6 +1510,218 @@ explicit *re-arrange* or when the retained set is under half the new one.
   game's content graph is directional enough for a ranked layout to beat
   a force one — and this is the first moment anybody can see whether that
   is true.
+  **Not done, and it cannot be until Task 7 puts a canvas on the
+  screen**; what to look at is spelled out at the end of the
+  corrections below.
+
+#### Corrections made during implementation
+
+1. **dagre is deterministic *given an insertion order*, and not
+   otherwise — so the engine sorts, and the determinism the whole
+   no-write-back rule rests on comes from that and not from the
+   envelope.** Measured on the vendored 3.1.1, on an eight-node graph:
+   reversing the node array moves every node, and so does reversing the
+   edge array. §5.3's argument for `manual` ("safe only because the
+   engine is deterministic and the envelope's node order is stable") and
+   O3's argument for removing `layout_seed` both rest on a premise that
+   was half true. `engine.js` therefore sorts nodes and edges by the
+   entity's address before inserting either, which makes the arrangement
+   a function of the addresses and the sizes and of nothing else — and
+   that is strictly stronger than what the plan assumed, because the
+   envelope's order is `ORDER BY capped.rank, capped.id`
+   (`internal/views/compile.go`): an order by **uuid**, stable across
+   loads and *not* across a re-seed. The coupling to the server nobody
+   had written down is now removed rather than documented. Every
+   determinism assertion runs a third time with both arrays shuffled,
+   which is what tells the two apart; without it the suite would pass on
+   an engine whose stability was the server's accident.
+
+2. **`addressOf` lives in `engine.js` and is joined to the twin's row
+   key by a test.** The layout needs one string per entity and the
+   product already has one — `(type, key)` as JSON, never an id — but it
+   was a private function inside `render/twin.js`. Restating it would
+   have given the canvas two spellings of one address, and a selection
+   joining a twin row to a laid-out node on the wrong one fails
+   silently. It is exported from `engine.js` (the module that turns an
+   entity into a graph vertex), re-exported by `compose.js` so callers
+   have one import, and `theEngineAddressesANodeExactlyAsTheTwinAddresses
+   ItsRow` asserts the two modules agree rather than trusting them to.
+
+3. **`compose`'s `computed` is the engine's answer for whatever
+   `subgraphFor` asked for, and the picture's node set is the union of
+   `computed` and `stored`.** The plan's signature is kept, but manual
+   mode lays out the *unplaced sub-graph only* (§5.3), so `computed`
+   does not cover every node in that mode and the composer has to reach
+   the rest through the stored rows. `layoutView` filters those rows to
+   the picture — a stored row for an entity the query no longer returns
+   is not a node, and drawing one would put a box on the canvas for
+   something outside the answer — and `aStoredRowForAnEntityOutsideThe
+   PictureIsNotDrawn` pins it. The split also means `subgraphFor` is its
+   own exported function: what the engine is asked to lay out is the one
+   question that differs between the three modes before any arithmetic,
+   and it is the half of manual mode a test can see.
+
+4. **The composed placements carry no sizes, and `compose` returns no
+   write intent of any kind.** The engine takes measured sizes and
+   returns coordinates; the canvas that measured them does not need them
+   handed back. `manualDoesNotWriteBackPlacements` is therefore asserted
+   two ways rather than by looking for an absent field: the stored rows
+   are **deep-frozen**, so a composer that appended its automatic
+   placements throws, and the result's own key set is scanned for
+   anything write-shaped. The mutation that adds the write-back fails
+   with `Cannot add property 2, object is not extensible`.
+
+5. **"No rotation" is enforced twice, because a similarity fit has two
+   ways to rotate.** A rotation matrix is the obvious one and is simply
+   never computed. The other is a **negative uniform scale**, which is a
+   180° turn composed with a reflection, and which the least-squares
+   formula will happily return for pins arranged opposite to the
+   computed shape. It is clamped to 1 and reported as a translation, and
+   `theFitNeverFlipsTheShape` is its own test — removing the `scale <= 0`
+   clause turns it red at `got -1, want 1`, and turns
+   `theFitDoesNotRotate` red beside it.
+
+   `theFitDoesNotRotate`'s witness node was also **wrong on its first
+   pass and passed for it**: it named (-300, 100) as the rotated
+   position, which no transform produces, so the assertion held
+   vacuously and the test's second line was doing all the work. The
+   arithmetic is now written out in the fixture's comment and the point
+   is (-400, 100); the rotation mutation names it in the failure.
+
+6. **The budget's supervisor lives in `budget.js`, not in the worker,
+   and its clock is injected.** A worker cannot interrupt its own
+   synchronous dagre run, so the deadline is the page's: `runWithBudget`
+   races the worker against an injected timer and calls `terminate()`.
+   That keeps every decision about *giving up* on the pure side, which
+   is what lets a two-second budget cost a millisecond of test time, and
+   it is what produces the `layoutMs` §5.4 puts in the footer —
+   `layoutElapsedIsReportedToTheFrame` joins it to `scene.js`'s
+   `footerFor`, which already had the slot and had no producer. A `run`
+   that **rejects** rejects rather than becoming a grid: a worker that
+   failed is not a worker that was slow, and offering ten more seconds
+   for an exception offers to wait longer for the same throw.
+
+7. **The plan's budget assertion needed one more line to be able to
+   fail.** `assertEqual(banner.text, budgetSentence(LAYOUT_BUDGET_MS))`
+   compares the sentence with itself: hard-code the sentence *and*
+   retune the constant and both sides are the same frozen string. The
+   harness now also asserts the text contains
+   `${LAYOUT_BUDGET_MS / 1000} seconds` computed from the constant, and
+   `TestTheLayoutBudgetIsOneNumberAndItsSentenceIsGenerated` refuses any
+   digit-and-unit written into `budget.js`'s own source. Run as the plan
+   asks — sentence hard-coded, constant moved to 3000 — the harness
+   fails on the new line and the Go guard fails twice; with the sentence
+   generated, moving the constant to 3000 leaves the suite green, which
+   is the point.
+
+8. **Nothing under `static/layout/` may import by bare specifier, and
+   that is a Go guard.** An import map belongs to a *document*; a module
+   worker has its own module map and none at all, so `import … from
+   "dagre"` inside anything `worker.js` pulls in resolves to nothing at
+   load — and the page sees not an error but a worker that never
+   answers, which is indistinguishable from a slow layout and would be
+   reported to the designer as the budget running out. Every import in
+   the directory is relative. `TestTheLayoutModulesResolveWithoutAn
+   ImportMap` also asserts the directory *does* reach the vendored
+   runtime, so the rule is guarding something rather than describing a
+   directory that imports nothing, and it names the four modules, so a
+   fifth arrives as a diff a human reads.
+
+9. **The wire spells a stored position two ways, and this is the shipped
+   server.** `internal/views.Position` carries **no struct tags**, so a
+   run marshals `{"EntityType","EntityKey","X","Y","Pinned",
+   "UpdatedAt"}` — Go field names, which `mcp_views_test.go` already
+   reads back by those exact strings — while `views.set_positions`
+   *takes* `entity_type/entity_key/x/y/pinned`, which is what
+   `client.js` sends. `storedFrom` reads both. A composer reading only
+   the snake_case spelling would find no stored position in any envelope
+   and would silently re-arrange every saved view on every load, with no
+   error anywhere; `TestTheComposerReadsAStoredPositionInTheSpellingThe
+   ServerWrites` marshals the real struct rather than quoting it, so
+   adding json tags to `Position` fails loudly in the same commit. This
+   asymmetry is **named, not fixed**: giving `Position` tags is a wire
+   change to the MCP surface and belongs to whoever owns that decision.
+
+10. **The separation pass is ordered by the entity's *address*, not by
+    its key.** §5.3 says "in entity-key order", and a key alone is not
+    unique across types — `quest/boss` and `zone/boss` are two entities.
+    The order is `(type, key)`, which refines what the spec asked for
+    and is the only reading that is total. `gridFallback` sorts on the
+    tuple rather than on the address string, because the spec's "type
+    then key" is about the pair and JSON's escaping is not.
+
+11. **`mixed` with nothing pinned is the auto answer exactly, separation
+    pass included.** §5.3 says two things about that case that pull
+    apart: an unpinned stored row is a starting coordinate "in step 3",
+    and with 0 pins `mixed` "behaves as auto". With nothing pinned there
+    is no step 3 — no fit, and nothing to separate against — so the
+    second sentence is the one that applies, and
+    `mixedWithNoPinnedNodesIsAuto` asserts the placements are equal node
+    for node. Only `draggable` differs, and it must: a drag is precisely
+    how a designer leaves that case.
+
+12. **Two degeneracies the plan did not name, both of them divisions by
+    zero.** Two or more pins whose *computed* coordinates coincide give
+    a zero denominator exactly as one pin does, and are answered by the
+    same branch rather than by a tolerance
+    (`twoPinsAtOneComputedPointAreATranslationAndNotADivisionByZero`).
+    **Collinear** pins are the opposite case and are *not* degenerate
+    here — `collinearPinsStillDetermineAScale` — which is where refusing
+    rotation pays for itself: a rotational fit needs its pins to span
+    two dimensions, and three pins down a tidied column is the common
+    arrangement rather than a corner one.
+
+13. **The engine drops every edge with an endpoint outside the picture,
+    and this is load-bearing rather than defensive.** dagre's `setEdge`
+    *creates* a node for an unknown endpoint, so passing a stub edge
+    (§4.2: normal, not an error) through would invent an empty box for
+    an entity the query chose not to draw, give it a rank, and push the
+    real drawing around to make room for it.
+    `anEdgeLeavingThePictureInventsNoNode` catches it — on the
+    coordinate comparison rather than on the node count, since the
+    invented box never reaches `placements`, and the test says so.
+
+14. **`placedAutomatically` is 0 in `auto`.** It is `scene.js`'s option
+    and the count in *"12 new nodes were placed automatically"* (§4.2),
+    whose whole job is to tell a designer that a **saved arrangement**
+    has gaps. In `auto` there is no saved arrangement being honoured and
+    every node is placed automatically, so the sentence would be noise
+    about something that is not happening. This gives `BANNER_PLACED`
+    its first producer.
+
+15. **The layout budget's band is not in `scene.js`'s `BANNER_ORDER`.**
+    That stack is built from the **envelope**; this band is a statement
+    about *this browser's* last two seconds, which a second designer
+    looking at the same view may never see. `BANNER_LAYOUT_BUDGET` and
+    `ACTION_RETRY_LAYOUT` are declared in `budget.js` in `scene.js`'s
+    vocabulary and placed by the canvas (Task 7); the frame's model does
+    not know they exist.
+
+**Mutations run, all red.** The fit made a full similarity
+(`theFitDoesNotRotate`, `theFitNeverFlipsTheShape`); `manual` writing
+its placements back (`manualDoesNotWriteBackPlacements`, throwing on the
+frozen rows); the sentence hard-coded with the constant retuned to 3000
+(the harness *and* the Go guard, and green again with the sentence
+generated); the separation pass in insertion order
+(`theSeparationPassRunsInEntityKeyOrder`, on the reversed run); the
+engine's sort removed (`theEngineIsDeterministic`, on the shuffled run);
+`mixed`-with-no-pins doing its own thing; `auto` honouring a stored
+position; the re-layout threshold widened to "at most half"; the
+composer reading only one spelling (harness and Go guard); the retry
+ladder never ending; a negative scale admitted; a stub edge handed to
+dagre; a bare specifier in `engine.js` (Go guard).
+
+**The hand check this task leaves.** A 500-node graph in a browser,
+which cannot be done before Task 7 puts a canvas on the screen: does the
+ranked drawing read as structure, or as a hairball with good test
+coverage? §5.2's choice of a ranked engine over a force one rests on the
+claim that a game's content graph is directional enough for ranking to
+win, and nothing automated can see whether that is true. Two numbers to
+record while looking: the real elapsed layout time (O10 says
+`LAYOUT_BUDGET_MS` should be revisited against a measurement and not
+against a guess), and whether the separation pass's residual overlap —
+which is a reduction and not a guarantee, by design — is visible at that
+size or only arithmetically present.
 
 ```bash
 git add internal/web/static/layout internal/web/jstest/layout_test.mjs \

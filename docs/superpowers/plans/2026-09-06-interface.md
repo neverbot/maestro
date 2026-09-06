@@ -929,11 +929,19 @@ git commit -m "feat(web): one data client for views, with the SSE rules the even
    so a re-read happens at most `REREAD_DEBOUNCE_MS` after the first
    event that asked for one.
 
-10. **The `client` signature gained three injected seams beyond the
-    task's `{slug, fetchImpl, now}`: `setTimer`, `clearTimer` and
-    `random`.** A 750ms window and a reconnect backoff cannot be asserted
-    on a real clock without sleeping, and a harness that sleeps is a
-    harness that flakes. Every one of them defaults to the browser's own.
+10. **The `client` signature gained three injected seams and lost one.**
+    `setTimer`, `clearTimer` and `random` are injected, each defaulting to
+    the browser's own, because a 750ms window and a reconnect backoff
+    cannot be asserted on a real clock without sleeping and a harness that
+    sleeps is a harness that flakes. The task's `now` came *out* again:
+    nothing in the shipped client reads a wall clock — the window and the
+    backoff are both expressed as timers, which is the seam a test
+    actually needs — and an injected clock nothing called would be a
+    mechanism nothing reads. Two other unread surfaces went the same way
+    in the same pass (`state.lastDecision`, and `receive` on the returned
+    object), and `clearTimer` earned its place by acquiring a real reader:
+    `disconnect` now cancels a re-read that has not happened yet, because
+    a timer firing into a closed surface is a request nobody asked for.
 
 11. **A comment skip that no mutation could turn red came out again.**
     `parseFrame` began with an explicit `line.startsWith(":")` skip for

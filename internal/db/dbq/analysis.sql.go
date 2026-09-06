@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countConsideredEntities = `-- name: CountConsideredEntities :one
@@ -35,6 +36,173 @@ func (q *Queries) CountConsideredEntities(ctx context.Context, arg CountConsider
 	var considered int64
 	err := row.Scan(&considered)
 	return considered, err
+}
+
+const deleteRoute = `-- name: DeleteRoute :execrows
+DELETE FROM routes
+WHERE project_id = $1::uuid AND id = $2::uuid
+`
+
+type DeleteRouteParams struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+}
+
+// The steps go with it: route_steps keys into routes with ON DELETE
+// CASCADE (0013_analysis.sql), so this is one statement rather than two.
+// execrows, not exec, because zero rows is the answer to "was it there"
+// -- a caller that resolved the route a moment earlier and deletes
+// nothing raced another remover, and hears not_found rather than a
+// success it can publish an event about.
+func (q *Queries) DeleteRoute(ctx context.Context, arg DeleteRouteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRoute, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteRouteSteps = `-- name: DeleteRouteSteps :exec
+DELETE FROM route_steps
+WHERE project_id = $1::uuid AND route_id = $2::uuid
+`
+
+type DeleteRouteStepsParams struct {
+	ProjectID uuid.UUID
+	RouteID   uuid.UUID
+}
+
+// The first half of the step rewrite. Delete-then-insert rather than a
+// diff: steps are positional, the list is small, and a diff would be a
+// second place that decides what a step is. It runs inside the same
+// transaction as the route row's compare-and-set, so a step list never
+// lands beside a route row that rolled back.
+func (q *Queries) DeleteRouteSteps(ctx context.Context, arg DeleteRouteStepsParams) error {
+	_, err := q.db.Exec(ctx, deleteRouteSteps, arg.ProjectID, arg.RouteID)
+	return err
+}
+
+const getDesignVersion = `-- name: GetDesignVersion :one
+SELECT design_version FROM projects WHERE id = $1::uuid
+`
+
+// The game's current design version, which is the staleness signal a
+// stored route verdict is compared against. It is maintained by
+// 0013_analysis.sql's twelve triggers and never by Go, for the reason
+// that migration argues: a bump a query has to remember is a bump the
+// twenty-first query forgets.
+func (q *Queries) GetDesignVersion(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getDesignVersion, projectID)
+	var design_version int64
+	err := row.Scan(&design_version)
+	return design_version, err
+}
+
+const getRouteByKey = `-- name: GetRouteByKey :one
+SELECT id, project_id, key, name, description, params, version, last_checked_at, last_checked_design_version, last_check, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM routes
+WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
+`
+
+type GetRouteByKeyParams struct {
+	ProjectID uuid.UUID
+	Key       string
+}
+
+func (q *Queries) GetRouteByKey(ctx context.Context, arg GetRouteByKeyParams) (Route, error) {
+	row := q.db.QueryRow(ctx, getRouteByKey, arg.ProjectID, arg.Key)
+	var i Route
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Name,
+		&i.Description,
+		&i.Params,
+		&i.Version,
+		&i.LastCheckedAt,
+		&i.LastCheckedDesignVersion,
+		&i.LastCheck,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const getRouteByKeyForUpdate = `-- name: GetRouteByKeyForUpdate :one
+SELECT id, project_id, key, name, description, params, version, last_checked_at, last_checked_design_version, last_check, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM routes
+WHERE project_id = $1::uuid AND lower(key) = lower($2::text)
+FOR UPDATE
+`
+
+type GetRouteByKeyForUpdateParams struct {
+	ProjectID uuid.UUID
+	Key       string
+}
+
+// The upsert's own read, taken inside its transaction with the row lock
+// held, so the spelling and the version a caller is told about are the
+// ones its own write will meet. GetViewByKeyForUpdate's comment carries
+// the argument for the lock: what it buys is not the refusal but the
+// *number* the caller is told to merge onto.
+func (q *Queries) GetRouteByKeyForUpdate(ctx context.Context, arg GetRouteByKeyForUpdateParams) (Route, error) {
+	row := q.db.QueryRow(ctx, getRouteByKeyForUpdate, arg.ProjectID, arg.Key)
+	var i Route
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Name,
+		&i.Description,
+		&i.Params,
+		&i.Version,
+		&i.LastCheckedAt,
+		&i.LastCheckedDesignVersion,
+		&i.LastCheck,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
+}
+
+const insertRouteStep = `-- name: InsertRouteStep :exec
+INSERT INTO route_steps (route_id, project_id, position, entity_id,
+                         entity_type_key, entity_key, note)
+VALUES ($1::uuid, $2::uuid,
+        $3::integer, $4::uuid,
+        $5::text, $6::text,
+        $7::text)
+`
+
+type InsertRouteStepParams struct {
+	RouteID       uuid.UUID
+	ProjectID     uuid.UUID
+	Position      int32
+	EntityID      uuid.UUID
+	EntityTypeKey string
+	EntityKey     string
+	Note          string
+}
+
+// entity_id is resolved by Go before this statement and is NOT NULL on
+// write: a key that does not resolve is refused at the call, never
+// stored as a tombstone. A tombstone is what a *deletion* leaves behind
+// (ON DELETE SET NULL), and accepting one on write would let an agent
+// author a route out of typos and be told it holds.
+func (q *Queries) InsertRouteStep(ctx context.Context, arg InsertRouteStepParams) error {
+	_, err := q.db.Exec(ctx, insertRouteStep,
+		arg.RouteID,
+		arg.ProjectID,
+		arg.Position,
+		arg.EntityID,
+		arg.EntityTypeKey,
+		arg.EntityKey,
+		arg.Note,
+	)
+	return err
 }
 
 const listNormalisedInEdges = `-- name: ListNormalisedInEdges :many
@@ -311,6 +479,55 @@ func (q *Queries) ListRelationsByIDs(ctx context.Context, arg ListRelationsByIDs
 	return items, nil
 }
 
+const listRouteStepsByRouteID = `-- name: ListRouteStepsByRouteID :many
+SELECT s.position, s.entity_id, s.entity_type_key, s.entity_key, s.note
+FROM route_steps s
+WHERE s.project_id = $1::uuid AND s.route_id = $2::uuid
+ORDER BY s.position
+`
+
+type ListRouteStepsByRouteIDParams struct {
+	ProjectID uuid.UUID
+	RouteID   uuid.UUID
+}
+
+type ListRouteStepsByRouteIDRow struct {
+	Position      int32
+	EntityID      *uuid.UUID
+	EntityTypeKey string
+	EntityKey     string
+	Note          string
+}
+
+// One route's steps in order, addressed by the route's id and this
+// game's id. entity_id is nullable and a null is a tombstone; the
+// stored key pair beside it is what a check reports as missing or moved.
+func (q *Queries) ListRouteStepsByRouteID(ctx context.Context, arg ListRouteStepsByRouteIDParams) ([]ListRouteStepsByRouteIDRow, error) {
+	rows, err := q.db.Query(ctx, listRouteStepsByRouteID, arg.ProjectID, arg.RouteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRouteStepsByRouteIDRow
+	for rows.Next() {
+		var i ListRouteStepsByRouteIDRow
+		if err := rows.Scan(
+			&i.Position,
+			&i.EntityID,
+			&i.EntityTypeKey,
+			&i.EntityKey,
+			&i.Note,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRouteStepsByRouteKey = `-- name: ListRouteStepsByRouteKey :many
 
 SELECT s.position, s.entity_id, s.entity_type_key, s.entity_key
@@ -373,6 +590,89 @@ func (q *Queries) ListRouteStepsByRouteKey(ctx context.Context, arg ListRouteSte
 	return items, nil
 }
 
+const listRoutesPage = `-- name: ListRoutesPage :many
+SELECT r.id, r.key, r.name, r.description, r.version, r.updated_at,
+       r.last_checked_at, r.last_checked_design_version,
+       (SELECT count(*) FROM route_steps s
+         WHERE s.project_id = r.project_id AND s.route_id = r.id)::bigint AS step_count
+FROM routes r
+WHERE r.project_id = $1::uuid
+  AND ($2::uuid IS NULL
+       OR (r.name, r.id) > ($3::text, $2::uuid))
+ORDER BY r.name, r.id
+LIMIT $4::int
+`
+
+type ListRoutesPageParams struct {
+	ProjectID uuid.UUID
+	AfterID   *uuid.UUID
+	AfterName *string
+	Limit     int32
+}
+
+type ListRoutesPageRow struct {
+	ID                       uuid.UUID
+	Key                      string
+	Name                     string
+	Description              string
+	Version                  int32
+	UpdatedAt                pgtype.Timestamptz
+	LastCheckedAt            pgtype.Timestamptz
+	LastCheckedDesignVersion *int64
+	StepCount                int64
+}
+
+// One page of a game's routes, keyed on (name, id), which is exactly
+// routes_project_idx.
+//
+// **No step lists and no stored verdicts**, mirroring ListViewsPage's
+// discipline about not shipping query documents in a listing: a listing
+// says what exists and how healthy it is, and routes.get is where a walk
+// and its proof come from. What is here instead is the step *count* and
+// the two columns a caller needs to decide the three-state status --
+// never checked, stale, checked -- which is a fixed amount of data per
+// row however long the route is.
+//
+// The keyset compares uuid to uuid and carries `id` in the ORDER BY as
+// well as in the comparison, for the reasons ListEntitiesPage sets out:
+// route names are as duplicable as entity names, and a keyset whose
+// comparison disagrees with its sort order skips or repeats rows at a
+// page boundary and says nothing.
+func (q *Queries) ListRoutesPage(ctx context.Context, arg ListRoutesPageParams) ([]ListRoutesPageRow, error) {
+	rows, err := q.db.Query(ctx, listRoutesPage,
+		arg.ProjectID,
+		arg.AfterID,
+		arg.AfterName,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRoutesPageRow
+	for rows.Next() {
+		var i ListRoutesPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Key,
+			&i.Name,
+			&i.Description,
+			&i.Version,
+			&i.UpdatedAt,
+			&i.LastCheckedAt,
+			&i.LastCheckedDesignVersion,
+			&i.StepCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const routeExists = `-- name: RouteExists :one
 SELECT EXISTS (
     SELECT 1 FROM routes WHERE project_id = $1 AND lower(key) = lower($2)
@@ -392,4 +692,85 @@ func (q *Queries) RouteExists(ctx context.Context, arg RouteExistsParams) (bool,
 	var route_exists bool
 	err := row.Scan(&route_exists)
 	return route_exists, err
+}
+
+const upsertRoute = `-- name: UpsertRoute :one
+
+INSERT INTO routes (project_id, key, name, description, params,
+                    updated_by_user_id, updated_by_token_id)
+VALUES ($1::uuid, $2::text, $3::text,
+        $4::text, $5::jsonb,
+        $6::uuid, $7::uuid)
+ON CONFLICT (project_id, lower(key)) DO UPDATE
+SET name                = excluded.name,
+    description         = excluded.description,
+    params              = excluded.params,
+    version             = routes.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE routes.version = $8::integer
+RETURNING id, project_id, key, name, description, params, version, last_checked_at, last_checked_design_version, last_check, created_at, updated_at, updated_by_user_id, updated_by_token_id
+`
+
+type UpsertRouteParams struct {
+	ProjectID        uuid.UUID
+	Key              string
+	Name             string
+	Description      string
+	Params           []byte
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+	ExpectedVersion  int32
+}
+
+// The route CRUD. Every statement filters on the resolved project id,
+// and the two that address one row by key fold the key, because every
+// key in Maestro is matched without regard to case.
+// The compare-and-set, in one statement, exactly as UpsertView and
+// UpsertEntityType do it; those statements carry the full argument and
+// it is not restated. In short: the DO UPDATE is guarded by the caller's
+// expected version, so two writers cannot both read version 1 and both
+// succeed, and a guard that matches nothing returns no row rather than
+// an error, which Go turns into the typed conflict.
+//
+// **key is not in the SET list**, for UpsertEntityType's reason: the
+// first spelling stored stands, so a re-seed cannot rewrite the handle a
+// designer bookmarks, and the returned row still carries the stored
+// spelling.
+//
+// **The three verdict columns are not in the SET list either, and that
+// is the decision this table exists for.** last_check, last_checked_at
+// and last_checked_design_version are written by routes.check alone. An
+// edit to a route's name must not silently discard a verdict somebody
+// proved, and a caller that said nothing about a check would be saying
+// "never checked" if they were listed here.
+func (q *Queries) UpsertRoute(ctx context.Context, arg UpsertRouteParams) (Route, error) {
+	row := q.db.QueryRow(ctx, upsertRoute,
+		arg.ProjectID,
+		arg.Key,
+		arg.Name,
+		arg.Description,
+		arg.Params,
+		arg.UpdatedByUserID,
+		arg.UpdatedByTokenID,
+		arg.ExpectedVersion,
+	)
+	var i Route
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Key,
+		&i.Name,
+		&i.Description,
+		&i.Params,
+		&i.Version,
+		&i.LastCheckedAt,
+		&i.LastCheckedDesignVersion,
+		&i.LastCheck,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedByUserID,
+		&i.UpdatedByTokenID,
+	)
+	return i, err
 }

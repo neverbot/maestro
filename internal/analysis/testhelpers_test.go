@@ -214,29 +214,23 @@ func (g game) invalidate(t *testing.T, relTypeKey string) {
 	}
 }
 
-// route writes one route with the given steps, by raw insert: the route
-// CRUD is a later task and this fixture needs only the two tables the
-// migration already ships.
+// route writes one route with the given steps, **through the product's
+// own writer**.
+//
+// It used to insert the two tables by hand, because the route CRUD was a
+// later task. It is not any more, and a fixture that wrote rows the
+// product's own writer would have refused is a fixture testing a game
+// that cannot exist -- the same reason declareEntityType, entity and
+// edge all go through internal/metamodel. Task 5's seed-route tests
+// therefore now run against routes an agent could actually have
+// authored.
 func (g game) route(t *testing.T, key string, steps []SeedRef) {
 	t.Helper()
-	ctx := context.Background()
-	var routeID uuid.UUID
-	if err := g.pool.QueryRow(ctx,
-		`INSERT INTO routes (project_id, key, name) VALUES ($1, $2, $2) RETURNING id`,
-		g.projectID, key).Scan(&routeID); err != nil {
-		t.Fatalf("insert route %q: %v", key, err)
+	in := RouteInput{Key: key, Name: key, ExpectedVersion: new(int32)}
+	for _, step := range steps {
+		in.Steps = append(in.Steps, RouteStepInput{EntityType: step.EntityType, Key: step.Key})
 	}
-	for i, step := range steps {
-		row, err := g.meta.EntityByKey(ctx, g.projectID, step.EntityType, step.Key)
-		if err != nil {
-			t.Fatalf("resolve route step %s/%s: %v", step.EntityType, step.Key, err)
-		}
-		if _, err := g.pool.Exec(ctx,
-			`INSERT INTO route_steps (route_id, project_id, position, entity_id,
-			                          entity_type_key, entity_key)
-			 VALUES ($1, $2, $3, $4, $5, $6)`,
-			routeID, g.projectID, i, row.ID, step.EntityType, row.Key); err != nil {
-			t.Fatalf("insert route step %d: %v", i, err)
-		}
+	if _, err := g.analysis.UpsertRoute(context.Background(), g.projectID, in); err != nil {
+		t.Fatalf("write route %q: %v", key, err)
 	}
 }

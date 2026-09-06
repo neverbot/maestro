@@ -174,3 +174,132 @@ WHERE e.project_id = @project_id
                                           sqlc.narg('after_id')::uuid))
 ORDER BY et.key, lower(e.key), e.id
 LIMIT sqlc.arg('limit')::int;
+
+-- The route CRUD. Every statement filters on the resolved project id,
+-- and the two that address one row by key fold the key, because every
+-- key in Maestro is matched without regard to case.
+
+-- name: UpsertRoute :one
+-- The compare-and-set, in one statement, exactly as UpsertView and
+-- UpsertEntityType do it; those statements carry the full argument and
+-- it is not restated. In short: the DO UPDATE is guarded by the caller's
+-- expected version, so two writers cannot both read version 1 and both
+-- succeed, and a guard that matches nothing returns no row rather than
+-- an error, which Go turns into the typed conflict.
+--
+-- **key is not in the SET list**, for UpsertEntityType's reason: the
+-- first spelling stored stands, so a re-seed cannot rewrite the handle a
+-- designer bookmarks, and the returned row still carries the stored
+-- spelling.
+--
+-- **The three verdict columns are not in the SET list either, and that
+-- is the decision this table exists for.** last_check, last_checked_at
+-- and last_checked_design_version are written by routes.check alone. An
+-- edit to a route's name must not silently discard a verdict somebody
+-- proved, and a caller that said nothing about a check would be saying
+-- "never checked" if they were listed here.
+INSERT INTO routes (project_id, key, name, description, params,
+                    updated_by_user_id, updated_by_token_id)
+VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('key')::text, sqlc.arg('name')::text,
+        sqlc.arg('description')::text, sqlc.arg('params')::jsonb,
+        sqlc.narg('updated_by_user_id')::uuid, sqlc.narg('updated_by_token_id')::uuid)
+ON CONFLICT (project_id, lower(key)) DO UPDATE
+SET name                = excluded.name,
+    description         = excluded.description,
+    params              = excluded.params,
+    version             = routes.version + 1,
+    updated_by_user_id  = excluded.updated_by_user_id,
+    updated_by_token_id = excluded.updated_by_token_id
+WHERE routes.version = sqlc.arg('expected_version')::integer
+RETURNING *;
+
+-- name: GetRouteByKey :one
+SELECT * FROM routes
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text);
+
+-- name: GetRouteByKeyForUpdate :one
+-- The upsert's own read, taken inside its transaction with the row lock
+-- held, so the spelling and the version a caller is told about are the
+-- ones its own write will meet. GetViewByKeyForUpdate's comment carries
+-- the argument for the lock: what it buys is not the refusal but the
+-- *number* the caller is told to merge onto.
+SELECT * FROM routes
+WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
+FOR UPDATE;
+
+-- name: DeleteRoute :execrows
+-- The steps go with it: route_steps keys into routes with ON DELETE
+-- CASCADE (0013_analysis.sql), so this is one statement rather than two.
+-- execrows, not exec, because zero rows is the answer to "was it there"
+-- -- a caller that resolved the route a moment earlier and deletes
+-- nothing raced another remover, and hears not_found rather than a
+-- success it can publish an event about.
+DELETE FROM routes
+WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
+
+-- name: ListRoutesPage :many
+-- One page of a game's routes, keyed on (name, id), which is exactly
+-- routes_project_idx.
+--
+-- **No step lists and no stored verdicts**, mirroring ListViewsPage's
+-- discipline about not shipping query documents in a listing: a listing
+-- says what exists and how healthy it is, and routes.get is where a walk
+-- and its proof come from. What is here instead is the step *count* and
+-- the two columns a caller needs to decide the three-state status --
+-- never checked, stale, checked -- which is a fixed amount of data per
+-- row however long the route is.
+--
+-- The keyset compares uuid to uuid and carries `id` in the ORDER BY as
+-- well as in the comparison, for the reasons ListEntitiesPage sets out:
+-- route names are as duplicable as entity names, and a keyset whose
+-- comparison disagrees with its sort order skips or repeats rows at a
+-- page boundary and says nothing.
+SELECT r.id, r.key, r.name, r.description, r.version, r.updated_at,
+       r.last_checked_at, r.last_checked_design_version,
+       (SELECT count(*) FROM route_steps s
+         WHERE s.project_id = r.project_id AND s.route_id = r.id)::bigint AS step_count
+FROM routes r
+WHERE r.project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (r.name, r.id) > (sqlc.narg('after_name')::text, sqlc.narg('after_id')::uuid))
+ORDER BY r.name, r.id
+LIMIT sqlc.arg('limit')::int;
+
+-- name: DeleteRouteSteps :exec
+-- The first half of the step rewrite. Delete-then-insert rather than a
+-- diff: steps are positional, the list is small, and a diff would be a
+-- second place that decides what a step is. It runs inside the same
+-- transaction as the route row's compare-and-set, so a step list never
+-- lands beside a route row that rolled back.
+DELETE FROM route_steps
+WHERE project_id = sqlc.arg('project_id')::uuid AND route_id = sqlc.arg('route_id')::uuid;
+
+-- name: InsertRouteStep :exec
+-- entity_id is resolved by Go before this statement and is NOT NULL on
+-- write: a key that does not resolve is refused at the call, never
+-- stored as a tombstone. A tombstone is what a *deletion* leaves behind
+-- (ON DELETE SET NULL), and accepting one on write would let an agent
+-- author a route out of typos and be told it holds.
+INSERT INTO route_steps (route_id, project_id, position, entity_id,
+                         entity_type_key, entity_key, note)
+VALUES (sqlc.arg('route_id')::uuid, sqlc.arg('project_id')::uuid,
+        sqlc.arg('position')::integer, sqlc.arg('entity_id')::uuid,
+        sqlc.arg('entity_type_key')::text, sqlc.arg('entity_key')::text,
+        sqlc.arg('note')::text);
+
+-- name: ListRouteStepsByRouteID :many
+-- One route's steps in order, addressed by the route's id and this
+-- game's id. entity_id is nullable and a null is a tombstone; the
+-- stored key pair beside it is what a check reports as missing or moved.
+SELECT s.position, s.entity_id, s.entity_type_key, s.entity_key, s.note
+FROM route_steps s
+WHERE s.project_id = sqlc.arg('project_id')::uuid AND s.route_id = sqlc.arg('route_id')::uuid
+ORDER BY s.position;
+
+-- name: GetDesignVersion :one
+-- The game's current design version, which is the staleness signal a
+-- stored route verdict is compared against. It is maintained by
+-- 0013_analysis.sql's twelve triggers and never by Go, for the reason
+-- that migration argues: a bump a query has to remember is a bump the
+-- twenty-first query forgets.
+SELECT design_version FROM projects WHERE id = sqlc.arg('project_id')::uuid;

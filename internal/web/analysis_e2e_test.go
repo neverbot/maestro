@@ -134,9 +134,16 @@ func newTwoGames(t *testing.T) *twoGames {
 // --- Step 1: an MMORPG-shaped game, seeded over the tools ---
 
 // mmoQuestChain is the eight quests a route walks, in order, each
-// unlocking the next. It is the progression
-// TestARouteOverTheMainStoryHoldsEndToEnd proves and the one the later
-// tests break in three different ways.
+// unlocking the next. It is the progression the later tests break in
+// three different ways.
+//
+// The green baseline is not a test of its own: it is the opening
+// assertion of TestATypoFixMakesARouteStaleAndAReCheckMakesItGreen,
+// which refuses to go on unless the route is green the moment it is
+// first checked. That is deliberate rather than an omission — a
+// standalone happy-path test would assert the same call and then be
+// the one test nobody reads when a break test starts failing, whereas
+// folded in it is a precondition every one of those runs re-proves.
 var mmoQuestChain = []string{
 	"q-tutorial", "q-hogger", "q-westfall", "q-defias",
 	"q-deadmines", "q-vancleef", "q-stormwind", "q-duskwood",

@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -798,14 +797,34 @@ func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
 	}
 }
 
+// TestRegisterWithExpiredInviteReportsExpired.
+//
+// **This test used to sleep, and the sleep was the bug.** It minted an
+// invite with a one-millisecond TTL and slept ten milliseconds, so the
+// assertion held only while the database server's clock was no more than
+// nine milliseconds behind this process' — a margin nothing bounds, and
+// one the two containers a real deployment runs in have no reason to
+// respect. Under load it failed, and the failure looked like the
+// registration path accepting an expired invite.
+//
+// The invite is now expired by *statement*, on the same clock every
+// expiry check uses, with an hour of margin instead of nine
+// milliseconds. Nothing here waits for anything, and the production
+// half of the same defect — expires_at written from Go's clock and
+// judged against Postgres' — is fixed in identity.sql rather than
+// papered over here.
 func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
-	srv, ids, _ := newTestServer(t)
+	srv, ids, _, pool := newTestServerWithPool(t)
 	ctx := context.Background()
-	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{ExpiresIn: time.Millisecond})
+	token, invite, err := ids.CreateInvite(ctx, identity.InviteRequest{})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	time.Sleep(10 * time.Millisecond)
+	if _, err := pool.Exec(ctx,
+		`UPDATE invites SET expires_at = now() - interval '1 hour' WHERE id = $1`,
+		invite.ID); err != nil {
+		t.Fatalf("expire the invite: %v", err)
+	}
 
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@studio.com","display_name":"Invited","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()

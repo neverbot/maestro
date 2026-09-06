@@ -69,16 +69,23 @@ func (s *Service) IssueSession(ctx context.Context, userID uuid.UUID) (token str
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	expiresAt = time.Now().Add(s.cfg.SessionTTL)
 	sum := sha256.Sum256([]byte(token))
-	if err := s.q.CreateSession(ctx, dbq.CreateSessionParams{
+	// The TTL travels as an interval and the *database* turns it into a
+	// timestamp, because the database is what judges it: GetLiveSession
+	// compares expires_at against its own now(). Computed here instead,
+	// a session's lifetime was a claim that this process' clock and the
+	// database server's agree, which in a Compose deployment is two
+	// containers. See CreateSession's own comment, and CreateInvite's,
+	// which carries the full argument.
+	written, err := s.q.CreateSession(ctx, dbq.CreateSessionParams{
 		TokenHash: sum[:],
 		UserID:    userID,
-		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	}); err != nil {
+		Ttl:       pgtype.Interval{Microseconds: s.cfg.SessionTTL.Microseconds(), Valid: true},
+	})
+	if err != nil {
 		return "", time.Time{}, fmt.Errorf("create session: %w", err)
 	}
-	return token, expiresAt, nil
+	return token, written.Time, nil
 }
 
 // UserForSession resolves a session token to its user and to that

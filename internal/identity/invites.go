@@ -77,6 +77,22 @@ type InviteSummary struct {
 	CreatedBy *uuid.UUID
 	CreatedAt time.Time
 	ExpiresAt time.Time
+
+	// Revoked is "this invite's expiry has passed", **decided by the
+	// database and not recomputed here or above this package.**
+	//
+	// internal/web used to derive it as `!ExpiresAt.After(time.Now())`,
+	// which compared a timestamp Postgres wrote (RevokeProjectInvite
+	// sets expires_at to its own now()) against the application's clock,
+	// with a margin of one HTTP round trip. A database clock a few
+	// milliseconds ahead of the application's reported a just-revoked
+	// invite as still live — the same two-clock defect CreateInvite's own
+	// comment describes, on the read side.
+	//
+	// It is false on a freshly minted invite by construction rather than
+	// by a comparison: CreateInvite refuses a non-positive TTL, so the
+	// row it returns cannot already have expired.
+	Revoked bool
 }
 
 func inviteSummaryFrom(inv dbq.Invite) InviteSummary {
@@ -88,6 +104,37 @@ func inviteSummaryFrom(inv dbq.Invite) InviteSummary {
 		CreatedBy: inv.CreatedBy,
 		CreatedAt: inv.CreatedAt.Time,
 		ExpiresAt: inv.ExpiresAt.Time,
+	}
+}
+
+// listedInvite is one row of either outstanding-invite listing. Both
+// queries select the same columns plus the same computed `revoked`, and
+// this is the one shape both are read through, so the two listings
+// cannot drift about what an invite carries.
+type listedInvite struct {
+	ID         uuid.UUID
+	TokenHash  []byte
+	Email      *string
+	ProjectID  *uuid.UUID
+	Role       *string
+	CreatedBy  *uuid.UUID
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+	RedeemedAt pgtype.Timestamptz
+	RedeemedBy *uuid.UUID
+	Revoked    bool
+}
+
+func listedInviteSummary(row listedInvite) InviteSummary {
+	return InviteSummary{
+		ID:        row.ID,
+		Email:     row.Email,
+		ProjectID: row.ProjectID,
+		Role:      row.Role,
+		CreatedBy: row.CreatedBy,
+		CreatedAt: row.CreatedAt.Time,
+		ExpiresAt: row.ExpiresAt.Time,
+		Revoked:   row.Revoked,
 	}
 }
 
@@ -124,7 +171,12 @@ func (s *Service) CreateInvite(ctx context.Context, req InviteRequest) (string, 
 		TokenHash: sum[:],
 		ProjectID: req.ProjectID,
 		CreatedBy: req.CreatedBy,
-		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(ttl), Valid: true},
+		// The TTL travels as an interval; the database turns it into a
+		// timestamp, because the database is what judges it (GetLiveInvite
+		// and MarkInviteRedeemed both compare against its own now()).
+		// See CreateInvite's own comment in identity.sql for the whole
+		// argument, and for the flaky test that found it.
+		Ttl: pgtype.Interval{Microseconds: ttl.Microseconds(), Valid: true},
 	}
 	if email := strings.ToLower(strings.TrimSpace(req.Email)); email != "" {
 		// Same bound CreateUser applies to a real account's email, and for
@@ -506,7 +558,7 @@ func (s *Service) ListOutstandingInvites(ctx context.Context) ([]InviteSummary, 
 	}
 	out := make([]InviteSummary, len(rows))
 	for i, row := range rows {
-		out[i] = inviteSummaryFrom(row)
+		out[i] = listedInviteSummary(listedInvite(row))
 	}
 	return out, nil
 }
@@ -524,7 +576,7 @@ func (s *Service) ListOutstandingInvitesForProject(ctx context.Context, projectI
 	}
 	out := make([]InviteSummary, len(rows))
 	for i, row := range rows {
-		out[i] = inviteSummaryFrom(row)
+		out[i] = listedInviteSummary(listedInvite(row))
 	}
 	return out, nil
 }

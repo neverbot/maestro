@@ -131,7 +131,7 @@ const createInvite = `-- name: CreateInvite :one
 INSERT INTO invites (token_hash, email, project_id, role, created_by, expires_at)
 VALUES ($1::bytea, $2::text,
         $3::uuid, $4::text,
-        $5::uuid, $6::timestamptz)
+        $5::uuid, now() + $6::interval)
 RETURNING id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by
 `
 
@@ -141,9 +141,28 @@ type CreateInviteParams struct {
 	ProjectID *uuid.UUID
 	Role      *string
 	CreatedBy *uuid.UUID
-	ExpiresAt pgtype.Timestamptz
+	Ttl       pgtype.Interval
 }
 
+// **expires_at is now() + ttl computed here, not a timestamp Go worked
+// out and sent.** That is the same rule RefreshSession above already
+// states for a session's renewal target, and it is here for a reason
+// that is sharper than symmetry: this row's expiry is *read back* by
+// GetLiveInvite and MarkInviteRedeemed, both of which compare it against
+// Postgres' own now(). Writing it from the application's clock made the
+// whole comparison a claim about two clocks agreeing — the app process'
+// and the database server's — which in this product are two containers.
+// A deployment whose database clock lags the application's by more than
+// the invite's own TTL accepts an invite that expired; one whose
+// database clock runs ahead refuses one that has not. Neither leaves a
+// trace anyone could chase.
+//
+// It was found as a flaky test rather than as an incident:
+// TestRegisterWithExpiredInviteReportsExpired created an invite with a
+// one-millisecond TTL and slept ten milliseconds, so its whole safety
+// margin was nine milliseconds of tolerance for a skew nothing bounds.
+// That test no longer touches a clock at all, and this statement is why
+// it does not have to.
 func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Invite, error) {
 	row := q.db.QueryRow(ctx, createInvite,
 		arg.TokenHash,
@@ -151,7 +170,7 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 		arg.ProjectID,
 		arg.Role,
 		arg.CreatedBy,
-		arg.ExpiresAt,
+		arg.Ttl,
 	)
 	var i Invite
 	err := row.Scan(
@@ -169,20 +188,42 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) (Inv
 	return i, err
 }
 
-const createSession = `-- name: CreateSession :exec
+const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (token_hash, user_id, expires_at)
-VALUES ($1::bytea, $2::uuid, $3::timestamptz)
+VALUES ($1::bytea, $2::uuid,
+        now() + $3::interval)
+RETURNING expires_at
 `
 
 type CreateSessionParams struct {
 	TokenHash []byte
 	UserID    uuid.UUID
-	ExpiresAt pgtype.Timestamptz
+	Ttl       pgtype.Interval
 }
 
-func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
-	_, err := q.db.Exec(ctx, createSession, arg.TokenHash, arg.UserID, arg.ExpiresAt)
-	return err
+// now() + ttl here rather than a timestamp from Go, for the reason
+// CreateInvite below states at length: GetLiveSession judges this column
+// against Postgres' own now(), so writing it from the application's
+// clock made a session's lifetime depend on two clocks agreeing. Carried
+// to this statement in the same change, because the defect is the same
+// defect and a rule fixed in one of two identical places is a rule that
+// comes back.
+//
+// Unlike RefreshSession, there is no cap expression: a session's
+// absolute 90-day lifetime is measured from created_at, and a session
+// being created has none yet. sessions.maxSessionLifetime is what
+// refuses a configured TTL longer than that cap before this statement
+// ever runs.
+//
+// It RETURNs the expiry it wrote, which is why this is :one and not
+// :exec: IssueSession's own doc comment already refuses to let a caller
+// recompute the policy that was stored, and now that Go no longer
+// computes it at all, reading it back is the only way to have it.
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, createSession, arg.TokenHash, arg.UserID, arg.Ttl)
+	var expires_at pgtype.Timestamptz
+	err := row.Scan(&expires_at)
+	return expires_at, err
 }
 
 const createUser = `-- name: CreateUser :one
@@ -574,8 +615,25 @@ func (q *Queries) ListAPITokens(ctx context.Context, projectID uuid.UUID) ([]Lis
 }
 
 const listOutstandingInvites = `-- name: ListOutstandingInvites :many
-SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL AND project_id IS NULL ORDER BY created_at DESC, id DESC
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by, expires_at <= now() AS revoked
+FROM invites
+WHERE redeemed_at IS NULL AND project_id IS NULL
+ORDER BY created_at DESC, id DESC
 `
+
+type ListOutstandingInvitesRow struct {
+	ID         uuid.UUID
+	TokenHash  []byte
+	Email      *string
+	ProjectID  *uuid.UUID
+	Role       *string
+	CreatedBy  *uuid.UUID
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+	RedeemedAt pgtype.Timestamptz
+	RedeemedBy *uuid.UUID
+	Revoked    bool
+}
 
 // "Outstanding" means not yet redeemed, regardless of whether it has since
 // expired: an admin looking for a mis-sent invite to revoke needs to find
@@ -596,15 +654,19 @@ SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_
 // project-bound invite is listed through its own game's
 // ListOutstandingProjectInvites instead, gated on that game's own owner
 // role.
-func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]Invite, error) {
+//
+// revoked is computed here for the reason ListOutstandingProjectInvites'
+// own comment gives: the flag belongs to whichever clock wrote
+// expires_at, and that is this one.
+func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]ListOutstandingInvitesRow, error) {
 	rows, err := q.db.Query(ctx, listOutstandingInvites)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Invite
+	var items []ListOutstandingInvitesRow
 	for rows.Next() {
-		var i Invite
+		var i ListOutstandingInvitesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TokenHash,
@@ -616,6 +678,7 @@ func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]Invite, error) 
 			&i.ExpiresAt,
 			&i.RedeemedAt,
 			&i.RedeemedBy,
+			&i.Revoked,
 		); err != nil {
 			return nil, err
 		}
@@ -628,23 +691,49 @@ func (q *Queries) ListOutstandingInvites(ctx context.Context) ([]Invite, error) 
 }
 
 const listOutstandingProjectInvites = `-- name: ListOutstandingProjectInvites :many
-SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by FROM invites WHERE redeemed_at IS NULL AND project_id = $1::uuid ORDER BY created_at DESC, id DESC
+SELECT id, token_hash, email, project_id, role, created_by, created_at, expires_at, redeemed_at, redeemed_by, expires_at <= now() AS revoked
+FROM invites
+WHERE redeemed_at IS NULL AND project_id = $1::uuid
+ORDER BY created_at DESC, id DESC
 `
+
+type ListOutstandingProjectInvitesRow struct {
+	ID         uuid.UUID
+	TokenHash  []byte
+	Email      *string
+	ProjectID  *uuid.UUID
+	Role       *string
+	CreatedBy  *uuid.UUID
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+	RedeemedAt pgtype.Timestamptz
+	RedeemedBy *uuid.UUID
+	Revoked    bool
+}
 
 // ListOutstandingInvites' project-scoped counterpart, added in Task 18 for
 // GET /api/games/{game}/invites: the same "outstanding" definition, the
 // same ordering, scoped to invites that name this one game instead of
 // account-only ones. See ListOutstandingInvites' own comment for why the
 // two never overlap.
-func (q *Queries) ListOutstandingProjectInvites(ctx context.Context, projectID uuid.UUID) ([]Invite, error) {
+//
+// revoked is computed here and not in Go, and that is the third half of
+// the one-clock rule CreateInvite states. RevokeProjectInvite sets
+// expires_at to Postgres' now(); the listing's `revoked` flag used to be
+// `!row.ExpiresAt.After(time.Now())` in internal/web, so a revocation
+// written by the database and read by the application was a comparison
+// across two clocks whose margin was one HTTP round trip. A database
+// clock a few milliseconds ahead of the application's reported a
+// just-revoked invite as live.
+func (q *Queries) ListOutstandingProjectInvites(ctx context.Context, projectID uuid.UUID) ([]ListOutstandingProjectInvitesRow, error) {
 	rows, err := q.db.Query(ctx, listOutstandingProjectInvites, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Invite
+	var items []ListOutstandingProjectInvitesRow
 	for rows.Next() {
-		var i Invite
+		var i ListOutstandingProjectInvitesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TokenHash,
@@ -656,6 +745,7 @@ func (q *Queries) ListOutstandingProjectInvites(ctx context.Context, projectID u
 			&i.ExpiresAt,
 			&i.RedeemedAt,
 			&i.RedeemedBy,
+			&i.Revoked,
 		); err != nil {
 			return nil, err
 		}

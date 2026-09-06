@@ -84,12 +84,16 @@ func TestIssueSessionSetsExpiryFromConfig(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	before := time.Now()
+	// The database's clock: IssueSession sends the TTL as an interval and
+	// Postgres writes now() + it, so bracketing with this process' clock
+	// would assert that two machines agree — the assumption
+	// CreateSession's own comment in identity.sql exists to remove.
+	before := dbNow(t, pool)
 	token, expiresAt, err := svc.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
 	}
-	after := time.Now()
+	after := dbNow(t, pool)
 
 	wantFrom := before.Add(cfg.SessionTTL)
 	wantTo := after.Add(cfg.SessionTTL)

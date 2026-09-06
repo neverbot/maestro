@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/testutil"
@@ -226,4 +228,29 @@ func TestBootstrapFirstAdminNamesTheEnvVarOnFailure(t *testing.T) {
 	if got := err.Error(); !strings.Contains(got, "FIRST_ADMIN_PASSWORD") {
 		t.Fatalf("err = %q, want it to name FIRST_ADMIN_PASSWORD", got)
 	}
+}
+
+// dbNow reads the database server's own clock.
+//
+// **Every assertion about a stored expiry goes through it, and that is
+// the point.** Expiries in this package are written by Postgres (now() +
+// an interval) and judged by Postgres (expires_at > now()), so a test
+// that bracketed one with this process' time.Now() would be asserting
+// that two machines' clocks agree — the assumption
+// TestRegisterWithExpiredInviteReportsExpired used to fail under load
+// on, and the one CreateInvite's own comment in identity.sql exists to
+// remove. Against the local test database that disagreement measured
+// about 1.6ms, which is enough to redden a bracket and nowhere near
+// enough to be noticed as a cause.
+//
+// clock_timestamp() rather than now(): now() is transaction start time,
+// which for a bracket read *around* another call would be the wrong
+// instant on both sides.
+func dbNow(t *testing.T, pool *pgxpool.Pool) time.Time {
+	t.Helper()
+	var at time.Time
+	if err := pool.QueryRow(context.Background(), `SELECT clock_timestamp()`).Scan(&at); err != nil {
+		t.Fatalf("read the database clock: %v", err)
+	}
+	return at
 }

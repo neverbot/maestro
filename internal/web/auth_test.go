@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/identity"
 	"github.com/neverbot/maestro/internal/projects"
@@ -31,6 +33,23 @@ func testConfig() config.Config {
 // newTestServer wires a server against an ephemeral database.
 func newTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Service) {
 	t.Helper()
+	srv, ids, projSvc, _ := newTestServerWithPool(t)
+	return srv, ids, projSvc
+}
+
+// newTestServerWithPool is newTestServer plus the pool it was built on,
+// for the tests that have to state a fact about a row that no API on
+// this surface can express — an invite whose expiry is in the past being
+// the one that matters. Writing that with a SQL UPDATE puts the value on
+// the *database's* clock, which is the clock every expiry check uses, so
+// such a test carries no dependence on this process' clock agreeing with
+// the server's. TestRegisterWithExpiredInviteReportsExpired used to
+// express it by minting a one-millisecond invite and sleeping ten, whose
+// entire safety margin was nine milliseconds of tolerance for a skew
+// nothing bounds; identity/invites_test.go had already established this
+// shape as the alternative.
+func newTestServerWithPool(t *testing.T) (*web.Server, *identity.Service, *projects.Service, *pgxpool.Pool) {
+	t.Helper()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)
@@ -41,7 +60,7 @@ func newTestServer(t *testing.T) (*web.Server, *identity.Service, *projects.Serv
 		Identity: ids,
 		Projects: projSvc,
 	})
-	return srv, ids, projSvc
+	return srv, ids, projSvc, pool
 }
 
 // newTestServerWithConfig wires a server the same way newTestServer does,

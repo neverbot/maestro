@@ -63,9 +63,29 @@ SELECT count(*) FROM (
     SELECT 1 FROM users WHERE is_admin = true FOR UPDATE
 ) sub;
 
--- name: CreateSession :exec
+-- name: CreateSession :one
+-- now() + ttl here rather than a timestamp from Go, for the reason
+-- CreateInvite below states at length: GetLiveSession judges this column
+-- against Postgres' own now(), so writing it from the application's
+-- clock made a session's lifetime depend on two clocks agreeing. Carried
+-- to this statement in the same change, because the defect is the same
+-- defect and a rule fixed in one of two identical places is a rule that
+-- comes back.
+--
+-- Unlike RefreshSession, there is no cap expression: a session's
+-- absolute 90-day lifetime is measured from created_at, and a session
+-- being created has none yet. sessions.maxSessionLifetime is what
+-- refuses a configured TTL longer than that cap before this statement
+-- ever runs.
+--
+-- It RETURNs the expiry it wrote, which is why this is :one and not
+-- :exec: IssueSession's own doc comment already refuses to let a caller
+-- recompute the policy that was stored, and now that Go no longer
+-- computes it at all, reading it back is the only way to have it.
 INSERT INTO sessions (token_hash, user_id, expires_at)
-VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('user_id')::uuid, sqlc.arg('expires_at')::timestamptz);
+VALUES (sqlc.arg('token_hash')::bytea, sqlc.arg('user_id')::uuid,
+        now() + sqlc.arg('ttl')::interval)
+RETURNING expires_at;
 
 -- name: GetSessionUser :one
 SELECT u.id, u.email, u.display_name, u.password_hash, u.is_admin, u.created_at, u.updated_at,
@@ -137,10 +157,29 @@ DELETE FROM sessions WHERE user_id = sqlc.arg('user_id')::uuid;
 DELETE FROM sessions WHERE expires_at <= now();
 
 -- name: CreateInvite :one
+-- **expires_at is now() + ttl computed here, not a timestamp Go worked
+-- out and sent.** That is the same rule RefreshSession above already
+-- states for a session's renewal target, and it is here for a reason
+-- that is sharper than symmetry: this row's expiry is *read back* by
+-- GetLiveInvite and MarkInviteRedeemed, both of which compare it against
+-- Postgres' own now(). Writing it from the application's clock made the
+-- whole comparison a claim about two clocks agreeing — the app process'
+-- and the database server's — which in this product are two containers.
+-- A deployment whose database clock lags the application's by more than
+-- the invite's own TTL accepts an invite that expired; one whose
+-- database clock runs ahead refuses one that has not. Neither leaves a
+-- trace anyone could chase.
+--
+-- It was found as a flaky test rather than as an incident:
+-- TestRegisterWithExpiredInviteReportsExpired created an invite with a
+-- one-millisecond TTL and slept ten milliseconds, so its whole safety
+-- margin was nine milliseconds of tolerance for a skew nothing bounds.
+-- That test no longer touches a clock at all, and this statement is why
+-- it does not have to.
 INSERT INTO invites (token_hash, email, project_id, role, created_by, expires_at)
 VALUES (sqlc.arg('token_hash')::bytea, sqlc.narg('email')::text,
         sqlc.narg('project_id')::uuid, sqlc.narg('role')::text,
-        sqlc.narg('created_by')::uuid, sqlc.arg('expires_at')::timestamptz)
+        sqlc.narg('created_by')::uuid, now() + sqlc.arg('ttl')::interval)
 RETURNING *;
 
 -- name: GetLiveInvite :one
@@ -187,7 +226,14 @@ WHERE id = sqlc.arg('id')::uuid
 -- project-bound invite is listed through its own game's
 -- ListOutstandingProjectInvites instead, gated on that game's own owner
 -- role.
-SELECT * FROM invites WHERE redeemed_at IS NULL AND project_id IS NULL ORDER BY created_at DESC, id DESC;
+--
+-- revoked is computed here for the reason ListOutstandingProjectInvites'
+-- own comment gives: the flag belongs to whichever clock wrote
+-- expires_at, and that is this one.
+SELECT *, expires_at <= now() AS revoked
+FROM invites
+WHERE redeemed_at IS NULL AND project_id IS NULL
+ORDER BY created_at DESC, id DESC;
 
 -- name: ListOutstandingProjectInvites :many
 -- ListOutstandingInvites' project-scoped counterpart, added in Task 18 for
@@ -195,7 +241,19 @@ SELECT * FROM invites WHERE redeemed_at IS NULL AND project_id IS NULL ORDER BY 
 -- same ordering, scoped to invites that name this one game instead of
 -- account-only ones. See ListOutstandingInvites' own comment for why the
 -- two never overlap.
-SELECT * FROM invites WHERE redeemed_at IS NULL AND project_id = sqlc.arg('project_id')::uuid ORDER BY created_at DESC, id DESC;
+--
+-- revoked is computed here and not in Go, and that is the third half of
+-- the one-clock rule CreateInvite states. RevokeProjectInvite sets
+-- expires_at to Postgres' now(); the listing's `revoked` flag used to be
+-- `!row.ExpiresAt.After(time.Now())` in internal/web, so a revocation
+-- written by the database and read by the application was a comparison
+-- across two clocks whose margin was one HTTP round trip. A database
+-- clock a few milliseconds ahead of the application's reported a
+-- just-revoked invite as live.
+SELECT *, expires_at <= now() AS revoked
+FROM invites
+WHERE redeemed_at IS NULL AND project_id = sqlc.arg('project_id')::uuid
+ORDER BY created_at DESC, id DESC;
 
 -- name: RevokeInvite :exec
 -- Setting expires_at to now(), rather than deleting the row, keeps the

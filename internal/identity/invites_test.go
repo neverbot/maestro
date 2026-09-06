@@ -394,12 +394,20 @@ func TestCreateInviteUsesConfiguredDefaultTTL(t *testing.T) {
 	cfg := testConfig() // InviteTTL: 24 * time.Hour, see testConfig's doc comment.
 	svc := identity.New(pool, cfg)
 
-	before := time.Now().Add(cfg.InviteTTL)
+	// Bracketed against the *database's* clock, not this process'.
+	// CreateInvite no longer computes a timestamp at all — it sends the
+	// TTL as an interval and Postgres writes now() + it — so bracketing
+	// with time.Now() would be asserting that two machines' clocks agree
+	// to within the round trip, which is the very assumption whose
+	// failure this change removed (see CreateInvite in identity.sql).
+	// Measured against the local test database, that bracket was already
+	// off by about 1.6ms.
+	before := dbNow(t, pool).Add(cfg.InviteTTL)
 	_, summary, err := svc.CreateInvite(context.Background(), identity.InviteRequest{})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	after := time.Now().Add(cfg.InviteTTL)
+	after := dbNow(t, pool).Add(cfg.InviteTTL)
 
 	if summary.ExpiresAt.Before(before) || summary.ExpiresAt.After(after) {
 		t.Fatalf("ExpiresAt = %v, want between %v and %v", summary.ExpiresAt, before, after)
@@ -412,12 +420,14 @@ func TestCreateInviteHonoursExpiresIn(t *testing.T) {
 	ctx := context.Background()
 
 	const ttl = 2 * time.Hour
-	before := time.Now().Add(ttl)
+	// The database's clock, for the reason
+	// TestCreateInviteUsesConfiguredDefaultTTL states.
+	before := dbNow(t, pool).Add(ttl)
 	_, summary, err := svc.CreateInvite(ctx, identity.InviteRequest{ExpiresIn: ttl})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	after := time.Now().Add(ttl)
+	after := dbNow(t, pool).Add(ttl)
 	if summary.ExpiresAt.Before(before) || summary.ExpiresAt.After(after) {
 		t.Fatalf("ExpiresAt = %v, want between %v and %v", summary.ExpiresAt, before, after)
 	}
@@ -1129,5 +1139,122 @@ func TestRedeemInviteForExistingUserMarksInviteRedeemed(t *testing.T) {
 	}
 	if _, err := svc.RedeemInviteForExistingUser(ctx, token, other.ID); !errors.Is(err, identity.ErrInviteInvalid) {
 		t.Fatalf("second redemption err = %v, want ErrInviteInvalid", err)
+	}
+}
+
+// TestAnInviteIsJudgedByTheClockThatWroteItsExpiry is the regression
+// test for the defect a flaky test led back to.
+//
+// `expires_at` used to be `time.Now().Add(ttl)` computed in this
+// process, while `GetLiveInvite` and `MarkInviteRedeemed` both compare
+// it against Postgres' own `now()`. So whether an invite was live was a
+// claim about two clocks agreeing — the application's and the database
+// server's, which in a Compose deployment are two containers. It was
+// found as `TestRegisterWithExpiredInviteReportsExpired` failing under
+// load, because that test's whole margin was nine milliseconds of
+// tolerance for a skew nothing bounds.
+//
+// What is pinned here is the property that replaced it: an invite's
+// life is decided entirely by the clock that wrote its expiry, so
+// moving `expires_at` in the database's own terms is what makes an
+// invite live or dead, and this process' clock is nowhere in the
+// answer. Both directions, because a fix that expired everything would
+// pass a one-sided version of this test.
+func TestAnInviteIsJudgedByTheClockThatWroteItsExpiry(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	// The stored expiry tracks the database's clock, not this one.
+	before := dbNow(t, pool)
+	token, summary, err := svc.CreateInvite(ctx, identity.InviteRequest{ExpiresIn: time.Hour})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if gap := summary.ExpiresAt.Sub(before); gap < time.Hour || gap > time.Hour+time.Minute {
+		t.Fatalf("expires_at is %v past the database's clock, want about an hour: "+
+			"the TTL is applied by whichever clock judges it", gap)
+	}
+
+	// A second before the database's now: refused, and refused as
+	// expired rather than as unknown.
+	if _, err := pool.Exec(ctx,
+		`UPDATE invites SET expires_at = now() - interval '1 second' WHERE id = $1`,
+		summary.ID); err != nil {
+		t.Fatalf("expire the invite: %v", err)
+	}
+	_, err = svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "late@studio.com", DisplayName: "Late", Password: "password12345",
+	})
+	if !errors.Is(err, identity.ErrInviteExpired) {
+		t.Fatalf("redeeming a database-expired invite = %v, want ErrInviteExpired", err)
+	}
+
+	// A second after it: accepted. The row is otherwise untouched, so
+	// the only thing that changed is where its expiry sits relative to
+	// the one clock that matters.
+	if _, err := pool.Exec(ctx,
+		`UPDATE invites SET expires_at = now() + interval '1 hour' WHERE id = $1`,
+		summary.ID); err != nil {
+		t.Fatalf("un-expire the invite: %v", err)
+	}
+	if _, err := svc.RedeemInvite(ctx, token, identity.CreateUserRequest{
+		Email: "intime@studio.com", DisplayName: "In Time", Password: "password12345",
+	}); err != nil {
+		t.Fatalf("redeeming a database-live invite: %v", err)
+	}
+}
+
+// TestARevokedInviteListsAsRevoked is the read side of the same rule.
+//
+// RevokeProjectInvite sets `expires_at` to Postgres' `now()`, and the
+// listing's `revoked` flag used to be `!ExpiresAt.After(time.Now())`
+// computed in internal/web — a comparison across two clocks whose whole
+// margin was one HTTP round trip, so a database clock a few
+// milliseconds ahead reported a just-revoked invite as live. The flag is
+// now computed beside the column it is about.
+func TestARevokedInviteListsAsRevoked(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := identity.New(pool, testConfig())
+	ctx := context.Background()
+
+	owner, err := svc.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	var projectID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO projects (slug, name) VALUES ('azeroth', 'Azeroth') RETURNING id`).
+		Scan(&projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	role := "viewer"
+	_, live, err := svc.CreateInvite(ctx, identity.InviteRequest{
+		ProjectID: &projectID, Role: role, CreatedBy: &owner.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+
+	listed, err := svc.ListOutstandingInvitesForProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvitesForProject: %v", err)
+	}
+	if len(listed) != 1 || listed[0].Revoked {
+		t.Fatalf("a live invite lists as %+v, want revoked false", listed)
+	}
+
+	if err := svc.RevokeProjectInvite(ctx, projectID, live.ID); err != nil {
+		t.Fatalf("RevokeProjectInvite: %v", err)
+	}
+	listed, err = svc.ListOutstandingInvitesForProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ListOutstandingInvitesForProject: %v", err)
+	}
+	// Still listed — revocation keeps the audit trail — and flagged.
+	if len(listed) != 1 || !listed[0].Revoked {
+		t.Fatalf("a revoked invite lists as %+v, want one row with revoked true", listed)
 	}
 }

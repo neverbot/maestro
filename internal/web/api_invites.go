@@ -95,7 +95,12 @@ func inviteResponseFrom(inv identity.InviteSummary) inviteResponse {
 		CreatedBy: inv.CreatedBy,
 		CreatedAt: inv.CreatedAt,
 		ExpiresAt: inv.ExpiresAt,
-		Revoked:   !inv.ExpiresAt.After(time.Now()),
+		// The domain's own flag, computed by the database that wrote the
+		// expiry. This used to be `!inv.ExpiresAt.After(time.Now())` here,
+		// which compared a timestamp Postgres wrote against this
+		// process' clock across one HTTP round trip; see
+		// identity.InviteSummary.Revoked for what that cost.
+		Revoked: inv.Revoked,
 	}
 }
 

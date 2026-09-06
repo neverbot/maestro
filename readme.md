@@ -245,6 +245,7 @@ Design documents, one per sub-project as they land:
 - [Core and metamodel](docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md)
 - [The markdown domain](docs/superpowers/specs/2026-09-02-markdown-domain-design.md)
 - [Views and the D2 query language](docs/superpowers/specs/2026-09-02-views-and-query-language-design.md)
+- [The interface](docs/superpowers/specs/2026-09-06-interface-design.md)
 - [The analysis engine](docs/superpowers/specs/2026-09-02-analysis-engine-design.md)
 - [The agent skill bundle](docs/superpowers/specs/2026-09-02-agent-skill-bundle-design.md)
 

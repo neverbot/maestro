@@ -15,7 +15,16 @@ fmt:
 vet:
 	$(GO) vet ./...
 
+# A missing linter is reported as a missing linter. Without this, the
+# bare command fails with "command not found" and a 127 that reads as a
+# broken repository rather than as a machine that has not run `make
+# tools` — or, worse, as a lint failure. The check is on the binary, not
+# on PATH, because the answer is the same either way.
 lint:
+	@command -v golangci-lint >/dev/null || { \
+		echo "golangci-lint not found: run 'make tools', and put $$($(GO) env GOPATH)/bin on your PATH"; \
+		exit 1; \
+	}
 	golangci-lint run
 
 # docs-check is deliberately not part of this gate: it would lint the
@@ -37,8 +46,20 @@ check:
 run: build
 	./bin/maestro
 
+# tools installs everything `check` shells out to. Both land in
+# $(go env GOPATH)/bin, so that directory has to be on PATH — `make lint`
+# and `make sqlc-check` call the binaries by bare name, the way a
+# developer would.
+#
+# golangci-lint is pinned to a v2 line because .golangci.yml declares
+# `version: "2"` and a v1 binary cannot read it. A v1 binary also cannot
+# read the export data of a current Go standard library, and what it
+# reports then is not "your config is old" but typecheck errors in files
+# nobody has edited — which is a confusing enough failure to be worth
+# pinning against rather than leaving to @latest and a lucky day.
 tools:
 	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
 
 sqlc:
 	sqlc generate

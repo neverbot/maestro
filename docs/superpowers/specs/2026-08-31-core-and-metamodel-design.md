@@ -264,8 +264,13 @@ decision below.
 > with **no analytical meaning**; analysis reads `analysis_traits` and
 > nothing else. The agent bundle therefore teaches traits for analysis
 > and the role as a label, and never as two ways to say one thing.
-> `analysis_traits` itself is not implemented — it belongs to the
-> analysis sub-project, which owns its vocabulary and its validation.
+> `analysis_traits` **has since shipped**, in the analysis
+> sub-project, which owns its vocabulary and its validation: a
+> `text[]` on `relation_types` constrained to a closed set of seven
+> words, refused when the combination is incoherent, and accepted on
+> `relation_types.upsert`. The distinction above is what the surface
+> now teaches — a role is a label, a trait is behaviour, and declaring
+> one is not declaring the other.
 
 ### Field schemas
 

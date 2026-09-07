@@ -4,9 +4,15 @@ Project context and operating rules for Claude Code (and any other AI
 agent working on Maestro). Short and load-bearing; every working
 session keeps these invariants in mind from the start.
 
-This file is young: Maestro is in the design phase. Sections marked
-**(pending)** are not decided yet — do not treat them as settled, and
-update this file as decisions land.
+All seven sub-projects have shipped. What was pending here is now
+decided, built and tested; the specs and plans under
+`docs/superpowers/` are the record of how, and the "Project status"
+section at the end says where things actually stand.
+
+Keep this file honest as decisions land. Every sentence in it is a
+claim about code that can go false without anything turning red —
+which happened repeatedly during the build, and cost more than any
+compiler error did.
 
 ## What Maestro is
 
@@ -121,10 +127,13 @@ Inherited from Nottario unless a design decision overrides them:
 - **Frontend:** vanilla CSS + Lit, ES modules, no build step, no
   TypeScript. Graph layout by a vendored layout engine; rendering is
   ours in SVG.
-- **Deployment:** Docker Compose, image published by CI, reverse
-  proxy in front. The primary branch is `master`. A public
-  documentation site is built from `docs/site/` by `cmd/maestro-docs`
-  and published at `neverbot.github.io/maestro`.
+- **Deployment:** Docker Compose, reverse proxy in front. The primary
+  branch is `master`. **Not yet true, and written here so nobody
+  repeats it as if it were:** CI builds the image and smoke-tests it
+  against a real Postgres, and pushes it nowhere — building from this
+  repository is the only way to run it. There is no documentation site
+  and no `cmd/maestro-docs`; the binaries are `maestro` and
+  `maestro-skilldoc`.
 - **Human auth:** local accounts only — email plus argon2id password,
   invite links, no email delivery and no external identity provider.
   Designers are not developers and an instance must work with zero
@@ -132,26 +141,72 @@ Inherited from Nottario unless a design decision overrides them:
   against an allowed-domain list.
 - **Agent auth:** bearer tokens, one token = one game, admins included.
 
-Decided in the core/metamodel design and detailed there:
-`docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md` —
-metamodel tables, MCP tool surface, validation and error shapes,
-concurrency, single-game navigation.
+Each area has a spec under `docs/superpowers/specs/` and a plan under
+`docs/superpowers/plans/`. **The plans are worth more than the specs
+now**: every one carries a "Corrections made during implementation"
+block recording what the spec got wrong, and four end with a "What
+this sub-project learned" section. Read the corrections before
+changing an area — they are where the reasoning behind the odd-looking
+decisions lives.
 
-**(pending)** — visual identity, the D2 view query language, the
-renderer catalogue and its graph layout engine, the markdown domain,
-the analysis engine, and the agent skill bundle. Each gets its own
-spec.
+| Area | Spec | Plan |
+|---|---|---|
+| Core, metamodel | `2026-08-31-core-and-metamodel-design.md` | `2026-08-31-core.md`, `2026-08-31-metamodel.md` |
+| Markdown | `2026-09-02-markdown-domain-design.md` | `2026-09-02-markdown.md` |
+| Views | `2026-09-02-views-and-query-language-design.md` | `2026-09-02-views.md` |
+| Interface | `2026-09-06-interface-design.md` | `2026-09-06-interface.md` |
+| Analysis | `2026-09-02-analysis-engine-design.md` | `2026-09-06-analysis.md` |
+| Skill bundle | `2026-09-02-agent-skill-bundle-design.md` | `2026-09-06-skills.md` |
 
 ## Operational rules
 
-### Design phase artefacts
+### Documents
 
-- Design specs go to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
-- Brainstorming mockups and other throwaway artefacts live under
-  `develop/` for now — it is scratch space and may be deleted once
-  the design is accepted. Never put throwaway files in `.claude/`
-  (read-only context) or at the repo root.
+- Design specs: `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
+- Implementation plans: `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`,
+  each carrying its own corrections block. **Record a correction where
+  the decision lives, not in a commit message** — a commit message is
+  read once and a plan is read by whoever changes the area next.
+- Throwaway artefacts (screenshots, probe pages, scratch dumps) go in
+  `.scratch/`, which is git-ignored. Never in `.claude/` (read-only
+  context) and never at the repo root.
 - Markdown filenames are lowercase (`readme.md`, `claude.md`).
+
+### How this project verifies itself
+
+These are not style preferences. Each one is here because skipping it
+shipped a defect during the build.
+
+- **Mutation is the proof.** A green test proves nothing until you have
+  seen it go red: introduce the fault the test claims to prevent,
+  confirm by diff that the patch actually landed, watch it fail, and
+  restore. Nearly every serious defect found in this repository was
+  found this way, and none by reading a diff.
+- **Run the one test, not the package.** A single test is under five
+  seconds; `internal/web` alone is over three minutes. Mutation against
+  a whole package costs forty times what it needs to.
+- **`export TEST_DATABASE_URL` or hundreds of tests skip in silence**
+  and `go test` still prints `ok`. A repo-wide `-v` run must show zero
+  `--- SKIP` lines.
+- **Correct in the module, dead at the call site.** The single most
+  repeated defect here: a unit asserted by a harness that calls it
+  directly, wired to nothing, with everything green. Assert through the
+  path the product actually uses — the real transport for a tool, the
+  real page for a component.
+- **A rule established and not carried one step along.** The second
+  most repeated, and it lands *inside the correction that establishes
+  the rule* more often than not. When you write a rule, find every
+  place it applies before you stop.
+- **A mechanism nothing reads is a lie.** No knob without a reader, no
+  signal nobody consumes, no cap whose overflow nothing detects.
+- **Prose about code is code, and rots the same way.** Doc comments,
+  tool descriptions and the skill bundle have all shipped statements
+  that contradicted the code with nothing red anywhere. Check a claim
+  against the code, never against the spec — the spec is older.
+- **A browser fails silently where a server returns an error.** A
+  refused stylesheet, a blocked import map and an unwired listener all
+  look exactly like working code. Frontend work is not verified until
+  something has opened it.
 
 ### Git
 
@@ -181,6 +236,49 @@ ask.
 
 ## Project status
 
-Design phase. No code yet. The repository currently holds this file,
-the Nottario skill bundle, and `develop/` scratch space for the
-in-progress design conversation.
+**All seven sub-projects have shipped**, on branch
+`core-implementation`, unpushed. `make check` — gofmt, vet, lint,
+`sqlc diff`, the skill-bundle guards and `go test -race ./...` —
+exits 0 across sixteen packages with no test skipped.
+
+| | What is there |
+|---|---|
+| Core | Server, Postgres, identity, invites, sessions, tokens |
+| Metamodel | The four primitives, field schemas, validation, search, bulk writes, repair, rename |
+| Markdown | Versioned prose, diffs, moves, attachments to entities |
+| Views | Query language, saved views, staleness, positions, background images |
+| Interface | Six renderers drawing, its own visual identity, a text twin |
+| Analysis | Cycles, unreachable content, orphans, routes with a verdict |
+| Skills | The agent bundle, three genres, served over a signed URL |
+
+Sixty tools on the agent surface, mirrored in REST. Thirteen
+migrations. Roughly 2600 tests.
+
+### What is deliberately not built
+
+Say these plainly rather than letting someone discover them:
+
+- **A human alone cannot compose a view.** There is no query builder —
+  the query language was written for agents, and building one is its
+  own sub-project. A person can copy an existing view and change how it
+  is drawn, and nothing more.
+- **No published image, no documentation site, no backups.**
+- **One process only.** Events fan out from an in-memory hub, not
+  Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so
+  a second replica has its own subscribers and its own budgets.
+- **Nobody has verified that the skill bundle teaches.** Its guards
+  prove it is consistent with the server and say nothing about whether
+  an agent reading it can actually start. Two acceptance cases needing
+  a human are recorded as not run.
+
+### Where the work is tracked
+
+Nottario, project slug `maestro`, over the `mcp__nottario__*` tools —
+and its task list is currently **empty**. Everything filed during the
+build has been closed, each with a comment recording what the task
+found rather than that it was done. Read those comments before
+reopening an area; several record a decision that looks arbitrary in
+the code and is not.
+
+Anything discovered from here goes there first, before it is worked
+on.

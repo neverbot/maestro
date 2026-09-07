@@ -15,12 +15,11 @@ running one: no live instances, no real players, no telemetry.
 > text twin that describes the same answer for anyone who cannot see the
 > drawing. Agents work over MCP; people work in the browser.
 >
-> Two honest gaps. **A person cannot yet compose a view from nothing** —
+> One honest gap. **A person cannot yet compose a view from nothing** —
 > the query language was written for agents, and a query builder is its
 > own piece of work; you can copy an existing view and change how it is
-> drawn. And there is **no analysis** yet: no cycle report, no
-> unreachable-content report. See [Running it](#running-it) to start an
-> instance, the [Roadmap](#roadmap) for what is done, and
+> drawn. See [Running it](#running-it) to start an instance, the
+> [Roadmap](#roadmap) for what is done, and
 > [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design.
 
 ## Maestro knows nothing about games
@@ -77,10 +76,18 @@ the entities they describe.
 
 ## Two ways in
 
-Humans work in a web UI. Agents drive the same data over **MCP**, and
-learn the metamodel from a skill bundle carrying worked examples per
-genre, so an agent arrives knowing how to declare types and seed a few
-hundred entities without being told twice.
+Humans work in a web UI. Agents drive the same data over **MCP** —
+sixty tools, mirrored in REST — and learn the metamodel from a skill
+bundle the instance serves them: `skill.install` hands back a
+short-lived download and the bundle's version, so an agent arrives
+knowing how to declare types and seed a few hundred entities without
+being told twice.
+
+The bundle teaches what a tool description cannot: what to do across
+several calls, which mistakes cost a rewrite rather than a retry, and
+two worked genres — an MMORPG and a racing career — whose transcripts
+are replayed against a real server by a test, because an example that
+no longer runs is worse than no example.
 
 ### The skill bundle
 
@@ -252,9 +259,13 @@ as an unknown token.
   `Time=3`, `Memory=64MiB`, `Threads=2` (`internal/config/config.go`).
   Changing them means changing the default and rebuilding, not setting
   an environment variable.
-- **No backups, no documentation site.** Scheduled `pg_dump` backups and
-  a public documentation site are design-stage only; both were moved to
-  later sub-projects, and nothing in this repository runs either yet.
+- **No backups and no documentation site.** Neither was ever built.
+  Backing up an instance means backing up its Postgres volume, the same
+  way you would any other database.
+- **A person cannot compose a view from nothing.** The query language
+  was written for agents to write; the interface can copy a view and
+  change how it is drawn, and that is all. A query builder is real work
+  and was deliberately not smuggled in as a corner of another task.
 
 ## Roadmap
 
@@ -266,7 +277,10 @@ as an unknown token.
 - [x] **Analysis.** Cycles, unreachable content, orphans, routes.
 - [x] **Skills.** The agent bundle and genre templates.
 
-Design documents, one per sub-project as they land:
+Design documents, one per sub-project. The **plans** beside them, in
+[`docs/superpowers/plans/`](docs/superpowers/plans/), are the more
+useful read: each carries a record of what its spec got wrong once the
+code met reality, and several end with what the sub-project learned.
 
 - [Core and metamodel](docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md)
 - [The markdown domain](docs/superpowers/specs/2026-09-02-markdown-domain-design.md)

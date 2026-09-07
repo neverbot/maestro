@@ -1049,10 +1049,16 @@ omission as an oversight.
   now exist, so the repair is no longer speculative — a designer can
   produce a `*_renamed` banner in one call. O6 is now a question about
   when, not about whether.
-- **No analysis.** Cycles, unreachable content, orphans, routes — all of
-  sub-project 6. §4.4's "3 edges run against the ranking" is a drawing
-  artefact honestly reported, not an analysis, and must not grow into
-  one here.
+- **No analysis *in this interface*.** Cycles, unreachable content,
+  orphans and routes were sub-project 6, and **they shipped** — over
+  the agent surface and REST, with no screen of their own. So this
+  entry has half expired: the engine exists, and nothing in the
+  interface reads it. A designer runs an analysis through an agent, not
+  through a page.
+  §4.4's "3 edges run against the ranking" remains a drawing artefact
+  honestly reported, not an analysis, and must not grow into one here —
+  that half stands, and matters more now that a real analysis exists to
+  be confused with it.
 - **No editing of content.** Entities, types, relations and documents
   are *read* in this interface. They are written by agents over MCP and
   by the REST API. An entity editor is a real product need and a

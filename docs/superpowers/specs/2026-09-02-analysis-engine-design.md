@@ -803,8 +803,10 @@ Stated plainly rather than answered with false confidence.
    is exactly why there are two rather than why one replaces the other.
    Recorded in full as core open question O1 in
    `2026-08-31-core-and-metamodel-design.md`, "Metamodel".
-   `analysis_traits` is not implemented; it belongs to this
-   sub-project, and §11.1 is its schema change.
+   `analysis_traits` **shipped with this sub-project**, as §11.1's
+   schema change: a closed seven-word vocabulary held in a database
+   constraint and in Go, guarded in both directions, with incoherent
+   combinations refused at the surface.
 
 4. **Can a route step be a relation rather than an entity?** "Take the
    portal to Darnassus" is an edge, not a node. Modelling it as an

@@ -51,6 +51,43 @@ func testGetenv(env map[string]string) func(string) string {
 	return func(key string) string { return env[key] }
 }
 
+// waitForRunningServer polls /healthz and watches run() at the same
+// time, and it exists because the version that only polled reported the
+// wrong thing.
+//
+// run() is started in a goroutine whose only output is the done
+// channel. When it fails at startup — a port taken between reserveAddr
+// closing its listener and run() binding it, a migration that will not
+// apply, a database that refuses the connection — it returns
+// immediately and that error sits in the channel unread, while the
+// poller spends its whole budget dialling a port nobody is listening
+// on and then reports "server never became healthy: connection
+// refused". That sentence is true and it names a symptom: it is what
+// *the test* saw, not what went wrong. Two runs of the full suite were
+// diagnosed from it as a timeout, which is the one thing it does not
+// prove.
+//
+// Selecting on both means a failed start is reported as itself, and a
+// genuinely slow start is still reported as a timeout — and the two
+// stop being indistinguishable.
+func waitForRunningServer(t *testing.T, base string, done chan error, deadline time.Duration) {
+	t.Helper()
+	ready := make(chan struct{})
+	go func() {
+		defer close(ready)
+		waitForHealthz(t, base, deadline)
+	}()
+	select {
+	case err := <-done:
+		// run() returned before the server ever answered. Whatever it
+		// says is the real failure; put it back so the caller's own
+		// shutdown assertion still finds a value rather than blocking.
+		done <- err
+		t.Fatalf("run() exited during startup instead of serving: %v", err)
+	case <-ready:
+	}
+}
+
 // waitForHealthz polls GET /healthz until it answers "ok" or deadline
 // elapses, matching how a real caller (or an orchestrator's readiness
 // probe) would wait for a process that has just been started in the
@@ -103,7 +140,7 @@ func startRunningServer(t *testing.T) (base string, cancel context.CancelFunc, d
 	go func() { done <- run(ctx, testGetenv(env)) }()
 
 	base = "http://" + addr
-	waitForHealthz(t, base, 5*time.Second)
+	waitForRunningServer(t, base, done, 5*time.Second)
 	return base, cancel, done
 }
 

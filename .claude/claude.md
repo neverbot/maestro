@@ -273,12 +273,25 @@ Say these plainly rather than letting someone discover them:
 
 ### Where the work is tracked
 
-Nottario, project slug `maestro`, over the `mcp__nottario__*` tools —
-and its task list is currently **empty**. Everything filed during the
-build has been closed, each with a comment recording what the task
-found rather than that it was done. Read those comments before
-reopening an area; several record a decision that looks arbitrary in
-the code and is not.
+Nottario, project slug `maestro`, over the `mcp__nottario__*` tools.
+Everything filed during the build is closed, each with a comment
+recording what the task **found** rather than that it was done. Read
+those comments before reopening an area; several record a decision
+that looks arbitrary in the code and is not.
+
+One task is deliberately open: two `cmd/maestro` tests fail under a
+loaded full-suite run and pass in isolation. It is left open waiting to
+happen again, because the test now distinguishes a process that died
+from one that was merely slow, and that answer decides where to look —
+which the old message could not. Do not raise its deadline: a normal
+startup is 540ms against a five-second budget, so a failure means a
+multi-second stall, and a larger number would turn that stall into a
+slow pass. Connection pressure and the port-reservation race were both
+measured and ruled out; the numbers are in the task.
+
+Do not restate the task list here. This paragraph went false a few
+hours after it was written, in the same file that warns about prose
+going false — ask Nottario instead.
 
 Anything discovered from here goes there first, before it is worked
 on.

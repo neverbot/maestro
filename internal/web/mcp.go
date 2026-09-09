@@ -255,12 +255,11 @@ func MCPGamesList(ctx context.Context, deps MCPDeps, caller Caller) (GamesListOu
 // the call fails with scope_violation before the tool's own handler ever
 // runs — it is never used to select which project to query. This gives
 // an agent juggling two tokens for two games a way to state which one it
-// meant to use and be told immediately when it guessed wrong (Nottario
-// requires an equivalent field for the same reason), without turning a
-// caller-supplied name into a lookup key the way this task's first draft
-// of games.get did — see addScopedTool's own doc comment for why that
-// shape was the actual risk a quality review flagged, not merely a
-// missing check.
+// meant to use and be told immediately when it guessed wrong, without
+// turning a caller-supplied name into a lookup key the way this task's
+// first draft of games.get did — see addScopedTool's own doc comment
+// for why that shape was the actual risk a quality review flagged, not
+// merely a missing check.
 type ScopedArgs struct {
 	// Game is the game's slug, as a confirmation and never as a
 	// selector: the caller's game comes from its token binding, and this

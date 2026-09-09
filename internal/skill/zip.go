@@ -26,9 +26,8 @@ func Zip() ([]byte, error) {
 // It hashes the *tree*, not the zip, and it length-prefixes every path
 // and every body before hashing them. Without the prefixes, a file
 // "ab" holding "c" and a file "a" holding "bc" hash identically, which
-// is the classic concatenation collision and is why Nottario's hash is
-// built the same way. Computed once, lazily, under a sync.Once: the
-// tree cannot change while the process runs.
+// is the classic concatenation collision. Computed once, lazily, under
+// a sync.Once: the tree cannot change while the process runs.
 //
 // Hashing the tree rather than the zip bytes is only honest because the
 // zip is a pure, deterministic function of the tree and holds exactly

@@ -1,0 +1,491 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-09T15:22:25Z",
+  "title": "Design System: Maestro",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Ledger Paper",
+        "canonical": "oklch(0.965 0.014 88)",
+        "dark": "oklch(0.215 0.012 80)",
+        "darkHex": "#1c1913",
+        "tonalRamp": [
+          "#0c0b08",
+          "#27241c",
+          "#45423a",
+          "#66635a",
+          "#8a867d",
+          "#aeaaa1",
+          "#d5d1c7",
+          "#f0eee9"
+        ]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Desk",
+        "canonical": "oklch(0.935 0.018 86)",
+        "dark": "oklch(0.175 0.012 80)",
+        "darkHex": "#13100b",
+        "tonalRamp": [
+          "#0d0b07",
+          "#28241a",
+          "#474238",
+          "#686358",
+          "#8b867a",
+          "#b0aa9e",
+          "#d6d0c4",
+          "#f1eee7"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Leaf",
+        "canonical": "oklch(0.985 0.008 88)",
+        "dark": "oklch(0.255 0.013 80)",
+        "darkHex": "#26221c",
+        "tonalRamp": [
+          "#0c0b09",
+          "#262420",
+          "#44423e",
+          "#65635e",
+          "#888681",
+          "#adaba5",
+          "#d3d1cb",
+          "#f0eeeb"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Bister Ink",
+        "canonical": "oklch(0.260 0.020 55)",
+        "dark": "oklch(0.915 0.014 85)",
+        "darkHex": "#e7e2d9",
+        "tonalRamp": [
+          "#0f0a07",
+          "#2c221b",
+          "#4b4038",
+          "#6d6059",
+          "#90837b",
+          "#b5a89f",
+          "#dccec5",
+          "#f5ede8"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Sepia",
+        "canonical": "oklch(0.505 0.020 58)",
+        "dark": "oklch(0.665 0.016 70)",
+        "darkHex": "#9a9289",
+        "tonalRamp": [
+          "#0f0a07",
+          "#2c221a",
+          "#4b4038",
+          "#6c6158",
+          "#90837b",
+          "#b5a89f",
+          "#dccec4",
+          "#f4ede7"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(0.865 0.016 82)",
+        "dark": "oklch(0.315 0.014 75)",
+        "darkHex": "#36312a",
+        "tonalRamp": [
+          "#0d0b07",
+          "#28231b",
+          "#474239",
+          "#686359",
+          "#8b857c",
+          "#b0aaa0",
+          "#d6d0c6",
+          "#f1eee8"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Stroke",
+        "canonical": "oklch(0.615 0.020 62)",
+        "dark": "oklch(0.575 0.020 68)",
+        "darkHex": "#81776d",
+        "tonalRamp": [
+          "#0f0a07",
+          "#2b221a",
+          "#4a4038",
+          "#6c6158",
+          "#8f847a",
+          "#b4a89e",
+          "#dbcec4",
+          "#f4ede7"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Kiln Rust",
+        "canonical": "oklch(0.500 0.130 48)",
+        "dark": "oklch(0.700 0.115 52)",
+        "darkHex": "#d78958",
+        "tonalRamp": [
+          "#200000",
+          "#500000",
+          "#752300",
+          "#9c470d",
+          "#c46b39",
+          "#ed905e",
+          "#ffb684",
+          "#ffe1c5"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Rust Ink",
+        "canonical": "oklch(0.980 0.008 88)",
+        "dark": "oklch(0.190 0.012 80)",
+        "darkHex": "#17130e",
+        "tonalRamp": [
+          "#0c0b09",
+          "#262420",
+          "#44423e",
+          "#65635e",
+          "#888681",
+          "#adaba5",
+          "#d3d1cb",
+          "#f0eeeb"
+        ]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Rust Wash",
+        "canonical": "oklch(0.925 0.035 55)",
+        "dark": "oklch(0.320 0.045 50)",
+        "darkHex": "#452c1d",
+        "tonalRamp": [
+          "#110904",
+          "#311f13",
+          "#513e31",
+          "#735e50",
+          "#978172",
+          "#bda696",
+          "#e4ccbc",
+          "#f9ebe3"
+        ]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Alarm",
+        "canonical": "oklch(0.480 0.165 25)",
+        "dark": "oklch(0.700 0.135 25)",
+        "darkHex": "#e67a73",
+        "tonalRamp": [
+          "#260000",
+          "#5c0000",
+          "#85000a",
+          "#ae2d2f",
+          "#d75551",
+          "#ff7c74",
+          "#ffa299",
+          "#ffd7d0"
+        ]
+      },
+      "data-1": {
+        "role": "data",
+        "displayName": "Categorical 1",
+        "canonical": "#96311d",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-2": {
+        "role": "data",
+        "displayName": "Categorical 2",
+        "canonical": "#1086d3",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-3": {
+        "role": "data",
+        "displayName": "Categorical 3",
+        "canonical": "#bf7101",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-4": {
+        "role": "data",
+        "displayName": "Categorical 4",
+        "canonical": "#6e4fe9",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-5": {
+        "role": "data",
+        "displayName": "Categorical 5",
+        "canonical": "#4e925a",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-6": {
+        "role": "data",
+        "displayName": "Categorical 6",
+        "canonical": "#7a358c",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-7": {
+        "role": "data",
+        "displayName": "Categorical 7",
+        "canonical": "#028f95",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      },
+      "data-8": {
+        "role": "data",
+        "displayName": "Categorical 8",
+        "canonical": "#8e3256",
+        "note": "Inside diagrams and legends only. Never in the chrome.",
+        "tonalRamp": []
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The page title, once per screen. Literata."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section headings and an entity's name in its own view. Literata."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel headings and group titles. Fira Sans."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Everything the tool says: cells, fields, buttons, navigation."
+      },
+      "prose": {
+        "displayName": "Prose",
+        "purpose": "The game's own writing. Literata, capped at 68ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Column headers, rail headings, metadata keys. Sentence case."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Slugs, keys, pointers, versions. Anything copyable."
+      }
+    },
+    "shadows": [
+      {
+        "name": "resting",
+        "value": "0 1px 2px rgba(94, 72, 55, 0.12)",
+        "purpose": "A panel separated from the ground. Static surfaces."
+      },
+      {
+        "name": "lifted",
+        "value": "0 2px 9px rgba(94, 72, 55, 0.14)",
+        "purpose": "Something the user opened: the game switcher, a menu, a panel over the canvas."
+      },
+      {
+        "name": "floating",
+        "value": "0 10px 30px rgba(94, 72, 55, 0.18)",
+        "purpose": "A surface over the whole page. At most once per screen."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-quart",
+        "value": "cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "The only easing. No bounce, no elastic."
+      },
+      {
+        "name": "duration-state",
+        "value": "120ms",
+        "purpose": "Hover, focus, selection."
+      },
+      {
+        "name": "duration-disclosure",
+        "value": "180ms",
+        "purpose": "A menu or panel opening."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow",
+        "value": "780px",
+        "purpose": "The side rail folds under the main column."
+      },
+      {
+        "name": "wide",
+        "value": "1280px",
+        "purpose": "The catalogue gains its optional third column."
+      }
+    ],
+    "density": [
+      {
+        "name": "row-height",
+        "value": "36px"
+      },
+      {
+        "name": "control-height",
+        "value": "32px"
+      },
+      {
+        "name": "prose-measure",
+        "value": "68ch"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single most likely action on a screen. Ink on paper, never accent-filled.",
+      "html": "<button class=\"ds-btn\">Save as view</button>",
+      "css": ".ds-btn{font:600 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--ink);border-radius:3px;background:var(--ink);color:var(--paper);box-shadow:0 1px 2px rgba(94,72,55,.12);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn:hover{background:#1d1611}.ds-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Every secondary action. No fill until hover.",
+      "html": "<button class=\"ds-btn-ghost\">Copy view</button>",
+      "css": ".ds-btn-ghost{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn-ghost:hover{background:var(--ground)}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Leaf fill on paper, rust border on focus. No glow.",
+      "html": "<input class=\"ds-input\" placeholder=\"Search this game…\">",
+      "css": ".ds-input{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:5px 9px;border:1px solid var(--line);border-radius:3px;background:var(--raised);color:var(--ink);width:220px}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Filter Chips",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Exactly one selected per group. The selected chip is the only place the accent fills anything.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip\" aria-pressed=\"true\">All</button><button class=\"ds-chip\" aria-pressed=\"false\">Main</button><button class=\"ds-chip\" aria-pressed=\"false\">No zone</button></div>",
+      "css": ".ds-chips{display:flex;gap:6px}.ds-chip{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}.ds-chip:hover{background:var(--ground)}.ds-chip[aria-pressed=\"true\"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}.ds-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+    },
+    {
+      "name": "Catalogue Table",
+      "kind": "custom",
+      "refersTo": "table-row",
+      "description": "The signature surface. 36px rows, serif names over mono slugs, named absences, tabular numbers.",
+      "html": "<table class=\"ds-table\"><thead><tr><th>Quest</th><th>Zone</th><th class=\"ds-num\">Level</th></tr></thead><tbody><tr><td class=\"ds-nm\">The ash well<span>ash-well</span></td><td>Vael Crypt</td><td class=\"ds-num\">12</td></tr><tr><td class=\"ds-nm\">Shadow market<span>shadow-market</span></td><td class=\"ds-absent\">no zone</td><td class=\"ds-num\">4</td></tr></tbody></table>",
+      "css": ".ds-table{width:100%;border-collapse:collapse;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;background:var(--paper)}.ds-table th{text-align:left;font:600 0.75rem/1.2 'Fira Sans',system-ui,sans-serif;letter-spacing:.03em;color:var(--muted);padding:7px 11px;border-bottom:1px solid var(--line)}.ds-table td{height:36px;padding:8px 11px;border-bottom:1px solid var(--line)}.ds-table tbody tr:hover td{background:var(--ground)}.ds-nm{font:500 0.95rem/1.25 Literata,Georgia,serif}.ds-nm span{display:block;font:400 0.78rem/1.4 'Fira Mono',ui-monospace,monospace;color:var(--muted)}.ds-absent{color:var(--muted);font-style:italic}.ds-num{text-align:right;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Game Switcher",
+      "kind": "nav",
+      "refersTo": "panel",
+      "description": "Always present inside a game. Marks the current game with weight and aria-current, never with colour.",
+      "html": "<details class=\"ds-sw\" open><summary>Hollow Reach</summary><ul><li><a href=\"#\" aria-current=\"page\">Hollow Reach</a></li><li><a href=\"#\">Le Mans 1971</a></li><li><a href=\"#\">All games</a></li></ul></details>",
+      "css": ".ds-sw{position:relative;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;width:220px}.ds-sw summary{list-style:none;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 1px 2px rgba(94,72,55,.12)}.ds-sw summary::-webkit-details-marker{display:none}.ds-sw summary::after{content:'\\25be';float:right;color:var(--muted)}.ds-sw ul{list-style:none;margin:4px 0 0;padding:4px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 2px 9px rgba(94,72,55,.14)}.ds-sw a{display:block;padding:5px 8px;border-radius:3px;color:var(--ink);text-decoration:none}.ds-sw a:hover{background:var(--ground)}.ds-sw a[aria-current=\"page\"]{font-weight:600}"
+    },
+    {
+      "name": "Read-Only Notice",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "States the limitation where the missing button would be, rather than leaving it to be inferred.",
+      "html": "<span class=\"ds-ro\">Read-only, written by the agent</span>",
+      "css": ".ds-ro{display:inline-block;font:600 0.75rem/1.2 'Fira Sans',system-ui,sans-serif;letter-spacing:.03em;color:var(--muted);border:1px dashed var(--line-strong);border-radius:3px;padding:4px 8px}"
+    },
+    {
+      "name": "Prose Block",
+      "kind": "custom",
+      "refersTo": "panel",
+      "description": "The game's own writing, in the serif, capped at 68ch.",
+      "html": "<p class=\"ds-prose\">The well does not give back what is thrown into it. Vael knows this, and still they go down: once a year, with the rope measured and a dead name in the mouth.</p>",
+      "css": ".ds-prose{font:400 0.95rem/1.6 Literata,Georgia,serif;color:var(--ink);max-width:68ch;margin:0}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Workshop Notebook",
+    "overview": "Maestro looks like the bound working notebook of a design team, opened flat on a desk in daylight. Warm paper, ink that is brown-black rather than black, a rust accent that reads as something drawn on the page rather than something rendered on a screen. It is a reading surface first. Density is high and unapologetic: rows are 36 pixels and hierarchy is earned with weight, size and rule lines rather than with air. Two typefaces carry the whole product and divide the work by ownership: the tool speaks in Fira Sans, and the game speaks in Literata.",
+    "keyCharacteristics": [
+      "Warm paper ground, never white, never grey.",
+      "Two voices: sans for the tool, serif for the game.",
+      "Rust accent, spent sparingly and never as decoration.",
+      "Flat surfaces, three shadow levels reserved for what genuinely floats.",
+      "36-pixel rows and a compact scale: comparison beats comfort."
+    ],
+    "rules": [
+      {
+        "name": "The Two Exemptions Rule",
+        "body": "The chrome is achromatic. Exactly two chromatic tokens exist outside the data palette, accent and danger, and a third is admitted only against this test: not 'would a colour help' but 'is there a fact on screen that nothing else says'.",
+        "section": "colors"
+      },
+      {
+        "name": "The Ink Button Rule",
+        "body": "The primary button is ink on paper. A button filled with the accent is forbidden.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Grounds Rule",
+        "body": "ground is darker than paper on purpose. The diagram lies on the desk; the reading panels are sheets on top of it.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Voices Rule",
+        "body": "The tool speaks sans, the game speaks serif. If it would survive the game shipping, it is serif.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Uppercase Rule",
+        "body": "Labels are sentence case with light tracking. All-caps labels are the admin-panel tell.",
+        "section": "typography"
+      },
+      {
+        "name": "The Copyable Is Mono Rule",
+        "body": "If a value is a machine identifier a person might paste, it is monospace.",
+        "section": "typography"
+      },
+      {
+        "name": "The Warm Shadow Rule",
+        "body": "Every shadow is rgba(94, 72, 55, ...), the paper's own brown. Pure black is forbidden everywhere.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Earned Elevation Rule",
+        "body": "A shadow answers a question about stacking, never about importance.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Named Absence Rule",
+        "body": "Nothing is blank because a value is missing. Absent gets a word, empty gets a different word.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do set every game-owned word in Literata and every tool-owned word in Fira Sans.",
+      "Do keep rows at 36px and lists dense.",
+      "Do tint every shadow with rgba(94, 72, 55, ...).",
+      "Do name absences in words: 'no zone', 'never reviewed', 'no requirement'.",
+      "Do state read-only where the missing action would be.",
+      "Do mark the current item with weight and aria-current.",
+      "Do cap prose at 68ch.",
+      "Do build every repeated pattern once, as a shared component."
+    ],
+    "donts": [
+      "Don't build the generic admin panel: no icon sidebar, no card grid of counters.",
+      "Don't reach for the dark blue SaaS dashboard.",
+      "Don't borrow GitHub's chrome.",
+      "Don't bury content the way the ad-choked game wiki does.",
+      "Don't produce the empty beautiful landing page.",
+      "Don't use #000 or #fff anywhere, including in a shadow.",
+      "Don't fill a button, a badge or a header with the accent.",
+      "Don't use border-left or border-right above 1px as a coloured stripe.",
+      "Don't set a label in all caps.",
+      "Don't nest a panel inside a panel.",
+      "Don't leave a cell blank when the value is absent.",
+      "Don't animate layout properties, and never use bounce or elastic easing.",
+      "Don't add a modal before an inline alternative has been ruled out in writing."
+    ]
+  }
+}

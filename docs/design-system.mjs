@@ -116,15 +116,18 @@ const shadowCards = shadows
   )
   .join("\n");
 
-const components = side.components
-  .map(
-    (c) => `<section class="comp">
+// A component the size of a page (the header, a catalogue table) is
+// unreadable in a third of a row: it wraps and overlaps and says nothing
+// true about itself. Those carry `full: true` and get a row of their own,
+// with a scroller so a wide one is scrolled rather than squeezed.
+const componentCard = (c) => `<section class="comp${c.full ? " full" : ""}">
   <h3>${esc(c.name)}</h3><p>${esc(c.description)}</p>
-  <div class="stage">${c.html}</div>
+  <div class="stage${c.full ? " wide" : ""}">${c.html}</div>
   <style>${c.css}</style>
-</section>`,
-  )
-  .join("\n");
+</section>`;
+
+const components = side.components.filter((c) => !c.full).map(componentCard).join("\n");
+const componentsFull = side.components.filter((c) => c.full).map(componentCard).join("\n");
 
 const list = (items, f) => items.map(f).join("");
 const scales = (obj) =>
@@ -176,6 +179,8 @@ code.dim { opacity:.75; }
 .comp h3 { font:${fm.typography.title.fontWeight} ${fm.typography.title.fontSize}/${fm.typography.title.lineHeight} ${fm.typography.title.fontFamily}; margin:0 0 .2rem; }
 .comp p { margin:0 0 .7rem; color:var(--muted); }
 .comp .stage { background:var(--ground); border:1px solid var(--line); border-radius:${fm.rounded.sm}; padding:1rem; }
+.comp .stage.wide { overflow-x:auto; padding:0; }
+.comp.full { grid-column:1 / -1; }
 ul.rules { margin:0; padding-left:1.1rem; display:grid; gap:.45rem; max-width:80ch; }
 ul.plain { list-style:none; margin:0; padding:0; display:grid; gap:.3rem; }
 .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
@@ -203,6 +208,7 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
 
   <h2>Shared components</h2>
   <div class="comps">${components}</div>
+  <div class="comps">${componentsFull}</div>
 
   <h2>Scales</h2>
   <div class="panel cols">

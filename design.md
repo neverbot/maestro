@@ -75,6 +75,9 @@ spacing:
   lg: "16px"
   xl: "24px"
   xxl: "32px"
+  gutter: "24px"
+  rail: "280px"
+  page-max: "1440px"
 components:
   button-primary:
     backgroundColor: "{colors.ink}"
@@ -129,6 +132,29 @@ components:
   table-row-hover:
     backgroundColor: "{colors.ground}"
     textColor: "{colors.ink}"
+  table-row-compact:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    padding: "4px 0"
+    height: "28px"
+  page-header:
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    padding: "0 {spacing.gutter}"
+    height: "48px"
+  breadcrumb:
+    backgroundColor: "transparent"
+    textColor: "{colors.muted}"
+    typography: "{typography.body}"
+    height: "32px"
+  negative-state:
+    backgroundColor: "transparent"
+    textColor: "{colors.muted}"
+    typography: "{typography.body}"
+    padding: "{spacing.lg} 0"
+    width: "62ch"
 ---
 
 # Design System: Maestro
@@ -358,15 +384,60 @@ flat.
 
 The signature surface of this product and the one to get right.
 
-- **Row:** 36px, 8px by 11px padding, 1px Hairline rule beneath.
-- **Header:** Label type, Sepia, sticky, one Hairline beneath.
+- **Row:** 36px, uniform. 11px of horizontal padding and a fixed 20px
+  line box rather than vertical padding, because a row carrying a tag
+  chip is otherwise one pixel taller than a row without one, and a
+  one-pixel wobble is what makes a table look unmade.
+- **Header:** Label type, Sepia, sticky under the page header, one
+  Hairline beneath.
 - **Hover:** the row turns Desk. No lift, no border change.
 - **Numbers:** right-aligned, `font-variant-numeric: tabular-nums`.
-- **Name cell:** the entity name in Literata 500, with its slug beneath
-  in Mono at Sepia. Two lines, one cell.
+- **Name cell:** the entity name in Literata 500 with its slug **inline**
+  after it, in Mono at Sepia. Stacking the slug underneath costs 17px a
+  row and takes a 900px window from 17 rows to 9.
 - **Absent value:** the word for what is missing, in Sepia italic, for
   example "no zone". An empty cell is forbidden: it cannot be told from
   a value that failed to load.
+- **Container:** one border and a 3px radius around the whole table,
+  rules between rows, and `overflow-x: auto` on the wrapper with a
+  `min-width` on the table. Rows never wrap into two lines to fit.
+- **Columns:** the fields the content actually has. A name and a key are
+  the two things the reader already knew.
+
+### The page frame
+
+The one structure every screen is built in, decided once in
+`docs/superpowers/specs/2026-09-10-global-look-design.md`.
+
+- **Content width:** 1440px maximum, centred on a full-bleed ground,
+  24px gutters and 16px below 780px. The 68ch measure belongs to the
+  prose role alone and never to the page: it was on `body` once, and it
+  squeezed the catalogue, the diagram and a pair of selects into 686px
+  of a 1280px window.
+- **Columns:** content and a 280px rail, 24px apart, the rail sticky
+  under the header and folding beneath the content below 1100px. The
+  rail carries what is true of the whole screen, never the screen's own
+  content.
+- **Order in the header, left to right:** wordmark, game switcher,
+  destinations, spacer, account, sign out. One row, 48px, sticky.
+- **Below it:** a 32px breadcrumb, then the page head — title, count,
+  read-only notice — closed by a 1px rule and 24px of space.
+- **Wide content scrolls inside its own container**, never the page. A
+  table sets `min-width` and its wrapper `overflow-x: auto`, so a row
+  stays 36px at any width instead of wrapping into two lines.
+
+### Negative states
+
+One component, three shapes, always in the content column, never in a
+box, never with a stripe, capped at 62ch.
+
+- **Empty:** a bold `ink` line naming what is absent, one `muted`
+  sentence saying who would put it there, at most one link. Never a
+  tutorial: a person reading it has no API.
+- **Loading:** the same shape, rendered only after 200ms so a fast
+  answer never flashes.
+- **Refused:** the bold line in Alarm, the reason in plain words, one
+  action.
 
 ### Navigation
 
@@ -395,6 +466,19 @@ missing.
 is missing. Absent gets a word, empty gets a different word, and the two
 never look alike.
 
+**The Shadow Boundary Rule.** An element selector in the global
+stylesheet does not reach inside a component's shadow root, and custom
+properties do. No component writes a bare `button {}` of its own; every
+one adopts the shared control stylesheet, written in terms of
+`var(--…)`. This failed silently for a whole build: five of six controls
+on the view screen were browser defaults, one of them a `#ffffff`
+input.
+
+**The Never Hidden Rule.** Navigation is never hidden without being
+moved somewhere reachable. Below 780px the destinations join the game
+switcher's menu; exactly one of the two carries them at any width, never
+both and never neither.
+
 ## 6. Do's and Don'ts
 
 ### Do:
@@ -411,7 +495,11 @@ never look alike.
   Read-Only Notice.
 - **Do** mark the current item with weight and `aria-current`, and use
   the accent only for focus, selection and the single active filter.
-- **Do** cap prose at 68ch.
+- **Do** cap prose at 68ch, and nothing else.
+- **Do** let wide content scroll inside its own container so the page
+  never scrolls sideways.
+- **Do** put a breadcrumb on every screen inside a game, and delete the
+  back links it replaces.
 - **Do** build every repeated pattern once, as a shared component. A
   second implementation of the same shape is a defect and gets reported
   as one.
@@ -435,6 +523,10 @@ never look alike.
 - **Don't** set a label in all caps.
 - **Don't** nest a panel inside a panel.
 - **Don't** leave a cell blank when the value is absent.
+- **Don't** put a measure meant for prose on the page.
+- **Don't** hide navigation at a breakpoint without moving it somewhere.
+- **Don't** write a bare element selector for a control inside a
+  component and expect the global stylesheet to have styled it.
 - **Don't** animate layout properties, and never use bounce or elastic
   easing. Transitions are 120ms for state and 180ms for disclosure, both
   ease-out-quart.

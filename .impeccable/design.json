@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-09-09T15:22:25Z",
+  "generatedAt": "2026-09-10T18:11:20Z",
   "title": "Design System: Maestro",
   "extensions": {
     "colorMeta": {
@@ -316,18 +316,35 @@
       {
         "name": "narrow",
         "value": "780px",
-        "purpose": "The side rail folds under the main column."
+        "purpose": "Gutter drops to 16px and the destinations move into the game switcher's menu."
       },
       {
-        "name": "wide",
-        "value": "1280px",
-        "purpose": "The catalogue gains its optional third column."
+        "name": "rail-folds",
+        "value": "1100px",
+        "purpose": "The rail folds beneath the content column."
+      },
+      {
+        "name": "table-min",
+        "value": "720px",
+        "purpose": "Below this a catalogue table scrolls inside its own container rather than squeezing."
       }
     ],
     "density": [
       {
+        "name": "header-height",
+        "value": "48px"
+      },
+      {
+        "name": "breadcrumb-height",
+        "value": "32px"
+      },
+      {
         "name": "row-height",
         "value": "36px"
+      },
+      {
+        "name": "row-compact",
+        "value": "28px"
       },
       {
         "name": "control-height",
@@ -336,6 +353,10 @@
       {
         "name": "prose-measure",
         "value": "68ch"
+      },
+      {
+        "name": "state-measure",
+        "value": "62ch"
       }
     ]
   },
@@ -376,9 +397,10 @@
       "name": "Catalogue Table",
       "kind": "custom",
       "refersTo": "table-row",
-      "description": "The signature surface. 36px rows, serif names over mono slugs, named absences, tabular numbers.",
-      "html": "<table class=\"ds-table\"><thead><tr><th>Quest</th><th>Zone</th><th class=\"ds-num\">Level</th></tr></thead><tbody><tr><td class=\"ds-nm\">The ash well<span>ash-well</span></td><td>Vael Crypt</td><td class=\"ds-num\">12</td></tr><tr><td class=\"ds-nm\">Shadow market<span>shadow-market</span></td><td class=\"ds-absent\">no zone</td><td class=\"ds-num\">4</td></tr></tbody></table>",
-      "css": ".ds-table{width:100%;border-collapse:collapse;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;background:var(--paper)}.ds-table th{text-align:left;font:600 0.75rem/1.2 'Fira Sans',system-ui,sans-serif;letter-spacing:.03em;color:var(--muted);padding:7px 11px;border-bottom:1px solid var(--line)}.ds-table td{height:36px;padding:8px 11px;border-bottom:1px solid var(--line)}.ds-table tbody tr:hover td{background:var(--ground)}.ds-nm{font:500 0.95rem/1.25 Literata,Georgia,serif}.ds-nm span{display:block;font:400 0.78rem/1.4 'Fira Mono',ui-monospace,monospace;color:var(--muted)}.ds-absent{color:var(--muted);font-style:italic}.ds-num{text-align:right;font-variant-numeric:tabular-nums}"
+      "description": "The signature surface. Uniform 36px rows, serif names with the slug inline, named absences, tabular numbers, scrolling in its own container rather than squeezing.",
+      "html": "<div class=\"ds-scroller\"><table class=\"ds-table\"><thead><tr><th>Quest</th><th>Zone</th><th>Requires</th><th class=\"ds-num\">Level</th></tr></thead><tbody><tr><td class=\"ds-nm\">The ash well <span>ash-well</span></td><td>Vael Crypt</td><td><span class=\"ds-tag\">Mothwing cloak</span></td><td class=\"ds-num\">12</td></tr><tr><td class=\"ds-nm\">Shadow market <span>shadow-market</span></td><td class=\"ds-absent\">no zone</td><td class=\"ds-absent\">no requirement</td><td class=\"ds-num\">4</td></tr></tbody></table></div>",
+      "css": ".ds-scroller{overflow-x:auto;border:1px solid var(--line);border-radius:3px;background:var(--paper)}.ds-table{width:100%;min-width:560px;border-collapse:collapse;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-table th{text-align:left;font:600 0.75rem/1.2 'Fira Sans',system-ui,sans-serif;letter-spacing:.03em;color:var(--muted);padding:7px 11px;border-bottom:1px solid var(--line)}.ds-table td{height:36px;padding:0 11px;line-height:20px;border-bottom:1px solid var(--line);vertical-align:middle}.ds-table tbody tr:last-child td{border-bottom:0}.ds-table tbody tr:hover td{background:var(--ground)}.ds-nm{font:500 0.95rem/20px Literata,Georgia,serif}.ds-nm span{font:400 0.78rem/1.4 'Fira Mono',ui-monospace,monospace;color:var(--muted);margin-left:8px}.ds-tag{display:inline-block;padding:0 6px;border:1px solid var(--line);border-radius:3px;background:var(--ground);font:400 0.78rem/18px 'Fira Sans',system-ui,sans-serif}.ds-absent{color:var(--muted);font-style:italic}.ds-num{text-align:right;font-variant-numeric:tabular-nums}",
+      "full": true
     },
     {
       "name": "Game Switcher",
@@ -403,6 +425,31 @@
       "description": "The game's own writing, in the serif, capped at 68ch.",
       "html": "<p class=\"ds-prose\">The well does not give back what is thrown into it. Vael knows this, and still they go down: once a year, with the rope measured and a dead name in the mouth.</p>",
       "css": ".ds-prose{font:400 0.95rem/1.6 Literata,Georgia,serif;color:var(--ink);max-width:68ch;margin:0}"
+    },
+    {
+      "name": "Page Header",
+      "kind": "nav",
+      "refersTo": "page-header",
+      "description": "One row, one order, on every screen: wordmark, game switcher, destinations, spacer, account, sign out.",
+      "html": "<header class=\"ds-hdr\"><a class=\"ds-wordmark\" href=\"#\">Maestro</a><span class=\"ds-sw-stub\">Hollow Reach ▾</span><nav class=\"ds-dest\"><a href=\"#\" aria-current=\"page\">Catalogue</a><a href=\"#\">Views</a><a href=\"#\">Prose</a><a href=\"#\">Images</a><a href=\"#\">Analysis</a></nav><span class=\"ds-sp\"></span><span class=\"ds-who\">ivan</span><button class=\"ds-btn-ghost\">Sign out</button></header>",
+      "css": ".ds-hdr{display:flex;align-items:center;gap:24px;height:48px;padding:0 24px;background:var(--paper);border-bottom:1px solid var(--line);font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-wordmark{font:600 1rem/1 Literata,Georgia,serif;letter-spacing:-.01em;color:var(--ink);text-decoration:none}.ds-sw-stub{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 1px 2px rgba(94,72,55,.12)}.ds-dest{display:flex;gap:16px}.ds-dest a{color:var(--muted);text-decoration:none;padding:2px 0;border-bottom:2px solid transparent}.ds-dest a[aria-current=\"page\"]{color:var(--ink);font-weight:600;border-bottom-color:var(--accent)}.ds-sp{flex:1}.ds-who{color:var(--muted)}",
+      "full": true
+    },
+    {
+      "name": "Breadcrumb",
+      "kind": "nav",
+      "refersTo": "breadcrumb",
+      "description": "Says where you are as well as where you came from. Replaces every one-off back link.",
+      "html": "<nav class=\"ds-crumbs\"><a href=\"#\">Hollow Reach</a> / <a href=\"#\">Catalogue</a> / <b>Quests</b></nav>",
+      "css": ".ds-crumbs{display:flex;align-items:center;gap:8px;height:32px;color:var(--muted);font:400 0.8rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-crumbs a{color:inherit;text-decoration:none}.ds-crumbs a:hover{text-decoration:underline;text-underline-offset:2px}.ds-crumbs b{font-weight:500;color:var(--ink)}"
+    },
+    {
+      "name": "Negative States",
+      "kind": "custom",
+      "refersTo": "negative-state",
+      "description": "Empty, loading and refused in one shape. No box, no stripe, capped at 62ch. Loading appears only after 200ms.",
+      "html": "<div class=\"ds-state\"><b>Nothing here yet</b>This game has no saved views. An agent writes one over MCP.</div><div class=\"ds-state\"><b>Loading…</b>Shown only after 200ms, so a fast answer never flashes.</div><div class=\"ds-state ds-refused\"><b>That did not load</b>The server answered 500 for this catalogue.</div>",
+      "css": ".ds-state{padding:16px 0;max-width:62ch;color:var(--muted);font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-state b{display:block;color:var(--ink);font-weight:600;margin-bottom:2px}.ds-refused b{color:var(--danger)}"
     }
   ],
   "narrative": {
@@ -460,6 +507,16 @@
         "name": "The Named Absence Rule",
         "body": "Nothing is blank because a value is missing. Absent gets a word, empty gets a different word.",
         "section": "components"
+      },
+      {
+        "name": "The Shadow Boundary Rule",
+        "body": "An element selector in the global stylesheet does not reach inside a component's shadow root, and custom properties do. No component writes a bare button rule of its own; every one adopts the shared control stylesheet written in terms of var(--...).",
+        "section": "components"
+      },
+      {
+        "name": "The Never Hidden Rule",
+        "body": "Navigation is never hidden without being moved somewhere reachable. Below 780px the destinations join the game switcher's menu; exactly one of the two carries them at any width.",
+        "section": "components"
       }
     ],
     "dos": [
@@ -470,7 +527,10 @@
       "Do state read-only where the missing action would be.",
       "Do mark the current item with weight and aria-current.",
       "Do cap prose at 68ch.",
-      "Do build every repeated pattern once, as a shared component."
+      "Do build every repeated pattern once, as a shared component.",
+      "Do cap prose at 68ch, and nothing else.",
+      "Do let wide content scroll inside its own container so the page never scrolls sideways.",
+      "Do put a breadcrumb on every screen inside a game, and delete the back links it replaces."
     ],
     "donts": [
       "Don't build the generic admin panel: no icon sidebar, no card grid of counters.",
@@ -485,7 +545,10 @@
       "Don't nest a panel inside a panel.",
       "Don't leave a cell blank when the value is absent.",
       "Don't animate layout properties, and never use bounce or elastic easing.",
-      "Don't add a modal before an inline alternative has been ruled out in writing."
+      "Don't add a modal before an inline alternative has been ruled out in writing.",
+      "Don't put a measure meant for prose on the page.",
+      "Don't hide navigation at a breakpoint without moving it somewhere.",
+      "Don't write a bare element selector for a control inside a component and expect the global stylesheet to have styled it."
     ]
   }
 }

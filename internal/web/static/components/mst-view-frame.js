@@ -18,7 +18,9 @@
 // hands it, which keeps internal/web/static/client.js the only module in
 // this front end that reaches the network.
 
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, css, html, nothing, unsafeCSS } from "lit";
+
+import { CONTROL_CSS } from "./control-styles.js";
 
 import { ACTION_RUN_BEST_EFFORT, KIND_DIAGNOSTICS, KIND_EMPTY, KIND_UNBOUND, runAction } from "../render/scene.js";
 import "./mst-twin.js";
@@ -48,7 +50,9 @@ export class MstViewFrame extends LitElement {
     params: { attribute: false },
   };
 
-  static styles = css`
+  static styles = [
+    unsafeCSS(CONTROL_CSS),
+    css`
     :host {
       display: block;
       background: var(--paper);
@@ -226,7 +230,8 @@ export class MstViewFrame extends LitElement {
       font-size: 0.8em;
       font-family: var(--mono);
     }
-  `;
+  `,
+  ];
 
   render() {
     const frame = this.frame;

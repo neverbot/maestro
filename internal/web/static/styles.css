@@ -40,11 +40,19 @@
      is a thing lying on the desk and the reading panels around it are
      the paper. It also keeps a white node fill legible against it
      without a border, which matters at a thousand nodes. */
-  --paper: #faf8f5;
-  --ground: #f2efe9;
+  --paper: #f7f3e9;
+  --ground: #efe9dc;
 
-  --ink: #14140f;
-  --muted: #6b6459;
+  /* One step *lighter* than --paper, and the third surface the two-grounds
+     rule needs: --ground is the desk, --paper is the sheet on it, and
+     --raised is what a person lifted off the sheet — an open menu, the
+     game switcher, a field waiting for a value. Without it a menu wore
+     the same fill as the page it floats over and only its shadow said
+     so, which is a shadow doing a surface's job. */
+  --raised: #fcfaf4;
+
+  --ink: #2c221b;
+  --muted: #6e625a;
 
   /* Two rules, because they do two jobs. --line is the decorative
      hairline: a table rule, a panel edge, the underline of a header.
@@ -52,21 +60,21 @@
      outline of a node whose colour_by slot found nothing, the hatch of
      the palette's tail — and it is the one held to 3:1 against the
      canvas, because a hairline at 3:1 is not a hairline, it is a box. */
-  --line: #ded7cb;
-  --line-strong: #857e72;
+  --line: #d8d2c7;
+  --line-strong: #8e8279;
 
   /* The one accent. It was called --accent and it is called --focus now:
      a token named "accent" invites a second accent, and one accent used
      for focus, selection and current is a system where four are a
      palette nobody can learn. */
-  --focus: #2f4a8a;
-  --focus-ink: #ffffff;
+  --focus: #9c470d;
+  --focus-ink: #fbf8f2;
 
   /* The one colour that means "this needs your attention": the forms'
      error text, the home page's invalid-row line and a destructive
      confirmation are the same statement to a reader, so they are the
      same token rather than the same hex typed three times. */
-  --danger: #a4262c;
+  --danger: #a72629;
 
   /* A node whose colour_by slot is *absent from attrs* gets no fill at
      all and is told apart by a dashed --line-strong outline. The
@@ -107,11 +115,51 @@
      text — keys, pointers, versions — in mono, because a JSON pointer is
      a thing to be copied and monospace is what says so. These are not
      redeclared in the dark block: a font stack does not have a theme. */
+  /* The frame's measurements (docs/superpowers/specs/2026-09-10-global-
+     look-design.md). They are tokens rather than numbers at each call
+     site for the reason the colours are: the audit counted fifteen
+     padding values and eight gaps in this file, none of them shared, and
+     a screen cannot be inconsistent with a scale it never named.
+
+     --measure is the prose cap and it is *only* the prose cap. It sat on
+     `body` as max-width: 68ch until this task, which laid the catalogue,
+     the diagram and a pair of version selects out in 686px of a 1280px
+     window. */
+  --page-max: 1440px;
+  --gutter: 24px;
+  --measure: 68ch;
+
+  --header-h: 48px;
+  --row-h: 36px;
+  --row-compact-h: 28px;
+  --control-h: 32px;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  --radius: 3px;
+  --radius-pill: 999px;
+
+  /* Tinted toward the paper's own brown. A neutral black shadow on a warm
+     ground is what makes an interface read as a dashboard, which is this
+     product's first anti-reference. */
+  --shadow-1: 0 1px 2px rgba(94, 72, 55, 0.12);
+  --shadow-2: 0 2px 9px rgba(94, 72, 55, 0.14);
+
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur-state: 120ms;
+
   --serif: ui-serif, Georgia, "Times New Roman", serif;
   --sans: system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--sans);
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
 /* Dark is not an inversion. The ground is a warm near-black rather than
@@ -123,19 +171,20 @@
    filter. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #1c1a14;
-    --ground: #16150f;
+    --paper: #1c1913;
+    --ground: #13100b;
+    --raised: #26221c;
 
-    --ink: #ece5d8;
-    --muted: #9c948a;
+    --ink: #e7e2d9;
+    --muted: #9a9289;
 
-    --line: #34302a;
-    --line-strong: #7d7668;
+    --line: #36312a;
+    --line-strong: #81776d;
 
-    --focus: #90b0e8;
-    --focus-ink: #14140f;
+    --focus: #d78958;
+    --focus-ink: #17130e;
 
-    --danger: #ef9a9e;
+    --danger: #e67a73;
 
     --unset: transparent;
 
@@ -186,25 +235,46 @@ a:hover {
   color: var(--focus);
 }
 
+/* **The page is not a paragraph.** This rule read `max-width: 68ch` and
+   `background: var(--paper)` until the 2026-09-09 audit measured it:
+   686px of a 1280px window, 36% of a 1920 one, with the catalogue of a
+   thousand entities, the diagram this product exists to draw and a pair
+   of version selects all laid out inside a measure chosen for a line of
+   prose. The measure moves to --measure and is worn by .prose alone.
+
+   The ground moves too. --ground is the desk and --paper is the sheet on
+   it, so the document wears the desk and the reading surfaces sit on
+   top; a body painted --paper made every panel invisible against it. */
 body {
   margin: 0 auto;
-  padding: 2rem;
-  background: var(--paper);
+  padding: 0 var(--gutter) var(--s6);
+  background: var(--ground);
   color: var(--ink);
-  max-width: 68ch;
+  max-width: var(--page-max);
+}
+
+@media (max-width: 780px) {
+  body { padding: 0 var(--s4) var(--s5); }
 }
 
 h1 { font-size: 1.6rem; }
 
 p.muted { color: var(--muted); }
 
+/* One row, one height, one order, on every screen. It is sticky because
+   the game switcher is the way out of a game and a person a thousand
+   rows down a catalogue should not have to scroll back up to leave. */
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding-bottom: 1rem;
-  margin-bottom: 1.5rem;
+  gap: var(--s5);
+  height: var(--header-h);
+  margin-bottom: var(--s5);
+  background: var(--paper);
   border-bottom: 1px solid var(--line);
 }
 
@@ -246,6 +316,8 @@ p.muted { color: var(--muted); }
    which is why the harness in internal/web/jstest/game_switcher_test.mjs
    was green while the page was wrong. */
 .game-switcher ul {
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
   display: none;
   position: absolute;
   z-index: 10;
@@ -263,6 +335,7 @@ p.muted { color: var(--muted); }
 .game-switcher[open] ul { display: grid; }
 
 .game-switcher a {
+  min-height: var(--row-compact-h);
   display: block;
   padding: 0.3rem 0.45rem;
   border-radius: 3px;
@@ -290,7 +363,7 @@ p.muted { color: var(--muted); }
   margin-top: 1.5rem;
 }
 
-form { display: grid; gap: 0.75rem; margin-top: 1.5rem; }
+form { display: grid; gap: var(--s3); margin-top: var(--s5); }
 
 form label {
   font-size: 0.85rem;
@@ -299,12 +372,17 @@ form label {
 }
 
 input {
-  padding: 0.6rem 0.7rem;
+  height: var(--control-h);
+  padding: 0 9px;
   border: 1px solid var(--line);
-  border-radius: 4px;
-  background: transparent;
+  border-radius: var(--radius);
+  background: var(--raised);
   color: inherit;
   font: inherit;
+}
+
+input:focus {
+  border-color: var(--focus);
 }
 
 /* The primary button is ink on paper, not accent on accent-ink. The
@@ -312,37 +390,65 @@ input {
    filled with --focus is a coloured button — which is the one thing the
    identity's central rule forbids, since it would spend the accent on a
    fourth meaning and spend a hue the game is entitled to. */
+/* The same statement components/control-styles.js makes inside every
+   shadow root, made here for the light DOM. The two are deliberately the
+   same shape: a control that is 32px and 3px-rounded in a component and
+   38px and 4px-rounded on the page is the drift this design pass exists
+   to end, and the audit caught exactly that in reverse. */
 button {
-  padding: 0.6rem 1rem;
-  border: 0;
-  border-radius: 4px;
+  height: var(--control-h);
+  padding: 0 13px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius);
   background: var(--ink);
   color: var(--paper);
   font: inherit;
   cursor: pointer;
   justify-self: start;
+  box-shadow: var(--shadow-1);
+  transition: background var(--dur-state) var(--ease);
+}
+
+button:hover:not(:disabled) {
+  background: var(--ground);
+  color: var(--ink);
 }
 
 button:disabled {
   opacity: 0.6;
   cursor: default;
+  box-shadow: none;
 }
 
 .link-button {
+  height: auto;
   background: none;
   color: var(--ink);
   padding: 0;
+  border: 0;
   border-radius: 0;
+  box-shadow: none;
   text-decoration: underline;
-  font-size: 0.95rem;
+  text-underline-offset: 2px;
 }
 
+.link-button:hover:not(:disabled) {
+  background: none;
+}
+
+/* Sign out is a ghost and never the primary button: it is the least
+   likely thing a person came here to do. */
 .sign-out {
   background: none;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  padding: 0.35rem 0.7rem;
+  color: var(--ink);
+  border-color: var(--line-strong);
+  box-shadow: none;
   justify-self: auto;
+}
+
+.sign-out:hover:not(:disabled) {
+  background: var(--ground);
+  color: var(--ink);
 }
 
 .error { color: var(--danger); min-height: 1.2em; }
@@ -374,9 +480,26 @@ h2 {
    the game's own label first, the key an agent addresses it by next, and
    the count last. A grid rather than a table so a narrow screen can let
    the label wrap without the counts drifting out of line. */
-ul.catalogue { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.25rem; min-width: 0; }
+/* **A list is a table with rules, not a stack of boxes.** Every row in
+   this product wore a 1px border and a 4px radius with a gap between,
+   which is 8px of chrome and a radius per row and says nothing: the 2026
+   -09-09 audit counted a thousand entities rendered as a thousand boxes.
+   The border and the radius move to the container, the rows are told
+   apart by a hairline, and the gap goes to zero. */
+ul.catalogue {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
 
 ul.catalogue li {
+  min-height: var(--row-h);
   display: grid;
   /* minmax(0, …) on all three, so a long key or a wide count shrinks
      rather than pushing the row past its column. A grid track's default
@@ -384,12 +507,27 @@ ul.catalogue li {
      comes to overlap the lane beside it — found by opening the page. */
   grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto);
   align-items: baseline;
-  gap: 0.75rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  gap: var(--s3);
+  padding: 0 11px;
+  border-bottom: 1px solid var(--line);
   min-width: 0;
 }
+
+ul.catalogue li:last-child { border-bottom: 0; }
+
+/* The row answers to the pointer, which is the only thing a border per
+   row was doing that a rule does not. */
+ul.catalogue li:hover { background: var(--ground); }
+
+/* **In a list, the underline is noise.** The stylesheet's general rule
+   underlines links because with the hue gone the underline is the only
+   thing that says a word is a link — true in a sentence, and false in a
+   list where every row is one. A thousand underlined names is a page of
+   underlines with names in it. The row itself is the affordance: it
+   answers to the pointer, and the underline arrives on hover, which is
+   the moment a reader asks "is this one?". */
+ul.catalogue a { text-decoration: none; }
+ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 .catalogue-label { font-weight: 600; font-family: var(--serif); }
 
@@ -427,7 +565,10 @@ ul.catalogue li {
 /* The game's own words, in the serif. This is the one place the identity
    is expressive and it is expressive about the right thing: a document
    body is prose somebody wrote because they cared about it. */
-.prose { line-height: 1.6; font-family: var(--serif); }
+/* The measure lives here now, and only here: this is the game's own
+   writing, which is the one thing on screen a 68-character line was
+   ever the right shape for. */
+.prose { line-height: 1.6; font-family: var(--serif); max-width: var(--measure); }
 .prose h1, .prose h2, .prose h3 { color: var(--ink); font-weight: 600; }
 .prose h1 { font-size: 1.35rem; margin: 1.8rem 0 0.6rem; letter-spacing: 0; }
 .prose h2 { font-size: 1.15rem; margin: 1.6rem 0 0.5rem; letter-spacing: 0; }

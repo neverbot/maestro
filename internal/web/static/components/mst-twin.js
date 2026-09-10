@@ -36,7 +36,9 @@
 // every binding's position in the static markup, and fails if a game
 // string is interpolated anywhere but into a text node.
 
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, css, html, nothing, unsafeCSS } from "lit";
+
+import { CONTROL_CSS } from "./control-styles.js";
 
 // The event a focused row fires. It is a bare event with the node's two
 // keys on it — never the entity id, which execute.go says is not an
@@ -50,7 +52,9 @@ export class MstTwin extends LitElement {
     selected: { state: true },
   };
 
-  static styles = css`
+  static styles = [
+    unsafeCSS(CONTROL_CSS),
+    css`
     :host {
       display: block;
       font-family: var(--sans);
@@ -99,7 +103,8 @@ export class MstTwin extends LitElement {
     tr[aria-current="true"] {
       background: var(--ground);
     }
-  `;
+  `,
+  ];
 
   render() {
     const twin = this.twin;

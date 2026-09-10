@@ -59,6 +59,7 @@ import { CONTROLS as NESTED_CONTROLS, RENDERER as RENDERER_NESTED } from "../ren
 import { CONTROLS as MAP_CONTROLS, RENDERER as RENDERER_MAP } from "../render/map.js";
 import { CONTROLS as TABLE_CONTROLS, RENDERER as RENDERER_TABLE } from "../render/table.js";
 import { CONTROLS as TIMELINE_CONTROLS, RENDERER as RENDERER_TIMELINE } from "../render/timeline.js";
+import { adoptControlStyles } from "./control-styles.js";
 
 // The tooltips, by the renderer that draws them. Keyed off each module's
 // own RENDERER export rather than off a list of six names typed here,
@@ -143,8 +144,13 @@ export const SAVE_AS_CSS = `
 .save-as { max-width: 46rem; margin: 0 0 1rem; color: var(--ink); font-family: var(--sans); }
 .save-as h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 .save-as label { display: block; margin: 0.6rem 0; font-size: 0.9rem; }
-.save-as input, .save-as select { font: inherit; display: block; margin-top: 0.2rem; }
-.save-as button { font: inherit; margin: 0.4rem 0.4rem 0 0; }
+/* Layout only. What these controls *look* like is stated once in
+   components/control-styles.js, which this root adopts before this
+   sheet; restating "font: inherit" here would be a second statement of
+   it. (No backticks in this comment: it lives inside a template
+   literal, and one closed it.) */
+.save-as input, .save-as select { display: block; margin-top: 0.2rem; }
+.save-as button { margin: 0.4rem 0.4rem 0 0; }
 .save-as .note { max-width: 60ch; margin: 0.4rem 0; color: var(--muted); font-size: 0.85em; }
 .save-as .tooltip { max-width: 60ch; margin: 0.2rem 0 0; color: var(--muted); font-size: 0.8em; }
 .save-as .band { margin: 0.6rem 0 0; color: var(--danger); font-size: 0.9em; }
@@ -199,6 +205,7 @@ export class MstSaveAs extends HTMLElement {
     this.bindings = { ...(options.params || {}) };
     this.root = this.doc.createElement("div");
     const shadow = this.attachShadow({ mode: "open" });
+    adoptControlStyles(shadow);
     adoptSaveAsStyles(shadow);
     if (shadow && typeof shadow.appendChild === "function") shadow.appendChild(this.root);
     this.render();

@@ -23,7 +23,9 @@
 // in hand, and a table that fetched to sort would be asking a question
 // it already had the answer to.
 
-import { LitElement, css, html, nothing } from "lit";
+import { LitElement, css, html, nothing, unsafeCSS } from "lit";
+
+import { CONTROL_CSS } from "./control-styles.js";
 
 import { ASCENDING, tableScene } from "../render/table.js";
 
@@ -45,7 +47,9 @@ export class MstTable extends LitElement {
     page: { attribute: false },
   };
 
-  static styles = css`
+  static styles = [
+    unsafeCSS(CONTROL_CSS),
+    css`
     /* **The scroll container the sticky headers stick to**, and the
        reason it has a height. An overflow:auto box with no height
        is a scroll container that never scrolls: it grows to its content,
@@ -123,7 +127,8 @@ export class MstTable extends LitElement {
       font-family: var(--mono);
       font-size: 0.8em;
     }
-  `;
+  `,
+  ];
 
   render() {
     const table = this.table;

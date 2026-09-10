@@ -202,7 +202,8 @@ svg.surface text { paint-order: stroke; }
 /* The arrangement menu: the three things about saving a position that
    are otherwise invisible, beside the controls they are about. */
 .menu { max-width: 40ch; margin: 0.75rem; padding: 0.75rem; color: var(--ink); font-family: var(--sans); }
-.menu button { font: inherit; margin-right: 0.4rem; }
+/* Layout only; the look comes from the adopted control sheet. */
+.menu button { margin-right: 0.4rem; }
 .menu .note { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.85em; }
 .menu .band { margin: 0.5rem 0 0; color: var(--danger); font-size: 0.9em; }
 /* In flight. A reduced-opacity treatment and not a spinner: what is
@@ -465,6 +466,7 @@ export class MstCanvas extends HTMLElement {
     this.menuElement = null;
     this.shell = buildShell(this.doc);
     const shadow = this.attachShadow({ mode: "open" });
+    adoptControlStyles(shadow);
     this.sheet = adoptCanvasStyles(shadow);
     if (shadow && typeof shadow.appendChild === "function") shadow.appendChild(this.shell.root);
   }
@@ -784,6 +786,7 @@ customElements.define("mst-canvas", MstCanvas);
 
 import { addressOf } from "../address.js";
 import { MODE_MIXED, normaliseMode, readsPositions, snapsPositions } from "../positions.js";
+import { adoptControlStyles } from "./control-styles.js";
 
 // The role that may look and not write. It is the server's own spelling
 // (internal/web/api_projects.go), and it is read here for the page's

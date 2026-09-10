@@ -43,6 +43,7 @@
 // like any other.
 
 import { CLASS_PENDING, worldDelta } from "./mst-canvas.js";
+import { adoptControlStyles } from "./control-styles.js";
 
 // The bounds, in the server's own numbers.
 //
@@ -130,6 +131,11 @@ export class MstGround extends HTMLElement {
     this.confirming = false;
     this.root = this.doc.createElement("div");
     const shadow = this.attachShadow({ mode: "open" });
+    // This root adopted nothing until the 2026-09-09 audit measured it:
+    // the file input a designer uploads a map's background with reported
+    // `border: 0px none` and -apple-system at 13.33px, because a shadow
+    // root inherits the page's custom properties and none of its rules.
+    adoptControlStyles(shadow);
     if (shadow && typeof shadow.appendChild === "function") shadow.appendChild(this.root);
     this.render();
   }

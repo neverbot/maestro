@@ -92,11 +92,31 @@ func stripCSSBlock(src string) string {
 
 // componentFiles is every component this server ships, discovered rather
 // than listed.
+// definesAComponent marks a file in the components directory as a
+// component rather than as something the components share. A component
+// puts an element on the page; a shared module does not, and the scans
+// below are about what a designer reads on screen.
+//
+// It is a content test and not a name list, so the day somebody adds
+// mst-something.js the scan reads it without being told to, which is the
+// property TestTheComponentScanReadsEveryComponent exists to keep.
+var definesAComponent = regexp.MustCompile(`customElements\.define\(|extends LitElement|attachShadow\(`)
+
 func componentFiles(t *testing.T) []string {
 	t.Helper()
-	found, err := filepath.Glob(filepath.Join("static", "components", "*.js"))
+	all, err := filepath.Glob(filepath.Join("static", "components", "*.js"))
 	if err != nil {
 		t.Fatalf("glob components: %v", err)
+	}
+	var found []string
+	for _, path := range all {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if definesAComponent.Match(raw) {
+			found = append(found, path)
+		}
 	}
 	sort.Strings(found)
 	return found
@@ -174,6 +194,15 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // that source in both directions. The refusals themselves stay the
 // server's, and internal/web/jstest/save_as_test.mjs asserts a taken key
 // is rendered exactly as it arrived.
+// control-styles.js joined the directory in the 2026-09-10 design pass
+// and is **not** a component: it defines no custom element and holds no
+// template. It is the one statement of what a button and a field look
+// like, adopted by every shadow root in the product, and it exists
+// because element selectors in styles.css do not cross a shadow boundary
+// — five of six controls on the view screen were browser defaults until
+// it landed. It carries no words a reader sees, so the scan above has
+// nothing to read in it, and naming it here as a component would be
+// claiming an argument it does not need.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	found := componentFiles(t)
 	want := []string{

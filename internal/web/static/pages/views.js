@@ -12,9 +12,9 @@
 // it, and **no create control of any kind**.
 
 import {
-  destinations,
   DESTINATION_VIEWS,
   countLabel,
+  destinations,
   emptyOrRows,
   expired,
   gameURL,
@@ -22,6 +22,7 @@ import {
   openGame,
   row,
   say,
+  setBreadcrumb,
   viewURL,
 } from "./page.js";
 import { goToLogin } from "../app.js";
@@ -38,8 +39,10 @@ export async function viewsPage(opened) {
     say(noteEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
     return opened;
   }
-  const back = doc.getElementById("back-to-game");
-  if (back) back.href = gameURL(opened.slug);
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_VIEWS },
+  ]);
 
   let cursor = null;
   let rendered = 0;

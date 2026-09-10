@@ -224,10 +224,10 @@ const SHELL_IDS = [
   "view-error",
   "view-narrow",
   "entity-panel",
-  "back-to-game",
-  "back-to-views",
-  "back-to-types",
-  "back-to-type",
+  // The trail that replaced four differently-worded back links. Every
+  // shell inside a game declares it; the pages fill it through
+  // pages/page.js setBreadcrumb.
+  "crumbs",
 ];
 
 const GAME = { id: "1e9d6b0c-4f7a-4a9e-8a5b-2c1d3e4f5a6b", slug: "azeroth", name: "Azeroth" };
@@ -598,7 +598,7 @@ const CATALOGUE_IDS = [
   "entities-empty",
   "entities-error",
   "entities-more",
-  "back-to-types",
+  "crumbs",
 ];
 
 check("theCatalogueSaysItIsACatalogueAndNotAView", async () => {
@@ -621,6 +621,63 @@ check("theCatalogueSaysItIsACatalogueAndNotAView", async () => {
     CATALOGUE_NOTE.includes("not a view"),
     "the catalogue's own line does not distinguish it from a view, which it is deliberately close to in appearance",
   );
+});
+
+// The trail replaced four differently-worded back links, and the thing
+// those links never did is the thing this asserts: the last crumb says
+// where the reader *is*. It is checked on the deepest trail the
+// catalogue has, and after the type's own fetch has landed — the page
+// puts a trail up before it knows the type's name and rewrites the last
+// crumb when it does, so a check that only saw the first one would pass
+// on a page still showing a key.
+check("theTrailNamesTheGameTheSectionAndWhereYouAre", async () => {
+  const dom = mount({
+    ids: CATALOGUE_IDS,
+    pathname: "/g/azeroth/t/quest",
+    routes: [
+      [(url) => url === base + "/types/by-key/quest", { body: { key: "quest", label: "Quest", label_plural: "Quests", field_schema: [] } }],
+      [(url) => url.startsWith(base + "/entities"), { body: { items: [] } }],
+      events,
+    ],
+  });
+  await load("catalogue");
+  const tag = (node) => String(node.tagName).toUpperCase();
+  const crumbs = dom.elements["crumbs"].children.filter((node) => tag(node) !== "SPAN");
+  assertEqual(
+    crumbs.map((node) => node.textContent).join(" / "),
+    "Azeroth / Catalogue / Quests",
+    "the trail does not name the game, the section and this page",
+  );
+  assertEqual(tag(crumbs[0]), "A", "the game is not a link back to the game");
+  assertEqual(tag(crumbs[1]), "A", "the section is not a link back to the section");
+  assertEqual(
+    tag(crumbs[2]),
+    "B",
+    "the last crumb is a link: a trail whose end is a link to the page you are on is a back link with extra steps",
+  );
+  assertEqual(
+    crumbs[2].getAttribute("aria-current"),
+    "page",
+    "the last crumb does not tell a screen reader it is the current page",
+  );
+
+  // The component's own contract, asserted against the component rather
+  // than through a page: **the last crumb is never a link, even when a
+  // caller hands it an href.** No caller does today, which is exactly why
+  // this is checked here — a guard only the call sites keep is a guard
+  // the seventh call site breaks.
+  const { crumbNodes } = await load("page");
+  const forced = crumbNodes(globalThis.document, [
+    { label: "Azeroth", href: "/g/azeroth" },
+    { label: "Quests", href: "/g/azeroth/t/quest" },
+  ]);
+  const lastForced = forced[forced.length - 1];
+  assertEqual(
+    tag(lastForced),
+    "B",
+    "a last crumb given an href became a link to the page the reader is already on",
+  );
+  assertEqual(lastForced.href, "", "the last crumb kept an address");
 });
 
 check("theCataloguePagesOverTheExistingCursor", async () => {
@@ -657,7 +714,7 @@ check("theCataloguePagesOverTheExistingCursor", async () => {
 
 // --- The entity -------------------------------------------------------
 
-const ENTITY_IDS = ["entity-name", "entity-address", "entity-error", "entity-content", "back-to-type"];
+const ENTITY_IDS = ["entity-name", "entity-address", "entity-error", "entity-content", "crumbs"];
 
 const QUEST_SCHEMA = [
   { key: "level", label: "Level", type: "number" },

@@ -13,9 +13,9 @@
 // ends are.
 
 import {
+  DESTINATION_CATALOGUE,
   countLabel,
   destinations,
-  DESTINATION_CATALOGUE,
   expired,
   fail,
   fill,
@@ -23,6 +23,7 @@ import {
   openGame,
   row,
   say,
+  setBreadcrumb,
   typeURL,
   whoWrites,
 } from "./page.js";
@@ -38,8 +39,10 @@ export async function typesPage(opened) {
     say(noteEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
     return opened;
   }
-  const back = doc.getElementById("back-to-game");
-  if (back) back.href = gameURL(opened.slug);
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_CATALOGUE },
+  ]);
 
   const answer = await opened.client.summary();
   if (!answer.ok) {

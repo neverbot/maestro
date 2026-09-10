@@ -22,7 +22,11 @@
 <noscript>
   <p class="notice">A view is a drawing this page builds in the browser, so it needs JavaScript enabled.</p>
 </noscript>
-<p class="muted"><a id="back-to-views" href="/">Back to the views</a></p>
+<!-- Filled by pages/page.js setBreadcrumb once the page knows what it is
+     looking at. It replaced this shell's back link: a trail says where you
+     are as well as where you came from, in one component instead of four
+     spellings across five screens. -->
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
 <!-- Everything on this page is built by pages/view.js: the frame owns
      every negative state (Task 4), the canvas owns the drawing and the

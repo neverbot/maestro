@@ -30,17 +30,20 @@
 
 import { absentCell, presentCell } from "../render/twin.js";
 import {
+  DESTINATION_CATALOGUE,
   countLabel,
   destinations,
-  DESTINATION_CATALOGUE,
   docURL,
   entityURL,
   expired,
   fail,
+  gameURL,
   openGame,
   say,
   segmentsOf,
+  setBreadcrumb,
   typeURL,
+  typesURL,
 } from "./page.js";
 import { goToLogin } from "../app.js";
 
@@ -401,8 +404,19 @@ export async function entityPage(opened) {
 
   say(nameEl, model.entity.name || model.entity.key);
   say(addressEl, model.entity.type_key + " · " + model.entity.key);
-  const back = doc.getElementById("back-to-type");
-  if (back) back.href = typeURL(opened.slug, typeKey);
+  // Four crumbs, and the third is the type's **key** rather than its
+  // plural label. The entity model carries `type_key` and not the type's
+  // label, and fetching the type for a word in a trail would be a second
+  // round trip on every entity page in the product. The key is also what
+  // the address bar says and what the line directly under this heading
+  // repeats, so a reader meets it twice rather than meeting a word the
+  // page had to pay for.
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_CATALOGUE, href: typesURL(opened.slug) },
+    { label: typeKey, href: typeURL(opened.slug, typeKey) },
+    { label: model.entity.name || model.entity.key },
+  ]);
 
   // The shell's own sections are replaced wholesale by the one builder
   // the panel shares, so the two cannot drift.

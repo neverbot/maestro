@@ -15,16 +15,18 @@
 // is why the button stays until the server stops sending a cursor.
 
 import {
+  DESTINATION_CATALOGUE,
   countLabel,
   destinations,
-  DESTINATION_CATALOGUE,
   emptyOrRows,
   entityURL,
   expired,
+  gameURL,
   openGame,
   row,
   say,
   segmentsOf,
+  setBreadcrumb,
   typesURL,
 } from "./page.js";
 import { goToLogin } from "../app.js";
@@ -59,8 +61,14 @@ export async function cataloguePage(opened) {
     say(metaEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
     return opened;
   }
-  const back = doc.getElementById("back-to-types");
-  if (back) back.href = typesURL(opened.slug);
+  // The type's own label is not known until its fetch lands, so the trail
+  // goes up now with the slug in the last crumb and is rewritten below
+  // once the type has a name. A crumb that waits is a page with no way
+  // back while it loads.
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_CATALOGUE, href: typesURL(opened.slug) },
+  ]);
 
   // /g/{slug}/t/{typeKey}: the segment after the "t". Read through
   // segmentsOf, so this page cannot disagree with the entity page about
@@ -83,7 +91,16 @@ export async function cataloguePage(opened) {
     say(errorEl, type.error.message);
     return opened;
   }
-  say(nameEl, type.result.label_plural || type.result.label || type.result.key);
+  const typeName = type.result.label_plural || type.result.label || type.result.key;
+  say(nameEl, typeName);
+  // The last crumb, now that the type has a name. Until this line it
+  // read the key, which is what the address says and what a reader who
+  // arrived by link already knows.
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_CATALOGUE, href: typesURL(opened.slug) },
+    { label: typeName },
+  ]);
   say(metaEl, type.result.key);
 
   let cursor = null;

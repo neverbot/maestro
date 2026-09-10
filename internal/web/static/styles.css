@@ -130,6 +130,7 @@
   --measure: 68ch;
 
   --header-h: 48px;
+  --crumbs-h: 32px;
   --row-h: 36px;
   --row-compact-h: 28px;
   --control-h: 32px;
@@ -278,6 +279,37 @@ p.muted { color: var(--muted); }
 }
 
 .header-spacer { flex: 1; }
+
+/* The trail from the game to this page, in the row under the header.
+   It replaced four differently-worded back links across five screens,
+   none of which said where the reader was. */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--crumbs-h);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.crumbs a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The last crumb is where you are, so it wears the ink and no link. */
+.crumbs b {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.crumb-sep { color: var(--line-strong); }
 
 .site-header .brand {
   color: inherit;

@@ -71,13 +71,15 @@ import "../components/mst-view-frame.js";
 import "../components/mst-table.js";
 import { entityBody, readEntity } from "./entity.js";
 import {
-  destinations,
   DESTINATION_VIEWS,
+  destinations,
   entityURL,
   expired,
+  gameURL,
   openGame,
   say,
   segmentsOf,
+  setBreadcrumb,
   viewsURL,
 } from "./page.js";
 import { goToLogin } from "../app.js";
@@ -395,8 +397,10 @@ export async function viewPage(opened, options = {}) {
     say(errorEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
     return null;
   }
-  const back = doc.getElementById("back-to-views");
-  if (back) back.href = viewsURL(opened.slug);
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_VIEWS, href: viewsURL(opened.slug) },
+  ]);
 
   const key = viewKeyOf(opened.location.pathname);
   if (key === "") {

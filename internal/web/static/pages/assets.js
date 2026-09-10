@@ -10,14 +10,15 @@
 // draws from, so a page with no outbound route shows every image on it.
 
 import {
+  DESTINATION_IMAGES,
   countLabel,
   destinations,
-  DESTINATION_IMAGES,
   emptyOrRows,
   expired,
   gameURL,
   openGame,
   say,
+  setBreadcrumb,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
 import { goToLogin } from "../app.js";
@@ -64,8 +65,10 @@ export async function assetsPage(opened) {
     say(noteEl, opened.failure ?? "You may not have access to this game, or it no longer exists.");
     return opened;
   }
-  const back = doc.getElementById("back-to-game");
-  if (back) back.href = gameURL(opened.slug);
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_IMAGES },
+  ]);
 
   let cursor = null;
   let rendered = 0;

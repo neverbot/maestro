@@ -21,6 +21,10 @@ import {
   postJSON,
   renderHeader,
 } from "./app.js";
+// The chrome every other page gets. This reading view was rendering the
+// header with no destinations at all, which is one of the three
+// different chromes the 2026-09-09 audit found inside a single game.
+import { DESTINATION_PROSE, destinations, gameURL, setBreadcrumb } from "./pages/page.js";
 // A relative specifier, not "/static/app.js": the browser resolves it
 // against this module's own URL and gets the same file either way, and
 // Node — which internal/web/jstest drives this page with — can resolve
@@ -135,7 +139,6 @@ function entityRow(link) {
   return item;
 }
 
-const backLink = document.getElementById("back-to-game");
 const titleEl = document.getElementById("doc-title");
 if (titleEl) {
   // /g/{slug}/doc?path=… — the slug in the path, the document's path in
@@ -144,10 +147,6 @@ if (titleEl) {
   const slugMatch = window.location.pathname.match(/^\/g\/([^/]+)\/doc$/);
   const slug = slugMatch ? decodeURIComponent(slugMatch[1]) : null;
   const docPath = new URLSearchParams(window.location.search).get("path") ?? "";
-  if (slug && backLink) {
-    backLink.href = `/g/${encodeURIComponent(slug)}`;
-  }
-
   // The game's row, from the same list every other page resolves a slug
   // against: /g/{slug} serves a static shell and resolves nothing
   // server-side, and this page adds none. It is fetched for the game's
@@ -167,7 +166,18 @@ if (titleEl) {
   } else {
     const list = games.ok ? games.games : [];
     const game = list.find((g) => g.slug === slug) || null;
-    renderHeader({ games: list, current: game });
+    const nav = game === null ? null : destinations(document, game.slug, DESTINATION_PROSE);
+    renderHeader({ games: list, current: game, nav });
+    if (game !== null) {
+      // The document's own title is not known yet — it arrives with the
+      // fetch below, which rewrites the last crumb. Until then the trail
+      // carries the path, which is what the address already says.
+      setBreadcrumb(document, [
+        { label: game.name, href: gameURL(game.slug) },
+        { label: DESTINATION_PROSE, href: gameURL(game.slug) + "#prose" },
+        { label: docPath },
+      ]);
+    }
 
     if (!docPath) {
       titleEl.textContent = "No document asked for";
@@ -180,7 +190,7 @@ if (titleEl) {
       showFailure("You may not have access to this game, or it no longer exists.");
     } else {
       // The stored slug, for the reason app.js's own call says.
-      await renderDocument(game.slug, docPath);
+      await renderDocument(game.slug, docPath, game.name);
     }
   }
 }
@@ -193,7 +203,11 @@ if (titleEl) {
 // The reading view comes first and its failure is the page's failure:
 // there is nothing worth showing beside a document that could not be
 // read.
-async function renderDocument(game, docPath) {
+// `game` is the **slug**, not the row: every fetch below addresses the
+// game by slug. The name comes in beside it because the trail says the
+// game's name and reading it off a slug string gave an empty first
+// crumb — found by opening the page.
+async function renderDocument(game, docPath, gameName) {
   const titleEl = document.getElementById("doc-title");
   const metaEl = document.getElementById("doc-meta");
   const bodyEl = document.getElementById("doc-body");
@@ -217,7 +231,16 @@ async function renderDocument(game, docPath) {
   // meta line names the document's last author and describeAuthor falls
   // back to this map for a user the server could not resolve.
   const membersByID = await loadMembers(game);
-  if (titleEl) titleEl.textContent = doc.title || doc.path || docPath;
+  const docTitle = doc.title || doc.path || docPath;
+  if (titleEl) titleEl.textContent = docTitle;
+  // The last crumb, now that the document has a title. It carried the
+  // path until this line, which is what the address says and what a
+  // reader who arrived by link already has.
+  setBreadcrumb(document, [
+    { label: gameName, href: gameURL(game) },
+    { label: DESTINATION_PROSE, href: gameURL(game) + "#prose" },
+    { label: docTitle },
+  ]);
   if (metaEl) {
     // The kind is optional on the wire, so the line is assembled from
     // the parts that are actually there rather than printing an empty

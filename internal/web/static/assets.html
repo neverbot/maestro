@@ -22,7 +22,11 @@
 <noscript>
   <p class="notice">This page needs JavaScript enabled in this browser.</p>
 </noscript>
-<p class="muted"><a id="back-to-game" href="/">Back to this game</a></p>
+<!-- Filled by pages/page.js setBreadcrumb once the page knows what it is
+     looking at. It replaced this shell's back link: a trail says where you
+     are as well as where you came from, in one component instead of four
+     spellings across five screens. -->
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
 <h1>Images</h1>
 <p class="muted" id="assets-note" aria-live="polite">Loading this game&#39;s images…</p>

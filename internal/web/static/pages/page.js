@@ -310,6 +310,53 @@ export function destinations(doc, slug, current) {
   return nav;
 }
 
+// --- The breadcrumb ---------------------------------------------------
+
+// The trail from the game to this page, and **the one component that
+// replaced four different back links**. The 2026-09-09 audit found "Back
+// to this game", "Back to the game", "Back to the catalogue" and "Back to
+// this type" on five screens: two spellings of one destination, and not
+// one of them saying where the reader currently was.
+//
+// A crumb with an href is a place to go; the last crumb has none and is
+// where you are. Every string goes in through textContent, and every
+// address comes from the functions above, so a crumb can only ever point
+// at a slug address.
+export function crumbNodes(doc, trail) {
+  const nodes = [];
+  trail.forEach((crumb, index) => {
+    if (index > 0) {
+      const sep = doc.createElement("span");
+      sep.className = "crumb-sep";
+      sep.setAttribute("aria-hidden", "true");
+      sep.textContent = "/";
+      nodes.push(sep);
+    }
+    const last = index === trail.length - 1;
+    const node = doc.createElement(crumb.href && !last ? "a" : "b");
+    if (crumb.href && !last) node.href = crumb.href;
+    if (last) node.setAttribute("aria-current", "page");
+    node.textContent = crumb.label ?? "";
+    nodes.push(node);
+  });
+  return nodes;
+}
+
+// setBreadcrumb fills the shell's own placeholder rather than prepending
+// a second one, so a page that renders twice — every page that names a
+// thing it had to fetch — does not stack two trails.
+//
+// It appends the nodes rather than building a nav and moving its
+// childNodes across: `childNodes` is a live NodeList the harness's DOM
+// stub does not model, and a product that reaches for a DOM API only a
+// browser has is a product one half of its tests cannot drive.
+export function setBreadcrumb(doc, trail) {
+  const host = doc.getElementById("crumbs");
+  if (!host) return null;
+  host.replaceChildren(...crumbNodes(doc, trail));
+  return host;
+}
+
 // --- The rows the catalogues are made of ------------------------------
 
 // countLabel spells a count with the right noun, so "1 entities" never

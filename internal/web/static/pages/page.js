@@ -88,7 +88,12 @@ export const SKILL_BUNDLE_LABEL = "How an agent writes one";
 // and refusing this one outright would leave the product's single piece
 // of onboarding pointing at a path this instance does not serve, which
 // is the *New view* button that leads nowhere wearing a different hat.
-export const SKILL_BUNDLE_HREF = "https://neverbot.github.io/maestro/agents/views";
+// It points at the **repository**, not at a documentation site: there is
+// no documentation site, `claude.md` says so plainly, and this link
+// 404ed for the whole build. A page offering an action it cannot
+// perform is the defect this sub-project is written against, and a
+// link to a page that does not exist is one.
+export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";
 
 // slugOf reads the game's slug out of a path. One reader, for the reason
 // this file exists.

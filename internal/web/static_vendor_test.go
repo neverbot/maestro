@@ -337,7 +337,7 @@ var namespaceDeclaration = regexp.MustCompile(`^export const [A-Z_]*NS = "http:/
 // named SKILL_BUNDLE_HREF, https, on this project's own documentation
 // site, with nothing after the semicolon.
 var documentationLink = regexp.MustCompile(
-	`^export const SKILL_BUNDLE_HREF = "https://neverbot\.github\.io/maestro/[a-z][a-z0-9/-]*";$`)
+	`^export const SKILL_BUNDLE_HREF = "https://github\.com/neverbot/maestro(#[a-z][a-z0-9-]*)?";$`)
 
 // networkReach is one line of one module that reaches outside the
 // instance.
@@ -779,16 +779,16 @@ func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
 // admits, what it still refuses, and that the front end contains exactly
 // one line it applies to.
 func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
-	admitted := `export const SKILL_BUNDLE_HREF = "https://neverbot.github.io/maestro/agents/views";`
+	admitted := `export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";`
 	if !documentationLink.MatchString(admitted) {
 		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
 	}
 	for name, refused := range map[string]string{
-		"a fetch of the same URL":   `const r = await fetch("https://neverbot.github.io/maestro/agents/views");`,
-		"an http spelling":          `export const SKILL_BUNDLE_HREF = "http://neverbot.github.io/maestro/agents/views";`,
-		"another host":              `export const SKILL_BUNDLE_HREF = "https://cdn.example.com/maestro/agents/views";`,
-		"another constant":          `export const ANALYTICS_HREF = "https://neverbot.github.io/maestro/agents/views";`,
-		"a declaration with a tail": `export const SKILL_BUNDLE_HREF = "https://neverbot.github.io/maestro/a"; fetch(SKILL_BUNDLE_HREF);`,
+		"a fetch of the same URL":   `const r = await fetch("https://github.com/neverbot/maestro#the-skill-bundle");`,
+		"an http spelling":          `export const SKILL_BUNDLE_HREF = "http://github.com/neverbot/maestro#the-skill-bundle";`,
+		"another host":              `export const SKILL_BUNDLE_HREF = "https://cdn.example.com/neverbot/maestro";`,
+		"another constant":          `export const ANALYTICS_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";`,
+		"a declaration with a tail": `export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro"; fetch(SKILL_BUNDLE_HREF);`,
 	} {
 		if documentationLink.MatchString(refused) {
 			t.Errorf("the exemption admits %s: %q", name, refused)

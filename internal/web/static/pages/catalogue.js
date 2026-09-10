@@ -137,10 +137,9 @@ export async function cataloguePage(opened) {
 }
 
 if (globalThis.document && globalThis.document.getElementById("type-note")) {
-  const opened = await openGame();
+  const opened = await openGame({ destination: DESTINATION_CATALOGUE });
   if (opened !== null) {
     const doc = opened.document;
-    if (opened.game !== null) doc.body.prepend(destinations(doc, opened.slug, DESTINATION_CATALOGUE));
     await cataloguePage(opened);
   }
 }

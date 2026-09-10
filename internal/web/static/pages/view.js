@@ -1147,13 +1147,12 @@ function receive(state, verdict) {
 }
 
 if (globalThis.document && globalThis.document.getElementById("view-root")) {
-  const opened = await openGame();
+  const opened = await openGame({ destination: DESTINATION_VIEWS });
   if (opened !== null) {
     const doc = opened.document;
     if (opened.game === null) {
       await viewPage(opened);
     } else {
-      doc.body.prepend(destinations(doc, opened.slug, DESTINATION_VIEWS));
       // The client is rebuilt with the answer seam once the slug is
       // known, because that is the earliest moment either can exist.
       // **Every run comes back through it**, the page's own and the

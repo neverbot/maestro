@@ -44,6 +44,17 @@ export const SEGMENT_ASSETS = "/assets";
 export const DESTINATION_VIEWS = "Views";
 export const DESTINATION_CATALOGUE = "Catalogue";
 export const DESTINATION_PROSE = "Prose";
+// Images is a destination because it is a screen. It was not one, and
+// /g/{slug}/assets therefore had no place of its own to mark: it marked
+// **Views**, so a reader saw the wrong tab in bold and a screen reader
+// was told the wrong location (found in the 2026-09-09 audit). A page in
+// the product with no entry in the bar is a page the bar has to lie
+// about.
+//
+// Analysis is deliberately *not* here yet, though the design settled it
+// as the fifth. Its screens do not exist, and a destination pointing at
+// nothing is worse than one that is missing: it lands with them.
+export const DESTINATION_IMAGES = "Images";
 export const DESTINATIONS = [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATION_PROSE];
 
 // The sentence a game with no views at all reads, and the one piece of
@@ -195,7 +206,13 @@ export async function openGame(options = {}) {
   // `game` may be null — a slug that reaches nothing. The switcher then
   // says "Games" instead of naming one, which is exactly the state that
   // most needs a way out.
-  renderHeader({ games: answer.games, current: game });
+  // The nav is built here and handed to the header, so the bar a person
+  // sees is one element in one order on every screen. `options.current`
+  // is the destination this page belongs to; a page that passes none
+  // gets the bar with nothing marked, which is honest, rather than the
+  // bar marking a page it is not on.
+  const nav = game === null ? null : destinations(doc, game.slug, options.destination || null);
+  renderHeader({ games: answer.games, current: game, nav });
   if (game === null) {
     return { slug, game: null, client: null, failure: null, document: doc, location: url };
   }
@@ -281,6 +298,7 @@ export function destinations(doc, slug, current) {
     [DESTINATION_VIEWS, viewsURL(slug)],
     [DESTINATION_CATALOGUE, typesURL(slug)],
     [DESTINATION_PROSE, gameURL(slug) + "#prose"],
+    [DESTINATION_IMAGES, assetsURL(slug)],
   ];
   for (const [label, href] of targets) {
     const link = doc.createElement("a");

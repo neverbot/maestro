@@ -257,6 +257,23 @@ export function renderHeader(options = {}) {
     header.append(gameSwitcher(games, options.current || null));
   }
 
+  // **The destinations belong in the bar, not above it.** Every page but
+  // the home used to prepend its own strip to the body *after* this
+  // header was already there, which drew the three least permanent
+  // things on the screen above the product's name and the way out of it.
+  // The 2026-09-09 audit measured three different chromes inside one
+  // game for the same reason. The caller passes the nav it has already
+  // built, because this module cannot import pages/page.js without a
+  // cycle.
+  if (options.nav) header.append(options.nav);
+
+  // Everything above is identity and navigation; everything after this
+  // is the account. The spacer is what makes the order an order rather
+  // than a coincidence of widths.
+  const spacer = document.createElement("span");
+  spacer.className = "header-spacer";
+  header.append(spacer);
+
   const signOut = document.createElement("button");
   signOut.type = "button";
   signOut.className = "sign-out";

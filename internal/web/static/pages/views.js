@@ -96,10 +96,9 @@ export async function viewsPage(opened) {
 }
 
 if (globalThis.document && globalThis.document.getElementById("view-list-note")) {
-  const opened = await openGame();
+  const opened = await openGame({ destination: DESTINATION_VIEWS });
   if (opened !== null) {
     const doc = opened.document;
-    if (opened.game !== null) doc.body.prepend(destinations(doc, opened.slug, DESTINATION_VIEWS));
     await viewsPage(opened);
   }
 }

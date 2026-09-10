@@ -12,7 +12,7 @@
 import {
   countLabel,
   destinations,
-  DESTINATION_VIEWS,
+  DESTINATION_IMAGES,
   emptyOrRows,
   expired,
   gameURL,
@@ -127,10 +127,9 @@ export async function assetsPage(opened) {
 }
 
 if (globalThis.document && globalThis.document.getElementById("assets-note")) {
-  const opened = await openGame();
+  const opened = await openGame({ destination: DESTINATION_IMAGES });
   if (opened !== null) {
     const doc = opened.document;
-    if (opened.game !== null) doc.body.prepend(destinations(doc, opened.slug, DESTINATION_VIEWS));
     await assetsPage(opened);
   }
 }

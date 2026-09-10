@@ -270,13 +270,14 @@ p.muted { color: var(--muted); }
   z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--s5);
   height: var(--header-h);
   margin-bottom: var(--s5);
   background: var(--paper);
   border-bottom: 1px solid var(--line);
 }
+
+.header-spacer { flex: 1; }
 
 .site-header .brand {
   color: inherit;
@@ -720,20 +721,35 @@ ul.history li {
    other two destinations from wherever they are. The current one is
    marked rather than removed: a strip that dropped the page you are on
    would change shape as you navigate. */
+/* Inside the header now, and no longer a strip of its own above it. It
+   carries no rule and no padding of its own: the bar it sits in has the
+   height and the bottom rule, and a second border was the seam that made
+   two pieces of chrome out of one. */
 .destinations {
   display: flex;
-  gap: 1.25rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 0.9rem;
+  gap: var(--s4);
 }
+
 .destinations a {
   color: var(--muted);
   text-decoration: none;
+  /* Reserved at rest so marking the current one does not move the other
+     three by two pixels. */
+  border-bottom: 2px solid transparent;
+  padding-bottom: 1px;
 }
+
+.destinations a:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+/* The accent's third job: the current item. It is the only place in the
+   chrome a hue appears, and it appears once. */
 .destinations a[aria-current="page"] {
   color: var(--ink);
   font-weight: 600;
+  border-bottom-color: var(--focus);
 }
 
 /* Three lanes side by side where there is room and stacked where there

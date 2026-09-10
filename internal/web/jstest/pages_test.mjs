@@ -415,10 +415,11 @@ check("aGameWithNoViewsGetsTheAgentSentenceAndNoCreateButton", async () => {
     pathname: "/g/azeroth",
     routes: [[(url) => url === base + "/summary", { body: summaryOf() }], noKinds, noDocs, noViews, events],
   });
-  const { NO_VIEWS_SENTENCE, SKILL_BUNDLE_HREF, SKILL_BUNDLE_LABEL } = await load("page");
+  const { NO_VIEWS_HEADING, NO_VIEWS_SENTENCE, SKILL_BUNDLE_HREF, SKILL_BUNDLE_LABEL } = await load("page");
   await load("home");
   const lane = dom.elements["views-onboarding"];
   const rendered = text(lane);
+  assert(rendered.includes(NO_VIEWS_HEADING), `the onboarding heading is missing: ${JSON.stringify(rendered)}`);
   assert(rendered.includes(NO_VIEWS_SENTENCE), `the onboarding sentence is missing: ${JSON.stringify(rendered)}`);
   const anchors = links(lane);
   assertEqual(anchors.length, 1, "the onboarding is not exactly one link");

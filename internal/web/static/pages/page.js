@@ -65,9 +65,12 @@ export const DESTINATIONS = [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATI
 // taught by the skill bundle — so a *New view* control here would lead
 // nowhere, and a page offering an action it cannot perform is the defect
 // this whole sub-project is written against.
+// The heading is the fact, and it is short because it is read first and
+// often alone. The sentence beneath it is the explanation, and it keeps
+// the wording it has always had.
+export const NO_VIEWS_HEADING = "No saved views yet";
 export const NO_VIEWS_SENTENCE =
-  "This game has no saved views yet. A view is a saved query plus a renderer, " +
-  "written by an agent over MCP.";
+  "A view is a saved query plus a renderer, written by an agent over MCP.";
 export const SKILL_BUNDLE_LABEL = "How an agent writes one";
 
 // The one line in this front end that names an address outside this
@@ -434,23 +437,62 @@ export function whoWrites(role, what) {
   );
 }
 
-// onboarding is the no-views state: the sentence, then the link, and no
-// control of any kind. It is built here rather than in the two pages
-// that show it, because two copies of the product's only piece of
-// onboarding is two sentences that will come to differ.
-export function onboarding(doc) {
+// --- The three negative states, in one shape --------------------------
+
+// A screen with nothing on it is in one of exactly three states, and the
+// 2026-09-09 audit found four different shapes for the first of them on a
+// single screen: a filled box with a coloured left stripe, two bare grey
+// sentences, and a nine-line paragraph explaining the MCP API in a 200px
+// lane. Three of the four said the same thing in a different voice.
+//
+// One shape, three flavours, stated once:
+//
+//   - **empty**    nothing is here, and here is who would put it there
+//   - **loading**  the answer has not come back yet
+//   - **refused**  it came back and it was a refusal
+//
+// The heading is the fact, in ink. The sentence beneath it is the
+// explanation, muted, and there is at most one link. It never teaches an
+// API: the person reading it does not have one.
+export const STATE_EMPTY = "empty";
+export const STATE_LOADING = "loading";
+export const STATE_REFUSED = "refused";
+
+export function negativeState(doc, spec) {
   const root = doc.createElement("div");
-  root.className = "onboarding";
+  root.className = spec.kind === STATE_REFUSED ? "state refused" : "state";
 
-  const sentence = doc.createElement("p");
-  sentence.className = "muted";
-  sentence.textContent = NO_VIEWS_SENTENCE;
-  root.append(sentence);
+  const heading = doc.createElement("b");
+  heading.textContent = spec.heading ?? "";
+  root.append(heading);
 
-  const link = doc.createElement("a");
-  link.href = SKILL_BUNDLE_HREF;
-  link.textContent = SKILL_BUNDLE_LABEL;
-  root.append(link);
+  if (spec.sentence) {
+    const sentence = doc.createElement("span");
+    sentence.textContent = spec.sentence;
+    root.append(sentence);
+  }
+
+  // At most one, and only where there is somewhere useful to go. A state
+  // with two actions is a state that has become a form.
+  if (spec.action && spec.action.href) {
+    const link = doc.createElement("a");
+    link.href = spec.action.href;
+    link.textContent = spec.action.label ?? "";
+    root.append(link);
+  }
 
   return root;
+}
+
+// onboarding is the no-views state, and it is now the shared shape with
+// the product's one piece of onboarding in it rather than a component of
+// its own. It kept its name and its sentence; what it lost is the box and
+// the 3px coloured left stripe, which the identity bans by name.
+export function onboarding(doc) {
+  return negativeState(doc, {
+    kind: STATE_EMPTY,
+    heading: NO_VIEWS_HEADING,
+    sentence: NO_VIEWS_SENTENCE,
+    action: { href: SKILL_BUNDLE_HREF, label: SKILL_BUNDLE_LABEL },
+  });
 }

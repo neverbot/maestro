@@ -834,13 +834,36 @@ ul.history li {
 
 /* The one piece of onboarding in this product: a sentence and a link,
    and deliberately no control. */
-.onboarding {
-  padding: 1rem;
-  background: var(--ground);
-  border-left: 3px solid var(--line-strong);
+/* **The three negative states, in one shape.** This rule replaced a
+   filled box with a `border-left: 3px` stripe — a coloured side stripe is
+   banned by name in design.md, and it was the only one of four empty
+   states on that screen wearing a box at all.
+
+   No box, no stripe, no background: a state is a sentence in the content
+   column, capped at a measure a person reads rather than scans. */
+.state {
+  display: grid;
+  justify-items: start;
+  gap: var(--s1);
+  padding: var(--s4) 0;
+  max-width: 62ch;
+  color: var(--muted);
 }
-.onboarding p {
-  margin-top: 0;
+
+.state b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Refusal is the one negative state that has gone wrong rather than
+   merely being empty, and --danger is the token that already means
+   "this needs your attention". */
+.state.refused b {
+  color: var(--danger);
+}
+
+.state a {
+  margin-top: var(--s1);
 }
 
 /* The entity page's fields. Three columns — label, value, declared type

@@ -269,3 +269,53 @@ widths, which is the only reason it is a footnote and not a shipped bug.
   screen its full width, a help panel that is not permanently over the
   drawing, and legible labels on a background image.
 - **Pass 7** re-opens all ten at the four widths in this document.
+
+---
+
+## What pass 3 built, and what it corrected here
+
+Recorded where the decisions live, not in a commit message.
+
+**The control vocabulary is one file.** `static/components/control-styles.js`
+states what a button, a field, a chip and a link look like, in terms of
+`var(--…)`, and every shadow root adopts it. Measured on the view screen
+before and after: `Save as…` went from `#e9e9ed` with a `2px outset`
+bevel and no radius to the ink fill at 3px; the `class_key` field went
+from `#ffffff` at `-apple-system` 13.33px to the raised surface at 14px.
+Five of six controls changed. Only the page's own *Sign out* was ever
+styled, because it is the only one outside a shadow root.
+
+**It imports nothing, and that was a correction.** The first version
+imported `unsafeCSS` from Lit for one line, which put Lit into the module
+graph of `mst-canvas` and `mst-ground` — two plain custom elements that
+had deliberately never depended on it. Their harnesses failed to resolve
+a bare specifier, and once that was fixed they failed again on a DOM stub
+with no `createTreeWalker`. The three Lit components wrap the string
+themselves now, in the one place that already imports Lit.
+
+**Three corrections to what this document said.**
+
+- The row is **36px with the slug inline**, and the design system's own
+  table component was still stacking it under the name when this document
+  was written. A rule stated and not carried one step along, inside the
+  document that states it.
+- **Analysis is not a destination yet.** The frame settled five and four
+  shipped: Views, Catalogue, Prose and Images. A destination pointing at
+  screens that do not exist is worse than one that is missing, so it
+  lands with them. Images shipped now because the page exists and had no
+  entry of its own to mark, which is why `/assets` was marking Views.
+- The entity trail's third crumb is the type's **key**, not its plural
+  label. The entity model carries `type_key` and not the label, and a
+  fetch for one word in a trail is a round trip on every entity page.
+
+**Two mechanisms nothing read, removed rather than kept.** `--rail`,
+`--shadow-3` and `--dur-disclosure` were declared with the rest of the
+scale and describe a frame no markup carries yet; the token guard caught
+all three the first time the suite ran. They land with the screens that
+read them.
+
+**What pass 3 did not do, deliberately.** The negative-state component
+exists and the no-views state uses it; the other empty states on the home
+and the catalogue still speak in their own voice. Those screens belong to
+passes 4 to 6, and rewriting their copy from here would be editing three
+screens through a component's back door.

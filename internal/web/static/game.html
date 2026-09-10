@@ -22,6 +22,8 @@
 <noscript>
   <p class="notice">This page needs JavaScript enabled in this browser.</p>
 </noscript>
+
+<main class="page">
 <h1 id="game-name">Loading…</h1>
 <p class="muted" id="game-summary" aria-live="polite">Loading this game…</p>
 
@@ -38,7 +40,7 @@
      order, so a reordered home is a failing check and not a surprise. -->
 <div id="home" class="lanes" hidden>
   <section class="lane" id="lane-views" aria-labelledby="lane-views-heading">
-    <h2 id="lane-views-heading"><a id="views-link" href="/">Views</a></h2>
+    <h2 id="lane-views-heading">Views</h2>
     <ul class="catalogue" id="views" hidden></ul>
     <!-- The one piece of onboarding in this product: a sentence and a
          link, never a *New view* button. pages/page.js carries both. -->
@@ -48,7 +50,7 @@
   </section>
 
   <section class="lane" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
-    <h2 id="lane-catalogue-heading"><a id="types-link" href="/">Catalogue</a></h2>
+    <h2 id="lane-catalogue-heading">Catalogue</h2>
     <ul class="catalogue" id="types"></ul>
     <p class="muted" id="types-empty" hidden>
       This game has no entity types yet. A game declares its own — Quest, Zone
@@ -93,6 +95,7 @@
   </section>
 </div>
 
-<p class="muted"><a id="assets-link" href="/">Images</a></p>
+
+</main>
 
 <script type="module" src="/static/pages/home.js"></script>

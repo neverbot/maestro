@@ -89,8 +89,7 @@ button {
    filled accent button would spend the accent on a fourth meaning and
    make every screen carrying a form the loudest screen in the product. */
 button:hover:not(:disabled) {
-  background: var(--ground);
-  color: var(--ink);
+  background: var(--ink-hover);
 }
 
 button:disabled {

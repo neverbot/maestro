@@ -215,7 +215,15 @@ export async function openGame(options = {}) {
   // gets the bar with nothing marked, which is honest, rather than the
   // bar marking a page it is not on.
   const nav = game === null ? null : destinations(doc, game.slug, options.destination || null);
-  renderHeader({ games: answer.games, current: game, nav });
+  renderHeader({
+    games: answer.games,
+    current: game,
+    nav,
+    // The same list the strip was built from, for the widths where the
+    // strip cannot be shown.
+    destinations: game === null ? null : destinationTargets(game.slug),
+    destination: options.destination || null,
+  });
   if (game === null) {
     return { slug, game: null, client: null, failure: null, document: doc, location: url };
   }
@@ -291,19 +299,33 @@ export function emptyOrRows(listEl, emptyEl, count) {
 // The current one is marked with `aria-current` rather than removed: a
 // strip that dropped the page you are on changes shape as you navigate,
 // which is the one thing a persistent strip must not do.
-export function destinations(doc, slug, current) {
-  const nav = doc.createElement("nav");
-  nav.className = "destinations";
-  // Prose has no listing page of its own: the home's third lane is the
-  // whole of it, so this link is the home anchored at that lane rather
-  // than a fourth shell nobody would have anything else to put on.
-  const targets = [
+// The four destinations as data, so the two places that show them build
+// from one list rather than one of them reading the other back out of the
+// DOM. The switcher's narrow-width copies were built by calling
+// querySelectorAll on the rendered nav, which is an API the harness's DOM
+// stub does not model — a product that reaches for a browser-only method
+// is a product half its tests cannot drive, and this is the second time
+// in one design pass that exact mistake landed.
+export function destinationTargets(slug) {
+  return [
     [DESTINATION_VIEWS, viewsURL(slug)],
     [DESTINATION_CATALOGUE, typesURL(slug)],
+    // Prose has no listing page of its own: the home's third lane is the
+    // whole of it, so this link is the home anchored at that lane.
     [DESTINATION_PROSE, gameURL(slug) + "#prose"],
     [DESTINATION_IMAGES, assetsURL(slug)],
   ];
-  for (const [label, href] of targets) {
+}
+
+export function destinations(doc, slug, current) {
+  const nav = doc.createElement("nav");
+  nav.className = "destinations";
+  // Two navigations on most screens, and only one of them was named.
+  nav.setAttribute("aria-label", "Sections of this game");
+  // Prose has no listing page of its own: the home's third lane is the
+  // whole of it, so this link is the home anchored at that lane rather
+  // than a fourth shell nobody would have anything else to put on.
+  for (const [label, href] of destinationTargets(slug)) {
     const link = doc.createElement("a");
     link.href = href;
     link.textContent = label;

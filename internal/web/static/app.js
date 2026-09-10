@@ -188,7 +188,7 @@ export const GAMES_PATH = "/games";
 // open in a state this file forgot to close. Built with
 // createElement/textContent throughout, never innerHTML — a game's name
 // is chosen by whoever created the game.
-function gameSwitcher(games, current) {
+function gameSwitcher(games, current, destinations, destination) {
   const details = document.createElement("details");
   details.className = "game-switcher";
 
@@ -222,6 +222,29 @@ function gameSwitcher(games, current) {
   all.append(allLink);
   list.append(all);
 
+  // **The destinations, for the widths where the bar cannot hold them.**
+  // Below 780px the bar has no room and CSS hides the strip; hiding
+  // navigation with nothing in its place leaves a phone with no way to
+  // change section, which the frame calls out by name. They are copied
+  // into this menu — copied and not moved, because the strip is the way
+  // in at every width above that, and one of the two is always the one
+  // showing. `.narrow-only` is what decides which, in exactly one rule.
+  if (Array.isArray(destinations)) {
+    const rule = document.createElement("li");
+    rule.className = "game-switcher-sep narrow-only";
+    list.append(rule);
+    for (const [label, href] of destinations) {
+      const item = document.createElement("li");
+      item.className = "narrow-only";
+      const link = document.createElement("a");
+      link.href = href;
+      link.textContent = label;
+      if (label === destination) link.setAttribute("aria-current", "page");
+      item.append(link);
+      list.append(item);
+    }
+  }
+
   details.append(list);
   return details;
 }
@@ -243,18 +266,27 @@ function gameSwitcher(games, current) {
 // no list — the picker itself, which *is* the list — passes nothing and
 // gets no switcher.
 export function renderHeader(options = {}) {
+  // Two elements, not one: the bar spans the window so its bottom rule
+  // crosses the whole page, and the row inside it is capped at the page
+  // width so the wordmark lines up with the content below. Built as one
+  // element, the bar inherited the page's cap and drew a paper band with
+  // 120px of ground either side of it on a 1680px monitor.
   const header = document.createElement("header");
   header.className = "site-header";
+
+  const inner = document.createElement("div");
+  inner.className = "header-inner";
+  header.append(inner);
 
   const brand = document.createElement("a");
   brand.className = "brand";
   brand.href = "/";
   brand.textContent = "Maestro";
-  header.append(brand);
+  inner.append(brand);
 
   const games = Array.isArray(options.games) ? options.games : [];
   if (games.length > 0) {
-    header.append(gameSwitcher(games, options.current || null));
+    inner.append(gameSwitcher(games, options.current || null, options.destinations, options.destination));
   }
 
   // **The destinations belong in the bar, not above it.** Every page but
@@ -265,14 +297,14 @@ export function renderHeader(options = {}) {
   // game for the same reason. The caller passes the nav it has already
   // built, because this module cannot import pages/page.js without a
   // cycle.
-  if (options.nav) header.append(options.nav);
+  if (options.nav) inner.append(options.nav);
 
   // Everything above is identity and navigation; everything after this
   // is the account. The spacer is what makes the order an order rather
   // than a coincidence of widths.
   const spacer = document.createElement("span");
   spacer.className = "header-spacer";
-  header.append(spacer);
+  inner.append(spacer);
 
   const signOut = document.createElement("button");
   signOut.type = "button";
@@ -289,7 +321,7 @@ export function renderHeader(options = {}) {
     }
     window.location.href = "/login";
   });
-  header.append(signOut);
+  inner.append(signOut);
 
   document.body.prepend(header);
 }

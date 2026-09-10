@@ -33,6 +33,19 @@
  * separation of both sets are what they claim to be. None of that is a
  * matter of taste, so none of it is left to one.
  */
+/* **The one reset in this file, and the frame does not work without it.**
+   Without it `max-width` is a content-box width, so --page-max plus two
+   24px gutters laid out at 1488px rather than 1440; a header declared
+   48px tall measured 49 because its 1px rule sat outside the height; and
+   a list row measured 36px or 37px depending on whether it was the last
+   one, which is the one-pixel wobble design.md names and this stylesheet
+   then shipped. All three were one missing line. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 :root {
   color-scheme: light dark;
 
@@ -52,6 +65,11 @@
   --raised: #fcfaf4;
 
   --ink: #2c221b;
+  /* The primary button's hover, and the only reason it is a token rather
+     than a mix: a computed colour has no theme. Darker than --ink on
+     paper and *lighter* than it on the dark ground, because "pressed
+     harder" is a different direction in each. */
+  --ink-hover: #1b130d;
   --muted: #6e625a;
 
   /* Two rules, because they do two jobs. --line is the decorative
@@ -159,8 +177,6 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--sans);
-  font-size: 0.875rem;
-  line-height: 1.5;
 }
 
 /* Dark is not an inversion. The ground is a warm near-black rather than
@@ -177,6 +193,7 @@
     --raised: #26221c;
 
     --ink: #e7e2d9;
+    --ink-hover: #faf6ef;
     --muted: #9a9289;
 
     --line: #36312a;
@@ -246,19 +263,47 @@ a:hover {
    The ground moves too. --ground is the desk and --paper is the sheet on
    it, so the document wears the desk and the reading surfaces sit on
    top; a body painted --paper made every panel invisible against it. */
+/* **The body is the window, not the page.** It carried --page-max and the
+   gutters until the header needed to be full-bleed: a sticky bar that
+   stops 120px short of the window edge on a 1680px monitor, with a
+   bottom rule ending in mid-air, is not the bar the frame describes. The
+   cap moved to .page, which every shell wraps its content in, and to
+   .site-header's own inner row.
+
+   The size is set here rather than on :root. On :root it detuned every
+   rem in this file — the root resolves rem against the initial 16px, so
+   a 0.875rem root made `1.6rem` mean 22.4px and `2rem` mean 28px, which
+   is not a step on the spacing scale this file calls mandatory. */
 body {
-  margin: 0 auto;
-  padding: 0 var(--gutter) var(--s6);
+  margin: 0;
+  padding: 0;
   background: var(--ground);
   color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.page {
   max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 var(--gutter) var(--s6);
 }
 
 @media (max-width: 780px) {
-  body { padding: 0 var(--s4) var(--s5); }
+  .page { padding: 0 var(--s4) var(--s5); }
 }
 
-h1 { font-size: 1.6rem; }
+/* The display role. A game's name is the game's own word, so it is the
+   serif; it was the UA's bold system-ui with a size override, which is
+   the Two Voices Rule failing at the largest element on the page. */
+h1 {
+  font-family: var(--serif);
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin: 0 0 var(--s2);
+}
 
 p.muted { color: var(--muted); }
 
@@ -269,13 +314,26 @@ p.muted { color: var(--muted); }
   position: sticky;
   top: 0;
   z-index: 20;
+  margin-bottom: var(--s5);
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The row inside the bar. The bar is the width of the window so its rule
+   crosses the whole page; the row is capped and centred so its contents
+   line up with the page's own left edge. */
+.header-inner {
   display: flex;
   align-items: center;
   gap: var(--s5);
   height: var(--header-h);
-  margin-bottom: var(--s5);
-  background: var(--paper);
-  border-bottom: 1px solid var(--line);
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+@media (max-width: 780px) {
+  .header-inner { padding: 0 var(--s4); }
 }
 
 .header-spacer { flex: 1; }
@@ -311,7 +369,7 @@ p.muted { color: var(--muted); }
 
 .crumb-sep { color: var(--line-strong); }
 
-.site-header .brand {
+.header-inner .brand {
   color: inherit;
   text-decoration: none;
   font-weight: 600;
@@ -360,9 +418,8 @@ p.muted { color: var(--muted); }
   padding: 0.35rem;
   list-style: none;
   gap: 0.15rem;
-  background: var(--paper);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 .game-switcher[open] ul { display: grid; }
@@ -389,6 +446,13 @@ p.muted { color: var(--muted); }
 }
 
 .game-switcher-all a { color: var(--muted); }
+
+.game-switcher-sep {
+  border-top: 1px solid var(--line);
+  margin: var(--s1) 0;
+}
+
+.narrow-only { display: none; }
 
 #new-game > summary {
   cursor: pointer;
@@ -442,9 +506,12 @@ button {
   transition: background var(--dur-state) var(--ease);
 }
 
+/* **The primary button darkens; it does not invert.** This rule swapped
+   the ink fill for --ground with ink text, which is the *ghost* button's
+   hover: the two controls answered the pointer identically, and a solid
+   button going pale reads as "disabled", not as "armed". */
 button:hover:not(:disabled) {
-  background: var(--ground);
-  color: var(--ink);
+  background: var(--ink-hover);
 }
 
 button:disabled {
@@ -501,12 +568,19 @@ button:disabled {
 ul.games { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
 ul.games a { color: inherit; }
 
+/* The headline role. It was 14.7px in --muted with label tracking, which
+   put the body/heading ratio at 1.05 against the 1.24 this system calls
+   mandatory: a section heading 0.7px larger than the rows under it, and
+   greyer. A flat scale is the fault the whole design pass exists to fix,
+   and it was still here. */
 h2 {
-  font-size: 1.05rem;
-  margin: 2rem 0 0.75rem;
-  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 1.4rem;
+  line-height: 1.25;
+  margin: var(--s6) 0 var(--s3);
+  color: var(--ink);
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
 }
 
 /* The game home page's two catalogues: one row per declared type, with
@@ -534,12 +608,20 @@ ul.catalogue {
 ul.catalogue li {
   min-height: var(--row-h);
   display: grid;
+  /* **`center` and not `baseline`, and this is what the reported bug
+     was.** The row has no vertical padding by design — the height is the
+     token, not the sum of two paddings — so with a baseline alignment the
+     items sit at the start of a track that stretched to 36px: 21px of
+     content at the top and 14px of empty paper under it. `align-content`
+     does not fix it either, because .lane re-declares the row as a
+     single-line flex and a single-line flex ignores align-content. This
+     is the one property that governs both cases. */
   /* minmax(0, …) on all three, so a long key or a wide count shrinks
      rather than pushing the row past its column. A grid track's default
      minimum is its content, which in a three-lane home is how one row
      comes to overlap the lane beside it — found by opening the page. */
   grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto);
-  align-items: baseline;
+  align-items: center;
   gap: var(--s3);
   padding: 0 11px;
   border-bottom: 1px solid var(--line);
@@ -561,6 +643,14 @@ ul.catalogue li:hover { background: var(--ground); }
    the moment a reader asks "is this one?". */
 ul.catalogue a { text-decoration: none; }
 ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+.catalogue-label,
+.catalogue-key,
+.catalogue-count {
+  /* A fixed line box rather than vertical padding: it is what makes every
+     row the same height whatever it carries. */
+  line-height: 20px;
+}
 
 .catalogue-label { font-weight: 600; font-family: var(--serif); }
 
@@ -789,7 +879,7 @@ ul.history li {
    one: the whole point of the home is that a designer sees all three. */
 .lanes {
   display: grid;
-  gap: 2rem;
+  gap: var(--s6);
   grid-template-columns: 1fr;
   margin-top: 1.5rem;
 }
@@ -810,9 +900,15 @@ ul.history li {
    third of the window is not enough for a name, a key and a count side
    by side, and three columns squeezed into it is how a label came to be
    set one character per line — found by opening the page. */
+/* **No wrapping.** A lane is 288px at 970px, and a wrapping row put the
+   count on a second line: seven distinct row heights were measured on one
+   screen (36, 37, 43, 44, 44.1, 45.1 and 66.1). A row that wraps has no
+   height, and a list of rows with no height is not a list. The key is the
+   cell that gives way, because it is the one a reader already has in the
+   address. */
 .lane ul.catalogue li {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   column-gap: 0.75rem;
   row-gap: 0.15rem;
 }
@@ -927,4 +1023,26 @@ dl.fields dt.undeclared {
   max-width: 8rem;
   max-height: 5rem;
   border: 1px solid var(--line);
+}
+
+/* --- Narrow: the destinations move, they are never merely hidden ------
+ *
+ * **This block is the last thing in the file, and that is not tidiness.**
+ * It was written next to the switcher, three hundred lines above
+ * `.destinations { display: flex }`, so the base rule came later, won the
+ * cascade at equal specificity and kept the strip visible at every width
+ * — while the menu copies stayed hidden, because their own default was
+ * also being read in the wrong order. Nothing was red. The stylesheet
+ * already carries the same lesson twice: `.diff > .diff-added` is spelled
+ * with its parent for this reason, and the frame's spec has a paragraph
+ * about it. Third time.
+ *
+ * Exactly one of the two carries the destinations at any width, never
+ * both and never neither: below 780px the strip goes and the switcher's
+ * menu shows them, above it the reverse. Hiding navigation with nothing
+ * in its place would leave a narrow window with no way to change section.
+ */
+@media (max-width: 780px) {
+  .destinations { display: none; }
+  .narrow-only { display: block; }
 }

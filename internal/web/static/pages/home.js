@@ -26,6 +26,7 @@ import {
   TARGET_PROSE,
 } from "../client.js";
 import {
+  assetsURL,
   countLabel,
   docURL,
   emptyOrRows,
@@ -35,11 +36,10 @@ import {
   openGame,
   row,
   say,
-  typesURL,
   typeURL,
-  assetsURL,
-  viewsURL,
+  typesURL,
   viewURL,
+  viewsURL,
   whoWrites,
 } from "./page.js";
 import { goToLogin } from "../app.js";
@@ -111,6 +111,16 @@ export async function home(opened) {
     return { ...opened, onEvent: null };
   }
 
+  // **No trail here, deliberately.** The home is the root of a game and a
+  // one-item trail is not a trail: it printed the game's name in muted
+  // 0.8rem directly above an <h1> holding the same name. Every screen
+  // *under* the home has one, and the first crumb on all of them is this
+  // page.
+  // The tab's own name. Every page in the product was titled "Maestro",
+  // so a designer with the engine and three games open read three
+  // identical tabs.
+  doc.title = opened.game.name + " · Maestro";
+
   const { slug, client } = opened;
   // textContent, never markup: a game name is chosen by whoever created
   // the game, so it is untrusted input as far as this page is concerned.
@@ -120,9 +130,13 @@ export async function home(opened) {
   // here rather than written into the shell because only this module
   // knows the slug, and a hard-coded href in the shell would be an
   // address the address functions could not check.
-  linkTo(doc, "views-link", viewsURL(slug));
-  linkTo(doc, "types-link", typesURL(slug));
-  linkTo(doc, "assets-link", assetsURL(slug));
+  // The lane headings are headings, not links. They were two links and
+  // one plain heading, and both links pointed at destinations the header
+  // already carries: three routes to two pages from one screen.
+  // The Images link that used to sit here, alone below the three lanes
+  // and outside their grid, is gone: Images is a destination in the
+  // header now, and a second route to the same page from the same
+  // screen is the duplication design.md asks to be reported as a defect.
 
   const prose = proseLane(doc, slug, client);
 
@@ -345,12 +359,6 @@ function proseLane(doc, slug, client) {
   }
 
   return { load };
-}
-
-function linkTo(doc, id, href) {
-  const el = doc.getElementById(id);
-  if (el) el.href = href;
-  return el;
 }
 
 // The shell this module drives, and the one it does not: game.html has a

@@ -141,6 +141,14 @@ func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
 // are driven by two different harnesses and this is the one property
 // both must have; what the switcher *renders* is asserted for real
 // against pages/home.js in jstest/game_switcher_test.mjs.
+// handsOverTheGameList matches the property and not the formatting. It
+// was `strings.Contains(raw, "renderHeader({ games:")`, which failed the
+// day the call grew a fourth argument and wrapped onto several lines: a
+// guard that pins where the newlines go is a guard that fires on an
+// edit that changed nothing it cares about. It still fails, as it must,
+// on a `renderHeader()` with no list in it.
+var handsOverTheGameList = regexp.MustCompile(`renderHeader\(\{[^}]*\bgames:`)
+
 func TestEveryPageInsideAGameGivesItsHeaderTheGameList(t *testing.T) {
 	// The two shells a person can be inside a game on: every page under
 	// /g/{slug} except the reading view starts at openGame (page.js), and
@@ -150,7 +158,7 @@ func TestEveryPageInsideAGameGivesItsHeaderTheGameList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", module, err)
 		}
-		if !strings.Contains(string(raw), "renderHeader({ games:") {
+		if !handsOverTheGameList.Match(raw) {
 			t.Errorf("%s renders the shared header without handing it the caller's game list, so its "+
 				"switcher is not drawn: a page inside a game with no switcher is a page with no way to "+
 				"another game", module)

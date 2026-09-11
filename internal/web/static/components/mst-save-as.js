@@ -394,7 +394,13 @@ export class MstSaveAs extends HTMLElement {
     root.setAttribute("class", this.pending ? CLASS_SAVE_AS + " " + CLASS_PENDING : CLASS_SAVE_AS);
 
     if (!this.open) {
-      root.appendChild(this.button(ACTION_OPEN, LABEL_OPEN));
+      // A ghost, not the primary button. "Save as" is the least likely
+      // thing a person came to this screen to do — they came to read the
+      // picture — and it was rendering as the one ink-filled control on
+      // the page, above the drawing it is about.
+      const opener = this.button(ACTION_OPEN, LABEL_OPEN);
+      opener.className = "ghost";
+      root.appendChild(opener);
       return root;
     }
 
@@ -435,7 +441,9 @@ export class MstSaveAs extends HTMLElement {
     }
 
     root.appendChild(this.button(ACTION_SAVE, LABEL_SAVE));
-    root.appendChild(this.button(ACTION_CANCEL, LABEL_CANCEL));
+    const cancel = this.button(ACTION_CANCEL, LABEL_CANCEL);
+    cancel.className = "ghost";
+    root.appendChild(cancel);
 
     if (this.band) {
       const band = this.doc.createElement("p");

@@ -318,6 +318,16 @@ body {
   margin-bottom: var(--s5);
 }
 
+/* The view screen's one control, right-aligned above the frame it acts
+   on. It was an ink-filled button at the page's left edge, which is the
+   most emphatic treatment in the product spent on the least likely
+   action on the screen. */
+#save-as-root {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--s3);
+}
+
 .page-actions {
   margin-left: auto;
   padding-bottom: 3px;
@@ -341,6 +351,17 @@ body {
 }
 
 .sign-in input {
+  width: 100%;
+}
+
+/* The compare form: two version pickers and a button. They were the
+   width of the window to hold the string "Version 1", which is a control
+   saying nothing about what goes in it. */
+#compare-form {
+  max-width: 22rem;
+}
+
+#compare-form select {
   width: 100%;
 }
 

@@ -91,7 +91,7 @@ export async function viewsPage(opened) {
     say(noteEl, rendered === 0 ? "" : countLabel(rendered, "view", "views"));
     cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
     if (moreEl) {
-      moreEl.hidden = cursor === null;
+      moreEl.hidden = cursor === null || rendered === 0;
       moreEl.disabled = false;
     }
   }

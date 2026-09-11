@@ -122,7 +122,11 @@ export async function assetsPage(opened) {
     say(noteEl, rendered === 0 ? "" : countLabel(rendered, "image", "images"));
     cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
     if (moreEl) {
-      moreEl.hidden = cursor === null;
+      // **A pager on an empty list is a control with nothing to fetch.**
+      // The condition was the cursor alone, and an empty first page that
+      // still carried one left "Show more images" sitting under a state
+      // that had just said there are none.
+      moreEl.hidden = cursor === null || rendered === 0;
       moreEl.disabled = false;
     }
   }

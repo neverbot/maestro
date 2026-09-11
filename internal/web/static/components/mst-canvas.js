@@ -204,6 +204,8 @@ svg.surface text { paint-order: stroke; }
 .menu { max-width: 40ch; margin: 0.75rem; padding: 0.75rem; color: var(--ink); font-family: var(--sans); }
 /* Layout only; the look comes from the adopted control sheet. */
 .menu button { margin-right: 0.4rem; }
+.menu-notes { margin: 0.5rem 0 0; }
+.menu-notes > summary { cursor: pointer; color: var(--muted); font-size: 0.85em; }
 .menu .note { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.85em; }
 .menu .band { margin: 0.5rem 0 0; color: var(--danger); font-size: 0.9em; }
 /* In flight. A reduced-opacity treatment and not a spinner: what is
@@ -700,11 +702,26 @@ export class MstCanvas extends HTMLElement {
       button.textContent = action.label;
       root.appendChild(button);
     }
-    for (const note of menu.notes) {
-      const paragraph = this.doc.createElement("p");
-      paragraph.setAttribute("class", CLASS_NOTE);
-      paragraph.textContent = note;
-      root.appendChild(paragraph);
+    // **The notes fold away.** Three paragraphs about pinning, undo and
+    // last-writer-wins sat open on top of the drawing, permanently,
+    // covering about a quarter of it — documentation over the picture the
+    // page exists to show. They are still here and still exactly as
+    // argued; they are behind a disclosure, closed, so a reader meets the
+    // two controls and opens the explanation when a control surprises
+    // them. No word of them changed.
+    if (menu.notes.length > 0) {
+      const details = this.doc.createElement("details");
+      details.setAttribute("class", CLASS_NOTES);
+      const summary = this.doc.createElement("summary");
+      summary.textContent = LABEL_ABOUT_POSITIONS;
+      details.appendChild(summary);
+      for (const note of menu.notes) {
+        const paragraph = this.doc.createElement("p");
+        paragraph.setAttribute("class", CLASS_NOTE);
+        paragraph.textContent = note;
+        details.appendChild(paragraph);
+      }
+      root.appendChild(details);
     }
     if (arrangement.band) {
       const band = this.doc.createElement("p");
@@ -806,6 +823,13 @@ export const NUDGE_DEFAULT = 1;
 // still looking at.
 export const CLASS_PENDING = "pending";
 export const CLASS_MENU = "menu";
+export const CLASS_NOTES = "menu-notes";
+
+// The one word this component writes that is not a control's label and
+// not a model's sentence: the name of the fold the three notes live
+// behind. It names what is inside it, which is the only thing a summary
+// may do.
+export const LABEL_ABOUT_POSITIONS = "About saved positions";
 export const CLASS_NOTE = "note";
 export const CLASS_BAND = "band";
 

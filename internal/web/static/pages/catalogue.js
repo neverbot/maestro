@@ -247,7 +247,7 @@ export async function cataloguePage(opened) {
     sayScope();
     cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
     if (moreEl) {
-      moreEl.hidden = cursor === null;
+      moreEl.hidden = cursor === null || rendered === 0;
       // It says how many it will fetch. "Show more" makes a reader guess
       // whether pressing it costs them a second or a minute.
       moreEl.textContent = "Show 50 more";

@@ -332,7 +332,7 @@ function proseLane(doc, slug, client) {
     // page that reports the end is the empty one after the last row.
     cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
     if (moreEl) {
-      moreEl.hidden = cursor === null;
+      moreEl.hidden = cursor === null || rendered === 0;
       moreEl.disabled = false;
     }
   }

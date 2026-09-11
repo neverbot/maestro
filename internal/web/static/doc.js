@@ -24,7 +24,7 @@ import {
 // The chrome every other page gets. This reading view was rendering the
 // header with no destinations at all, which is one of the three
 // different chromes the 2026-09-09 audit found inside a single game.
-import { DESTINATION_PROSE, destinations, gameURL, setBreadcrumb } from "./pages/page.js";
+import { DESTINATION_PROSE, destinations, gameURL, setBreadcrumb, setReadOnly } from "./pages/page.js";
 // A relative specifier, not "/static/app.js": the browser resolves it
 // against this module's own URL and gets the same file either way, and
 // Node — which internal/web/jstest drives this page with — can resolve
@@ -241,6 +241,11 @@ async function renderDocument(game, docPath, gameName) {
     { label: DESTINATION_PROSE, href: gameURL(game) + "#prose" },
     { label: docTitle },
   ]);
+  // What this screen cannot do, where the action would be. The reading
+  // view is the one screen whose content is most obviously editable-
+  // looking and it said nothing at all.
+  const summary = await fetchAPI(`/api/games/${game}/summary`);
+  if (summary.ok) setReadOnly(document, summary.body.role, "writes this document");
   if (metaEl) {
     // The kind is optional on the wire, so the line is assembled from
     // the parts that are actually there rather than printing an empty

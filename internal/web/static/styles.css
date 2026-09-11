@@ -676,6 +676,32 @@ button:disabled {
   box-shadow: none;
 }
 
+/* A filter chip. It lives in the light DOM on the analysis page and in
+   the shadow roots through control-styles.js, and both say the same
+   thing: exactly one selected per group, and the selected one is the
+   only surface in this product the accent fills. */
+.chip {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--ground);
+  color: var(--ink);
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--focus);
+  border-color: var(--focus);
+  color: var(--focus-ink);
+  font-weight: 500;
+}
+
 .link-button {
   height: auto;
   background: none;
@@ -1042,6 +1068,96 @@ ul.history li:last-child { border-bottom: 0; }
 .history-author { color: var(--muted); font-size: 0.85rem; }
 .history-note { grid-column: 1 / -1; color: var(--muted); font-size: 0.85rem; }
 .history-revert { grid-column: 1 / -1; justify-self: start; font-size: 0.85rem; }
+
+/* --- Analysis ---------------------------------------------------------
+ *
+ * Three reports on one page, each with a head that carries its own
+ * control, because each is run when a reader asks rather than on load:
+ * two of them walk a whole game, and a page that fired all three on
+ * every visit would cost a second of server time to glance at.
+ */
+.report {
+  padding-bottom: var(--s5);
+  margin-bottom: var(--s5);
+  border-bottom: 1px solid var(--line);
+}
+
+.report:last-of-type { border-bottom: 0; }
+
+.report-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+.report-head h2 { margin: 0; }
+.report-head .btn { margin-left: auto; }
+.report-head .tools { margin-bottom: 0; }
+
+/* The negative half, and it is on screen whether the list is empty or
+   full: an empty findings list means either "the game is clean" or "the
+   walk followed nothing", and without this line the two read the same. */
+.walked {
+  margin-top: var(--s3);
+  font-size: 0.8rem;
+}
+
+/* A loop, spelled in order. It wraps rather than scrolling: a cycle is
+   read in order and losing the order loses the finding. */
+ul.cycles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s2);
+}
+
+li.cycle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+li.cycle:last-child { border-bottom: 0; }
+
+/* The names are the game's own words. */
+.cycle-node {
+  font-family: var(--serif);
+  font-weight: 500;
+}
+
+/* The closing repetition is the same name, shown as the loop shutting
+   rather than as another place to go. */
+.cycle-node.closing {
+  color: var(--muted);
+}
+
+.cycle-edge {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* The three states of a route. `stale` is not a failure and must not
+   read as one: it means the answer may no longer be about this game. A
+   screen that showed a tick or a cross would turn "we do not know" into
+   "it is fine". */
+.status {
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.status.never {
+  color: var(--muted);
+  border-bottom: 1px dashed var(--line-strong);
+}
+
+.status.stale { color: var(--danger); }
+
+.status.checked { color: var(--ink); }
 
 /* The comparison. internal/markdown's RenderDiff writes one <div> per
    line with exactly these five classes and escapes the line's text, so

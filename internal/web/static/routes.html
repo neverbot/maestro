@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Routes · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+<h1>Routes</h1>
+  <span class="page-actions" id="page-actions"></span>
+</div>
+
+<p class="muted" id="routes-note"></p>
+
+<ul class="catalogue" id="routes" hidden></ul>
+<div class="state" id="routes-empty" hidden>
+  <b>No routes yet</b>
+  <span>A route is a claim that one thing can be reached from another, saved so
+    it can be checked again when the design moves.</span>
+</div>
+<p class="error" id="routes-error" hidden></p>
+<button type="button" class="btn-more" id="routes-more" hidden>Show 50 more</button>
+</main>
+
+<script type="module" src="/static/pages/routes.js"></script>

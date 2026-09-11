@@ -35,6 +35,8 @@ export const SEGMENT_TYPE = "/t/";
 export const SEGMENT_ENTITY = "/e/";
 export const SEGMENT_DOC = "/doc";
 export const SEGMENT_ASSETS = "/assets";
+export const SEGMENT_ANALYSIS = "/analysis";
+export const SEGMENT_ROUTES = "/analysis/routes";
 
 // The three destinations, in the order the home shows them and in the
 // order every page's own navigation shows them. One list, so a lane
@@ -55,6 +57,11 @@ export const DESTINATION_PROSE = "Prose";
 // as the fifth. Its screens do not exist, and a destination pointing at
 // nothing is worse than one that is missing: it lands with them.
 export const DESTINATION_IMAGES = "Images";
+// The fifth, and it waited for its screens. The frame settled five
+// destinations and shipped four, because "a destination pointing at
+// nothing is worse than one that is missing"; these are the screens it
+// was waiting for.
+export const DESTINATION_ANALYSIS = "Analysis";
 export const DESTINATIONS = [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATION_PROSE];
 
 // The sentence a game with no views at all reads, and the one piece of
@@ -173,6 +180,18 @@ export function docURL(slug, path) {
 
 export function assetsURL(slug) {
   return gameURL(slug) + SEGMENT_ASSETS;
+}
+
+export function analysisURL(slug) {
+  return gameURL(slug) + SEGMENT_ANALYSIS;
+}
+
+export function routesURL(slug) {
+  return gameURL(slug) + SEGMENT_ROUTES;
+}
+
+export function routeURL(slug, key) {
+  return routesURL(slug) + "/" + encodeURIComponent(String(key ?? ""));
 }
 
 // --- Starting a page -------------------------------------------------
@@ -319,6 +338,7 @@ export function destinationTargets(slug) {
     // whole of it, so this link is the home anchored at that lane.
     [DESTINATION_PROSE, gameURL(slug) + "#prose"],
     [DESTINATION_IMAGES, assetsURL(slug)],
+    [DESTINATION_ANALYSIS, analysisURL(slug)],
   ];
 }
 

@@ -65,6 +65,11 @@ export function row(doc, spec) {
     const value = doc.createElement("span");
     value.className = cell && cell.absent ? "catalogue-cell absent" : "catalogue-cell";
     if (cell && cell.numeric) value.classList.add("numeric");
+    // A cell whose meaning has a treatment of its own — a route's three
+    // states are the only one today. It is a class and not a colour at
+    // the call site, so the stylesheet stays the one place a meaning is
+    // spelled.
+    if (cell && cell.status) value.classList.add("status", cell.status);
     value.textContent = cell ? (cell.text ?? "") : "";
     item.append(value);
   }

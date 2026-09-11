@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Route · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+<h1 id="route-name">Loading…</h1>
+  <span class="page-actions" id="page-actions"></span>
+</div>
+
+<p class="muted" id="route-meta" aria-live="polite"></p>
+
+<!-- A verdict about a game that has since moved says so here, above the
+     claim it is about: a reader who scrolls past it has already believed
+     it. -->
+<div class="state" id="route-stale" hidden>
+  <b id="route-stale-head"></b>
+  <span id="route-stale-body"></span>
+</div>
+
+<!-- Two columns because they are two things: the steps this route
+     asserts, in order, and what the last check found at each. -->
+<h2>The claim</h2>
+<ul class="catalogue" id="route-steps" hidden></ul>
+<div class="state" id="route-steps-empty" hidden>
+  <b>No steps</b>
+  <span>This route asserts nothing yet.</span>
+</div>
+
+<h2>The last check</h2>
+<p class="muted" id="route-verdict"></p>
+<div id="route-findings"></div>
+<p class="muted walked" id="route-walked"></p>
+<p class="error" id="route-error" hidden></p>
+</main>
+
+<script type="module" src="/static/pages/route.js"></script>

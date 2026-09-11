@@ -772,6 +772,42 @@ export function client({
     return get(base + "/search?" + search.toString());
   }
 
+  // --- Analysis ------------------------------------------------------
+  //
+  // The three read-only reports and the routes that have a lifecycle.
+  // They are POSTs because the engine takes bounds and filters, not
+  // because they write: nothing in this group changes a game except
+  // `checkRoute`, which records a verdict.
+  //
+  // Each takes the caller's own bounds and defaults to none, because the
+  // server's defaults are the ones the MCP surface uses and a second set
+  // here would be a second answer to the same question.
+  async function analysisCycles(options) {
+    return send(base + "/analysis/cycles", options && typeof options === "object" ? options : {});
+  }
+
+  async function analysisUnreachable(options) {
+    return send(base + "/analysis/unreachable", options && typeof options === "object" ? options : {});
+  }
+
+  async function analysisOrphans(options) {
+    return send(base + "/analysis/orphans", options && typeof options === "object" ? options : {});
+  }
+
+  async function listRoutes(options) {
+    const opts = options && typeof options === "object" ? options : {};
+    return get(paged(base + "/routes", opts, new URLSearchParams()));
+  }
+
+  async function getRoute(key) {
+    return get(base + "/routes/by-key/" + encodeURIComponent(String(key || "")));
+  }
+
+  // The one write in the whole of Analysis.
+  async function checkRoute(key) {
+    return send(base + "/routes/by-key/" + encodeURIComponent(String(key || "")) + "/check", {});
+  }
+
   async function getEntity(typeKey, key) {
     const path =
       base +
@@ -1003,6 +1039,12 @@ export function client({
     getRelationType,
     listEntities,
     searchEntities,
+    analysisCycles,
+    analysisUnreachable,
+    analysisOrphans,
+    listRoutes,
+    getRoute,
+    checkRoute,
     getEntity,
     listRelations,
     listEntityDocs,

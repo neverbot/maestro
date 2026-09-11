@@ -574,6 +574,9 @@ var shellRoutes = []struct {
 	{pattern: "GET /g/{slug}/t/{typeKey}", file: "type.html"},
 	{pattern: "GET /g/{slug}/e/{typeKey}/{key}", file: "entity.html"},
 	{pattern: "GET /g/{slug}/assets", file: "assets.html"},
+	{pattern: "GET /g/{slug}/analysis", file: "analysis.html"},
+	{pattern: "GET /g/{slug}/analysis/routes", file: "routes.html"},
+	{pattern: "GET /g/{slug}/analysis/routes/{key}", file: "route.html"},
 }
 
 // route registers pattern on the mux and records it in

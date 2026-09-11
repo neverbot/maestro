@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+<h1>Analysis</h1>
+  <span class="page-actions" id="page-actions"></span>
+</div>
+
+<p class="muted" id="analysis-note"></p>
+
+<!-- The fourth analysis. A route has stored state and a lifecycle —
+     written, checked, gone stale, re-checked — so it has a list and a
+     detail of its own rather than a section that could not hold either. -->
+<p><a id="routes-link" href="/">Routes: saved claims about a path, and whether they still hold</a></p>
+
+<!-- **Three sections, each run on demand.** These are POSTs and two of
+     them walk a whole game; a page that fired all three on every visit
+     would cost a second of server time to glance at. Each opens with its
+     button and no verdict, which is also honest: nothing has been
+     checked yet, and a page that looked checked before it was would be
+     the one output this engine's own error type calls the worst it could
+     produce. -->
+<section class="report" id="report-cycles" aria-labelledby="cycles-heading">
+  <div class="report-head">
+    <h2 id="cycles-heading">Loops</h2>
+    <button type="button" class="btn ghost" id="cycles-run">Check</button>
+  </div>
+  <p class="muted" id="cycles-verdict"></p>
+  <div id="cycles-truncated" class="state" hidden>
+    <b id="cycles-truncated-head"></b>
+    <span id="cycles-truncated-body"></span>
+  </div>
+  <div id="cycles-body"></div>
+  <p class="muted walked" id="cycles-walked"></p>
+  <p class="error" id="cycles-error" hidden></p>
+</section>
+
+<section class="report" id="report-unreachable" aria-labelledby="unreachable-heading">
+  <div class="report-head">
+    <h2 id="unreachable-heading">Out of reach</h2>
+    <button type="button" class="btn ghost" id="unreachable-run">Check</button>
+  </div>
+  <p class="muted" id="unreachable-verdict"></p>
+  <div id="unreachable-truncated" class="state" hidden>
+    <b id="unreachable-truncated-head"></b>
+    <span id="unreachable-truncated-body"></span>
+  </div>
+  <div id="unreachable-body"></div>
+  <p class="muted walked" id="unreachable-walked"></p>
+  <p class="error" id="unreachable-error" hidden></p>
+</section>
+
+<section class="report" id="report-orphans" aria-labelledby="orphans-heading">
+  <div class="report-head">
+    <h2 id="orphans-heading">Unconnected</h2>
+    <span class="tools" id="orphans-modes"></span>
+    <button type="button" class="btn ghost" id="orphans-run">Check</button>
+  </div>
+  <p class="muted" id="orphans-verdict"></p>
+  <div id="orphans-body"></div>
+  <p class="muted walked" id="orphans-walked"></p>
+  <button type="button" class="btn-more" id="orphans-more" hidden>Show 50 more</button>
+  <p class="error" id="orphans-error" hidden></p>
+</section>
+
+<!-- The refusal every one of the three can answer with, and the first
+     thing most designers will meet. It is a shared hole because the
+     recovery is the same whichever analysis asked. -->
+<div class="state refused" id="undeclared" hidden>
+  <b id="undeclared-head"></b>
+  <span id="undeclared-body"></span>
+  <span id="undeclared-advice"></span>
+</div>
+<ul class="catalogue" id="undeclared-types" hidden></ul>
+</main>
+
+<script type="module" src="/static/pages/analysis.js"></script>

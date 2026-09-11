@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administration · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- Applies the chosen theme before the first paint. Classic and not
+     deferred on purpose: see static/theme.js. -->
+<script src="/static/theme.js"></script>
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">Administering this instance needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page narrow">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+<h1>Administration</h1>
+</div>
+<p class="muted" id="admin-note" aria-live="polite">Loading…</p>
+
+<h2>Invitations</h2>
+<!-- **Not `id="invite"`.** app.js binds the sign-in shell's own
+     registration form by that id at module scope, and this page imports
+     app.js: a form called `invite` here was submitted twice, once to
+     POST /api/invites and once to POST /api/auth/register, and the
+     second refusal overwrote the first success on screen. -->
+<form id="new-invite">
+  <label for="new-invite-email">Email</label>
+  <input id="new-invite-email" type="email" name="email" placeholder="them@studio.com" autocomplete="off" required>
+  <p class="muted field-note">The address the link is for. It is not sent anywhere: this
+    instance delivers no email, so you pass the link on yourself.</p>
+  <p class="error" id="new-invite-error" role="alert" aria-live="assertive"></p>
+  <button type="submit">Create invitation</button>
+</form>
+
+<!-- The secret, once. POST /api/invites answers with the token and the
+     path to redeem it, and nothing can show either again. -->
+<div class="state" id="new-invite-made" hidden>
+  <b>Send this link. It is shown once.</b>
+  <span><code class="mono" id="new-invite-link"></code></span>
+  <span><button type="button" class="link-button" id="new-invite-copy">Copy the link</button></span>
+</div>
+
+<ul class="catalogue" id="invites" hidden></ul>
+<div class="state" id="invites-empty" hidden>
+  <b>Nobody is waiting</b>
+  <span>No invitation is outstanding. One appears here from the moment you
+    create it until the person uses it or you revoke it.</span>
+</div>
+<p class="error" id="invites-error" hidden></p>
+
+<h2>Administrators</h2>
+<!-- **A write with no read.** The server names an administrator by email
+     and offers no endpoint that lists users or admins, so this screen
+     cannot say who they are today. It says that rather than drawing an
+     empty list, which would read as "nobody". -->
+<p class="muted">Maestro cannot list the administrators of this instance: the server
+  has no endpoint that answers who they are. What you can do is grant it or take it away,
+  by the address the person signs in with.</p>
+<form id="admins">
+  <label for="admins-email">Email</label>
+  <input id="admins-email" type="email" name="email" placeholder="them@studio.com" autocomplete="off" required>
+  <fieldset class="choices">
+    <legend class="sr-only">Administrator</legend>
+    <label><input type="radio" name="is_admin" value="true" checked> Make an administrator</label>
+    <label><input type="radio" name="is_admin" value="false"> Take it away</label>
+  </fieldset>
+  <p class="error" id="admins-error" role="alert" aria-live="assertive"></p>
+  <button type="submit">Apply</button>
+  <p class="muted" id="admins-done" hidden></p>
+</form>
+
+</main>
+
+<script type="module" src="/static/pages/admin.js"></script>

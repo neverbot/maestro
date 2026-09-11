@@ -283,7 +283,14 @@ func TestNoPageURLContainsAUUID(t *testing.T) {
 				offences = append(offences, filepath.ToSlash(module)+":"+strconv.Itoa(line.number)+": "+line.text)
 				continue
 			}
-			if idInPath.MatchString(line.code) {
+			// **A page address, not an API one.** The rule is about the
+			// URLs a designer reads, types and recognises; an endpoint
+			// is addressed however the server spells it, and one of
+			// them — DELETE /api/invites/{invite} — takes the id
+			// because an invitation has no key and never gets one. A
+			// guard that refused that line would be a guard asking the
+			// front end to invent an address the server does not serve.
+			if idInPath.MatchString(line.code) && !strings.Contains(line.code, `"/api/`) {
 				offences = append(offences, filepath.ToSlash(module)+":"+strconv.Itoa(line.number)+": "+line.text)
 			}
 		}

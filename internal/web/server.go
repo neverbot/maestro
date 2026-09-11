@@ -566,6 +566,13 @@ var shellRoutes = []struct {
 	// reach.
 	{pattern: "GET /games", file: "index.html"},
 	{pattern: "GET /login", file: "login.html", byHand: true},
+	// The two screens that belong to a person rather than to a game.
+	// /admin is served to anybody who asks: every call it makes is
+	// admin-gated at the API, and the page says so in a sentence rather
+	// than being a 404 that cannot explain itself. The menu that leads
+	// there is drawn only for an admin.
+	{pattern: "GET /account", file: "account.html"},
+	{pattern: "GET /admin", file: "admin.html"},
 	{pattern: "GET /g/{slug}", file: "game.html", byHand: true},
 	{pattern: "GET /g/{slug}/doc", file: "document.html", byHand: true},
 	{pattern: "GET /g/{slug}/views", file: "views.html"},
@@ -755,7 +762,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request, _ Caller)
 // here for a client that wants to show "you are using token X" or
 // self-revoke it later (Task 12's token endpoints); nothing reads it back
 // out of a response today.
-func (s *Server) handleMe(w http.ResponseWriter, _ *http.Request, caller Caller) {
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, caller Caller) {
 	payload := map[string]any{
 		"user_id":  caller.UserID,
 		"is_admin": caller.IsAdmin,
@@ -765,6 +772,25 @@ func (s *Server) handleMe(w http.ResponseWriter, _ *http.Request, caller Caller)
 	}
 	if caller.TokenID != nil {
 		payload["token_id"] = *caller.TokenID
+	}
+	// **Who, in the words a person would use.** The three fields below
+	// are what the account screen shows and what the header says instead
+	// of a bare "Sign out": a user id names nobody. They are looked up
+	// rather than carried on Caller, which holds what authentication
+	// proved and not a copy of the row.
+	//
+	// Session callers only. A token is a key to one game, and the
+	// person's own email is not part of what the key opens; a token
+	// caller keeps exactly the answer it had before this.
+	if !caller.IsToken() {
+		user, err := s.opts.Identity.UserByID(r.Context(), caller.UserID)
+		if err != nil {
+			s.writeDomainError(w, r, err)
+			return
+		}
+		payload["email"] = user.Email
+		payload["display_name"] = user.DisplayName
+		payload["created_at"] = user.CreatedAt
 	}
 	writeJSON(w, http.StatusOK, payload)
 }

@@ -112,12 +112,22 @@ async function parseErrorBody(response) {
 // something a caller needs; one that returns 204 (nothing) or 200 with a
 // body a caller doesn't care about (login) simply gets an empty object.
 export async function postJSON(url, payload) {
+  return sendJSON("POST", url, payload);
+}
+
+// The same call with the verb as an argument, for the two writes that
+// are not posts: PATCH /api/me/password and DELETE /api/invites/{id}.
+// One implementation, because the error handling above is the part worth
+// having and a second copy of it is a second thing to get wrong.
+export async function sendJSON(method, url, payload) {
   let response;
   try {
     response = await fetch(url, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      // A DELETE carries nothing. `undefined` here is a request with no
+      // body at all, which is what the handler expects.
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     });
   } catch {
     return { ok: false, message: fallbackMessage };
@@ -139,7 +149,7 @@ export async function postJSON(url, payload) {
 // rate limiter's minute-long wait) can never be mistaken for a form that
 // silently ate the click — a double submission on a slow link is exactly
 // what this exists to prevent.
-function setFormBusy(form, busy, busyLabel) {
+export function setFormBusy(form, busy, busyLabel) {
   const button = form.querySelector("button[type=submit]");
   for (const field of form.elements) {
     field.disabled = busy;
@@ -308,6 +318,52 @@ export function renderHeader(options = {}) {
   spacer.className = "header-spacer";
   inner.append(spacer);
 
+  inner.append(personMenu(options.me ?? null));
+
+  document.body.prepend(header);
+}
+
+// **The bar says who is signed in.** It said "Sign out" and nothing
+// else: the one screen where a person could check which account they
+// were using was the one screen that never named it, on a product whose
+// first design principle is "always say where you are".
+//
+// It is a `<details>`, the same disclosure the game switcher already is,
+// so the bar carries one pattern rather than two. Sign out moves inside
+// it: a destructive action behind one deliberate click, beside the two
+// screens that belong to a person rather than to a game.
+export function personMenu(me) {
+  const wrap = document.createElement("details");
+  wrap.className = "person-menu";
+
+  const summary = document.createElement("summary");
+  // A name if the answer arrived, the word otherwise. Never a user id: a
+  // uuid names nobody, which is the fault the account screen exists to
+  // close.
+  summary.textContent = me && typeof me.display_name === "string" && me.display_name !== ""
+    ? me.display_name
+    : "Account";
+  wrap.append(summary);
+
+  const menu = document.createElement("div");
+  menu.className = "menu";
+  wrap.append(menu);
+
+  const account = document.createElement("a");
+  account.href = "/account";
+  account.textContent = "Your account";
+  menu.append(account);
+
+  // Admin-only, and absent rather than disabled: a control that refuses
+  // everyone who can see it teaches nothing. An account that is not an
+  // admin has no instance to administer and is told nothing about one.
+  if (me && me.is_admin === true) {
+    const admin = document.createElement("a");
+    admin.href = "/admin";
+    admin.textContent = "Administration";
+    menu.append(admin);
+  }
+
   const signOut = document.createElement("button");
   signOut.type = "button";
   signOut.className = "sign-out";
@@ -323,9 +379,17 @@ export function renderHeader(options = {}) {
     }
     window.location.href = "/login";
   });
-  inner.append(signOut);
+  menu.append(signOut);
 
-  document.body.prepend(header);
+  // Escape closes it, the way it closes the switcher: a menu a keyboard
+  // opened and cannot close is a trap.
+  wrap.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && wrap.open) {
+      wrap.open = false;
+      summary.focus();
+    }
+  });
+  return wrap;
 }
 
 const loginForm = document.getElementById("login");
@@ -473,7 +537,7 @@ if (loginForm) {
 // The border is set and cleared through a class rather than a style
 // attribute, because this server's policy admits no inline style and an
 // element.style assignment here would be refused in silence.
-function markRefused(form, field, errorEl, message) {
+export function markRefused(form, field, errorEl, message) {
   errorEl.textContent = message;
   if (!field) return;
   field.classList.add("refused");
@@ -545,6 +609,21 @@ export async function fetchAPI(path) {
   }
 }
 
+// fetchMe is fetchAPI over GET /api/me, **once per page**. The header
+// needs the person's name and whether they are an admin, and so does the
+// account screen; a second call for the same answer on one page is a
+// round trip spent on a fact that cannot have changed in between.
+//
+// A failure is not fatal to anything that calls it: the header falls
+// back to saying "Account", which is worse than a name and better than
+// no way to sign out.
+let mePromise = null;
+
+export function fetchMe() {
+  if (mePromise === null) mePromise = fetchAPI("/api/me");
+  return mePromise;
+}
+
 // fetchGames is fetchAPI over GET /api/games, with the one shape check
 // every caller of it would otherwise repeat: a body whose "games" is not
 // an array is treated as no games rather than crashing the page that is
@@ -581,8 +660,11 @@ const emptyState = document.getElementById("empty-state");
 const newGame = document.getElementById("new-game");
 const createGameForm = document.getElementById("create-game");
 if (gamesList) {
-  renderHeader();
-  const result = await fetchGames();
+  // The person, then the header: the bar names who is signed in, and the
+  // two calls are one round trip apart rather than one behind the other
+  // because neither answer depends on the other.
+  const [me, result] = await Promise.all([fetchMe(), fetchGames()]);
+  renderHeader({ me: me.ok ? me.body : null });
   if (!result.ok) {
     if (result.expired) {
       goToLogin();

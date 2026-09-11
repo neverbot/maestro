@@ -48,7 +48,13 @@ const stylesheetPath = "static/styles.css"
 const darkBlockMarker = "@media (prefers-color-scheme: dark)"
 
 var (
-	rootBlockRE   = regexp.MustCompile(`(?s):root\s*\{(.*?)\}`)
+	// The three shapes the root selector now has. The dark set is stated
+	// twice — once for a system that asks for it and once for a person
+	// who did — and a parser that only knew `:root {` read the second
+	// theme as empty and failed every guard in this file with the same
+	// line. TestTheTwoDarkBlocksAgree holds the two statements identical.
+	rootBlockRE = regexp.MustCompile(
+		`(?s):root(?::not\(\[data-theme="light"\]\)|\[data-theme="(?:dark|light)"\])?\s*\{(.*?)\}`)
 	declarationRE = regexp.MustCompile(`(?m)^\s*(--[a-z0-9-]+)\s*:\s*([^;]+);`)
 	referenceRE   = regexp.MustCompile(`var\(\s*(--[a-z0-9-]+)`)
 	hexRE         = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)

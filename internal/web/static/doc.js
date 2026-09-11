@@ -19,6 +19,7 @@ import {
   fetchGames,
   goToLogin,
   postJSON,
+  fetchMe,
   renderHeader,
 } from "./app.js";
 // The chrome every other page gets. This reading view was rendering the
@@ -160,14 +161,14 @@ if (titleEl) {
   // paths would be a page with no way off it, which is the exact defect
   // the switcher exists to close — and this page has more error paths
   // than any other in the product.
-  const games = await fetchGames();
+  const [who, games] = await Promise.all([fetchMe(), fetchGames()]);
   if (!games.ok && games.expired) {
     goToLogin();
   } else {
     const list = games.ok ? games.games : [];
     const game = list.find((g) => g.slug === slug) || null;
     const nav = game === null ? null : destinations(document, game.slug, DESTINATION_PROSE);
-    renderHeader({ games: list, current: game, nav });
+    renderHeader({ me: who.ok ? who.body : null, games: list, current: game, nav });
     if (game !== null) {
       // The document's own title is not known yet — it arrives with the
       // fetch below, which rewrites the last crumb. Until then the trail

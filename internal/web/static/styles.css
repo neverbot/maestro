@@ -187,7 +187,13 @@
    two that glow, which is the whole reason this set exists rather than a
    filter. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  /* **`:not([data-theme="light"])`, so an explicit choice wins.** The
+     account screen writes `data-theme` on the root element and a person
+     who asked for paper gets paper on a machine whose system is dark.
+     Without the guard this block would beat their choice at equal
+     specificity and the switch would work in one direction only, which
+     is the cascade defect this stylesheet has now shipped five times. */
+  :root:not([data-theme="light"]) {
     --paper: #1c1913;
     --ground: #13100b;
     --raised: #26221c;
@@ -217,6 +223,49 @@
     --data-7: #78d7d5;
     --data-8: #b67080;
   }
+}
+
+/* The scrollbars, the caret and a native control answer to
+   `color-scheme` and not to these tokens, so a chosen theme states it or
+   the page is warm paper with a dark scrollbar down its side. */
+:root[data-theme="light"] { color-scheme: light; }
+
+/* The same values as the block above, chosen rather than inherited from
+   the system. static_theme_test.go holds the two identical: a token
+   tuned in one and not the other is a theme that disagrees with itself,
+   and the only person who would ever see it is the one who used the
+   switch. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #1c1913;
+  --ground: #13100b;
+  --raised: #26221c;
+
+  --ink: #e7e2d9;
+  --ink-hover: #faf6ef;
+  --muted: #9a9289;
+
+  --line: #36312a;
+  --line-strong: #81776d;
+
+  --focus: #d78958;
+  --focus-ink: #17130e;
+
+  --danger: #e67a73;
+
+  --unset: transparent;
+
+  --dropped: #6b6459;
+
+  --data-1: #c5684f;
+  --data-2: #6bc3fe;
+  --data-3: #c86c00;
+  --data-4: #9c7cfd;
+  --data-5: #95d79e;
+  --data-6: #a56fad;
+  --data-7: #78d7d5;
+  --data-8: #b67080;
 }
 
 /* The one accent's three jobs, in the two places that exist today: the
@@ -594,6 +643,89 @@ p.muted { color: var(--muted); }
   margin: var(--s1) 0;
 }
 
+/* --- The person, at the right end of the bar --------------------------
+ *
+ * The same disclosure the switcher is, mirrored: its menu hangs from the
+ * right edge because the control it hangs from is the last thing in the
+ * row, and a left-anchored panel there would run off the window.
+ *
+ * The summary is **sans**, where the switcher's is serif: a game's name
+ * belongs to the game and a person's name belongs to the tool. The Two
+ * Voices Rule reads on the same line, which is the strongest place it
+ * can be demonstrated. */
+.person-menu { position: relative; }
+
+.person-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--control-h);
+  max-width: 14rem;
+  padding: 0 var(--s3);
+  cursor: pointer;
+  font-weight: 500;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.person-menu > summary:hover { background: var(--ground); }
+
+.person-menu > summary::-webkit-details-marker { display: none; }
+
+.person-menu > summary::after {
+  content: " \25be";
+  color: var(--muted);
+}
+
+.person-menu .menu {
+  background: var(--raised);
+  box-shadow: var(--shadow-2);
+  display: none;
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  min-width: 12rem;
+  margin: 0.4rem 0 0;
+  padding: 0.35rem;
+  gap: 0.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.person-menu[open] .menu { display: grid; }
+
+.person-menu .menu a,
+.person-menu .menu .sign-out {
+  min-height: var(--row-compact-h);
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.person-menu .menu a:hover,
+.person-menu .menu .sign-out:hover:not(:disabled) { background: var(--ground); }
+
+/* Signing out is not a navigation: it is the one thing in this menu that
+   ends something, so it sits under a rule rather than in the list. */
+.person-menu .menu .sign-out {
+  margin-top: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}
+
 .narrow-only { display: none; }
 
 /* A control, not a grey triangle. It was the only way to make a second
@@ -625,10 +757,97 @@ p.muted { color: var(--muted); }
 
 form { display: grid; gap: var(--s3); margin-top: var(--s5); }
 
+/* The Label role, which this rule invented a fourth size beside: it was
+   0.85rem at weight 400, and design.md's type scale contains no such
+   step. A field's name is a label in exactly the sense the scale means. */
 form label {
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
   color: var(--muted);
   margin-bottom: -0.4rem;
+}
+
+/* --- The surfaces that belong to a person, not to a game -------------
+ *
+ * One column, capped where prose is capped, because everything on these
+ * two screens is a sentence, a field or a short list. The catalogue's
+ * full width would leave a 62-character sentence adrift in 1440px. */
+.page.narrow { max-width: 52rem; }
+
+/* A short list of facts about you: name, address, since when. A
+   definition list and not a table, because there is one row per fact and
+   no column to compare down. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--s2) var(--s4);
+  margin: var(--s3) 0 0;
+  align-items: baseline;
+}
+
+.facts dt {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.facts dd { margin: 0; }
+
+/* A choice between three things a person makes once. The fieldset draws
+   no box: a border here would be a panel around three radio buttons. */
+.choices {
+  display: grid;
+  gap: var(--s2);
+  margin: var(--s3) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.choices label {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--row-compact-h);
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* A radio is the one control that must not be 32px tall. */
+.choices input[type="radio"] {
+  height: auto;
+  width: auto;
+  padding: 0;
+  accent-color: var(--focus);
+}
+
+/* **`class="mono"` had no rule at all.** entity.html sets the entity's
+   address in it — two machine identifiers and nothing else — and it
+   rendered in the tool's sans, against the Copyable Is Mono Rule, for as
+   long as that page has existed. A class nothing reads is a lie. */
+.mono {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* For a legend that names a group of radios the heading above already
+   named: said to a screen reader, not drawn twice. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* **`select` was never written in this file.** The 2026-09-10 pass fixed

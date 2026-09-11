@@ -20,7 +20,7 @@
 // which is the rule internal/web/static_client_test.go holds; what this
 // module owns is *where a page is*, not what a page knows.
 
-import { fetchGames, goToLogin, rememberGame, renderHeader } from "../app.js";
+import { fetchGames, fetchMe, goToLogin, rememberGame, renderHeader } from "../app.js";
 import { client } from "../client.js";
 
 // The route prefix of one game, and the segments under it. They are
@@ -209,7 +209,10 @@ export async function openGame(options = {}) {
   const doc = options.document || globalThis.document;
   const url = options.location || globalThis.window.location;
   const slug = slugOf(url.pathname);
-  const answer = await fetchGames();
+  // Both answers before the header, because the bar carries both: the
+  // switcher is the game list and the menu on the right is the person.
+  const [who, answer] = await Promise.all([fetchMe(), fetchGames()]);
+  const me = who.ok ? who.body : null;
   if (!answer.ok) {
     if (answer.expired) {
       goToLogin();
@@ -218,7 +221,7 @@ export async function openGame(options = {}) {
     // The header still goes up on a failed list — with no switcher,
     // because there is no list to switch through — so a page that could
     // not load is still a page a person can sign out of.
-    renderHeader();
+    renderHeader({ me });
     return { slug, game: null, client: null, failure: answer.message, document: doc, location: url };
   }
   const game = answer.games.find((row) => row.slug === slug) || null;
@@ -240,6 +243,7 @@ export async function openGame(options = {}) {
   // bar marking a page it is not on.
   const nav = game === null ? null : destinations(doc, game.slug, options.destination || null);
   renderHeader({
+    me,
     games: answer.games,
     current: game,
     nav,

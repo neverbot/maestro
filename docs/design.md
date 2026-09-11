@@ -180,7 +180,7 @@ the serif because they belong to the world being designed; a column
 header, a filter and a button are set in the sans because they belong to
 Maestro. That split is the single most legible thing about the system.
 
-This explicitly rejects what PRODUCT.md names: the generic admin panel,
+This explicitly rejects what `docs/product.md` names: the generic admin panel,
 the dark blue SaaS dashboard, GitHub's chrome, the ad-choked game wiki
 and the empty beautiful landing page. It is not a dashboard, it has no
 counter tiles, and it is not decorated. What is on screen is content.
@@ -358,8 +358,9 @@ flat.
 ### Chips
 
 - **Style:** pill, 1px Hairline border, Sepia text, transparent fill.
-- **State:** the selected chip fills with Kiln Rust and takes Rust Wash
-  text. Exactly one chip in a group is ever selected; a multi-select
+- **State:** the selected chip fills with Kiln Rust and takes
+  `accent-ink` text, the near-paper tone that stays legible on it. Rust
+  Wash is a background, never text, including here. Exactly one chip in a group is ever selected; a multi-select
   group uses checkboxes, not chips.
 
 ### Panels
@@ -391,8 +392,13 @@ The signature surface of this product and the one to get right.
 - **Header:** Label type, Sepia, sticky under the page header, one
   Hairline beneath.
 - **Hover:** the row turns Desk. No lift, no border change.
+- **Target:** the whole row is the link, through a pseudo-element on the
+  name that covers it, so the row keeps one anchor and one accessible
+  name. Only a genuine control inside the row is raised back above it. A
+  hover that lights the whole row over a link occupying a third of it is
+  a promise the row does not keep.
 - **Numbers:** right-aligned, `font-variant-numeric: tabular-nums`.
-- **Name cell:** the entity name in Literata 500 with its slug **inline**
+- **Name cell:** the entity name in Literata 600 with its slug **inline**
   after it, in Mono at Sepia. Stacking the slug underneath costs 17px a
   row and takes a 900px window from 17 rows to 9.
 - **Absent value:** the word for what is missing, in Sepia italic, for
@@ -406,8 +412,8 @@ The signature surface of this product and the one to get right.
 
 ### The page frame
 
-The one structure every screen is built in, decided once in
-`.superpowers/specs/2026-09-10-global-look-design.md`.
+The one structure every screen is built in, decided once and stated
+here.
 
 - **Content width:** 1440px maximum, centred on a full-bleed ground,
   24px gutters and 16px below 780px. The 68ch measure belongs to the
@@ -419,7 +425,9 @@ The one structure every screen is built in, decided once in
   rail carries what is true of the whole screen, never the screen's own
   content.
 - **Order in the header, left to right:** wordmark, game switcher,
-  destinations, spacer, account, sign out. One row, 48px, sticky.
+  destinations, spacer, sign out. One row, 48px, sticky. The account has
+  no screen of its own yet, so nothing in the bar names the person
+  signed in.
 - **Below it:** a 32px breadcrumb, then the page head — title, count,
   read-only notice — closed by a 1px rule and 24px of space.
 - **Wide content scrolls inside its own container**, never the page. A
@@ -441,8 +449,11 @@ box, never with a stripe, capped at 62ch.
 
 ### Navigation
 
-- **Header bar:** 46px, Ledger Paper, one Hairline beneath. Holds the
-  wordmark, the game switcher, a search field and the account.
+- **Header bar:** 48px, Ledger Paper, one Hairline beneath. Holds the
+  wordmark, the game switcher, the destinations, a spacer and sign out,
+  in that order. There is no search field in the bar: search belongs to
+  the catalogue it filters, and a second one here would be a control
+  that searches nothing in particular.
 - **Game switcher:** a `<details>` control, Leaf fill, lifted shadow
   when open, with the current game marked by `aria-current` and weight
   600 rather than by colour. It is always present on every screen inside

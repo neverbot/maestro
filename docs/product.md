@@ -37,7 +37,8 @@ what depends on itself, what nothing points at.
 Success is a designer opening a view an agent saved, understanding it in
 seconds, and spotting the thing that is wrong. Failure is a designer
 looking at a correct screen and not knowing what they are looking at.
-Today the product fails that test, which is why this document exists.
+The product failed that test when this document was written, and the
+redesign it started is the answer to it.
 
 ## Brand Personality
 
@@ -75,7 +76,9 @@ It never comes from rounded illustrations, mascots or exclamation marks.
 **1. Always say where you are.** Which game, which section, how to get
 back, how to go elsewhere. A designer who cannot switch games or name
 the screen they are on has no map, and every other quality is wasted.
-This is the first fault to fix, and it was a real reported bug.
+This was the first fault fixed: one header on every screen, carrying the
+game switcher and the destinations, and a breadcrumb under it that
+replaced four spellings of a back link.
 
 **2. Speak the game's vocabulary, not the metamodel's.** The model is
 generic on purpose; the interface must not be. A screen shows Quests and

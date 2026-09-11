@@ -47,6 +47,30 @@ function verdictWord(verdict) {
   return STEP_VERDICTS[key] || key;
 }
 
+// **A verdict has an age, and that is what makes stale meaningful
+// rather than alarming.** The status alone says "this may no longer be
+// about your game"; when it was taken and against which version of the
+// game is what lets a reader decide whether to care. Shown always, not
+// only when the route has gone stale — a fresh verdict with no date is
+// a claim with no standing either.
+export function whenChecked(raw) {
+  if (!raw) return "";
+  const when = new Date(raw);
+  return Number.isNaN(when.getTime()) ? String(raw) : when.toLocaleString();
+}
+
+export function metaLine(route) {
+  const parts = [route.key, STATUS_WORDS[route.status] || route.status];
+  const checked = whenChecked(route.last_checked_at);
+  if (checked !== "") {
+    parts.push("last checked " + checked);
+    if (Number.isFinite(route.last_checked_design_version)) {
+      parts.push("against design version " + route.last_checked_design_version);
+    }
+  }
+  return parts.join(" \u00b7 ");
+}
+
 export function paintVerdict(doc, slug, route) {
   const verdictEl = doc.getElementById("route-verdict");
   const findingsEl = doc.getElementById("route-findings");
@@ -127,7 +151,7 @@ export async function routePage(opened) {
     { label: "Routes", href: routesURL(opened.slug) },
     { label: name },
   ]);
-  say(metaEl, route.key + " · " + (STATUS_WORDS[route.status] || route.status));
+  say(metaEl, metaLine(route));
 
   // **Above the claim, not below it.** The two numbers are the route's
   // own: what it was checked against, and where the game is now.
@@ -195,7 +219,7 @@ export async function routePage(opened) {
       // implementation of a three-state rule.
       const again = await opened.client.getRoute(key);
       if (again.ok) {
-        say(metaEl, again.result.key + " · " + (STATUS_WORDS[again.result.status] || again.result.status));
+        say(metaEl, metaLine(again.result));
         if (staleEl) staleEl.hidden = again.result.status !== "stale";
         paintVerdict(doc, opened.slug, again.result);
       }

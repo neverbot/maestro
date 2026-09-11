@@ -1095,6 +1095,25 @@ ul.history li:last-child { border-bottom: 0; }
 .report-head .btn { margin-left: auto; }
 .report-head .tools { margin-bottom: 0; }
 
+/* The answer. It was `muted` at body size, which put it in the same
+   treatment as the disclaimer above it and a pixel from the run line
+   below: three grey sentences in a row, the middle one being the thing
+   the reader pressed a button for. */
+.verdict {
+  margin: var(--s3) 0 0;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* A run that was cut short is neither an empty state nor a refusal: it
+   is an answer with a caveat, so it is marked and not alarmed. It was
+   typeset identically to "No routes yet". */
+.state.cut-short {
+  padding-left: var(--s3);
+  border-left: 1px solid var(--focus);
+}
+
 /* The negative half, and it is on screen whether the list is empty or
    full: an empty findings list means either "the game is clean" or "the
    walk followed nothing", and without this line the two read the same. */
@@ -1156,6 +1175,16 @@ li.cycle:last-child { border-bottom: 0; }
 }
 
 .status.stale { color: var(--danger); }
+
+/* A step that did not hold. It is a different fact from a stale route
+   and it was wearing the same token, so a route with failures showed
+   --danger for "may be out of date" and --danger for "no longer exists"
+   in the same column. The identity's dashed spelling for "this is not
+   there" carries it without spending the second exemption twice. */
+.status.broken {
+  color: var(--ink);
+  border-bottom: 1px dashed var(--danger);
+}
 
 .status.checked { color: var(--ink); }
 

@@ -26,9 +26,9 @@ import {
   routesURL,
   say,
   setBreadcrumb,
-  setReadOnly,
+  typesURL,
 } from "./page.js";
-import { row } from "../rows.js";
+import { headerRow, row } from "../rows.js";
 
 // --- The words -------------------------------------------------------
 //
@@ -37,11 +37,11 @@ import { row } from "../rows.js";
 
 export const NOTE_ON_DEMAND =
   "Each of these walks the game when you ask it to. Nothing below has been checked yet.";
+export const NOTE_CHECKED = "Each of these walks the game when you ask it to.";
 
 export const CYCLES_CLEAN = "Nothing depends on itself.";
 export const CONTAINMENT_CLEAN = "Nothing contains itself.";
 export const UNREACHABLE_CLEAN = "Everything can be reached.";
-export const ORPHANS_CLEAN = "Everything is connected to something.";
 
 export const HEADING_PREREQUISITE = "Prerequisite loops";
 export const HEADING_CONTAINMENT = "Containment loops";
@@ -72,10 +72,34 @@ export const REASON_DEPTH = "depth_limited";
 // `isolated` is the engine's default and is disjoint from the other two;
 // `sink` and `source` partition the entities with exactly one direction
 // of edge.
+// Each mode with the chip's label **and the two sentences its answer
+// needs**, because the answer is a different claim in each.
+//
+// **The verdict was one sentence for all three and it was false in two
+// of them.** With `sink` selected the page read "11 entities stand
+// alone" over a row with two incoming edges; with `source`, "2 stand
+// alone" over one with three outgoing. A verdict that contradicts the
+// control directly above it is worse than no verdict: a reader goes
+// looking for an edge that is already there.
 export const ORPHAN_MODES = [
-  ["isolated", "Connected to nothing"],
-  ["sink", "Nothing leads out of it"],
-  ["source", "Nothing leads into it"],
+  {
+    mode: "isolated",
+    label: "Connected to nothing",
+    clean: "Everything is connected to something.",
+    found: (n) => countLabel(n, "entity", "entities") + " are connected to nothing.",
+  },
+  {
+    mode: "sink",
+    label: "Nothing leads out of it",
+    clean: "Everything leads somewhere.",
+    found: (n) => countLabel(n, "entity", "entities") + " lead nowhere.",
+  },
+  {
+    mode: "source",
+    label: "Nothing leads into it",
+    clean: "Everything has a way in.",
+    found: (n) => countLabel(n, "entity", "entities") + " have nothing leading to them.",
+  },
 ];
 
 export const TRUNCATED_HEAD = "This answer is not complete";
@@ -94,21 +118,80 @@ export const RUNNING_LABEL = "Checking…";
 
 // --- The page --------------------------------------------------------
 
+// scroller wraps a wide list so it scrolls inside its own box rather
+// than squeezing a row into two lines. The catalogue built this and
+// nothing else used it; four lists on this page needed it.
+function scroller(doc, list) {
+  const box = doc.createElement("div");
+  box.className = "scroller";
+  box.append(list);
+  return box;
+}
+
 function el(doc, id) {
   return doc.getElementById(id);
 }
 
-// walkedLine is the negative half, and it is assembled from whatever
-// counts the result carries rather than from a template per analysis, so
-// a count the engine adds later cannot be silently left off.
+// walkedLine is the negative half: what the run looked at, so an empty
+// findings list can be told from a walk that followed nothing.
+//
+// **It reads every count the engine sends, and it did not.** The first
+// version took four of eleven and carried a comment claiming it took
+// whatever the result had — so "reached 27 entities" had no denominator,
+// the seed count and the gate set were dropped, and
+// `invalid_edges_followed` never reached a screen although it exists
+// precisely because an empty list means two things. The comment was
+// prose contradicting the code directly beneath it, which is the defect
+// this repository names.
+//
+// Totals are paired where the engine sends both halves: "reached 27 of
+// 42" is a fact and "reached 27" is a number.
 export function walkedLine(result) {
   const parts = [];
-  if (Number.isFinite(result.seed_total)) parts.push("started from " + countLabel(result.seed_total, "entity", "entities"));
-  if (Number.isFinite(result.considered_total)) parts.push("considered " + countLabel(result.considered_total, "entity", "entities"));
-  if (Number.isFinite(result.reachable_total)) parts.push("reached " + countLabel(result.reachable_total, "entity", "entities"));
-  if (Number.isFinite(result.edges_walked)) parts.push("followed " + countLabel(result.edges_walked, "edge", "edges"));
+  if (Number.isFinite(result.seed_total)) {
+    parts.push("started from " + countLabel(result.seed_total, "entity", "entities"));
+  }
+  const seeds = result.seeds && typeof result.seeds === "object" ? result.seeds : null;
+  if (seeds && Number.isFinite(seeds.total)) {
+    parts.push("started from " + countLabel(seeds.total, "starting point", "starting points"));
+  }
+  if (Number.isFinite(result.considered_total)) {
+    parts.push("considered " + countLabel(result.considered_total, "entity", "entities"));
+  }
+  if (Number.isFinite(result.reachable_total)) {
+    const total = Number.isFinite(result.unreachable_total)
+      ? result.reachable_total + result.unreachable_total
+      : null;
+    parts.push(
+      total === null
+        ? "reached " + countLabel(result.reachable_total, "entity", "entities")
+        : "reached " + result.reachable_total + " of " + countLabel(total, "entity", "entities"),
+    );
+  }
+  if (Number.isFinite(result.edges_walked)) {
+    parts.push("followed " + countLabel(result.edges_walked, "edge", "edges"));
+  }
+  if (Number.isFinite(result.invalid_edges_followed) && result.invalid_edges_followed > 0) {
+    parts.push(countLabel(result.invalid_edges_followed, "of them invalid", "of them invalid"));
+  }
   if (parts.length === 0) return "";
   return "This run " + parts.join(", ") + ".";
+}
+
+// gateLine is the other half of the negative half: which relation types
+// the walk treated as edges, and whether each said so itself or had it
+// derived from a role. A reachability answer whose gate set is invisible
+// is a claim the reader cannot check — the spec's words, and the data
+// was on the wire the whole time.
+export function gateLine(result) {
+  const source = Array.isArray(result.semantics_source) ? result.semantics_source : [];
+  if (source.length === 0) return "";
+  const named = source.map((entry) => {
+    const traits = Array.isArray(entry.analysis_traits) ? entry.analysis_traits.join(", ") : "";
+    const how = entry.derived_from_role ? " (from its role)" : "";
+    return traits === "" ? String(entry.key ?? "") : String(entry.key ?? "") + ": " + traits + how;
+  });
+  return "It followed " + named.join("; ") + ".";
 }
 
 // cycleRow spells the loop in order: the names are the game's own words
@@ -181,7 +264,8 @@ function unreachableSection(doc, slug, reason, findings) {
   head.textContent = REASONS[reason] || reason;
   wrap.append(head);
   const list = doc.createElement("ul");
-  list.className = "catalogue";
+  list.className = "catalogue wide";
+  list.append(headerRow(doc, { label: "Entity", key: "key", cells: [{ text: "Type" }, { text: "Would let it through" }] }));
   for (const finding of findings) {
     // The blockers are the only thing on this screen that is not already
     // on another one: they are what would have let this entity through.
@@ -201,7 +285,7 @@ function unreachableSection(doc, slug, reason, findings) {
       }),
     );
   }
-  wrap.append(list);
+  wrap.append(scroller(doc, list));
   return wrap;
 }
 
@@ -220,11 +304,24 @@ export function showUndeclared(doc, slug, error) {
   const box = el(doc, "undeclared");
   if (box) box.hidden = false;
 
+  // **The way out.** This is the screen the task calls the one most
+  // designers meet first, and the reader's next action is to go and look
+  // at their relation types — a place the product has. The box had
+  // thirteen vocabulary words, one tool name and no link.
+  const link = el(doc, "undeclared-link");
+  if (link) {
+    link.href = typesURL(slug);
+    link.hidden = false;
+  }
+
   const list = el(doc, "undeclared-types");
   if (!list) return;
   // `relation_types`, which is what the domain's Details() writes.
   const types = Array.isArray(details.relation_types) ? details.relation_types : [];
   list.replaceChildren();
+  if (types.length > 0) {
+    list.append(headerRow(doc, { label: "Relation type", key: "", cells: [{ text: "Role" }, { text: "Declares" }] }));
+  }
   for (const type of types) {
     const traits = Array.isArray(type.analysis_traits) ? type.analysis_traits : [];
     list.append(
@@ -251,7 +348,7 @@ function hideUndeclared(doc) {
 
 // report wires one section: its button, its three parts, and the two
 // refusals every one of them can answer with.
-function report(doc, slug, name, run, paint) {
+function report(doc, slug, name, run, paint, onDone) {
   const button = el(doc, name + "-run");
   const verdict = el(doc, name + "-verdict");
   const body = el(doc, name + "-body");
@@ -288,8 +385,10 @@ function report(doc, slug, name, run, paint) {
     }
     hideUndeclared(doc);
     if (error) error.hidden = true;
+    if (typeof onDone === "function") onDone();
     paint(answer.result, { verdict, body, walked });
-    say(walked, walkedLine(answer.result));
+    const lines = [walkedLine(answer.result), gateLine(answer.result)].filter((line) => line !== "");
+    say(walked, lines.join(" "));
   }
 
   if (button) button.addEventListener("click", () => go());
@@ -316,15 +415,22 @@ export async function analysisPage(opened) {
     { label: DESTINATION_ANALYSIS },
   ]);
   doc.title = opened.game.name + " · Analysis · Maestro";
-  say(el(doc, "analysis-note"), NOTE_ON_DEMAND);
+  const noteEl = el(doc, "analysis-note");
+  say(noteEl, NOTE_ON_DEMAND);
+  // It said "nothing below has been checked yet" under three finished
+  // answers, because it was written once and never revised.
+  const noteDone = () => say(noteEl, NOTE_CHECKED);
 
   // The fourth analysis, which is the one with a lifecycle and therefore
   // its own screens rather than a section here.
   const routesLink = el(doc, "routes-link");
   if (routesLink) routesLink.href = routesURL(opened.slug);
 
-  const summary = await opened.client.summary();
-  if (summary.ok) setReadOnly(doc, summary.result.role, "runs these checks");
+  // **No read-only notice here.** This page has three buttons on it, and
+  // the notice is a claim about a screen: one that outlives the
+  // limitation it describes is the next piece of prose contradicting the
+  // code. The screen that does carry a write a viewer will be refused is
+  // the route detail, and that is where the notice went.
 
   report(doc, opened.slug, "cycles", () => opened.client.analysisCycles({}), (result, parts) => {
     showTruncation(doc, "cycles", result);
@@ -340,7 +446,7 @@ export async function analysisPage(opened) {
     // sentence, different fix.
     if (loops.length > 0) parts.body.append(cycleList(doc, opened.slug, HEADING_PREREQUISITE, loops));
     if (contains.length > 0) parts.body.append(cycleList(doc, opened.slug, HEADING_CONTAINMENT, contains));
-  });
+  }, noteDone);
 
   report(doc, opened.slug, "unreachable", () => opened.client.analysisUnreachable({}), (result, parts) => {
     showTruncation(doc, "unreachable", result);
@@ -365,20 +471,27 @@ export async function analysisPage(opened) {
         countLabel(beyond.length, "entity", "entities") + " were further away than this run looked.";
       parts.body.append(note);
     }
-  });
+  }, noteDone);
 
   // The mode is this screen's one control, and exactly one is selected.
-  let mode = ORPHAN_MODES[0][0];
+  let mode = ORPHAN_MODES[0];
   const modesEl = el(doc, "orphans-modes");
-  const runOrphans = report(doc, opened.slug, "orphans", () => opened.client.analysisOrphans({ mode }), (result, parts) => {
+  const runOrphans = report(doc, opened.slug, "orphans", () => opened.client.analysisOrphans({ mode: mode.mode }), (result, parts) => {
     const findings = Array.isArray(result.orphans) ? result.orphans : [];
-    say(
-      parts.verdict,
-      findings.length === 0 ? ORPHANS_CLEAN : countLabel(findings.length, "entity", "entities") + " stand alone.",
-    );
+    // The sentence this mode's answer actually makes.
+    say(parts.verdict, findings.length === 0 ? mode.clean : mode.found(findings.length));
     parts.body.replaceChildren();
     const list = doc.createElement("ul");
-    list.className = "catalogue";
+    list.className = "catalogue wide";
+    // Two unlabelled numbers taught a reader nothing and then let them
+    // carry the wrong assumption into the mode where the numbers matter.
+    list.append(
+      headerRow(doc, {
+        label: "Entity",
+        key: "key",
+        cells: [{ text: "Type" }, { text: "Leads in", numeric: true }, { text: "Leads out", numeric: true }],
+      }),
+    );
     for (const orphan of findings) {
       list.append(
         row(doc, {
@@ -394,7 +507,7 @@ export async function analysisPage(opened) {
         }),
       );
     }
-    parts.body.append(list);
+    parts.body.append(scroller(doc, list));
     const excluded = Array.isArray(result.excluded_relation_types) ? result.excluded_relation_types : [];
     if (excluded.length > 0) {
       const note = doc.createElement("p");
@@ -404,17 +517,21 @@ export async function analysisPage(opened) {
       note.textContent = "Edges of these kinds were not counted: " + excluded.join(", ") + ".";
       parts.body.append(note);
     }
-  });
+  }, noteDone);
 
   if (modesEl) {
-    for (const [value, label] of ORPHAN_MODES) {
+    // A named group, so a screen reader meets three related toggles
+    // rather than three unrelated ones above an unexplained list.
+    modesEl.setAttribute("role", "group");
+    modesEl.setAttribute("aria-label", "Which kind of unconnected");
+    for (const option of ORPHAN_MODES) {
       const chip = doc.createElement("button");
       chip.type = "button";
       chip.className = "chip";
-      chip.textContent = label;
-      chip.setAttribute("aria-pressed", String(value === mode));
+      chip.textContent = option.label;
+      chip.setAttribute("aria-pressed", String(option === mode));
       chip.addEventListener("click", () => {
-        mode = value;
+        mode = option;
         for (const other of modesEl.querySelectorAll("button")) {
           other.setAttribute("aria-pressed", String(other === chip));
         }

@@ -50,8 +50,8 @@
     <h2 id="cycles-heading">Loops</h2>
     <button type="button" class="btn ghost" id="cycles-run">Check</button>
   </div>
-  <p class="muted" id="cycles-verdict"></p>
-  <div id="cycles-truncated" class="state" hidden>
+  <p class="verdict" id="cycles-verdict"></p>
+  <div id="cycles-truncated" class="state cut-short" hidden>
     <b id="cycles-truncated-head"></b>
     <span id="cycles-truncated-body"></span>
   </div>
@@ -65,8 +65,8 @@
     <h2 id="unreachable-heading">Out of reach</h2>
     <button type="button" class="btn ghost" id="unreachable-run">Check</button>
   </div>
-  <p class="muted" id="unreachable-verdict"></p>
-  <div id="unreachable-truncated" class="state" hidden>
+  <p class="verdict" id="unreachable-verdict"></p>
+  <div id="unreachable-truncated" class="state cut-short" hidden>
     <b id="unreachable-truncated-head"></b>
     <span id="unreachable-truncated-body"></span>
   </div>
@@ -81,7 +81,7 @@
     <span class="tools" id="orphans-modes"></span>
     <button type="button" class="btn ghost" id="orphans-run">Check</button>
   </div>
-  <p class="muted" id="orphans-verdict"></p>
+  <p class="verdict" id="orphans-verdict"></p>
   <div id="orphans-body"></div>
   <p class="muted walked" id="orphans-walked"></p>
   <button type="button" class="btn-more" id="orphans-more" hidden>Show 50 more</button>
@@ -95,6 +95,7 @@
   <b id="undeclared-head"></b>
   <span id="undeclared-body"></span>
   <span id="undeclared-advice"></span>
+  <a id="undeclared-link" href="/" hidden>See this game's relation types</a>
 </div>
 <ul class="catalogue" id="undeclared-types" hidden></ul>
 </main>

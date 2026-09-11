@@ -16,10 +16,12 @@ import {
   openGame,
   routesURL,
   say,
+  ROLE_VIEWER,
   segmentsOf,
+  setReadOnly,
   setBreadcrumb,
 } from "./page.js";
-import { row } from "../rows.js";
+import { headerRow, row } from "../rows.js";
 import { STATUS_WORDS } from "./routes.js";
 
 // The four a step can come back as, in the reader's words. `ok` is not
@@ -73,11 +75,9 @@ export function metaLine(route) {
 
 export function paintVerdict(doc, slug, route) {
   const verdictEl = doc.getElementById("route-verdict");
-  const findingsEl = doc.getElementById("route-findings");
   const walkedEl = doc.getElementById("route-walked");
-  findingsEl.replaceChildren();
-
   const check = route.last_check && typeof route.last_check === "object" ? route.last_check : null;
+
   if (check === null) {
     say(verdictEl, NEVER_CHECKED);
     say(walkedEl, "");
@@ -91,28 +91,6 @@ export function paintVerdict(doc, slug, route) {
       : countLabel(check.steps_broken ?? 0, "step", "steps") + " did not hold.",
   );
 
-  const steps = Array.isArray(check.steps) ? check.steps : [];
-  const list = doc.createElement("ul");
-  list.className = "catalogue";
-  for (const step of steps) {
-    const blockers = Array.isArray(step.blockers) ? step.blockers : [];
-    list.append(
-      row(doc, {
-        label: step.key || "",
-        key: step.entity_type || "",
-        cells: [
-          { text: verdictWord(step.verdict), status: step.verdict === "ok" ? "checked" : "stale" },
-          blockers.length === 0
-            ? { text: "", absent: false }
-            : { text: "blocked by " + blockers.map((b) => b.key ?? "").join(", ") },
-        ],
-        count: "",
-        href: entityURL(slug, step.entity_type ?? "", step.key ?? ""),
-      }),
-    );
-  }
-  findingsEl.append(list);
-
   // The negative half: five `ok`s from a check that walked nothing and
   // five from one that walked four hundred edges are the same answer
   // without this line.
@@ -120,6 +98,80 @@ export function paintVerdict(doc, slug, route) {
   if (Number.isFinite(check.edges_walked)) parts.push("followed " + countLabel(check.edges_walked, "edge", "edges"));
   if (Number.isFinite(check.steps_checked)) parts.push("over " + countLabel(check.steps_checked, "step", "steps"));
   say(walkedEl, parts.length === 0 ? "" : "This check " + parts.join(" ") + ".");
+}
+
+// paintSteps draws **one table**: the ordered claim and the verdict at
+// each step, in one row per step.
+//
+// It was two tables, 220px apart, with the same four keys in the same
+// order in both — so the one question a reader has, "did step three
+// hold?", was answered by matching a key across two lists by eye. The
+// position is the first column, because the order is what makes this a
+// claim rather than a set.
+export function paintSteps(doc, slug, route) {
+  const listEl = doc.getElementById("route-steps");
+  const emptyEl = doc.getElementById("route-steps-empty");
+  const steps = Array.isArray(route.steps) ? route.steps : [];
+  const check = route.last_check && typeof route.last_check === "object" ? route.last_check : null;
+  const byPosition = new Map();
+  for (const found of Array.isArray(check && check.steps) ? check.steps : []) {
+    byPosition.set(Number(found.position), found);
+  }
+
+  listEl.replaceChildren();
+  if (steps.length > 0) {
+    listEl.append(
+      headerRow(doc, {
+        label: "Step",
+        key: "type",
+        cells: [{ text: "Verdict" }, { text: "Blocked by" }],
+      }),
+    );
+  }
+  steps.forEach((step, index) => {
+    const found = byPosition.get(Number(step.position));
+    const blockers = Array.isArray(found && found.blockers) ? found.blockers : [];
+    listEl.append(
+      row(doc, {
+        label: step.key || "",
+        key: step.entity_type || "",
+        cells: [
+          found
+            ? { text: verdictWord(found.verdict), status: found.verdict === "ok" ? "checked" : "broken" }
+            : { text: "not checked", absent: true },
+          blockers.length === 0 ? { text: "" } : { text: blockers.map((b) => b.key ?? "").join(", ") },
+        ],
+        // One-based, because a designer reading their own claim counts
+        // from one. The model's index started at zero and reached the
+        // screen.
+        count: String(index + 1),
+        href: entityURL(slug, step.entity_type ?? "", step.key ?? ""),
+      }),
+    );
+  });
+  listEl.hidden = steps.length === 0;
+  if (emptyEl) emptyEl.hidden = steps.length > 0;
+}
+
+// paintStale is called from both the first render and the re-check, so a
+// route that was checked on load and comes back stale gets a box with
+// something in it. It was populated on load only and merely unhidden
+// after, which is an empty 78px box.
+export function paintStale(doc, route) {
+  const staleEl = doc.getElementById("route-stale");
+  if (!staleEl) return;
+  const stale = route.status === "stale";
+  staleEl.hidden = !stale;
+  if (!stale) return;
+  say(doc.getElementById("route-stale-head"), STALE_HEAD);
+  say(
+    doc.getElementById("route-stale-body"),
+    "It was checked against design version " +
+      String(route.last_checked_design_version ?? "?") +
+      "; this game is at " +
+      String(route.design_version ?? "?") +
+      ".",
+  );
 }
 
 export async function routePage(opened) {
@@ -153,49 +205,24 @@ export async function routePage(opened) {
   ]);
   say(metaEl, metaLine(route));
 
-  // **Above the claim, not below it.** The two numbers are the route's
-  // own: what it was checked against, and where the game is now.
-  const staleEl = doc.getElementById("route-stale");
-  if (staleEl) {
-    const stale = route.status === "stale";
-    staleEl.hidden = !stale;
-    if (stale) {
-      say(doc.getElementById("route-stale-head"), STALE_HEAD);
-      say(
-        doc.getElementById("route-stale-body"),
-        "It was checked against design version " +
-          String(route.last_checked_design_version ?? "?") +
-          "; this game is at " +
-          String(route.design_version ?? "?") +
-          ".",
-      );
-    }
-  }
-
-  const stepsEl = doc.getElementById("route-steps");
-  const stepsEmptyEl = doc.getElementById("route-steps-empty");
-  const steps = Array.isArray(route.steps) ? route.steps : [];
-  stepsEl.replaceChildren();
-  for (const step of steps) {
-    stepsEl.append(
-      row(doc, {
-        label: step.key || "",
-        key: step.entity_type || "",
-        cells: [step.note ? { text: step.note } : { text: "" }],
-        count: String(step.position ?? ""),
-        href: entityURL(opened.slug, step.entity_type ?? "", step.key ?? ""),
-      }),
-    );
-  }
-  stepsEl.hidden = steps.length === 0;
-  if (stepsEmptyEl) stepsEmptyEl.hidden = steps.length > 0;
+  // Above the claim, not below it: a reader who scrolls past a caveat
+  // has already believed what it qualifies.
+  paintStale(doc, route);
+  paintSteps(doc, opened.slug, route);
 
   paintVerdict(doc, opened.slug, route);
 
   // The one write. It is the primary button on the page because it is
   // the only thing a person came here to do that changes anything.
+  // **The notice belongs on this screen and not on the report page**,
+  // because this is the one that carries a write. A viewer is told what
+  // will happen instead of being handed a button the server refuses.
+  const summary = await opened.client.summary();
+  const role = summary.ok ? String(summary.result.role ?? "") : "";
   const actions = doc.getElementById("page-actions");
-  if (actions) {
+  if (actions && role === ROLE_VIEWER) {
+    setReadOnly(doc, role, "checks these routes");
+  } else if (actions) {
     const button = doc.createElement("button");
     button.type = "button";
     button.textContent = CHECK_LABEL;
@@ -220,7 +247,8 @@ export async function routePage(opened) {
       const again = await opened.client.getRoute(key);
       if (again.ok) {
         say(metaEl, metaLine(again.result));
-        if (staleEl) staleEl.hidden = again.result.status !== "stale";
+        paintStale(doc, again.result);
+        paintSteps(doc, opened.slug, again.result);
         paintVerdict(doc, opened.slug, again.result);
       }
     });

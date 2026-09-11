@@ -37,13 +37,23 @@
      entity of a declared type, in key order, and answers no query. -->
 <p class="muted" id="type-note"></p>
 
+<!-- **Search, on the screen that most needs it.** A type with a thousand
+     entities was a thousand rows in key order with no way to find one, and
+     the server indexes a row's key alongside its name — so the handle a
+     designer meets in every error message is the one that works here. -->
+<div class="tools">
+  <input id="entities-search" type="search" placeholder="Find by name or key…"
+         autocomplete="off" aria-label="Find an entity of this type">
+  <span class="tools-note muted" id="entities-scope" aria-live="polite"></span>
+</div>
+
 <ul class="catalogue" id="entities" hidden></ul>
-<p class="muted" id="entities-empty" hidden>
-  Nothing of this type yet. Entities are written through this instance&#39;s API,
-  from an agent over MCP or over the game&#39;s content routes.
-</p>
+<div class="state" id="entities-empty" hidden>
+  <b>Nothing of this type yet</b>
+  <span id="entities-empty-action">An agent writes them; nothing on this page does.</span>
+</div>
 <p class="error" id="entities-error" hidden></p>
-<button type="button" class="link-button" id="entities-more" hidden>Show more</button>
+<button type="button" class="btn-more" id="entities-more" hidden>Show more</button>
 
 </main>
 

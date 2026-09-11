@@ -633,6 +633,39 @@ button:disabled {
 
 /* The one token that means "this needs your attention", on the sentence
    and on the field it is about. */
+/* The strip above a list: what narrows it, and what it is showing. */
+.tools {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+  flex-wrap: wrap;
+}
+
+.tools input {
+  width: 20rem;
+  max-width: 100%;
+}
+
+.tools-note {
+  font-size: 0.8rem;
+}
+
+/* "Show 50 more", under the list it extends. A ghost button, because
+   fetching the next page is never the most likely thing on a screen. */
+.btn-more {
+  margin-top: var(--s3);
+  background: none;
+  color: var(--ink);
+  border-color: var(--line-strong);
+  box-shadow: none;
+  justify-self: start;
+}
+
+.btn-more:hover:not(:disabled) {
+  background: var(--ground);
+}
+
 .error { color: var(--danger); min-height: 1.2em; }
 
 /* A line that explains a field, under the field. */
@@ -721,7 +754,10 @@ ul.catalogue li {
      rather than pushing the row past its column. A grid track's default
      minimum is its content, which in a three-lane home is how one row
      comes to overlap the lane beside it — found by opening the page. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto);
+  /* Name, key, then whatever columns this row's content has, then the
+     count. `auto-fit` rather than a fixed three, because a catalogue row
+     carries the fields its type declared and a game declares its own. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto) repeat(auto-fit, minmax(0, auto));
   align-items: center;
   gap: var(--s3);
   padding: 0 11px;
@@ -730,6 +766,23 @@ ul.catalogue li {
 }
 
 ul.catalogue li:last-child { border-bottom: 0; }
+
+/* The column header. Label type, sticky under the page header so the
+   names stay with the rows a thousand of them down, and not a link:
+   a heading is not a target. */
+ul.catalogue li.catalogue-head {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 1;
+  min-height: var(--row-compact-h);
+  background: var(--paper);
+  font: 600 0.75rem/20px var(--sans);
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+ul.catalogue li.catalogue-head:hover { background: var(--paper); }
+ul.catalogue li.catalogue-head .catalogue-key { font-family: var(--sans); }
 
 /* The row answers to the pointer, which is the only thing a border per
    row was doing that a rule does not. */
@@ -763,6 +816,19 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
      break at — a document path, a snake_case relation type — so it is
      the cell that breaks. */
   overflow-wrap: anywhere;
+}
+
+/* A declared field's value, in the tool's voice: it is data about the
+   game's thing, not one of the game's own words. */
+.catalogue-cell {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 4ch;
+}
+
+.catalogue-cell.absent {
+  font-style: italic;
 }
 
 .catalogue-count { color: var(--muted); font-variant-numeric: tabular-nums; }

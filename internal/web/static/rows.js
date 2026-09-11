@@ -37,6 +37,19 @@ export function row(doc, spec) {
   handle.textContent = spec.key ?? "";
   item.append(handle);
 
+  // The columns this row's own content has, between the key and the
+  // count. A catalogue of a thousand entities showing a name and a key
+  // shows a reader the two things they already knew; what they came to
+  // compare is the fields the type declares. The row is **widened**
+  // rather than copied, which is what design.md asks for when a second
+  // screen needs something the first has.
+  for (const cell of Array.isArray(spec.cells) ? spec.cells : []) {
+    const value = doc.createElement("span");
+    value.className = cell.absent ? "catalogue-cell absent" : "catalogue-cell";
+    value.textContent = cell.text ?? "";
+    item.append(value);
+  }
+
   const tally = doc.createElement("span");
   tally.className = "catalogue-count";
   tally.textContent = spec.count ?? "";
@@ -51,3 +64,31 @@ export function row(doc, spec) {
   return item;
 }
 
+// headerRow names the columns a catalogue is showing. **A column with no
+// header is a number a reader has to guess at**: the quests catalogue
+// shipped `ash 210 350` per row with nothing saying which was the region,
+// which the reward and which the requirement.
+//
+// It is the same grid as a row, so the two line up without either knowing
+// the other's widths, and it carries no link: a heading is not a target.
+export function headerRow(doc, spec) {
+  const item = doc.createElement("li");
+  item.className = "catalogue-head";
+
+  const label = doc.createElement("span");
+  label.textContent = spec.label ?? "";
+  item.append(label);
+
+  const key = doc.createElement("span");
+  key.className = "catalogue-key";
+  key.textContent = spec.key ?? "";
+  item.append(key);
+
+  for (const cell of Array.isArray(spec.cells) ? spec.cells : []) {
+    const head = doc.createElement("span");
+    head.className = "catalogue-cell";
+    head.textContent = cell;
+    item.append(head);
+  }
+  return item;
+}

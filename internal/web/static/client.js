@@ -748,6 +748,24 @@ export function client({
     return get(paged(base + "/entities", opts, search));
   }
 
+  // searchEntities is the catalogue's own search, over the route the MCP
+  // surface mirrors: `GET /search` takes a query and a type_key, and the
+  // server indexes a row's **key** alongside its name, which is the whole
+  // point of offering it here — the handle a designer meets in every
+  // error message is the one they will paste back in.
+  //
+  // It is a separate function from listEntities rather than a `query`
+  // option on it, because they are different routes with different
+  // shapes: a listing pages with a cursor and a search does not.
+  async function searchEntities(query, typeKey, options) {
+    const opts = options && typeof options === "object" ? options : {};
+    const search = new URLSearchParams();
+    search.set("query", String(query || ""));
+    if (typeof typeKey === "string" && typeKey !== "") search.set("type_key", typeKey);
+    if (Number.isFinite(opts.limit)) search.set("limit", String(opts.limit));
+    return get(base + "/search?" + search.toString());
+  }
+
   async function getEntity(typeKey, key) {
     const path =
       base +
@@ -978,6 +996,7 @@ export function client({
     listRelationTypes,
     getRelationType,
     listEntities,
+    searchEntities,
     getEntity,
     listRelations,
     listEntityDocs,

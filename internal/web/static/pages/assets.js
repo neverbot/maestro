@@ -22,6 +22,7 @@ import {
   setReadOnly,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
+import { row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // Where an uploaded image is served from: **the URL the server spelled**,
@@ -94,29 +95,37 @@ export async function assetsPage(opened) {
     }
     say(errorEl, "");
     const body = answer.result;
-    const items = Array.isArray(body.items) ? body.items : [];
+    // **`assets`, which is what the server writes.** This read was
+    // `body.items` and the handler has always answered under `assets`
+    // (api_view_assets.go), so the page rendered "No images yet" over a
+    // game whose map view was drawing one of these files at the time.
+    // Everything below this line had therefore never run in a browser,
+    // and two of its lines were separately wrong: the row it built by
+    // hand put three children into a six-track subgrid, so a size landed
+    // in the first content cell instead of the count, and the thumbnail
+    // repeated the visible filename as its alt text, which a screen
+    // reader reads twice. Both are gone with the hand-built row.
+    const items = Array.isArray(body.assets) ? body.assets : [];
     for (const asset of items) {
-      const item = doc.createElement("li");
-
       const source = assetURL(asset);
+      const item = row(doc, {
+        label: String(asset.filename ?? ""),
+        key: String(asset.id ?? ""),
+        cells: [{ text: describeAsset(asset) }],
+        // The image itself is the one thing this page can send a reader
+        // to, and it is the same URL the canvas draws from.
+        href: source === "" ? "" : source,
+      });
+
       const thumb = doc.createElement("img");
       thumb.className = "asset-thumb";
       if (source !== "") thumb.src = source;
-      // The filename is prose a designer typed and is stored for them to
-      // read; it is never consulted for the format, and it is the only
-      // honest alt text this page has.
-      thumb.alt = String(asset.filename ?? "");
-      item.append(thumb);
-
-      const name = doc.createElement("span");
-      name.className = "catalogue-label";
-      name.textContent = String(asset.filename ?? "");
-      item.append(name);
-
-      const meta = doc.createElement("span");
-      meta.className = "catalogue-count";
-      meta.textContent = describeAsset(asset);
-      item.append(meta);
+      // **Empty, on purpose.** The filename sits beside it in the label
+      // and is the row's accessible name; alt text repeating it makes a
+      // screen reader say the same words twice, and the picture carries
+      // nothing the name does not.
+      thumb.alt = "";
+      item.firstChild.prepend(thumb);
 
       listEl.append(item);
     }

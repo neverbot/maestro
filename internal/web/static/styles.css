@@ -1532,10 +1532,22 @@ dl.fields dt.undeclared {
 
 /* The images page. A thumbnail is bounded so a 4000px map does not push
    the row it is in off the screen. */
+/* **A thumbnail inside a row, not a row built around a thumbnail.** It
+   was 8rem by 5rem, which is an 81px row in a table whose token is 36,
+   and it had never been drawn because the listing it belongs to read the
+   wrong key and always found nothing. Sized to the row's own line box it
+   is a hint rather than a picture: the filename beside it is the name,
+   and the row links to the image itself for a reader who wants to see
+   it at its own size. */
 .asset-thumb {
-  max-width: 8rem;
-  max-height: 5rem;
+  width: auto;
+  height: 20px;
+  max-width: 3rem;
+  object-fit: cover;
+  vertical-align: middle;
+  margin-right: var(--s2);
   border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 /* --- Narrow: the destinations move, they are never merely hidden ------

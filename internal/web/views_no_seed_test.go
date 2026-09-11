@@ -219,7 +219,12 @@ func TestNoSourceFileNamesALayoutSeed(t *testing.T) {
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
 			switch rel {
-			case ".git", "docs", "bin", "develop", "node_modules":
+			// `.superpowers` holds the specs and plans, which argue
+			// about the dormant column by name and are not shipped;
+			// `docs` is the published documentation; the rest is
+			// build output and agent scratch.
+			case ".git", ".superpowers", ".impeccable", ".scratch",
+				"docs", "bin", "node_modules":
 				return filepath.SkipDir
 			}
 			return nil

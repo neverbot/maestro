@@ -30,7 +30,12 @@
      spellings across five screens. -->
 <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
+<div class="page-head">
 <h1 id="type-name">Loading…</h1>
+  <!-- What this screen cannot do, where the button would be.
+       pages/page.js setReadOnly fills it. -->
+  <span class="page-actions" id="page-actions"></span>
+</div>
 <p class="muted" id="type-meta" aria-live="polite"></p>
 <!-- Said out loud, because this page is deliberately close in
      appearance to the `table` renderer and is not one: it lists every
@@ -47,10 +52,24 @@
   <span class="tools-note muted" id="entities-scope" aria-live="polite"></span>
 </div>
 
-<ul class="catalogue" id="entities" hidden></ul>
+<!-- **The scroller, so a row is a row at any width.** Without it a
+     62-character quest name collapsed the name track to zero at a 420px
+     list and set the label one word per line: a measured 261px row with
+     the key overlapping the name. The frame spec specifies exactly this
+     and it was never built. -->
+<div class="scroller">
+  <ul class="catalogue wide" id="entities" hidden></ul>
+</div>
 <div class="state" id="entities-empty" hidden>
   <b>Nothing of this type yet</b>
   <span id="entities-empty-action">An agent writes them; nothing on this page does.</span>
+</div>
+<!-- A search that found nothing is its own state, and it names what the
+     type does hold: "Nothing of this type yet" under a heading saying 105
+     entities is the page contradicting itself three lines apart. -->
+<div class="state" id="entities-miss" hidden>
+  <b id="entities-miss-head"></b>
+  <span id="entities-miss-body"></span>
 </div>
 <p class="error" id="entities-error" hidden></p>
 <button type="button" class="btn-more" id="entities-more" hidden>Show more</button>

@@ -763,6 +763,12 @@ export function client({
     search.set("query", String(query || ""));
     if (typeof typeKey === "string" && typeKey !== "") search.set("type_key", typeKey);
     if (Number.isFinite(opts.limit)) search.set("limit", String(opts.limit));
+    // The search surface takes `verbose` through the same helper the two
+    // listings read it with, so a found row can carry the columns a
+    // catalogue draws. Without it a search result rendered "no faction"
+    // for a field the call simply had not asked for, which is a false
+    // statement about the data rather than a missing one.
+    if (opts.verbose === true) search.set("verbose", "true");
     return get(base + "/search?" + search.toString());
   }
 

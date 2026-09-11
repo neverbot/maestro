@@ -24,6 +24,7 @@ import {
   row,
   say,
   setBreadcrumb,
+  setReadOnly,
   typeURL,
   whoWrites,
 } from "./page.js";
@@ -57,6 +58,7 @@ export async function typesPage(opened) {
 
   const summary = answer.result;
   say(noteEl, describeTotals(summary.totals));
+  setReadOnly(doc, summary.role, "declares the types");
   say(doc.getElementById("types-empty-action"), whoWrites(summary.role, DECLARES_TYPES));
 
   fill(

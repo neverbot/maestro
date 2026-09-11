@@ -42,6 +42,7 @@ import {
   say,
   segmentsOf,
   setBreadcrumb,
+  setReadOnly,
   typeURL,
   typesURL,
 } from "./page.js";
@@ -434,6 +435,11 @@ export async function entityPage(opened) {
 
   say(nameEl, model.entity.name || model.entity.key);
   say(addressEl, model.entity.type_key + " · " + model.entity.key);
+  // One extra call, for the one sentence this screen owes: what it
+  // will not let you change, and whether that is the product or your
+  // role saying so.
+  const role = await opened.client.summary();
+  if (role.ok) setReadOnly(doc, role.result.role, "writes this entity");
   // Four crumbs, and the third is the type's **key** rather than its
   // plural label. The entity model carries `type_key` and not the type's
   // label, and fetching the type for a word in a trail would be a second

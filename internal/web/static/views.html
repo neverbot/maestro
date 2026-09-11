@@ -30,7 +30,12 @@
      spellings across five screens. -->
 <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
+<div class="page-head">
 <h1 id="view-list-title">Views</h1>
+  <!-- What this screen cannot do, where the button would be.
+       pages/page.js setReadOnly fills it. -->
+  <span class="page-actions" id="page-actions"></span>
+</div>
 <p class="muted" id="view-list-note" aria-live="polite">Loading this game&#39;s views…</p>
 
 <ul class="catalogue" id="views" hidden></ul>

@@ -31,7 +31,12 @@
      spellings across five screens. -->
 <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
+<div class="page-head">
 <h1 id="doc-title">Loading…</h1>
+  <!-- What this screen cannot do, where the button would be.
+       pages/page.js setReadOnly fills it. -->
+  <span class="page-actions" id="page-actions"></span>
+</div>
 <p class="muted" id="doc-meta" aria-live="polite">Loading this document…</p>
 <!-- Every failure on this page lands here, and nothing else renders
      behind it: a document that could not be read must not look like a

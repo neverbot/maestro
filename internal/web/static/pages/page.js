@@ -440,6 +440,45 @@ export function whoWrites(role, what) {
   return `An agent ${what}; nothing on this page does.`;
 }
 
+// --- The read-only notice ---------------------------------------------
+
+// **What the product cannot do, written where somebody would look for
+// the button.** The identity has specified this notice since the design
+// pass and no screen carried it: the only place the product admitted it
+// is read-only was inside an empty state, so the fuller a game was, the
+// less its screens said about what they will not let you do. Two
+// separate reviews found it, the second exactly that way round.
+//
+// It is role-aware through the same whoWrites the empty states use, so a
+// viewer is told the instance will refuse a write from them rather than
+// being told to go and make one.
+//
+// **It is a claim about a screen, so it comes off the screen that gains a
+// write.** A notice that outlives the limitation it describes is the next
+// piece of prose contradicting the code.
+export const READ_ONLY_LABEL = "Read-only";
+
+export function readOnlyNotice(doc, role, what) {
+  const note = doc.createElement("span");
+  note.className = "read-only";
+  note.textContent = READ_ONLY_LABEL;
+  // The detail is a title rather than a second line: the head is a row a
+  // page title shares, and a sentence there would push the content down
+  // on every screen to say a thing that is true of all of them.
+  note.title = whoWrites(role, what);
+  return note;
+}
+
+// setReadOnly puts the notice in the shell's page head, which every
+// screen inside a game has. A shell with no head element gets nothing
+// rather than a notice prepended somewhere arbitrary.
+export function setReadOnly(doc, role, what) {
+  const host = doc.getElementById("page-actions");
+  if (!host) return null;
+  host.replaceChildren(readOnlyNotice(doc, role, what));
+  return host;
+}
+
 // --- The three negative states, in one shape --------------------------
 
 // A screen with nothing on it is in one of exactly three states, and the

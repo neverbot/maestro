@@ -23,6 +23,7 @@ import {
   row,
   say,
   setBreadcrumb,
+  setReadOnly,
   viewURL,
 } from "./page.js";
 import { goToLogin } from "../app.js";
@@ -43,6 +44,8 @@ export async function viewsPage(opened) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_VIEWS },
   ]);
+  const role = await opened.client.summary();
+  if (role.ok) setReadOnly(doc, role.result.role, "writes these views");
 
   let cursor = null;
   let rendered = 0;

@@ -19,6 +19,7 @@ import {
   openGame,
   say,
   setBreadcrumb,
+  setReadOnly,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
 import { goToLogin } from "../app.js";
@@ -69,6 +70,8 @@ export async function assetsPage(opened) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_IMAGES },
   ]);
+  const role = await opened.client.summary();
+  if (role.ok) setReadOnly(doc, role.result.role, "uploads these images");
 
   let cursor = null;
   let rendered = 0;

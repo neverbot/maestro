@@ -23,6 +23,22 @@
 // neither is markup this product ever interprets. `href` turns the label
 // into a link and is built by the address functions above, so a row can
 // only ever point at a slug address.
+// **Every row emits the same number of cells, always.** A row that
+// appended a span only when it had something to put in it produced
+// sibling grids with different track counts, and sibling grids share
+// nothing: the column header sat 18px to the right of the values it
+// named, two rows with different key lengths disagreed with each other,
+// and the `faction` header's box overlapped the `x` column's. A header
+// over the wrong column is worse than no header, because it is
+// confidently wrong.
+//
+// The fix is a fixed shape — name, key, three content cells, count —
+// and `subgrid` on the row so every one of them takes its widths from
+// the list rather than from itself. Three because that is what the
+// catalogue shows; an empty cell costs an `auto` track that collapses to
+// nothing.
+export const CATALOGUE_CELLS = 3;
+
 export function row(doc, spec) {
   const item = doc.createElement("li");
 
@@ -43,10 +59,13 @@ export function row(doc, spec) {
   // compare is the fields the type declares. The row is **widened**
   // rather than copied, which is what design.md asks for when a second
   // screen needs something the first has.
-  for (const cell of Array.isArray(spec.cells) ? spec.cells : []) {
+  const cells = Array.isArray(spec.cells) ? spec.cells : [];
+  for (let i = 0; i < CATALOGUE_CELLS; i += 1) {
+    const cell = cells[i];
     const value = doc.createElement("span");
-    value.className = cell.absent ? "catalogue-cell absent" : "catalogue-cell";
-    value.textContent = cell.text ?? "";
+    value.className = cell && cell.absent ? "catalogue-cell absent" : "catalogue-cell";
+    if (cell && cell.numeric) value.classList.add("numeric");
+    value.textContent = cell ? (cell.text ?? "") : "";
     item.append(value);
   }
 
@@ -84,11 +103,19 @@ export function headerRow(doc, spec) {
   key.textContent = spec.key ?? "";
   item.append(key);
 
-  for (const cell of Array.isArray(spec.cells) ? spec.cells : []) {
+  const heads = Array.isArray(spec.cells) ? spec.cells : [];
+  for (let i = 0; i < CATALOGUE_CELLS; i += 1) {
     const head = doc.createElement("span");
     head.className = "catalogue-cell";
-    head.textContent = cell;
+    if (heads[i] && heads[i].numeric) head.classList.add("numeric");
+    head.textContent = heads[i] ? heads[i].text ?? heads[i] : "";
     item.append(head);
   }
+  // The count track, empty. It exists so the header spans the same six
+  // tracks a row does; without it the header is one track short and
+  // everything after the name drifts.
+  const tally = doc.createElement("span");
+  tally.className = "catalogue-count";
+  item.append(tally);
   return item;
 }

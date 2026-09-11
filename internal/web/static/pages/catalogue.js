@@ -26,6 +26,7 @@ import {
   say,
   segmentsOf,
   setBreadcrumb,
+  setReadOnly,
   typesURL,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
@@ -45,6 +46,10 @@ export const CATALOGUE_NOTE =
 // entity the server will refuse is worse than telling them nothing. A
 // second call for one sentence is the wrong trade, so the sentence says
 // what is true for everybody and stops.
+
+// How many a search asks for. It is named because two places read it:
+// the call, and the sentence that admits the cap.
+export const SEARCH_LIMIT = 50;
 
 export async function cataloguePage(opened) {
   const doc = opened.document;
@@ -109,6 +114,10 @@ export async function cataloguePage(opened) {
   let total = null;
   const counts = await opened.client.summary();
   if (counts.ok) {
+    // The same call carries the caller's role, which is what decides
+    // whether this screen says "an agent writes these" or "this instance
+    // will refuse a write from you".
+    setReadOnly(doc, counts.result.role, "writes these entities");
     const found = (counts.result.entity_types || []).find((entry) => entry.key === typeKey);
     if (found && Number.isFinite(found.entity_count)) total = found.entity_count;
   }
@@ -125,10 +134,22 @@ export async function cataloguePage(opened) {
     const values = entity.fields && typeof entity.fields === "object" ? entity.fields : {};
     return columns.map((field) => {
       const value = values[field.key];
-      if (value === undefined || value === null || value === "") {
-        return { text: "no " + field.key, absent: true };
+      const name = field.label || field.key;
+      // **Three arms, not two.** design.md's Named Absence Rule is that
+      // absent and empty are different facts that never look alike, and
+      // this folded the empty string into the absent arm: an entity with
+      // `faction: ""` rendered pixel-identically to one with no faction
+      // at all. The rule is stated in this repository and the module next
+      // door already honours it.
+      if (value === undefined || value === null) {
+        // The field's *label* and not its key: the key is the model's
+        // spelling, and a field keyed `min_level` with a label "Minimum
+        // level" was reading "no min_level" on the screen whose whole job
+        // is the game's vocabulary.
+        return { text: "no " + name, absent: true };
       }
-      return { text: String(value) };
+      if (value === "") return { text: "empty", absent: true };
+      return { text: String(value), numeric: field.type === "number" };
     });
   }
 
@@ -140,12 +161,15 @@ export async function cataloguePage(opened) {
       headerRow(doc, {
         label: type.result.label || type.result.key,
         key: "key",
-        cells: columns.map((field) => field.key),
+        cells: columns.map((field) => ({ text: field.label || field.key, numeric: field.type === "number" })),
       }),
     );
   }
 
   const searchEl = doc.getElementById("entities-search");
+  const missEl = doc.getElementById("entities-miss");
+  const missHeadEl = doc.getElementById("entities-miss-head");
+  const missBodyEl = doc.getElementById("entities-miss-body");
   const scopeEl = doc.getElementById("entities-scope");
 
   let cursor = null;
@@ -160,7 +184,17 @@ export async function cataloguePage(opened) {
     say(metaEl, parts.join(" \u00b7 "));
     if (!scopeEl) return;
     if (query !== "") {
-      say(scopeEl, countLabel(rendered, "match", "matches") + " for \u201c" + query + "\u201d");
+      // **"First 50" and not "50 matches".** The search asks for fifty and
+      // reports what came back, so a query matching a thousand rows said
+      // "50 matches" — the same defect this pass exists to fix, a count
+      // naming the page rather than the thing, re-introduced in the new
+      // code path. The honest sentence is the one that admits the cap.
+      const capped = rendered >= SEARCH_LIMIT;
+      say(
+        scopeEl,
+        (capped ? "First " + rendered + " matches" : countLabel(rendered, "match", "matches")) +
+          " for \u201c" + query + "\u201d",
+      );
     } else if (total !== null && rendered < total) {
       say(scopeEl, "Showing " + rendered + " of " + total);
     } else {
@@ -230,7 +264,7 @@ export async function cataloguePage(opened) {
     rendered = 0;
     cursor = null;
     if (moreEl) moreEl.hidden = true;
-    const answer = await opened.client.searchEntities(query, typeKey, { limit: 50 });
+    const answer = await opened.client.searchEntities(query, typeKey, { limit: SEARCH_LIMIT, verbose: true });
     if (!answer.ok) {
       if (expired(answer)) {
         goToLogin();
@@ -254,6 +288,10 @@ export async function cataloguePage(opened) {
         row(doc, {
           label: entity.name || entity.key,
           key: entity.key,
+          // The found row is the one a reader most wants to compare, and
+          // it was the only row in the product rendered under headers for
+          // columns it did not draw.
+          cells: cellsFor(entity),
           count: "",
           flag: entity.invalid === true ? "invalid" : "",
           href: entityURL(opened.slug, entity.type_key || typeKey, entity.key),
@@ -261,7 +299,29 @@ export async function cataloguePage(opened) {
       );
     }
     rendered = entities.length;
-    emptyOrRows(listEl, emptyEl, rendered);
+    // **A miss is not an empty type.** emptyOrRows shows the listing's
+    // own empty state, which reads "Nothing of this type yet" — three
+    // lines under a heading that says the type has 105 entities. A search
+    // that found nothing is a third negative state and it says so.
+    if (missEl) {
+      const missed = query !== "" && rendered === 0;
+      missEl.hidden = !missed;
+      if (missed) {
+        say(missHeadEl, "No match for \u201c" + query + "\u201d");
+        say(
+          missBodyEl,
+          total === null
+            ? "Nothing of this type matches that name or key."
+            : countLabel(total, "entity", "entities") + " of this type, and none of them matches that name or key.",
+        );
+      }
+    }
+    if (query !== "") {
+      listEl.hidden = rendered === 0;
+      if (emptyEl) emptyEl.hidden = true;
+    } else {
+      emptyOrRows(listEl, emptyEl, rendered);
+    }
     sayScope();
   }
 
@@ -276,6 +336,7 @@ export async function cataloguePage(opened) {
         if (next === query) return;
         query = next;
         if (query === "") {
+          if (missEl) missEl.hidden = true;
           listEl.replaceChildren();
           putHeader();
           rendered = 0;

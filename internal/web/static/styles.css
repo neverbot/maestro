@@ -305,6 +305,37 @@ body {
   margin-bottom: var(--s5);
 }
 
+/* The page head: the title, and at its right what this screen cannot do.
+   A rule under it closes the head, which is what the frame settled and
+   what nothing built. */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s5);
+}
+
+.page-actions {
+  margin-left: auto;
+  padding-bottom: 3px;
+}
+
+/* Dashed and muted: it is a statement, not a control, and the dash is
+   the identity's own spelling for "this is not there". */
+.read-only {
+  display: inline-block;
+  font: 600 0.75rem/1.2 var(--sans);
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  padding: 5px var(--s2);
+  cursor: help;
+}
+
 .sign-in .lede {
   margin: 0 0 var(--s3);
 }
@@ -345,7 +376,7 @@ h1 {
   font-weight: 600;
   line-height: 1.15;
   letter-spacing: -0.015em;
-  margin: 0 0 var(--s2);
+  margin: 0;
 }
 
 p.muted { color: var(--muted); }
@@ -731,7 +762,15 @@ ul.catalogue {
   list-style: none;
   padding: 0;
   margin: 0;
+  /* **The tracks live on the list, and every row takes them from here.**
+     They were on each row, which made every row its own grid — and
+     sibling grids share nothing, so a column header sat eighteen pixels
+     off the values it named and two rows with different key lengths did
+     not line up with each other. Six tracks: the name, the key, three
+     content cells and the count. A row with less to say leaves a track
+     empty, and an empty `auto` track collapses to nothing. */
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
   gap: 0;
   min-width: 0;
   background: var(--paper);
@@ -754,10 +793,12 @@ ul.catalogue li {
      rather than pushing the row past its column. A grid track's default
      minimum is its content, which in a three-lane home is how one row
      comes to overlap the lane beside it — found by opening the page. */
-  /* Name, key, then whatever columns this row's content has, then the
-     count. `auto-fit` rather than a fixed three, because a catalogue row
-     carries the fields its type declared and a game declares its own. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto) repeat(auto-fit, minmax(0, auto));
+  /* `subgrid`, so the row's cells sit in the *list's* tracks rather than
+     in tracks of its own. This is what makes a header and its rows one
+     table instead of N: sibling grids share nothing, and this row was one
+     of them. */
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
   gap: var(--s3);
   padding: 0 11px;
@@ -766,6 +807,17 @@ ul.catalogue li {
 }
 
 ul.catalogue li:last-child { border-bottom: 0; }
+
+/* Wide content scrolls inside its own container; the page never scrolls
+   sideways. The minimum is what keeps a row one line tall. */
+.scroller {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+ul.catalogue.wide {
+  min-width: 46rem;
+}
 
 /* The column header. Label type, sticky under the page header so the
    names stay with the rows a thousand of them down, and not a link:
@@ -822,9 +874,16 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
    game's thing, not one of the game's own words. */
 .catalogue-cell {
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
   min-width: 4ch;
+}
+
+/* **Numbers right, words left.** Every cell was right-aligned, so a
+   faction column of `ash` / `cinder` / `hollow` came out ragged down its
+   own left edge. design.md right-aligns numbers; the column knows its
+   declared type and now says so. */
+.catalogue-cell.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .catalogue-cell.absent {
@@ -1160,8 +1219,12 @@ dl.fields dt.undeclared {
 /* A relation's own fields, beside the far end it names. Typed edges are
    a first-class idea in this product and this is where their values are
    read. */
+/* The label is the game's own word, so it is the serif; the key beside
+   it is already mono through .catalogue-key. This set the whole heading
+   in mono, so "Preys on preys_on" read as one machine string — the
+   correction that moved the underscore left the tell behind. */
 .relation-type {
-  font-family: var(--mono);
+  font-family: var(--serif);
 }
 .relation-field {
   font-family: var(--mono);

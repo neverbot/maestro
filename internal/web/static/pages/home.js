@@ -36,6 +36,7 @@ import {
   openGame,
   row,
   say,
+  setReadOnly,
   typeURL,
   typesURL,
   viewURL,
@@ -150,6 +151,7 @@ export async function home(opened) {
   // game with nothing in it.
   if (!summary.ok) return { ...opened, onEvent: null };
   await viewsLane(doc, slug, client);
+  setReadOnly(doc, summary.role, "writes this game's content");
   await prose.load(summary.role);
 
   // The stream, last: the page has just read everything, so the first

@@ -26,3 +26,8 @@ tmp-*.png
 
 # OS noise
 .DS_Store
+
+# Working files of the impeccable skill: critique snapshots and its
+# sidecar. The one input the documentation generator needs lives at
+# docs/design-tokens.json instead.
+.impeccable/

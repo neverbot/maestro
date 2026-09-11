@@ -42,8 +42,15 @@ export const CATALOGUE_CELLS = 3;
 export function row(doc, spec) {
   const item = doc.createElement("li");
 
+  // **The whole row is the target, or the hover is a lie.** The row
+  // highlights on hover and the comment beside that rule says "the row
+  // itself is the affordance" — but only the label was a link, so a
+  // promise made over 100% of a row was kept on 32% of it and a click
+  // forty pixels from the right edge did nothing. The link stretches
+  // over the row through a pseudo-element, which keeps one anchor and
+  // one accessible name rather than wrapping every cell.
   const label = doc.createElement(spec.href ? "a" : "span");
-  label.className = "catalogue-label";
+  label.className = spec.href ? "catalogue-label stretched" : "catalogue-label";
   if (spec.href) label.href = spec.href;
   label.textContent = spec.label ?? "";
   item.append(label);

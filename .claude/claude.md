@@ -174,8 +174,10 @@ decisions lives.
 - The design system lives in three files that must move together:
   `product.md` (who it is for, and the anti-references), `design.md`
   (the normative tokens and the named rules) and
-  `.impeccable/design.json` (canonical OKLCH, shadows, motion and the
-  shared components' own HTML and CSS). `docs/design-system.html` renders
+  `docs/design-tokens.json` (canonical OKLCH, shadows, motion and the
+  shared components' own HTML and CSS; it is the impeccable skill's
+  sidecar, kept here because `.impeccable/` is git-ignored and a
+  generator input cannot live in an ignored directory). `docs/design-system.html` renders
   all three and is **generated** by `docs/design-system.mjs`: edit the
   sources and regenerate, never the page.
 

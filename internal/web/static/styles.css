@@ -480,7 +480,15 @@ p.muted { color: var(--muted); }
 
 .crumb-sep { color: var(--line-strong); }
 
+/* **A game's name is the game's word, and the product's name is its
+   own.** Both were system-ui: the same string that renders as 28px serif
+   in the <h1> forty pixels below was sans in the wordmark and sans again
+   in the switcher. The identity's central rule, failing in the one
+   component that is on every screen. */
 .header-inner .brand {
+  font-family: var(--serif);
+  font-size: 1rem;
+
   color: inherit;
   text-decoration: none;
   font-weight: 600;
@@ -496,6 +504,7 @@ p.muted { color: var(--muted); }
 .game-switcher { position: relative; }
 
 .game-switcher > summary {
+  font-family: var(--serif);
   display: inline-flex;
   align-items: center;
   gap: var(--s2);
@@ -553,7 +562,12 @@ p.muted { color: var(--muted); }
 .game-switcher[open] ul { display: grid; }
 
 .game-switcher a {
+  font-family: var(--serif);
+  /* The padding made every menu row 30.6px, so the compact token it
+     names was inert: a token declared and not read, again. */
   min-height: var(--row-compact-h);
+  display: flex;
+  align-items: center;
   display: block;
   padding: 0.3rem 0.45rem;
   border-radius: var(--radius);
@@ -921,6 +935,29 @@ ul.catalogue li.catalogue-head .catalogue-key { font-family: var(--sans); }
 /* The row answers to the pointer, which is the only thing a border per
    row was doing that a rule does not. */
 ul.catalogue li:hover { background: var(--ground); }
+
+/* The row is the click target. The pseudo-element covers it, so the
+   anchor keeps its single accessible name while the whole row answers to
+   the pointer, which is what the hover has been promising.
+
+   **Only what can be clicked comes back above it.** The rule read
+   `:not(.catalogue-label)` first, and that put every count and chip over
+   the overlay: a row whose hover lit all 1121px of it and whose right
+   half went nowhere. Counts and chips are text; a nested control is
+   raised by name. */
+ul.catalogue li { position: relative; }
+
+.catalogue-label.stretched::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+ul.catalogue li a:not(.catalogue-label),
+ul.catalogue li button,
+ul.catalogue li input,
+ul.catalogue li select,
+ul.catalogue li summary { position: relative; }
 
 /* **In a list, the underline is noise.** The stylesheet's general rule
    underlines links because with the hue gone the underline is the only
@@ -1374,16 +1411,29 @@ li.cycle:last-child { border-bottom: 0; }
 .lane .catalogue-label {
   flex: 1 1 8rem;
 }
+/* **Left over from when a lane row wrapped, and it unmade the row the
+   moment it mattered.** `flex-basis: 100%` pushed the flag onto a line of
+   its own, so a type with invalid rows — the single fact on this page
+   that asks a designer to act — measured 61px against 36, with the name
+   crushed from 258px to 65. Neither seeded game has one, which is
+   exactly why nothing went red: the rule that stopped the row wrapping
+   was carried, and its sibling was not. */
 .lane .catalogue-invalid {
-  flex-basis: 100%;
+  flex: 0 0 auto;
 }
 .lane h2 a {
   color: inherit;
 }
+/* The headline role, which is what a section heading inside a page is.
+   It was sans at 0.95rem muted — an eighth type role, 1.09 against the
+   body where the scale calls 1.24 mandatory, and greyer than the rows
+   under it. */
 .lane h3 {
-  margin: 1.5rem 0 0.4rem;
-  font-size: 0.95rem;
-  color: var(--muted);
+  margin: var(--s5) 0 var(--s2);
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  line-height: 1.3;
+  color: var(--ink);
   font-weight: 600;
 }
 

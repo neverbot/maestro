@@ -854,9 +854,17 @@ ul.catalogue li {
 ul.catalogue li:last-child { border-bottom: 0; }
 
 /* Wide content scrolls inside its own container; the page never scrolls
-   sideways. The minimum is what keeps a row one line tall. */
+   sideways. The minimum is what keeps a row one line tall.
+   
+   **The overflow is only declared where it is needed**, and that is not
+   tidiness: `overflow-x: auto` makes an element a scroll container in
+   *both* axes, and a sticky column header inside one resolves against it
+   rather than against the window — so the header scrolled away with the
+   list instead of staying under the page's own bar. The content column
+   is wider than the table's minimum at every width above the breakpoint,
+   so above it there is nothing to scroll and the container is not
+   needed. */
 .scroller {
-  overflow-x: auto;
   max-width: 100%;
 }
 
@@ -869,6 +877,9 @@ ul.catalogue.wide {
    a heading is not a target. */
 ul.catalogue li.catalogue-head {
   position: sticky;
+  /* Under the page's own bar, which is what it is sticking below. A
+     scroll container between this and the window would break that, which
+     is why `.scroller` only becomes one at the width that needs it. */
   top: var(--header-h);
   z-index: 1;
   min-height: var(--row-compact-h);
@@ -1352,4 +1363,10 @@ dl.fields dt.undeclared {
 @media (max-width: 780px) {
   .destinations { display: none; }
   .narrow-only { display: block; }
+
+  /* Below here the content column is narrower than a catalogue row's
+     minimum, so the table scrolls inside its own box — and its header
+     sticks to that box, because that is what it is now inside. */
+  .scroller { overflow-x: auto; }
+  ul.catalogue li.catalogue-head { top: 0; }
 }

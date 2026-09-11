@@ -97,6 +97,7 @@ export async function cataloguePage(opened) {
     return opened;
   }
   const typeName = type.result.label_plural || type.result.label || type.result.key;
+  doc.title = typeName + " \u00b7 Maestro";
   say(nameEl, typeName);
   // The last crumb, now that the type has a name. Until this line it
   // read the key, which is what the address says and what a reader who

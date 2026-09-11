@@ -433,7 +433,9 @@ export async function entityPage(opened) {
     return opened;
   }
 
-  say(nameEl, model.entity.name || model.entity.key);
+  const entityName = model.entity.name || model.entity.key;
+  say(nameEl, entityName);
+  doc.title = entityName + " \u00b7 Maestro";
   say(addressEl, model.entity.type_key + " · " + model.entity.key);
   // One extra call, for the one sentence this screen owes: what it
   // will not let you change, and whether that is the product or your

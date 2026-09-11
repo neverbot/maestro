@@ -44,6 +44,9 @@ export async function viewsPage(opened) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_VIEWS },
   ]);
+  // The game first: a person with three games open read three tabs
+  // called "Views".
+  doc.title = opened.game.name + " \u00b7 Views \u00b7 Maestro";
   const role = await opened.client.summary();
   if (role.ok) setReadOnly(doc, role.result.role, "writes these views");
 

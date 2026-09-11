@@ -47,22 +47,31 @@
        asking, and a page that hid the empty rows would answer a
        different one. -->
   <dl class="fields" id="entity-fields"></dl>
-  <p class="muted" id="entity-fields-empty" hidden>This type declares no fields.</p>
+  <div class="state" id="entity-fields-empty" hidden>
+  <b>No fields</b>
+  <span>This type declares no fields.</span>
+</div>
 
   <h2>Relations out</h2>
   <div id="relations-out"></div>
-  <p class="muted" id="relations-out-empty" hidden>Nothing leads out of this entity.</p>
+  <div class="state" id="relations-out-empty" hidden>
+  <b>Nothing leads out</b>
+  <span>Nothing leads out of this entity.</span>
+</div>
 
   <h2>Relations in</h2>
   <div id="relations-in"></div>
-  <p class="muted" id="relations-in-empty" hidden>Nothing leads into this entity.</p>
+  <div class="state" id="relations-in-empty" hidden>
+  <b>Nothing leads in</b>
+  <span>Nothing leads into this entity.</span>
+</div>
 
   <h2>Documents</h2>
   <ul class="catalogue" id="entity-docs"></ul>
-  <p class="muted" id="entity-docs-empty" hidden>
-    No document is attached to this entity. An agent attaches one over MCP
-    (docs.links.add); nothing on this page attaches one.
-  </p>
+  <div class="state" id="entity-docs-empty" hidden>
+  <b>No prose attached</b>
+  <span>No document is attached to this entity. An agent attaches one over MCP (docs.links.add); nothing on this page attaches one.</span>
+</div>
 </section>
 
 </main>

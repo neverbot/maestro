@@ -70,6 +70,9 @@ export async function assetsPage(opened) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_IMAGES },
   ]);
+  // The game first: a person with three games open read three tabs
+  // called "Images".
+  doc.title = opened.game.name + " \u00b7 Images \u00b7 Maestro";
   const role = await opened.client.summary();
   if (role.ok) setReadOnly(doc, role.result.role, "uploads these images");
 

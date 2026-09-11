@@ -1,18 +1,17 @@
 # claude.md
 
-Project context and operating rules for Claude Code (and any other AI
-agent working on Maestro). Short and load-bearing; every working
-session keeps these invariants in mind from the start.
+Operating rules for Claude Code, and for any other AI agent working on
+Maestro. Short and load-bearing: a working session reads this first and
+keeps these invariants from the start.
 
-All seven sub-projects have shipped. What was pending here is now
-decided, built and tested; the specs and plans under
-`.superpowers/` are the record of how, and the "Project status"
-section at the end says where things actually stand.
+This file is **public**, like the rest of the repository. It says how
+this project is built and verified. It says nothing about the machine
+it is built on, nothing about the author's other work, and nothing
+about where an instance of it happens to run.
 
-Keep this file honest as decisions land. Every sentence in it is a
-claim about code that can go false without anything turning red —
-which happened repeatedly during the build, and cost more than any
-compiler error did.
+Keep it honest as decisions land. Every sentence here is a claim about
+code that can go false with nothing turning red — which happened
+repeatedly during the build, and cost more than any compiler error did.
 
 ## What Maestro is
 
@@ -21,12 +20,11 @@ their AI agents while **designing the content of a video game**:
 narrative, missions, characters, places and progression.
 
 Maestro is *not* a project tracker. There is no kanban, no gantt, no
-sprint. Task tracking for building Maestro itself lives in Nottario
-(see "Sibling project" below). What Maestro tracks is the *game
-design*: everything a player can be, go to, do and unlock.
+sprint. What it tracks is the *game design*: everything a player can
+be, go to, do and unlock.
 
 The core is a **pure metamodel**. Maestro ships no built-in notion of
-"class", "zone" or "quest". Each game project declares its own:
+"class", "zone" or "quest". Each game declares its own:
 
 1. **EntityType** — a named kind of thing, with a field schema
    (`Class`, `Zone`, `Quest`, `Talent` for an MMORPG; `Driver`, `Car`,
@@ -40,19 +38,18 @@ The core is a **pure metamodel**. Maestro ships no built-in notion of
 
 Everything else — the catalogues, the place graph, the mission lists
 with preconditions and rewards, the progression trees — is a **view**
-over those primitives, driven by how a project classifies its own
-relation types. Genericity is the product: the same schema must serve
-an MMORPG and a racing career equally well.
+over those primitives, driven by how a game classifies its own relation
+types. Genericity is the product: the same schema must serve an MMORPG
+and a racing career equally well.
 
-Agents are not expected to guess the metamodel. Like Nottario,
-Maestro ships a **skill bundle** teaching agents how to declare types
-and populate content, with worked examples per genre.
+Agents are not expected to guess the metamodel. Maestro ships a **skill
+bundle** teaching them how to declare types and populate content, with
+worked examples per genre.
 
 ## The repository is PUBLIC
 
-`github.com/neverbot/maestro` is a public repository. Everything
-committed here is world-readable, forever, including in history after a
-later deletion.
+Everything committed here is world-readable, forever, including in
+history after a later deletion.
 
 **Before every `git commit`, review what is being staged**, with this
 in mind:
@@ -60,15 +57,16 @@ in mind:
 - No secrets of any kind: API keys, bearer tokens, passwords, session
   keys, certificates, SSH keys, `.env` contents, database URLs with
   credentials.
-- No private infrastructure details: internal hostnames or IPs, VPN
-  addresses, ports of the author's home server, container names of
-  private deployments, dashboard URLs.
+- No private infrastructure: hostnames, IP addresses, ports of a real
+  deployment, container names, dashboard URLs, VPN addresses.
 - No personal data: private email addresses, real names of third
-  parties, chat excerpts, customer content.
-- No local absolute paths that expose a home directory
-  (`/Users/<name>/…`) — write repo-relative or `~`-prefixed paths.
-- No scratch artefacts: brainstorming dumps, debug output, screenshots
-  of private tools. Those live in ignored directories.
+  parties, chat excerpts.
+- No local absolute paths that expose a home directory — write
+  repo-relative paths.
+- No references to a contributor's other projects, private or public,
+  and no instructions that only make sense on one person's machine.
+- No scratch artefacts: brainstorming dumps, debug output, screenshots.
+  Those live in ignored directories.
 
 Prefer `git add <specific files>` and read the diff before committing.
 If something questionable is already committed, say so immediately —
@@ -78,134 +76,103 @@ rewriting history on a public repo is a decision for the human.
 
 **All written artefacts are in English.** Source, comments, identifier
 names, `docs/`, `readme.md`, `changelog.md`, commit messages, seeded
-markdown, issue/PR titles and bodies, default UI strings, design specs
-and plans.
+markdown, issue and PR titles and bodies, default UI strings, design
+specs and plans.
 
-Conversation with the user happens in whatever language they choose
-(usually Spanish); artefacts written to disk are English regardless.
-
-## Sibling project: Nottario
-
-Maestro's architecture is deliberately modelled on
-[Nottario](../nottario/) (`~/Projects/neverbot/nottario`): single Go
-binary, embedded assets, Postgres, MCP over HTTP+SSE, per-project
-tokens, self-hosted via Docker. Read Nottario's `.claude/claude.md`
-and `docs/initial/` before proposing structural changes — most
-questions about "how should this be built" already have an answer
-there.
-
-Two things must **not** be copied:
-
-- **The domain.** Nottario tracks work; Maestro tracks game content.
-  No tasks, no cycles, no priorities, no kanban, no gantt.
-- **The visual design.** Nottario is deliberately GitHub-like.
-  Maestro gets its own identity, designed through the `impeccable`
-  skill. Do not reuse Nottario's palette or component look.
-
-**Maestro's own development work is tracked in Nottario**, project
-slug `maestro`, over the `mcp__nottario__*` tools (roles: backend,
-frontend, qa, design). File work before doing it, claim atomically
-with `tasks.claim_next`, link commits, close with a one-line comment.
-The Nottario skill bundle is installed at `.claude/skills/nottario/`
-and is the authority on that workflow.
+Conversation with the user happens in whatever language they choose;
+artefacts written to disk are English regardless.
 
 ## Technical invariants
 
-Inherited from Nottario unless a design decision overrides them:
-
 - **Lightweight is a first-order goal.** Single binary with embedded
-  assets, small Docker image, no heavy build pipeline. Every
-  dependency justifies its presence.
+  assets, small Docker image, no heavy build pipeline. Every dependency
+  justifies its presence.
 - **Backend:** Go, `net/http` (no framework), pgx/v5, sqlc for all
-  queries, embedded migrations.
+  queries, embedded goose migrations.
 - **Database:** PostgreSQL. `jsonb` for user-declared field values,
-  `tsvector` + GIN for search, `LISTEN`/`NOTIFY` for real-time,
-  recursive CTEs for graph walks.
+  `tsvector` + GIN for search, recursive CTEs for graph walks.
 - **Real-time:** SSE, no WebSockets.
 - **MCP:** served over HTTP+SSE from the same binary, authenticated
-  with per-project bearer tokens. One token = one project.
-- **Frontend:** vanilla CSS + Lit, ES modules, no build step, no
+  with per-game bearer tokens. One token = one game.
+- **Frontend:** vanilla CSS + Lit, ES modules, **no build step**, no
   TypeScript. Graph layout by a vendored layout engine; rendering is
-  ours in SVG.
-- **Deployment:** Docker Compose, reverse proxy in front. The primary
-  branch is `master`. **Not yet true, and written here so nobody
-  repeats it as if it were:** CI builds the image and smoke-tests it
-  against a real Postgres, and pushes it nowhere — building from this
-  repository is the only way to run it. There is no documentation site
-  and no `cmd/maestro-docs`; the binaries are `maestro` and
-  `maestro-skilldoc`.
+  ours in SVG. Two consequences that have each cost a day:
+  - **`default-src 'self'`.** A `<style>` element built by script is
+    refused silently; a shadow root gets its CSS through
+    `adoptedStyleSheets`. Fonts are self-hosted for the same reason.
+  - **The design system stops at the shadow boundary.** Element
+    selectors in the global stylesheet do not cross into a shadow
+    root; custom properties do. A component states its own shape and
+    reads tokens.
 - **Human auth:** local accounts only — email plus argon2id password,
   invite links, no email delivery and no external identity provider.
   Designers are not developers and an instance must work with zero
   external accounts. Registration is `invite_only` or `domain_open`
   against an allowed-domain list.
 - **Agent auth:** bearer tokens, one token = one game, admins included.
+- **Deployment:** Docker Compose, a reverse proxy in front. The primary
+  branch is `master`. CI builds the image, smoke-tests it against a
+  real Postgres, and publishes nothing: building from this repository
+  is the only way to run it. The binaries are `maestro` and
+  `maestro-skilldoc`.
 
-Each area has a spec under `.superpowers/specs/` and a plan under
-`.superpowers/plans/`. **The plans are worth more than the specs
-now**: every one carries a "Corrections made during implementation"
-block recording what the spec got wrong, and four end with a "What
-this sub-project learned" section. Read the corrections before
-changing an area — they are where the reasoning behind the odd-looking
-decisions lives.
+## The design system
 
-| Area | Spec | Plan |
-|---|---|---|
-| Core, metamodel | `2026-08-31-core-and-metamodel-design.md` | `2026-08-31-core.md`, `2026-08-31-metamodel.md` |
-| Markdown | `2026-09-02-markdown-domain-design.md` | `2026-09-02-markdown.md` |
-| Views | `2026-09-02-views-and-query-language-design.md` | `2026-09-02-views.md` |
-| Interface | `2026-09-06-interface-design.md` | `2026-09-06-interface.md` |
-| Analysis | `2026-09-02-analysis-engine-design.md` | `2026-09-06-analysis.md` |
-| Skill bundle | `2026-09-02-agent-skill-bundle-design.md` | `2026-09-06-skills.md` |
+Three files, and they move together:
+
+- `docs/product.md` — who this is for, the tone, the anti-references.
+- `docs/design.md` — the normative tokens and the named rules
+  (Two Grounds, Ink Button, Named Absence, Shadow Boundary, and the
+  rest). The stylesheet answers to this document, not the reverse.
+- `docs/design-tokens.json` — canonical OKLCH values, shadows, motion,
+  and the shared components' own HTML and CSS.
+
+`docs/design-system.html` renders all three and is **generated** by
+`docs/design-system.mjs`. Edit the sources and regenerate; never edit
+the page.
+
+Interface work is analysed through the `impeccable` skill rather than
+by eye. Its loader looks for `product.md` and `design.md` at the repo
+root, then `.agents/context/`, then `docs/` — which is why they live in
+`docs/`.
 
 ## Operational rules
 
 ### Documents
 
 - Specs and plans live in `.superpowers/`, which is **git-ignored**:
-  they are the working record of how this was built, they are not
-  published, and a reader outside this machine will never see them. A
-  claim that has to survive is written where the code is.
+  the working record of how this was built, never published. A claim
+  that has to survive is written where the code is.
 - Design specs: `.superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
-- Implementation plans: `.superpowers/plans/YYYY-MM-DD-<topic>.md`,
-  each carrying its own corrections block. **Record a correction where
-  the decision lives, not in a commit message** — a commit message is
-  read once and a plan is read by whoever changes the area next.
+  Implementation plans: `.superpowers/plans/YYYY-MM-DD-<topic>.md`.
+- **Record a correction where the decision lives**, not in a commit
+  message: a commit message is read once, and the code beside it is
+  read by whoever changes the area next.
 - Throwaway artefacts (screenshots, probe pages, scratch dumps) go in
   `.scratch/`, which is git-ignored. Never in `.claude/` (read-only
   context) and never at the repo root.
 - Markdown filenames are lowercase (`readme.md`, `claude.md`).
-- The design system lives in three files that must move together:
-  `product.md` (who it is for, and the anti-references), `design.md`
-  (the normative tokens and the named rules) and
-  `docs/design-tokens.json` (canonical OKLCH, shadows, motion and the
-  shared components' own HTML and CSS; it is the impeccable skill's
-  sidecar, kept here because `.impeccable/` is git-ignored and a
-  generator input cannot live in an ignored directory). `docs/design-system.html` renders
-  all three and is **generated** by `docs/design-system.mjs`: edit the
-  sources and regenerate, never the page.
 
 ### How this project verifies itself
 
-These are not style preferences. Each one is here because skipping it
-shipped a defect during the build.
+Not style preferences. Each one is here because skipping it shipped a
+defect during the build.
 
 - **Mutation is the proof.** A green test proves nothing until you have
   seen it go red: introduce the fault the test claims to prevent,
-  confirm by diff that the patch actually landed, watch it fail, and
-  restore. Nearly every serious defect found in this repository was
-  found this way, and none by reading a diff.
+  confirm by diff that the patch landed, watch it fail, restore.
+  Nearly every serious defect found here was found this way, and none
+  by reading a diff.
 - **Run the one test, not the package.** A single test is under five
-  seconds; `internal/web` alone is over three minutes. Mutation against
-  a whole package costs forty times what it needs to.
+  seconds; `internal/web` alone is over three minutes.
 - **`export TEST_DATABASE_URL` or hundreds of tests skip in silence**
   and `go test` still prints `ok`. A repo-wide `-v` run must show zero
   `--- SKIP` lines.
-- **Correct in the module, dead at the call site.** The single most
-  repeated defect here: a unit asserted by a harness that calls it
-  directly, wired to nothing, with everything green. Assert through the
-  path the product actually uses — the real transport for a tool, the
-  real page for a component.
+- **Correct in the module, dead at the call site.** The most repeated
+  defect here: a unit asserted by a harness that calls it directly,
+  wired to nothing, everything green. Assert through the path the
+  product actually uses — the real transport for a tool, the real page
+  for a component.
 - **A rule established and not carried one step along.** The second
   most repeated, and it lands *inside the correction that establishes
   the rule* more often than not. When you write a rule, find every
@@ -213,9 +180,9 @@ shipped a defect during the build.
 - **A mechanism nothing reads is a lie.** No knob without a reader, no
   signal nobody consumes, no cap whose overflow nothing detects.
 - **Prose about code is code, and rots the same way.** Doc comments,
-  tool descriptions and the skill bundle have all shipped statements
-  that contradicted the code with nothing red anywhere. Check a claim
-  against the code, never against the spec — the spec is older.
+  tool descriptions and the skill bundle have each shipped statements
+  contradicting the code with nothing red anywhere. Check a claim
+  against the code, never against a spec — the spec is older.
 - **A browser fails silently where a server returns an error.** A
   refused stylesheet, a blocked import map and an unwired listener all
   look exactly like working code. Frontend work is not verified until
@@ -234,7 +201,7 @@ shipped a defect during the build.
 
 ### Externally visible actions
 
-Push, PR/issue comments, messages, uploads to third-party services:
+Push, PR and issue comments, messages, uploads to third-party services:
 each needs explicit human confirmation. A one-time approval does not
 extend to future calls.
 
@@ -242,15 +209,15 @@ extend to future calls.
 
 Never drop, wipe or recreate a database holding real user state
 (`docker compose down -v`, `docker volume rm`, `DROP DATABASE`,
-unqualified `TRUNCATE`/`DELETE`). To verify a migration, create a
+unqualified `TRUNCATE` or `DELETE`). To verify a migration, create a
 fresh throwaway database from a test helper or a separate compose
 project. If you cannot proceed without resetting live data, stop and
 ask.
 
 ## Project status
 
-All seven sub-projects have shipped. `make check` is the gate:
-gofmt, vet, lint, `sqlc diff`, the skill-bundle guards and
+All seven sub-projects have shipped. `make check` is the gate: gofmt,
+vet, lint, `sqlc diff`, the skill-bundle guards and
 `go test -race ./...`.
 
 | | What is there |
@@ -264,6 +231,13 @@ gofmt, vet, lint, `sqlc diff`, the skill-bundle guards and
 | Skills | The agent bundle, three genres, served over a signed URL |
 
 The agent surface is MCP tools, mirrored route for route in REST.
+
+The interface is being redesigned against `docs/design.md`: a shared
+header and breadcrumb, one row component behind every catalogue, one
+statement of what a control looks like shared by the Lit components,
+and the analysis screens written as reports rather than as tables.
+Guards in `internal/web/static_*_test.go` hold the vocabulary, the
+tokens and the control styles.
 
 ### What is deliberately not built
 
@@ -279,5 +253,6 @@ Say these plainly rather than letting someone discover them:
   a second replica has its own subscribers and its own budgets.
 - **Nobody has verified that the skill bundle teaches.** Its guards
   prove it is consistent with the server and say nothing about whether
-  an agent reading it can actually start. Two acceptance cases needing
-  a human are recorded as not run.
+  an agent reading it can start. A cold-read rehearsal built a working
+  game and never derived the route checker, which is a gap in the
+  bundle and not in the reader.

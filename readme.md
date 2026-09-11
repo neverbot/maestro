@@ -276,11 +276,6 @@ as an unknown token.
 - [x] **Analysis.** Cycles, unreachable content, orphans, routes.
 - [x] **Skills.** The agent bundle and genre templates.
 
-Each sub-project was designed in a spec and built from a plan, and both
-live in `.superpowers/`, a working directory that is not versioned: they
-are how this was built, not what it is. What the code does is said by
-the code, by `design.md` for the interface, and by the roadmap above.
-
 ## License
 
 MIT. See [license.md](license.md).

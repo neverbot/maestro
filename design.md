@@ -407,7 +407,7 @@ The signature surface of this product and the one to get right.
 ### The page frame
 
 The one structure every screen is built in, decided once in
-`docs/superpowers/specs/2026-09-10-global-look-design.md`.
+`.superpowers/specs/2026-09-10-global-look-design.md`.
 
 - **Content width:** 1440px maximum, centred on a full-bleed ground,
   24px gutters and 16px below 780px. The 68ch measure belongs to the

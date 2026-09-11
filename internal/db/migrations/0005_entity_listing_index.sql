@@ -25,7 +25,7 @@
 -- cannot seek to its cursor** -- the exact defect this migration exists
 -- to fix, still open on the one path the original comment claimed it
 -- covered. See Task 6's plan corrections
--- (docs/superpowers/plans/2026-08-31-metamodel.md) for what that means
+-- (.superpowers/plans/2026-08-31-metamodel.md) for what that means
 -- for a query language built on this table.
 --
 -- Measured on this project's own Postgres, 50,000 entities across 20

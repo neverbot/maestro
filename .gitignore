@@ -1,7 +1,6 @@
-# Design-phase scratch space: brainstorming mockups, throwaway artefacts.
-# Deleted once the design is accepted; never versioned.
-/develop/
-.superpowers/
+# Working directory of the superpowers skills: brainstorming mockups,
+# design specs and implementation plans. One directory, never versioned.
+/.superpowers/
 
 # Throwaway artefacts from agent sessions (screenshots, dumps, probes).
 /.scratch/

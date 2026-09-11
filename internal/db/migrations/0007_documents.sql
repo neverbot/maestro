@@ -55,7 +55,7 @@
 -- digit" rule is tied to 'simple' having no stopword list. The cost is
 -- no stemming: searching "history" does not find "histories". Recorded
 -- here, not hidden; the search tool that surfaces this index is a later
--- task (docs/superpowers/plans/2026-09-02-markdown.md, Task 9) and says
+-- task (.superpowers/plans/2026-09-02-markdown.md, Task 9) and says
 -- so in its own description.
 --
 -- The weights are A for the title, B for the summary and C for the
@@ -136,7 +136,7 @@ CREATE INDEX documents_search_idx ON documents USING gin (search);
 -- (project_id, path, id), so that a keyset page can be an index scan
 -- rather than a sort of the whole game. Unlike 0005_entity_listing_index
 -- this is not measured: the listing it is for does not exist yet
--- (docs/superpowers/plans/2026-09-02-markdown.md, Task 8), and whoever
+-- (.superpowers/plans/2026-09-02-markdown.md, Task 8), and whoever
 -- writes it should check the plan rather than assume this index is in
 -- it. It also gives the projects delete cascade an index to work from.
 CREATE INDEX documents_listing_idx ON documents (project_id, path, id);
@@ -215,7 +215,7 @@ CREATE TABLE document_links (
 -- One document has exactly one role on one entity: re-adding a link
 -- updates the role rather than making a second edge. role is not part of
 -- the key, which is the decision
--- docs/superpowers/plans/2026-09-02-markdown.md records and argues.
+-- .superpowers/plans/2026-09-02-markdown.md records and argues.
 CREATE UNIQUE INDEX document_links_key ON document_links (document_id, entity_id);
 -- The reverse lookup, for reading every document attached to one entity.
 -- project_id leads it because every query filters on that first, and

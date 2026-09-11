@@ -133,7 +133,7 @@
      text — keys, pointers, versions — in mono, because a JSON pointer is
      a thing to be copied and monospace is what says so. These are not
      redeclared in the dark block: a font stack does not have a theme. */
-  /* The frame's measurements (docs/superpowers/specs/2026-09-10-global-
+  /* The frame's measurements (.superpowers/specs/2026-09-10-global-
      look-design.md). They are tokens rather than numbers at each call
      site for the reason the colours are: the audit counted fifteen
      padding values and eight gaps in this file, none of them shared, and

@@ -19,8 +19,7 @@ running one: no live instances, no real players, no telemetry.
 > the query language was written for agents, and a query builder is its
 > own piece of work; you can copy an existing view and change how it is
 > drawn. See [Running it](#running-it) to start an instance, the
-> [Roadmap](#roadmap) for what is done, and
-> [`docs/superpowers/specs/`](docs/superpowers/specs/) for the design.
+> [Roadmap](#roadmap) for what is done.
 
 ## Maestro knows nothing about games
 
@@ -277,17 +276,10 @@ as an unknown token.
 - [x] **Analysis.** Cycles, unreachable content, orphans, routes.
 - [x] **Skills.** The agent bundle and genre templates.
 
-Design documents, one per sub-project. The **plans** beside them, in
-[`docs/superpowers/plans/`](docs/superpowers/plans/), are the more
-useful read: each carries a record of what its spec got wrong once the
-code met reality, and several end with what the sub-project learned.
-
-- [Core and metamodel](docs/superpowers/specs/2026-08-31-core-and-metamodel-design.md)
-- [The markdown domain](docs/superpowers/specs/2026-09-02-markdown-domain-design.md)
-- [Views and the D2 query language](docs/superpowers/specs/2026-09-02-views-and-query-language-design.md)
-- [The interface](docs/superpowers/specs/2026-09-06-interface-design.md)
-- [The analysis engine](docs/superpowers/specs/2026-09-02-analysis-engine-design.md)
-- [The agent skill bundle](docs/superpowers/specs/2026-09-02-agent-skill-bundle-design.md)
+Each sub-project was designed in a spec and built from a plan, and both
+live in `.superpowers/`, a working directory that is not versioned: they
+are how this was built, not what it is. What the code does is said by
+the code, by `design.md` for the interface, and by the roadmap above.
 
 ## License
 

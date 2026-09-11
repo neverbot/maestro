@@ -6,7 +6,7 @@ session keeps these invariants in mind from the start.
 
 All seven sub-projects have shipped. What was pending here is now
 decided, built and tested; the specs and plans under
-`docs/superpowers/` are the record of how, and the "Project status"
+`.superpowers/` are the record of how, and the "Project status"
 section at the end says where things actually stand.
 
 Keep this file honest as decisions land. Every sentence in it is a
@@ -141,8 +141,8 @@ Inherited from Nottario unless a design decision overrides them:
   against an allowed-domain list.
 - **Agent auth:** bearer tokens, one token = one game, admins included.
 
-Each area has a spec under `docs/superpowers/specs/` and a plan under
-`docs/superpowers/plans/`. **The plans are worth more than the specs
+Each area has a spec under `.superpowers/specs/` and a plan under
+`.superpowers/plans/`. **The plans are worth more than the specs
 now**: every one carries a "Corrections made during implementation"
 block recording what the spec got wrong, and four end with a "What
 this sub-project learned" section. Read the corrections before
@@ -162,8 +162,12 @@ decisions lives.
 
 ### Documents
 
-- Design specs: `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
-- Implementation plans: `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`,
+- Specs and plans live in `.superpowers/`, which is **git-ignored**:
+  they are the working record of how this was built, they are not
+  published, and a reader outside this machine will never see them. A
+  claim that has to survive is written where the code is.
+- Design specs: `.superpowers/specs/YYYY-MM-DD-<topic>-design.md`.
+- Implementation plans: `.superpowers/plans/YYYY-MM-DD-<topic>.md`,
   each carrying its own corrections block. **Record a correction where
   the decision lives, not in a commit message** — a commit message is
   read once and a plan is read by whoever changes the area next.

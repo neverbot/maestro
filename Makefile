@@ -29,7 +29,7 @@ lint:
 
 # docs-check is deliberately not part of this gate: it would lint the
 # documentation site this project's own docs live in, and no such
-# generator exists yet in this repository (see docs/superpowers/plans,
+# generator exists yet in this repository (see .superpowers/plans,
 # which is plain Markdown consumed by nothing but a human reader today).
 # Adding docs-check here ahead of that generator existing would either be
 # a no-op with a misleading name or block every commit on a tool that

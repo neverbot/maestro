@@ -14,7 +14,7 @@ import (
 
 // The arithmetic half of the interface's identity.
 //
-// The design spec (docs/superpowers/specs/2026-09-06-interface-design.md
+// The design spec (.superpowers/specs/2026-09-06-interface-design.md
 // §2) commits to one mechanical rule — the chrome is achromatic and
 // every hue on screen belongs to the game — and to a categorical palette
 // of eight hues that has to survive being read at 11px, on two grounds,

@@ -1,7 +1,7 @@
 // The three read-only analyses, on one page.
 //
 // **The rule that outranks every layout here**
-// (docs/superpowers/specs/2026-09-11-analysis-screens-design.md §1): an
+// (.superpowers/specs/2026-09-11-analysis-screens-design.md §1): an
 // empty findings list is not a verdict. The engine is built around it —
 // every result carries what it walked, because an empty list means
 // either "the game is clean" or "the walk followed nothing" and the two

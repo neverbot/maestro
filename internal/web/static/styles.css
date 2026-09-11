@@ -700,8 +700,12 @@ p.muted { color: var(--muted); }
 
 .person-menu .menu a,
 .person-menu .menu .sign-out {
-  min-height: var(--row-compact-h);
-  display: block;
+  /* A control's own height, not the compact row's: these were 31px, one
+     pixel under the token every other target in the product answers to,
+     and one of them signs you out. */
+  min-height: var(--control-h);
+  display: flex;
+  align-items: center;
   width: 100%;
   padding: 0.3rem 0.45rem;
   border: 0;
@@ -717,13 +721,34 @@ p.muted { color: var(--muted); }
 .person-menu .menu a:hover,
 .person-menu .menu .sign-out:hover:not(:disabled) { background: var(--ground); }
 
-/* Signing out is not a navigation: it is the one thing in this menu that
-   ends something, so it sits under a rule rather than in the list. */
+/* **Signing out is not a navigation**, and it sat 8px under one. It is
+   the only destructive action in the product's chrome, it was the same
+   size, weight and colour as the two links above it, and it fired on one
+   click. The rule and the space are what separate a door from an exit;
+   the second click (pages/app.js) is what makes it an exit rather than a
+   trap. */
 .person-menu .menu .sign-out {
-  margin-top: 0.35rem;
-  padding-top: 0.4rem;
+  margin-top: var(--s3);
+  padding-top: var(--s2);
   border-top: 1px solid var(--line);
   border-radius: 0;
+}
+
+/* Armed: the label has changed to say what the next click does, and the
+   word is the one this system spends on a fault. */
+.person-menu .menu .sign-out[data-armed="true"] { color: var(--danger); }
+
+/* The same arming, in a row: a control that has asked once and is
+   waiting for the answer. */
+.link-button[data-armed="true"] { color: var(--danger); }
+
+/* A row's own action is a word, and a word is a 20px target. It keeps
+   the look and takes the height every other control in the product has,
+   inside a row that is 36px tall. */
+ul.catalogue .link-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h);
 }
 
 .narrow-only { display: none; }
@@ -770,10 +795,81 @@ form label {
 
 /* --- The surfaces that belong to a person, not to a game -------------
  *
- * One column, capped where prose is capped, because everything on these
- * two screens is a sentence, a field or a short list. The catalogue's
- * full width would leave a 62-character sentence adrift in 1440px. */
-.page.narrow { max-width: 52rem; }
+ * **The page is not capped; the things on it are.** It was
+ * `max-width: 52rem`, which centred an 832px column in a 1440px window
+ * and left the title at x328 under a wordmark at x24: the header and the
+ * page read as two documents, and the page-head rule stopped 328px short
+ * of the rule above it. The `.picker` block further up this file records
+ * that exact finding, and this rule committed it again 264 lines later.
+ *
+ * So the page keeps the frame every other screen has, and each kind of
+ * content takes the cap that suits it: a sentence gets a measure, a
+ * field gets the width of what goes in it, a list gets room to be a
+ * list. */
+.page.narrow > p,
+.page.narrow .facts,
+.page.narrow .choices,
+.page.narrow form,
+.page.narrow .field-note { max-width: 34rem; }
+
+.page.narrow .state { max-width: 42rem; }
+
+/* A field is as wide as what goes in it. `.sign-in` settled on 26rem for
+   an email address and wrote down why: a field stretched across 1440px
+   says nothing about what it wants. Same field, same answer. */
+.page.narrow input[type="email"],
+.page.narrow input[type="password"],
+.page.narrow input[type="text"] { max-width: 26rem; }
+
+/* The one list on these screens: wide enough to be a table, capped
+   before it becomes a field of white, and clear of the button above it
+   (they were touching at 0px). */
+.page.narrow ul.catalogue { max-width: 52rem; margin-top: var(--s5); }
+
+/* **A section names itself on the left and answers on the right.**
+ *
+ * Stacked in one column these screens were three headings and three
+ * forms with 32px between everything, reading as one long form — and on
+ * a 1440px window the whole of the right half was bare ground. This is
+ * the rail the page frame already describes, turned ninety degrees: the
+ * heading and the sentence that explains it sit in a fixed column, the
+ * controls in the one that grows.
+ *
+ * Below 900px it is one column again, because a 280px rail beside a
+ * 416px field does not fit in a phone. */
+.setting {
+  display: grid;
+  grid-template-columns: minmax(0, 17rem) minmax(0, 1fr);
+  gap: var(--s5) var(--s6);
+  margin-top: var(--s6);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--line);
+}
+
+.setting:first-of-type {
+  margin-top: var(--s5);
+  padding-top: 0;
+  border-top: 0;
+}
+
+.setting-head h2 {
+  margin: 0 0 var(--s2);
+}
+
+.setting-head p { max-width: 34rem; }
+
+.setting-body { display: grid; gap: var(--s3); align-content: start; }
+
+.setting-body > form { margin-top: 0; }
+
+@media (max-width: 900px) {
+  .setting { grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+}
+
+/* The user agent's 14px is a number this system does not contain, and
+   four paragraphs on these two screens were wearing it. */
+.page p { margin: 0; }
+
 
 /* A short list of facts about you: name, address, since when. A
    definition list and not a table, because there is one row per fact and
@@ -825,6 +921,11 @@ form label {
   accent-color: var(--focus);
 }
 
+/* A label in a catalogue row that is not the game's word: an email
+   address, a filename, anything belonging to the instance rather than to
+   the world being designed. */
+.catalogue-label.plain { font-family: var(--sans); font-weight: 400; }
+
 /* **`class="mono"` had no rule at all.** entity.html sets the entity's
    address in it — two machine identifiers and nothing else — and it
    rendered in the tool's sans, against the Copyable Is Mono Rule, for as
@@ -834,6 +935,53 @@ form label {
   font-size: 0.78rem;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+/* **A secret shown once.** `.state` is the negative-state component and
+   its three shapes are empty, loading and refused; a one-time invitation
+   link is none of those, and rendering it there set the most
+   consequential string in the product in the treatment reserved for
+   "there is nothing here". The dashed Stroke border is the Read-Only
+   Notice's vocabulary, which is what this system already spends on "read
+   this, you cannot get it again". */
+.secret {
+  display: grid;
+  gap: var(--s2);
+  max-width: 42rem;
+  margin-top: var(--s4);
+  padding: var(--s4);
+  background: var(--paper);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+}
+
+.secret b { color: var(--ink); }
+
+/* The link itself is the point of the box: ink at reading size, not
+   muted metadata. */
+.secret .mono {
+  color: var(--ink);
+  font-size: 0.875rem;
+  user-select: all;
+}
+
+/* One link and its button, side by side, so a second link is a second
+   line rather than the first one gone. */
+.secret-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+}
+
+/* A link from earlier in this sitting: still valid, still the only copy,
+   and Maestro cannot show it again if this page reloads. */
+.secret-line.spent .mono { color: var(--muted); }
+.secret-line.spent::after {
+  content: "shown earlier";
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.75rem;
 }
 
 /* For a legend that names a group of radios the heading above already
@@ -935,6 +1083,29 @@ button:disabled {
   font-weight: 500;
 }
 
+/* **The Ghost button, which design.md has documented since the first
+   pass and this stylesheet never wrote.** "Transparent, ink text, Stroke
+   border. Every secondary action." Without it a bare `button` is a
+   primary, so any screen carrying two forms grew two ink-filled
+   primaries by construction — which is what the administration screen
+   did on its first day, against the one-primary-per-screen rule three
+   sections above it. `.sign-out` was the same shape, written once for
+   one button; it now reads as what it always was, a ghost. */
+.ghost,
+.sign-out {
+  background: none;
+  color: var(--ink);
+  border-color: var(--line-strong);
+  box-shadow: none;
+  justify-self: start;
+}
+
+.ghost:hover:not(:disabled),
+.sign-out:hover:not(:disabled) {
+  background: var(--ground);
+  color: var(--ink);
+}
+
 .link-button {
   height: auto;
   background: none;
@@ -953,19 +1124,6 @@ button:disabled {
 
 /* Sign out is a ghost and never the primary button: it is the least
    likely thing a person came here to do. */
-.sign-out {
-  background: none;
-  color: var(--ink);
-  border-color: var(--line-strong);
-  box-shadow: none;
-  justify-self: auto;
-}
-
-.sign-out:hover:not(:disabled) {
-  background: var(--ground);
-  color: var(--ink);
-}
-
 /* The one token that means "this needs your attention", on the sentence
    and on the field it is about. */
 /* The strip above a list: what narrows it, and what it is showing. */
@@ -1001,13 +1159,21 @@ button:disabled {
   background: var(--ground);
 }
 
-.error { color: var(--danger); min-height: 1.2em; }
+.error { color: var(--danger); min-height: 1.2em; margin: 0; }
 
-/* A line that explains a field, under the field. */
+/* A line that explains a field, under the field.
+ *
+ * **The negative pull belongs to a field, not to everything.** It was
+ * unconditional and tuned to hug a 32px input, so under the theme
+ * fieldset it climbed 8px into the last radio's box and read as a
+ * description of "Dark" rather than of the group. */
 .field-note {
-  margin: calc(var(--s2) * -1) 0 0;
+  margin: var(--s2) 0 0;
   font-size: 0.8rem;
 }
+
+input + .field-note,
+select + .field-note { margin-top: calc(var(--s2) * -1); }
 
 input.refused,
 input.refused:focus {

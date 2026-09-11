@@ -27,14 +27,27 @@
 </noscript>
 
 <main class="page narrow">
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<!-- No breadcrumb: see account.html. -->
 
 <div class="page-head">
 <h1>Administration</h1>
+<!-- **The count belongs in the head**, which design.md spells as title,
+     count, notice. It sat under the head's rule, 285px above the list it
+     counts, saying "1 invitation outstanding" over two rows. It also
+     ships empty rather than saying "Loading…", which paints on every
+     load and is gone in fifteen milliseconds. -->
+<span class="page-actions" id="admin-note" aria-live="polite"></span>
 </div>
-<p class="muted" id="admin-note" aria-live="polite">Loading…</p>
 
-<h2>Invitations</h2>
+<!-- Two columns at a desk width: the section names itself on the left
+     and answers on the right. See account.html. -->
+<section class="setting">
+  <div class="setting-head">
+    <h2>Invitations</h2>
+    <p class="muted">A link that makes one account. Nothing is sent anywhere: this
+      instance delivers no email, so you pass the link on yourself.</p>
+  </div>
+  <div class="setting-body">
 <!-- **Not `id="invite"`.** app.js binds the sign-in shell's own
      registration form by that id at module scope, and this page imports
      app.js: a form called `invite` here was submitted twice, once to
@@ -43,48 +56,67 @@
 <form id="new-invite">
   <label for="new-invite-email">Email</label>
   <input id="new-invite-email" type="email" name="email" placeholder="them@studio.com" autocomplete="off" required>
-  <p class="muted field-note">The address the link is for. It is not sent anywhere: this
-    instance delivers no email, so you pass the link on yourself.</p>
   <p class="error" id="new-invite-error" role="alert" aria-live="assertive"></p>
   <button type="submit">Create invitation</button>
 </form>
 
 <!-- The secret, once. POST /api/invites answers with the token and the
-     path to redeem it, and nothing can show either again. -->
-<div class="state" id="new-invite-made" hidden>
+     path to redeem it, and nothing can show either again — not this
+     screen, not the listing below, not the server.
+
+     **It is not a `.state`.** That component's three shapes are empty,
+     loading and refused, and rendering the one irreversible thing on the
+     page in the treatment reserved for "there is nothing here" set the
+     most consequential string in the product at 12.48px in muted grey.
+     `role="status"` because it appears without anybody navigating to
+     it. -->
+<div class="secret" id="new-invite-made" role="status" aria-live="polite" hidden>
   <b>Send this link. It is shown once.</b>
-  <span><code class="mono" id="new-invite-link"></code></span>
-  <span><button type="button" class="link-button" id="new-invite-copy">Copy the link</button></span>
+  <div id="new-invite-links"></div>
 </div>
 
-<ul class="catalogue" id="invites" hidden></ul>
+<div class="scroller">
+  <ul class="catalogue wide" id="invites" hidden></ul>
+</div>
 <div class="state" id="invites-empty" hidden>
   <b>Nobody is waiting</b>
   <span>No invitation is outstanding. One appears here from the moment you
     create it until the person uses it or you revoke it.</span>
 </div>
 <p class="error" id="invites-error" hidden></p>
+  </div>
+</section>
 
-<h2>Administrators</h2>
-<!-- **A write with no read.** The server names an administrator by email
-     and offers no endpoint that lists users or admins, so this screen
-     cannot say who they are today. It says that rather than drawing an
-     empty list, which would read as "nobody". -->
-<p class="muted">Maestro cannot list the administrators of this instance: the server
-  has no endpoint that answers who they are. What you can do is grant it or take it away,
-  by the address the person signs in with.</p>
+<section class="setting">
+  <div class="setting-head">
+    <h2>Administrators</h2>
+    <!-- **A write with no read.** The server names an administrator by
+         email and offers no endpoint that lists users or admins, so this
+         screen cannot say who they are today. It says that rather than
+         drawing an empty list, which would read as "nobody". -->
+    <p class="muted">Maestro cannot say who they are: the server has no endpoint that
+      answers it. What you can do is grant it or take it away, by the address the person
+      signs in with.</p>
+  </div>
+  <div class="setting-body">
 <form id="admins">
   <label for="admins-email">Email</label>
   <input id="admins-email" type="email" name="email" placeholder="them@studio.com" autocomplete="off" required>
+  <!-- Under the field it is about, above everything else. It was below
+       the radios and the button, 114px from the input it marks red. -->
+  <p class="error" id="admins-error" role="alert" aria-live="assertive"></p>
   <fieldset class="choices">
     <legend class="sr-only">Administrator</legend>
     <label><input type="radio" name="is_admin" value="true" checked> Make an administrator</label>
     <label><input type="radio" name="is_admin" value="false"> Take it away</label>
   </fieldset>
-  <p class="error" id="admins-error" role="alert" aria-live="assertive"></p>
-  <button type="submit">Apply</button>
+  <!-- Ghost, not ink: the primary on this screen is the invitation.
+       "Apply" named neither the subject nor the change. -->
+  <button type="submit" class="ghost">Change who administers</button>
   <p class="muted" id="admins-done" hidden></p>
 </form>
+  </div>
+</section>
 
 </main>
 

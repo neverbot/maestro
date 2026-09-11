@@ -332,6 +332,9 @@ export function renderHeader(options = {}) {
 // so the bar carries one pattern rather than two. Sign out moves inside
 // it: a destructive action behind one deliberate click, beside the two
 // screens that belong to a person rather than to a game.
+export const SIGN_OUT = "Sign out";
+export const SIGN_OUT_ARMED = "Sign out — click again";
+
 export function personMenu(me) {
   const wrap = document.createElement("details");
   wrap.className = "person-menu";
@@ -364,11 +367,31 @@ export function personMenu(me) {
     menu.append(admin);
   }
 
+  // **Two clicks, and the second one is asked for in words.** Signing
+  // out is the only destructive action in the product's chrome and it
+  // sat eight pixels under a navigation link, firing on one click with
+  // no confirmation and no undo. A modal for this would be the lazy
+  // answer the design bans; arming the control itself says the same
+  // thing in place, and disarms itself if the hand moves on.
   const signOut = document.createElement("button");
   signOut.type = "button";
   signOut.className = "sign-out";
-  signOut.textContent = "Sign out";
+  signOut.textContent = SIGN_OUT;
+  let armed = null;
+  const disarm = () => {
+    if (armed !== null) clearTimeout(armed);
+    armed = null;
+    signOut.textContent = SIGN_OUT;
+    signOut.removeAttribute("data-armed");
+  };
   signOut.addEventListener("click", async () => {
+    if (armed === null) {
+      signOut.textContent = SIGN_OUT_ARMED;
+      signOut.dataset.armed = "true";
+      armed = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
     signOut.disabled = true;
     try {
       await fetch("/api/auth/logout", { method: "POST" });
@@ -387,8 +410,20 @@ export function personMenu(me) {
     if (event.key === "Escape" && wrap.open) {
       wrap.open = false;
       summary.focus();
+      disarm();
     }
   });
+  // And a click anywhere else closes it, which is what every menu in
+  // every browser does and this one did not: it stayed open over the
+  // page until the summary was clicked again.
+  if (typeof document.addEventListener === "function") {
+    document.addEventListener("click", (event) => {
+      if (wrap.open && !wrap.contains(event.target)) {
+        wrap.open = false;
+        disarm();
+      }
+    });
+  }
   return wrap;
 }
 

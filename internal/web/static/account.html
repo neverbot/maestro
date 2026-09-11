@@ -27,51 +27,86 @@
 </noscript>
 
 <main class="page narrow">
-<!-- Filled by pages/page.js setBreadcrumb: this screen is not inside a
-     game, so its trail is one crumb and the product's name. -->
-<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+<!-- **No breadcrumb.** A trail says where you are and how you got here;
+     a single crumb reading "Your account" under an h1 reading "Your
+     account" says it twice and costs 32px to do it. This screen is not
+     inside anything: the header is the way back. -->
 
 <div class="page-head">
 <h1>Your account</h1>
+<!-- The head's third part, on the first screen in the product whose
+     whole content is facts nobody can edit here. It is the component
+     design.md wrote for exactly this: it states the limitation where
+     somebody would look for the button. -->
+<span class="page-actions"><span class="read-only" title="Your name and address are set when you are invited; an administrator changes them.">Read-only</span></span>
 </div>
 
-<h2>You</h2>
-<dl class="facts" id="who">
-  <dt>Name</dt><dd id="who-name" class="muted">Loading…</dd>
-  <dt>Email</dt><dd id="who-email" class="muted">Loading…</dd>
-  <dt>Since</dt><dd id="who-since" class="muted">Loading…</dd>
-</dl>
-<p class="muted" id="who-admin" hidden>You administer this instance.</p>
-<p class="error" id="who-error" hidden></p>
+<!-- **Two columns at a desk width.** Each section names itself on the
+     left and answers on the right, which is the rail the page frame
+     already describes and the only thing on these screens that uses the
+     window. Stacked in one column, three headings and three forms read
+     as one long form with nothing between them, and half of a 1440px
+     screen was bare ground. Below 900px the two columns become one. -->
+<section class="setting">
+  <div class="setting-head">
+    <h2>Identity</h2>
+    <p class="muted">Who this account is. An invitation sets it; an administrator changes it.</p>
+  </div>
+  <div class="setting-body">
+    <dl class="facts" id="who">
+      <dt>Name</dt><dd id="who-name" class="muted">Loading…</dd>
+      <dt>Email</dt><dd id="who-email" class="muted">Loading…</dd>
+      <dt>Since</dt><dd id="who-since" class="muted">Loading…</dd>
+    </dl>
+    <p class="muted" id="who-admin" hidden>You administer this instance.</p>
+    <p class="error" id="who-error" hidden></p>
+  </div>
+</section>
 
-<h2>Appearance</h2>
-<!-- A radio group and not a toggle: there are three answers and one of
-     them is "do not decide", which a two-state control cannot say. -->
-<fieldset class="choices" id="theme">
-  <legend class="sr-only">Theme</legend>
-  <label><input type="radio" name="theme" value="system" checked> Follow the system</label>
-  <label><input type="radio" name="theme" value="light"> Light</label>
-  <label><input type="radio" name="theme" value="dark"> Dark</label>
-</fieldset>
-<p class="muted field-note">Kept in this browser, not in your account: choosing it on another
-  machine is a separate choice. Maestro stores no preferences of its own.</p>
+<section class="setting">
+  <div class="setting-head">
+    <h2>Appearance</h2>
+    <p class="muted">Kept in this browser, not in your account: on another machine you choose again.</p>
+  </div>
+  <div class="setting-body">
+    <!-- A radio group and not a toggle: there are three answers and one
+         of them is "do not decide", which a two-state control cannot
+         say. The page itself is the preview. -->
+    <fieldset class="choices" id="theme">
+      <legend class="sr-only">Theme</legend>
+      <label><input type="radio" name="theme" value="system" checked> Follow the system<span class="muted" id="theme-system-now"></span></label>
+      <label><input type="radio" name="theme" value="light"> Light</label>
+      <label><input type="radio" name="theme" value="dark"> Dark</label>
+    </fieldset>
+  </div>
+</section>
 
-<h2>Password</h2>
+<section class="setting">
+  <div class="setting-head">
+    <h2>Password</h2>
+    <p class="muted">There is no password reset. This instance sends no email, so an
+      administrator invites you again instead.</p>
+  </div>
+  <div class="setting-body">
 <form id="password">
   <label for="password-current">Current password</label>
   <input id="password-current" type="password" name="current_password" autocomplete="current-password" required>
   <label for="password-new">New password</label>
-  <input id="password-new" type="password" name="new_password" placeholder="At least 12 characters"
+  <input id="password-new" type="password" name="new_password"
          autocomplete="new-password" minlength="12" required>
+  <!-- The rule, where it can be read. It lived in the placeholder, which
+       design.md forbids and which disappears on the first keystroke,
+       exactly when a person starts needing it. -->
+  <p class="muted field-note">At least 12 characters.</p>
   <!-- **Under the field, above the button.** The sign-in screen printed
        its refusal below the submit button, so the reading order was
        field, action, reason. -->
   <p class="error" id="password-error" role="alert" aria-live="assertive"></p>
   <button type="submit">Change password</button>
-  <p class="muted" id="password-done" hidden>Your password is changed. Other browsers stay signed in.</p>
+  <p class="muted" id="password-done" hidden>Your password is changed. Other browsers stay signed in, and Maestro cannot end those sessions yet.</p>
 </form>
-<p class="muted field-note">Forgotten it instead? This instance sends no email, so an
-  administrator invites you again rather than resetting it.</p>
+  </div>
+</section>
 
 </main>
 

@@ -13,7 +13,7 @@
 
 import { fetchMe, markRefused, renderHeader, sendJSON, setFormBusy } from "../app.js";
 import { goToLogin } from "../app.js";
-import { say, setBreadcrumb } from "./page.js";
+import { say } from "./page.js";
 
 // The date a person reads, not the one a machine sorts by. The product
 // renders `06/09/2026, 16:30:11` elsewhere and it is ambiguous in half
@@ -30,7 +30,7 @@ export function since(value) {
 // what a stored theme is and what applying it means. A module that
 // duplicated that logic would be a second implementation of a rule that
 // has to agree with itself before the first paint.
-export function wireTheme(doc, themeAPI) {
+export function wireTheme(doc, themeAPI, matchMedia) {
   const group = doc.getElementById("theme");
   if (!group || !themeAPI) return null;
   const chosen = themeAPI.read();
@@ -39,6 +39,21 @@ export function wireTheme(doc, themeAPI) {
     input.addEventListener("change", () => {
       if (input.checked) themeAPI.write(input.value);
     });
+  }
+  // **"Follow the system" never said what the system said.** The other
+  // two options preview themselves — the page repaints as you choose
+  // them — and this one is the only answer whose result a person cannot
+  // see from the control. One word fixes it, and it is kept current: a
+  // machine that changes theme at sunset changes this line with it.
+  const systemLabel = doc.getElementById("theme-system-now");
+  const query = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
+  const sayWhich = () => {
+    if (!systemLabel || query === null) return;
+    systemLabel.textContent = query.matches ? " (dark right now)" : " (light right now)";
+  };
+  sayWhich();
+  if (query !== null && typeof query.addEventListener === "function") {
+    query.addEventListener("change", sayWhich);
   }
   return group;
 }
@@ -112,10 +127,10 @@ if (globalThis.document && globalThis.document.getElementById("who")) {
   } else {
     const me = who.ok ? who.body : null;
     renderHeader({ me });
-    setBreadcrumb(doc, [{ label: "Your account" }]);
     if (me) showWho(doc, me);
     else say(doc.getElementById("who-error"), who.message);
-    wireTheme(doc, globalThis.window ? globalThis.window.maestroTheme : null);
+    wireTheme(doc, globalThis.window ? globalThis.window.maestroTheme : null,
+      globalThis.window ? globalThis.window.matchMedia.bind(globalThis.window) : null);
     wirePassword(doc);
   }
 }

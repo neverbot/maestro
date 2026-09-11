@@ -1,26 +1,13 @@
-# Working directory of the superpowers skills: brainstorming mockups,
-# design specs and implementation plans. One directory, never versioned.
-/.superpowers/
-
-# Throwaway artefacts from agent sessions (screenshots, dumps, probes).
-/.scratch/
-tmp-*.png
-
-# Skill bundles mirrored into .claude/ for local agent sessions.
-# They ship from their own upstream project; the copy here is a local
-# convenience and must not be versioned.
-.claude/skills/
-
 # Environment and secrets
 .env
 *.pem
 *.key
 
 # Build artefacts and binaries
-/maestro
-/bin/
-/dist/
-/tmp/
+maestro
+bin/
+dist/
+tmp/
 *.exe
 
 # OS noise
@@ -30,3 +17,17 @@ tmp-*.png
 # sidecar. The one input the documentation generator needs lives at
 # docs/design-tokens.json instead.
 .impeccable/
+
+# Working directory of the superpowers skills: brainstorming mockups,
+# design specs and implementation plans. One directory, never versioned.
+.superpowers/
+
+# Throwaway artefacts from agent sessions (screenshots, dumps, probes).
+.scratch/
+tmp-*.png
+
+# Skill bundles mirrored into .claude/ for local agent sessions.
+# They ship from their own upstream project; the copy here is a local
+# convenience and must not be versioned.
+.claude/skills/
+

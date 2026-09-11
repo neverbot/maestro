@@ -321,7 +321,19 @@ body {
 }
 
 @media (max-width: 780px) {
-  .page { padding: 0 var(--s4) var(--s5); }
+  /* **Three longhands and not the `padding` shorthand.** Written as a
+     shorthand this rule also set `padding-top: 0`, and at equal
+     specificity it came after `.sign-in { padding-top: … }` and won — so
+     below 780px the sign-in wordmark was clipped through its ascenders
+     and a game's title touched the header's rule with a 0.0px gap. The
+     shorthand was silently overriding a longhand nobody looked at.
+     Fourth time this cascade shape has cost something in one design
+     pass. */
+  .page {
+    padding-right: var(--s4);
+    padding-bottom: var(--s5);
+    padding-left: var(--s4);
+  }
 }
 
 /* The display role. A game's name is the game's own word, so it is the
@@ -415,9 +427,26 @@ p.muted { color: var(--muted); }
 .game-switcher { position: relative; }
 
 .game-switcher > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--control-h);
+  max-width: 17rem;
+  padding: 0 var(--s3);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 500;
   list-style: none;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-switcher > summary:hover {
+  background: var(--ground);
 }
 
 .game-switcher > summary::-webkit-details-marker { display: none; }
@@ -602,7 +631,20 @@ button:disabled {
   color: var(--ink);
 }
 
+/* The one token that means "this needs your attention", on the sentence
+   and on the field it is about. */
 .error { color: var(--danger); min-height: 1.2em; }
+
+/* A line that explains a field, under the field. */
+.field-note {
+  margin: calc(var(--s2) * -1) 0 0;
+  font-size: 0.8rem;
+}
+
+input.refused,
+input.refused:focus {
+  border-color: var(--danger);
+}
 
 /* --ground rather than a translucent black: "one step back from paper"
    is exactly what a recessed panel is, and a black wash disappears

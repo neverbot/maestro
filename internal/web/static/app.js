@@ -10,6 +10,8 @@
 // navigation for a pure convenience, and a remembered value can go stale
 // the moment the user loses access to that game or it is deleted, with no
 // natural place server-side to notice either has happened.
+import { row } from "./rows.js";
+
 const LAST_GAME_KEY = "maestro:lastGame";
 
 // localStorage can throw (private browsing, a full quota, a disabled
@@ -453,8 +455,38 @@ if (loginForm) {
       return;
     }
     setFormBusy(loginForm, false);
-    errorEl.textContent = result.message;
+    // **A refusal marks the field and takes the cursor back to it.** It
+    // used to set a sentence 37px below the button and leave the focus on
+    // the document, with both fields still wearing their resting border:
+    // design.md's Inputs section asks for the Alarm border and the message
+    // directly beneath, and a person who mistyped a password should not
+    // have to find the field again with the mouse.
+    markRefused(loginForm, document.getElementById("login-password"), errorEl, result.message);
   });
+}
+
+// markRefused states a refusal in the one shape the product uses for it:
+// the server's own sentence in --danger, the field that has to change
+// wearing the same token on its border, and the cursor put back where
+// the correction happens.
+//
+// The border is set and cleared through a class rather than a style
+// attribute, because this server's policy admits no inline style and an
+// element.style assignment here would be refused in silence.
+function markRefused(form, field, errorEl, message) {
+  errorEl.textContent = message;
+  if (!field) return;
+  field.classList.add("refused");
+  field.setAttribute("aria-invalid", "true");
+  const clear = () => {
+    field.classList.remove("refused");
+    field.removeAttribute("aria-invalid");
+    errorEl.textContent = "";
+    field.removeEventListener("input", clear);
+  };
+  field.addEventListener("input", clear);
+  field.focus();
+  if (typeof field.select === "function") field.select();
 }
 
 if (inviteForm) {
@@ -597,32 +629,43 @@ if (gamesList) {
       gamesList.hidden = false;
       if (newGame) newGame.hidden = false;
       for (const game of games) {
-        // The same row every list in this product is made of: the name in
-        // the serif because a game's name is the game's own word, and the
-        // slug in mono beside it because that is what an agent addresses
-        // it by and what the address bar will say. It was a bare
-        // underlined link and nothing else, which told a person choosing
-        // between three games nothing they did not already know.
-        const item = document.createElement("li");
-        const link = document.createElement("a");
-        link.href = `/g/${game.slug}`;
-        link.className = "catalogue-label";
-        // textContent, never innerHTML: a game name is chosen by whoever
-        // created the game, so it is untrusted input as far as this page
-        // is concerned and must never be interpreted as markup.
-        link.textContent = game.name;
-        item.append(link);
-        const slug = document.createElement("span");
-        slug.className = "catalogue-key";
-        slug.textContent = game.slug;
-        item.append(slug);
-        gamesList.append(item);
+        // **The shared row, not a second one.** This built its own `li`,
+        // its own label and its own key, which is one shape with two
+        // implementations — the thing design.md asks to be reported as a
+        // defect. ../rows.js is where that shape lives now, in a module
+        // this one can import without closing a cycle.
+        gamesList.append(row(document, { label: game.name, key: game.slug, href: `/g/${game.slug}` }));
       }
     }
   }
 }
 
+// The slug follows the name until somebody edits it. A designer types
+// "Hollow Reach" and gets "hollow-reach" without being taught what a
+// slug is; the moment they change it themselves the derivation stops,
+// because at that point they have an opinion.
+function deriveSlug(name) {
+  return name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 if (createGameForm) {
+  const nameEl = document.getElementById("create-game-name");
+  const slugEl = document.getElementById("create-game-slug");
+  if (nameEl && slugEl) {
+    let slugIsOurs = true;
+    slugEl.addEventListener("input", () => {
+      slugIsOurs = slugEl.value === "";
+    });
+    nameEl.addEventListener("input", () => {
+      if (slugIsOurs) slugEl.value = deriveSlug(nameEl.value);
+    });
+  }
+
   const errorEl = document.getElementById("create-game-error");
   createGameForm.addEventListener("submit", async (event) => {
     event.preventDefault();

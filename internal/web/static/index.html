@@ -28,7 +28,14 @@
 <p class="muted" id="status" aria-live="polite">Loading your games…</p>
 <ul class="catalogue games" id="games" hidden></ul>
 
-<p id="empty-state" hidden>You have no games yet.</p>
+<!-- The first thing a brand-new account sees, in the same shape as every
+     other empty state in the product. It was a bare sentence, which made
+     the one screen that most needs to teach the odd one out. -->
+<div class="state" id="empty-state" hidden>
+  <b>No games yet</b>
+  <span>A game is a world you are designing: its kinds of things, how they
+    connect, and the writing that describes them. Make one to begin.</span>
+</div>
 
 <!-- The way a second game gets made. It sits beside the list rather than
      inside the empty state, because "create a game" stopped being an
@@ -40,10 +47,19 @@
 <details id="new-game" hidden>
   <summary>New game</summary>
   <form id="create-game">
-    <label for="create-game-slug">Slug</label>
-    <input id="create-game-slug" type="text" name="slug" placeholder="azeroth" autocomplete="off" required>
+    <!-- **Name first.** The slug was asked for first, of a designer who is
+         not a developer, with no statement of what a slug may contain: the
+         first thing a new account was asked for was a word it had not been
+         told the rules of, and the rules arrived as a refusal after a round
+         trip. The name comes first because it is the thing a person
+         actually has in mind, and app.js derives the slug from it as they
+         type until they edit the slug themselves. -->
     <label for="create-game-name">Name</label>
     <input id="create-game-name" type="text" name="name" placeholder="Azeroth" autocomplete="off" required>
+    <label for="create-game-slug">Address</label>
+    <input id="create-game-slug" type="text" name="slug" placeholder="azeroth" autocomplete="off"
+           pattern="[a-z0-9]+(-[a-z0-9]+)*" required>
+    <p class="muted field-note">Lowercase letters, digits and hyphens. It is what an agent and the address bar call this game.</p>
     <button type="submit">Create game</button>
     <p class="error" id="create-game-error" role="alert" aria-live="assertive"></p>
   </form>

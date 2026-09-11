@@ -804,8 +804,11 @@ check("bothDirectionsOfARelationAreListedSeparately", async () => {
   });
   await load("entity");
   const rendered = text(dom.elements["entity-content"]);
-  const out = rendered.indexOf("Relations out");
-  const into = rendered.indexOf("Relations in");
+  // The two headings are the game's direction in plain words now, not the
+  // model's: "Relations out" and "Relations in" are the shape of the
+  // query, and a designer reads which way an edge points.
+  const out = rendered.indexOf("Leading out of this");
+  const into = rendered.indexOf("Pointing at this");
   assert(out > -1 && into > out, "the two directions are not two lists in order");
   assert(rendered.indexOf("Cudgel") > out && rendered.indexOf("Cudgel") < into, "the outgoing edge is in the wrong list");
   assert(rendered.indexOf("Wanted") > into, "the incoming edge is in the wrong list");

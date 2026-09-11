@@ -156,13 +156,16 @@ export function fieldRows(schema, entity) {
 // answer to is a call per group, and a row on a summary page is not
 // worth one; `relation_types.get` is where the declared order lives, and
 // the catalogue links to it.
-export function relationGroups(relations, direction) {
+export function relationGroups(relations, direction, labels) {
   const items = Array.isArray(relations) ? relations : [];
   const groups = new Map();
   for (const relation of items) {
     if (!relation || typeof relation !== "object") continue;
     const type = String(relation.type_key ?? "");
-    if (!groups.has(type)) groups.set(type, { type, direction, rows: [] });
+    if (!groups.has(type)) {
+      const label = labels && typeof labels.get === "function" ? labels.get(type) : "";
+      groups.set(type, { type, label: label || "", direction, rows: [] });
+    }
     const far = direction === DIRECTION_OUT ? relation.target : relation.source;
     const fields = relation.fields && typeof relation.fields === "object" ? relation.fields : {};
     groups.get(type).rows.push({
@@ -187,15 +190,33 @@ export function relationGroups(relations, direction) {
 export async function readEntity(client, typeKey, key) {
   const entity = await client.getEntity(typeKey, key);
   if (!entity.ok) return { ok: false, error: entity.error };
-  const [type, out, into, docs] = await Promise.all([
+  const [type, out, into, docs, relationTypes] = await Promise.all([
     client.getType(typeKey),
     client.listRelations({ sourceType: typeKey, sourceKey: key, verbose: true }),
     client.listRelations({ targetType: typeKey, targetKey: key, verbose: true }),
     client.listEntityDocs(typeKey, key, {}),
+    // The fifth call, and it buys the page the game's own words for its
+    // connections: this screen headed each group with the raw key,
+    // `preys_on`, in monospace at heading size, while the catalogue one
+    // click away called the same thing "Preys on". One thing named two
+    // ways on two screens, and the model's spelling won on the screen a
+    // designer reads.
+    client.listRelationTypes({}),
   ]);
   return {
     ok: true,
     entity: entity.result,
+    // A label per relation type, keyed by the key the edges carry. A type
+    // the listing did not reach keeps its key, which is what the edge
+    // says and better than a blank heading.
+    relationLabels: relationTypes.ok
+      ? new Map(
+          (relationTypes.result.items || []).map((entry) => [
+            String(entry.key ?? ""),
+            String(entry.label || entry.key || ""),
+          ]),
+        )
+      : new Map(),
     // A schema that could not be read is no schema rather than a wrong
     // one: the fields the entity carries are still shown, as undeclared
     // rows, which is the honest reading of "this page does not know what
@@ -243,7 +264,16 @@ export function relationList(doc, slug, groups) {
   for (const group of groups) {
     const heading = doc.createElement("h3");
     heading.className = "relation-type";
-    heading.textContent = group.type;
+    // The label the game gave this connection, with the key an agent
+    // addresses it by beside it in mono — the same pair every row in this
+    // product shows, rather than the key alone at heading size.
+    heading.textContent = group.label || group.type;
+    if (group.label && group.label !== group.type) {
+      const key = doc.createElement("code");
+      key.className = "catalogue-key";
+      key.textContent = group.type;
+      heading.append(" ", key);
+    }
     root.append(heading);
 
     const count = doc.createElement("p");
@@ -314,14 +344,14 @@ export function entityBody(doc, slug, model) {
   root.append(fields);
 
   for (const [direction, heading, relations] of [
-    [DIRECTION_OUT, "Relations out", model.out],
-    [DIRECTION_IN, "Relations in", model.in],
+    [DIRECTION_OUT, "Leading out of this", model.out],
+    [DIRECTION_IN, "Pointing at this", model.in],
   ]) {
     const section = doc.createElement("section");
     const title = doc.createElement("h2");
     title.textContent = heading;
     section.append(title);
-    const groups = relationGroups(relations, direction);
+    const groups = relationGroups(relations, direction, model.relationLabels);
     if (groups.length === 0) {
       const none = doc.createElement("p");
       none.className = "muted";

@@ -286,7 +286,38 @@ body {
 .page {
   max-width: var(--page-max);
   margin: 0 auto;
-  padding: 0 var(--gutter) var(--s6);
+  /* The top padding is the page's own, not the header's margin: the one
+     screen with no header had its first line clipped against the top of
+     the window. */
+  padding: var(--s5) var(--gutter) var(--s6);
+}
+
+/* Sign in and account creation: the only screens with no header, and the
+   only ones whose content is a form rather than a catalogue. A 26rem
+   column, because a field stretched across 1440px to hold an email
+   address is a field that says nothing about what goes in it. */
+.sign-in {
+  max-width: 26rem;
+  padding-top: var(--s6);
+}
+
+.sign-in h1 {
+  margin-bottom: var(--s5);
+}
+
+.sign-in .lede {
+  margin: 0 0 var(--s3);
+}
+
+.sign-in input {
+  width: 100%;
+}
+
+/* The restriction, under the form it qualifies. */
+.sign-in-note {
+  margin-top: var(--s5);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 780px) {
@@ -314,7 +345,6 @@ p.muted { color: var(--muted); }
   position: sticky;
   top: 0;
   z-index: 20;
-  margin-bottom: var(--s5);
   background: var(--paper);
   border-bottom: 1px solid var(--line);
 }
@@ -454,10 +484,31 @@ p.muted { color: var(--muted); }
 
 .narrow-only { display: none; }
 
+/* A control, not a grey triangle. It was the only way to make a second
+   game and it read as less clickable than the links above it. */
 #new-game > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: var(--control-h);
+  padding: 0 13px;
+  margin-top: var(--s4);
   cursor: pointer;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  color: var(--ink);
+}
+
+#new-game > summary::-webkit-details-marker { display: none; }
+
+#new-game > summary::before {
+  content: "+";
   color: var(--muted);
-  margin-top: 1.5rem;
+}
+
+#new-game > summary:hover {
+  background: var(--ground);
 }
 
 form { display: grid; gap: var(--s3); margin-top: var(--s5); }
@@ -565,7 +616,15 @@ button:disabled {
 
 [hidden] { display: none !important; }
 
-ul.games { list-style: none; padding: 0; display: grid; gap: 0.5rem; }
+/* The picker is a short list of names, so the *list* is capped rather
+   than the page: capping the page centred the whole screen in the window
+   while the header's wordmark stayed at the left edge, which made the two
+   look like different pages. */
+.picker ul.games,
+.picker #new-game {
+  max-width: 46rem;
+}
+
 ul.games a { color: inherit; }
 
 /* The headline role. It was 14.7px in --muted with label tracking, which

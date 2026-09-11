@@ -597,14 +597,25 @@ if (gamesList) {
       gamesList.hidden = false;
       if (newGame) newGame.hidden = false;
       for (const game of games) {
+        // The same row every list in this product is made of: the name in
+        // the serif because a game's name is the game's own word, and the
+        // slug in mono beside it because that is what an agent addresses
+        // it by and what the address bar will say. It was a bare
+        // underlined link and nothing else, which told a person choosing
+        // between three games nothing they did not already know.
         const item = document.createElement("li");
         const link = document.createElement("a");
         link.href = `/g/${game.slug}`;
+        link.className = "catalogue-label";
         // textContent, never innerHTML: a game name is chosen by whoever
         // created the game, so it is untrusted input as far as this page
         // is concerned and must never be interpreted as markup.
         link.textContent = game.name;
         item.append(link);
+        const slug = document.createElement("span");
+        slug.className = "catalogue-key";
+        slug.textContent = game.slug;
+        item.append(slug);
         gamesList.append(item);
       }
     }

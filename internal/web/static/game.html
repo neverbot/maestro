@@ -52,24 +52,26 @@
   <section class="lane" id="lane-catalogue" aria-labelledby="lane-catalogue-heading">
     <h2 id="lane-catalogue-heading">Catalogue</h2>
     <ul class="catalogue" id="types"></ul>
-    <p class="muted" id="types-empty" hidden>
-      This game has no entity types yet. A game declares its own — Quest, Zone
-      and Class for one game, Driver, Car and Circuit for another.
-      <!-- The sentence that says what to do about it depends on who is
-           reading: an editor can declare one, a viewer cannot, and telling
-           a viewer to do what the server will refuse is worse than telling
-           them nothing. pages/home.js fills this in from the caller's own
-           role, which GET /summary carries. -->
+    <!-- The shared negative state, the shape every empty, loading and
+         refused answer in the product wears. The second line depends on
+         who is reading: an editor can declare a type, a viewer cannot,
+         and telling a viewer to do what the server will refuse is worse
+         than telling them nothing. pages/home.js fills it from the
+         caller's own role, which GET /summary carries. -->
+    <div class="state" id="types-empty" hidden>
+      <b>No types yet</b>
+      <span>A game declares its own: Quest, Zone and Class for one, Driver, Car
+        and Circuit for another.</span>
       <span id="types-empty-action"></span>
-    </p>
+    </div>
 
     <h3>Relation types</h3>
     <ul class="catalogue" id="relation-types"></ul>
-    <p class="muted" id="relation-types-empty" hidden>
-      No relation types yet. A relation type is a kind of edge between entities —
-      takes_place_in, requires, unlocks — and is declared the same way an entity
-      type is.
-    </p>
+    <div class="state" id="relation-types-empty" hidden>
+      <b>No connections yet</b>
+      <span>A relation type is a kind of edge between entities: takes_place_in,
+        requires, unlocks.</span>
+    </div>
   </section>
 
   <section class="lane" id="prose" aria-labelledby="lane-prose-heading">
@@ -81,15 +83,15 @@
          a kind to show, because "no kinds" is not a fact worth a line. -->
     <p class="muted" id="doc-kinds" hidden></p>
     <ul class="catalogue" id="docs"></ul>
-    <p class="muted" id="docs-empty" hidden>
-      This game has no documents yet. A document is prose addressed by a path
-      inside this game — lore/duskwood, scripts/wanted-hogger — versioned on
-      every save.
-      <!-- Same rule as the entity-types empty state above: the sentence
-           that says what to do about it depends on who is reading, and a
-           viewer must not be told to do what the server will refuse. -->
+    <!-- Same rule as the types empty state above: the second line depends
+         on who is reading, and a viewer must not be told to do what the
+         server will refuse. -->
+    <div class="state" id="docs-empty" hidden>
+      <b>No prose yet</b>
+      <span>A document is writing addressed by a path inside this game, such as
+        lore/duskwood, kept version by version.</span>
       <span id="docs-empty-action"></span>
-    </p>
+    </div>
     <p class="error" id="docs-error" hidden></p>
     <button type="button" class="link-button" id="docs-more" hidden>Show more documents</button>
   </section>

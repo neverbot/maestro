@@ -458,10 +458,14 @@ export function whoWrites(role, what) {
       `an editor, an admin or the owner ${what}.`
     );
   }
-  return (
-    "You do it through this instance's API, either from an agent over MCP or " +
-    "over the game's content routes. Nothing on this page does it for you."
-  );
+  // **The reader is a game designer, and the sentence told them to use an
+  // API they do not have.** "You do it through this instance's API,
+  // either from an agent over MCP or over the game's content routes" was
+  // three lines of developer vocabulary in a 200px lane, aimed at
+  // somebody whose whole reason for being here is that they do not write
+  // code. What is true and useful is who does it, not over what
+  // transport.
+  return `An agent ${what}; nothing on this page does.`;
 }
 
 // --- The three negative states, in one shape --------------------------

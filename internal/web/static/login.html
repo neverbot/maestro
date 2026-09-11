@@ -20,16 +20,18 @@
   "graphlib": "/static/vendor/graphlib.mjs"
 }}
 </script>
-<h1>Maestro</h1>
 <noscript>
   <p class="notice">Signing in needs JavaScript enabled in this browser.</p>
 </noscript>
 
-<main class="page">
-<p class="muted" id="mode-notice" hidden></p>
+<!-- The one screen with no header, so the wordmark is inside the column
+     rather than above it: outside the page container it drew flush to the
+     window's left edge and its own line box was clipped at the top. -->
+<main class="page sign-in">
+<h1>Maestro</h1>
 
 <div id="login-view">
-  <p>Sign in to reach your games.</p>
+  <p class="lede">Sign in to reach your games.</p>
   <form id="login">
     <label for="login-email">Email</label>
     <input id="login-email" type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
@@ -58,6 +60,11 @@
   <p><button type="button" id="back-to-login" class="link-button">Back to sign in</button></p>
 </div>
 
+<!-- **Below the forms, not above them.** This line says who the instance
+     admits, and it was the first thing a person read, before the sentence
+     telling them what to do here. A restriction read before the action is
+     a door with the rules written on it and no handle. -->
+<p class="muted sign-in-note" id="mode-notice" hidden></p>
 </main>
 
 <script type="module" src="/static/app.js"></script>

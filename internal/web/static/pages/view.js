@@ -401,6 +401,10 @@ export async function viewPage(opened, options = {}) {
     { label: opened.game.name, href: gameURL(opened.slug) },
     { label: DESTINATION_VIEWS, href: viewsURL(opened.slug) },
   ]);
+  // The last crumb and the tab's name, once the view is read. The trail
+  // ended at "Views" — a link to somewhere else — so the one screen the
+  // product exists for was the only one that never said where you were,
+  // and four view tabs were four tabs called "View · Maestro".
 
   const key = viewKeyOf(opened.location.pathname);
   if (key === "") {
@@ -426,6 +430,18 @@ export async function viewPage(opened, options = {}) {
     say(errorEl, row.error.message);
     return null;
   }
+
+  // The last crumb and the tab's name, now that the view has one. The
+  // trail ended at "Views" — a link to somewhere else — so the one screen
+  // the product exists for was the only one never saying where you were,
+  // and four view tabs were four tabs called "View · Maestro".
+  const viewName = String(row.result.name || row.result.key || key);
+  setBreadcrumb(doc, [
+    { label: opened.game.name, href: gameURL(opened.slug) },
+    { label: DESTINATION_VIEWS, href: viewsURL(opened.slug) },
+    { label: viewName },
+  ]);
+  doc.title = viewName + " \u00b7 Maestro";
 
   const surface = mount(doc, rootEl, opened.slug, key, row.result, client, options);
   surface.role = summary.ok ? String(summary.result.role ?? "") : "";

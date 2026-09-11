@@ -141,7 +141,40 @@ export const FIELD_DEFAULT = "default";
 // business.
 export const SAVE_AS_CSS = `
 :host { display: block; }
-.save-as { max-width: 46rem; margin: 0 0 1rem; color: var(--ink); font-family: var(--sans); }
+.save-as {
+  max-width: 46rem;
+  margin: 0 0 1rem;
+  padding: var(--s4);
+  color: var(--ink);
+  font-family: var(--sans);
+  /* A panel, with the tokens every other reading surface uses. It had no
+     background, no border and no shadow: an open dialog that is not a
+     surface is a column of controls lying on the desk. */
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  /* **It scrolls inside itself.** Open, this form is about a thousand
+     pixels tall: it pushed the frame a screen and a half down and put its
+     own Cancel button below the fold, so a person who opened it lost the
+     drawing, the legend and the way back in one click. A dialog that is
+     taller than the window is a dialog with no exit. */
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* The two buttons stay at the foot of the panel while its body scrolls,
+   so the way out is always on screen. */
+.save-as .actions {
+  position: sticky;
+  bottom: calc(var(--s4) * -1);
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s4);
+  padding: var(--s3) 0 0;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+}
 .save-as h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 .save-as label { display: block; margin: 0.6rem 0; font-size: 0.9rem; }
 /* Layout only. What these controls *look* like is stated once in
@@ -150,7 +183,13 @@ export const SAVE_AS_CSS = `
    it. (No backticks in this comment: it lives inside a template
    literal, and one closed it.) */
 .save-as input, .save-as select { display: block; margin-top: 0.2rem; }
-.save-as button { margin: 0.4rem 0.4rem 0 0; }
+.save-as .actions button { margin: 0; }
+/* The closed opener carries no panel and no margin: it is one ghost
+   button lining up with the frame's right edge, and the 0.4rem right
+   margin left over from when it sat at the left edge put it 6.4px short
+   of that edge. */
+:host(:not([open])) .save-as { padding: 0; background: none; border: 0; box-shadow: none; }
+:host(:not([open])) .save-as button { margin: 0; }
 .save-as .note { max-width: 60ch; margin: 0.4rem 0; color: var(--muted); font-size: 0.85em; }
 .save-as .tooltip { max-width: 60ch; margin: 0.2rem 0 0; color: var(--muted); font-size: 0.8em; }
 .save-as .band { margin: 0.6rem 0 0; color: var(--danger); font-size: 0.9em; }
@@ -193,6 +232,7 @@ export class MstSaveAs extends HTMLElement {
     // with no options is worse than a chooser that has not appeared.
     this.catalogue = null;
     this.open = false;
+    this.reflectOpen();
     this.pending = false;
     this.band = null;
     this.saved = null;
@@ -236,6 +276,7 @@ export class MstSaveAs extends HTMLElement {
   // show opens the dialog, reading the catalogue first.
   async show() {
     this.open = true;
+    this.reflectOpen();
     this.band = null;
     this.saved = null;
     this.render();
@@ -245,6 +286,7 @@ export class MstSaveAs extends HTMLElement {
 
   hide() {
     this.open = false;
+    this.reflectOpen();
     this.band = null;
     this.render();
     return this.open;
@@ -440,10 +482,13 @@ export class MstSaveAs extends HTMLElement {
       }
     }
 
-    root.appendChild(this.button(ACTION_SAVE, LABEL_SAVE));
+    const actions = this.doc.createElement("div");
+    actions.setAttribute("class", "actions");
+    actions.appendChild(this.button(ACTION_SAVE, LABEL_SAVE));
     const cancel = this.button(ACTION_CANCEL, LABEL_CANCEL);
     cancel.className = "ghost";
-    root.appendChild(cancel);
+    actions.appendChild(cancel);
+    root.appendChild(actions);
 
     if (this.band) {
       const band = this.doc.createElement("p");
@@ -543,6 +588,13 @@ export class MstSaveAs extends HTMLElement {
     paragraph.setAttribute("class", CLASS_NOTE);
     paragraph.textContent = text;
     return paragraph;
+  }
+
+  // The open state, on the host, so the stylesheet can tell a closed
+  // opener from an open panel. Without it both wore the panel's border
+  // and shadow, and a lone ghost button sat in a box.
+  reflectOpen() {
+    if (typeof this.toggleAttribute === "function") this.toggleAttribute("open", this.open === true);
   }
 
   button(action, label) {

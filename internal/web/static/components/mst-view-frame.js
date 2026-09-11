@@ -181,10 +181,13 @@ export class MstViewFrame extends LitElement {
       font-size: 0.85em;
       color: var(--muted);
     }
+    /* A full hairline in --danger, not a 3px left stripe: design.md bans
+       a coloured side stripe on a row, a panel or a callout by name, and
+       this was one on a panel. */
     .panel {
       padding: 0.75rem;
       color: var(--ink);
-      border-left: 3px solid var(--danger);
+      border: 1px solid var(--danger);
     }
     .panel .message {
       color: var(--danger);

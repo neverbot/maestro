@@ -233,6 +233,8 @@ async function renderDocument(game, docPath, gameName) {
   const membersByID = await loadMembers(game);
   const docTitle = doc.title || doc.path || docPath;
   if (titleEl) titleEl.textContent = docTitle;
+  // Every tab in the reading view was called "Maestro".
+  document.title = docTitle + " \u00b7 Maestro";
   // The last crumb, now that the document has a title. It carried the
   // path until this line, which is what the address says and what a
   // reader who arrived by link already has.
@@ -376,6 +378,8 @@ async function renderHistory(game, docPath, currentVersion, membersByID, role) {
 
   let cursor = null;
 
+  let shown = 0;
+
   function addOption(select, version) {
     if (!select) return;
     const option = document.createElement("option");
@@ -414,9 +418,14 @@ async function renderHistory(game, docPath, currentVersion, membersByID, role) {
       addOption(fromEl, item.version);
       addOption(toEl, item.version);
     }
+    shown += items.length;
     cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
     if (moreEl) {
-      moreEl.hidden = cursor === null;
+      // The same rule the four list pages carry: a pager on a list that
+      // rendered nothing is a control with nothing to fetch. This was the
+      // one place it was not carried to, which is the shape this
+      // repository calls its second most repeated defect.
+      moreEl.hidden = cursor === null || shown === 0;
       moreEl.disabled = false;
     }
   }

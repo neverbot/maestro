@@ -322,10 +322,27 @@ body {
    on. It was an ink-filled button at the page's left edge, which is the
    most emphatic treatment in the product spent on the least likely
    action on the screen. */
+/* **Only the closed opener is right-aligned.** `justify-content:
+   flex-end` on the container aligned the *panel* too, so opening the
+   dialog pinned a 450px column to the right edge, pushed the frame 1178px
+   down and put its own Cancel button below the fold: a person clicking it
+   lost the drawing, the title, the legend and the way back in one
+   gesture. Right-aligning a 32px ghost and right-aligning a form are not
+   the same decision. */
 #save-as-root {
   display: flex;
-  justify-content: flex-end;
   margin-bottom: var(--s3);
+}
+
+/* The closed state: the opener alone, pushed right. */
+#save-as-root mst-save-as {
+  margin-left: auto;
+}
+
+/* Open: the panel returns to the content column's left edge, at its own
+   46rem cap, instead of being pinned right by the container. */
+#save-as-root:has(mst-save-as[open]) {
+  display: block;
 }
 
 .page-actions {
@@ -600,7 +617,13 @@ form label {
   margin-bottom: -0.4rem;
 }
 
-input {
+/* **`select` was never written in this file.** The 2026-09-10 pass fixed
+   exactly this failure inside the shadow roots and did not carry it to
+   the light DOM, so the two version pickers on the prose page rendered
+   as `2px inset` browser defaults in `#e9e9ed` — a cold blue-grey that
+   exists nowhere in this palette — 300px from a serif page title. */
+input,
+select {
   height: var(--control-h);
   padding: 0 9px;
   border: 1px solid var(--line);
@@ -610,7 +633,8 @@ input {
   font: inherit;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: var(--focus);
 }
 
@@ -895,7 +919,16 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
    game's thing, not one of the game's own words. */
 .catalogue-cell {
   color: var(--muted);
+}
+
+/* **A cell with nothing in it takes no width.** `min-width: 4ch` made the
+   three content tracks 47px each on every list that draws none of them —
+   142px of nothing per row, while two comments in this file and in
+   rows.js claimed an empty track collapses. A minimum belongs on the
+   cells that have content, which is what padding is for. */
+.catalogue-cell:not(:empty) {
   min-width: 4ch;
+  padding-left: var(--s2);
 }
 
 /* **Numbers right, words left.** Every cell was right-aligned, so a
@@ -968,15 +1001,30 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
    and the restore button. */
 ul.history { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.25rem; }
 
-ul.history li {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: baseline;
-  gap: 0.75rem;
-  padding: 0.55rem 0.7rem;
+/* Rules, not boxes, at the compact density the frame assigns a version
+   history. It was 41px boxes with a border and a radius each — the shape
+   design.md deletes and the density it does not have. */
+ul.history {
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  background: var(--paper);
+  gap: 0;
 }
+
+ul.history li {
+  min-height: var(--row-compact-h);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 11px;
+}
+
+ul.history li:last-child { border-bottom: 0; }
 
 .history-version { font-weight: 600; }
 .history-message { color: var(--ink); }
@@ -1044,6 +1092,14 @@ ul.history li {
   border-radius: var(--radius);
   overflow-x: auto;
   margin-top: 1rem;
+  /* **Paper, so the fill actually fills.** This box had no background,
+     so it sat on --ground — and `.diff-added` fills with --ground, which
+     made "a filled ground against an unfilled one" an invisible channel:
+     the spelling's whole defence is that it distinguishes four ways and
+     it was distinguishing three. It is also a reading panel, and a
+     reading panel on the desk rather than on paper breaks the two-grounds
+     rule on the one screen the identity calls the reading surface. */
+  background: var(--paper);
 }
 /* The transparent rule is on every line, not only on the two that show
    one: the text is `white-space: pre` in a monospace face, and a gutter

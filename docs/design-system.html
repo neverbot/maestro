@@ -54,14 +54,14 @@
   --shadow-1: 0 1px 2px rgba(0,0,0,.4); --shadow-2: 0 2px 9px rgba(0,0,0,.45); --shadow-3: 0 10px 30px rgba(0,0,0,.5);
 } }
 *,*::before,*::after { box-sizing: border-box; }
-body { margin:0; background: var(--ground); color: var(--ink); font:400 0.875rem/1.5 Fira Sans, system-ui, sans-serif; }
+body { margin:0; background: var(--ground); color: var(--ink); font:400 0.875rem/1.5 system-ui, sans-serif; }
 header { padding: 2rem 2rem 1rem; }
-header h1 { font:600 1.75rem/1.15 Literata, Georgia, serif; margin:0 0 .3rem; letter-spacing:-0.015em; }
+header h1 { font:600 1.75rem/1.15 ui-serif, Georgia, Times New Roman, serif; margin:0 0 .3rem; letter-spacing:-0.015em; }
 header p { margin:0; color: var(--muted); max-width: 68ch; }
 main { padding: 0 2rem 4rem; display:grid; gap:1.25rem; }
-h2 { font:600 1.4rem/1.25 Literata, Georgia, serif; margin:1.5rem 0 0; letter-spacing:-0.01em; }
+h2 { font:600 1.4rem/1.25 ui-serif, Georgia, Times New Roman, serif; margin:1.5rem 0 0; letter-spacing:-0.01em; }
 .panel { background: var(--paper); border:1px solid var(--line); border-radius:3px; box-shadow: var(--shadow-1); padding: 16px; }
-code { font:400 0.78rem/1.4 Fira Mono, ui-monospace, monospace; color: var(--muted); }
+code { font:400 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
 code.dim { opacity:.75; }
 .swatches { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:.7rem; }
 .sw { display:grid; gap:1px; } .sw b { font-weight:600; }
@@ -71,13 +71,13 @@ code.dim { opacity:.75; }
 .row { display:grid; grid-template-columns:250px minmax(0,1fr); gap:1.25rem; padding:.85rem 0; border-bottom:1px solid var(--line); align-items:baseline; }
 .row:last-child { border-bottom:0; }
 .meta { display:grid; gap:.1rem; }
-.meta b { font:600 0.75rem/1.2 Fira Sans, system-ui, sans-serif; letter-spacing:0.03em; }
+.meta b { font:600 0.75rem/1.2 system-ui, sans-serif; letter-spacing:0.03em; }
 .meta span { color:var(--muted); font-size:.8rem; }
 .shadows { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:1rem; }
 .sh { display:grid; gap:.25rem; } .sh b { font-weight:600; } .sh span { color:var(--muted); font-size:.82rem; }
 .sh .chip { height:52px; background:var(--raised); border:1px solid var(--line); border-radius:3px; margin-bottom:.4rem; }
 .comps { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
-.comp h3 { font:600 1.125rem/1.35 Fira Sans, system-ui, sans-serif; margin:0 0 .2rem; }
+.comp h3 { font:600 1.125rem/1.35 system-ui, sans-serif; margin:0 0 .2rem; }
 .comp p { margin:0 0 .7rem; color:var(--muted); }
 .comp .stage { background:var(--ground); border:1px solid var(--line); border-radius:3px; padding:1rem; }
 .comp .stage.wide { overflow-x:auto; padding:0; }
@@ -85,7 +85,7 @@ code.dim { opacity:.75; }
 ul.rules { margin:0; padding-left:1.1rem; display:grid; gap:.45rem; max-width:80ch; }
 ul.plain { list-style:none; margin:0; padding:0; display:grid; gap:.3rem; }
 .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
-.cols h3, .dd h3 { font:600 0.75rem/1.2 Fira Sans, system-ui, sans-serif; letter-spacing:0.03em; color:var(--muted); margin:0 0 .4rem; }
+.cols h3, .dd h3 { font:600 0.75rem/1.2 system-ui, sans-serif; letter-spacing:0.03em; color:var(--muted); margin:0 0 .4rem; }
 .dd { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:1rem; }
 .dd ul { margin:.3rem 0 0; padding-left:1.1rem; display:grid; gap:.3rem; }
 footer { padding:0 2rem 3rem; color:var(--muted); }
@@ -136,38 +136,38 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
   <h2>Type scale</h2>
   <div class="panel"><div class="row">
   <div class="meta"><b>display</b><span>The page title, once per screen. Literata.</span>
-    <code>Literata 600 &middot; 1.75rem / 1.15</code></div>
-  <div style="font-family:Literata, Georgia, serif;font-size:1.75rem;font-weight:600;line-height:1.15;letter-spacing:-0.015em">Vael Crypt</div>
+    <code>ui-serif 600 &middot; 1.75rem / 1.15</code></div>
+  <div style="font-family:ui-serif, Georgia, Times New Roman, serif;font-size:1.75rem;font-weight:600;line-height:1.15;letter-spacing:-0.015em">Vael Crypt</div>
 </div>
 <div class="row">
   <div class="meta"><b>headline</b><span>Section headings and an entity's name in its own view. Literata.</span>
-    <code>Literata 600 &middot; 1.4rem / 1.25</code></div>
-  <div style="font-family:Literata, Georgia, serif;font-size:1.4rem;font-weight:600;line-height:1.25;letter-spacing:-0.01em">The ash well</div>
+    <code>ui-serif 600 &middot; 1.4rem / 1.25</code></div>
+  <div style="font-family:ui-serif, Georgia, Times New Roman, serif;font-size:1.4rem;font-weight:600;line-height:1.25;letter-spacing:-0.01em">The ash well</div>
 </div>
 <div class="row">
   <div class="meta"><b>title</b><span>Panel headings and group titles. Fira Sans.</span>
-    <code>Fira Sans 600 &middot; 1.125rem / 1.35</code></div>
-  <div style="font-family:Fira Sans, system-ui, sans-serif;font-size:1.125rem;font-weight:600;line-height:1.35;letter-spacing:normal">Types in this game</div>
+    <code>system-ui 600 &middot; 1.125rem / 1.35</code></div>
+  <div style="font-family:system-ui, sans-serif;font-size:1.125rem;font-weight:600;line-height:1.35;letter-spacing:normal">Types in this game</div>
 </div>
 <div class="row">
   <div class="meta"><b>body</b><span>Everything the tool says: cells, fields, buttons, navigation.</span>
-    <code>Fira Sans 400 &middot; 0.875rem / 1.5</code></div>
-  <div style="font-family:Fira Sans, system-ui, sans-serif;font-size:0.875rem;font-weight:400;line-height:1.5;letter-spacing:normal">105 quests, 12 shown, sorted by level</div>
+    <code>system-ui 400 &middot; 0.875rem / 1.5</code></div>
+  <div style="font-family:system-ui, sans-serif;font-size:0.875rem;font-weight:400;line-height:1.5;letter-spacing:normal">105 quests, 12 shown, sorted by level</div>
 </div>
 <div class="row">
   <div class="meta"><b>prose</b><span>The game's own writing. Literata, capped at 68ch.</span>
-    <code>Literata 400 &middot; 0.95rem / 1.6</code></div>
-  <div style="font-family:Literata, Georgia, serif;font-size:0.95rem;font-weight:400;line-height:1.6;letter-spacing:normal;max-width:68ch">The well does not give back what is thrown into it. Vael knows this, and still they go down: once a year, with the rope measured and a dead name in the mouth.</div>
+    <code>ui-serif 400 &middot; 0.95rem / 1.6</code></div>
+  <div style="font-family:ui-serif, Georgia, Times New Roman, serif;font-size:0.95rem;font-weight:400;line-height:1.6;letter-spacing:normal;max-width:68ch">The well does not give back what is thrown into it. Vael knows this, and still they go down: once a year, with the rope measured and a dead name in the mouth.</div>
 </div>
 <div class="row">
   <div class="meta"><b>label</b><span>Column headers, rail headings, metadata keys. Sentence case.</span>
-    <code>Fira Sans 600 &middot; 0.75rem / 1.2</code></div>
-  <div style="font-family:Fira Sans, system-ui, sans-serif;font-size:0.75rem;font-weight:600;line-height:1.2;letter-spacing:0.03em">Requires</div>
+    <code>system-ui 600 &middot; 0.75rem / 1.2</code></div>
+  <div style="font-family:system-ui, sans-serif;font-size:0.75rem;font-weight:600;line-height:1.2;letter-spacing:0.03em">Requires</div>
 </div>
 <div class="row">
   <div class="meta"><b>mono</b><span>Slugs, keys, pointers, versions. Anything copyable.</span>
-    <code>Fira Mono 400 &middot; 0.78rem / 1.4</code></div>
-  <div style="font-family:Fira Mono, ui-monospace, monospace;font-size:0.78rem;font-weight:400;line-height:1.4;letter-spacing:normal">requires_ability: "mothwing_cloak"</div>
+    <code>ui-monospace 400 &middot; 0.78rem / 1.4</code></div>
+  <div style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:0.78rem;font-weight:400;line-height:1.4;letter-spacing:normal">requires_ability: "mothwing_cloak"</div>
 </div></div>
 
   <h2>Elevation</h2>

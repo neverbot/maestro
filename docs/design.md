@@ -23,43 +23,43 @@ colors:
   data-8: "#8e3256"
 typography:
   display:
-    fontFamily: "Literata, Georgia, serif"
+    fontFamily: "ui-serif, Georgia, Times New Roman, serif"
     fontSize: "1.75rem"
     fontWeight: 600
     lineHeight: 1.15
     letterSpacing: "-0.015em"
   headline:
-    fontFamily: "Literata, Georgia, serif"
+    fontFamily: "ui-serif, Georgia, Times New Roman, serif"
     fontSize: "1.4rem"
     fontWeight: 600
     lineHeight: 1.25
     letterSpacing: "-0.01em"
   title:
-    fontFamily: "Fira Sans, system-ui, sans-serif"
+    fontFamily: "system-ui, sans-serif"
     fontSize: "1.125rem"
     fontWeight: 600
     lineHeight: 1.35
     letterSpacing: "normal"
   body:
-    fontFamily: "Fira Sans, system-ui, sans-serif"
+    fontFamily: "system-ui, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
   prose:
-    fontFamily: "Literata, Georgia, serif"
+    fontFamily: "ui-serif, Georgia, Times New Roman, serif"
     fontSize: "0.95rem"
     fontWeight: 400
     lineHeight: 1.6
     letterSpacing: "normal"
   label:
-    fontFamily: "Fira Sans, system-ui, sans-serif"
+    fontFamily: "system-ui, sans-serif"
     fontSize: "0.75rem"
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: "0.03em"
   mono:
-    fontFamily: "Fira Mono, ui-monospace, monospace"
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace"
     fontSize: "0.78rem"
     fontWeight: 400
     lineHeight: 1.4
@@ -174,9 +174,10 @@ or is in its way.
 Density is high and unapologetic. Rows are 36 pixels, the type scale is
 compact, and hierarchy is earned with weight, size and rule lines rather
 than with air. Two typefaces carry the whole product and they divide the
-work by ownership: the tool speaks in Fira Sans, and the game speaks in
-Literata. A quest title, a place name and a paragraph of lore are set in
-the serif because they belong to the world being designed; a column
+work by ownership: the tool speaks sans and the game speaks serif, in
+the reader's own system faces. A quest title, a place name and a
+paragraph of lore are set in the serif because they belong to the world
+being designed; a column
 header, a filter and a button are set in the sans because they belong to
 Maestro. That split is the single most legible thing about the system.
 
@@ -245,6 +246,34 @@ at least 28 degrees apart on the hue wheel, and pairwise separable under
 both deuteranopia and protanopia. They ship as `data-1` to `data-8` and
 are re-validated by test, not by eye.
 
+### The dark set
+
+The product ships two themes and answers to the reader's system
+setting: `prefers-color-scheme: dark` swaps the whole token set. It is
+**not an inversion**. The ground becomes a warm near-black rather than a
+blue-black, which is the same argument the light set makes about paper,
+and the eight data hues are a second set tuned separately at the
+lightness a dark ground needs, in the same order, so a legend read in
+one theme reads the same in the other. Eight hues inverted mechanically
+give two that vanish and two that glow.
+
+| Role | Light | Dark |
+|---|---|---|
+| paper | `#f7f3e9` | `#1c1913` |
+| ground | `#efe9dc` | `#13100b` |
+| raised | `#fcfaf4` | `#26221c` |
+| ink | `#2c221b` | `#e7e2d9` |
+| muted | `#6e625a` | `#9a9289` |
+| line | `#d8d2c7` | `#36312a` |
+| line-strong | `#8e8279` | `#81776d` |
+| accent / focus | `#9c470d` | `#d78958` |
+| danger | `#a72629` | `#e67a73` |
+
+Measured on the dark set: ink on ground 14.71:1, muted on ground 6.19:1,
+danger on ground 6.68:1. `internal/web/static_tokens_test.go` holds both
+sets, and a value changed in one theme and not the other is a test
+failure, not a discovery made by a reader in the dark.
+
 ### Named Rules
 
 **The Two Exemptions Rule.** The chrome is achromatic. Exactly two
@@ -265,32 +294,42 @@ panels are sheets on top of it.
 
 ## 3. Typography
 
-**Display Font:** Literata (with Georgia, serif)
-**Body Font:** Fira Sans (with system-ui, sans-serif)
-**Label/Mono Font:** Fira Mono (with ui-monospace, monospace)
+**Serif (the game's voice):** `ui-serif, Georgia, "Times New Roman", serif`
+**Sans (the tool's voice):** `system-ui, sans-serif`
+**Mono (anything copyable):** `ui-monospace, SFMono-Regular, Menlo, monospace`
 
-**Character:** Both families are humanist and hold a trace of the pen.
-Fira Sans was drawn for small sizes on screen and stays legible at the
-0.75rem a column header needs; Literata was drawn for long reading and
-gives the game's own words a weight the tool's words do not have. The
-pairing is warm without being soft, and neither face reads as corporate.
+**Nothing is downloaded.** The product ships no web font. Literata and
+Fira Sans were the drawing board's choice and are named here as the
+intent, not as what renders: a self-hosted pair costs 159 KB of latin
+subsets against a payload budget of 150 KB, and the CSP that admits no
+third-party origin rules out a font CDN besides. What renders is the
+reader's own system faces, which on macOS are New York and SF Pro.
+
+**Character:** What survives the substitution is the *split*, and the
+split is the system: a serif for what belongs to the game, a sans for
+what belongs to Maestro. Every platform's system serif is a text face
+built for long reading and every platform's system sans is drawn for
+small sizes on screen, so the contrast between the two voices holds
+wherever the product is opened. The specific warmth of Literata does
+not, and a future decision to raise the payload budget by those 9 KB
+would change the faces without changing a single rule below.
 
 ### Hierarchy
 
-- **Display** (Literata 600, 1.75rem, 1.15): the page title, once per
+- **Display** (serif 600, 1.75rem, 1.15): the page title, once per
   screen. The name of the thing being looked at.
-- **Headline** (Literata 600, 1.4rem, 1.25): section headings and the
+- **Headline** (serif 600, 1.4rem, 1.25): section headings and the
   name of an entity in its own detail view.
-- **Title** (Fira Sans 600, 1.125rem, 1.35): panel headings and group
+- **Title** (sans 600, 1.125rem, 1.35): panel headings and group
   titles inside a list.
-- **Body** (Fira Sans 400, 0.875rem, 1.5): everything the tool says.
+- **Body** (sans 400, 0.875rem, 1.5): everything the tool says.
   Table cells, form fields, buttons, navigation.
-- **Prose** (Literata 400, 0.95rem, 1.6, max 68ch): the game's own
+- **Prose** (serif 400, 0.95rem, 1.6, max 68ch): the game's own
   writing. Lore, mission text, documents. The line length cap is not
   optional.
-- **Label** (Fira Sans 600, 0.75rem, 0.03em): column headers, rail
+- **Label** (sans 600, 0.75rem, 0.03em): column headers, rail
   headings, metadata keys. Sentence case, never uppercase.
-- **Mono** (Fira Mono 400, 0.78rem): keys, slugs, JSON pointers,
+- **Mono** (mono 400, 0.78rem): keys, slugs, JSON pointers,
   version numbers. Anything a person might copy.
 
 Every adjacent step is at least a 1.24 ratio apart. A flat scale is what
@@ -301,8 +340,8 @@ one exists to fix.
 
 **The Two Voices Rule.** The tool speaks sans, the game speaks serif. A
 quest title, a place name, an entity name and every line of game prose
-are Literata. A column header, a button, a filter and a count are Fira
-Sans. If it would survive the game shipping, it is serif.
+are serif. A column header, a button, a filter and a count are
+sans. If it would survive the game shipping, it is serif.
 
 **The No Uppercase Rule.** Labels are sentence case with light tracking.
 All-caps labels are the admin-panel tell, and they cost legibility at
@@ -398,7 +437,7 @@ The signature surface of this product and the one to get right.
   hover that lights the whole row over a link occupying a third of it is
   a promise the row does not keep.
 - **Numbers:** right-aligned, `font-variant-numeric: tabular-nums`.
-- **Name cell:** the entity name in Literata 600 with its slug **inline**
+- **Name cell:** the entity name in the serif at 600 with its slug **inline**
   after it, in Mono at Sepia. Stacking the slug underneath costs 17px a
   row and takes a 900px window from 17 rows to 9.
 - **Absent value:** the word for what is missing, in Sepia italic, for
@@ -494,8 +533,8 @@ both and never neither.
 
 ### Do:
 
-- **Do** set every game-owned word in Literata and every tool-owned word
-  in Fira Sans. This split is the system.
+- **Do** set every game-owned word in the serif and every tool-owned
+  word in the sans. This split is the system.
 - **Do** keep rows at 36px and lists dense. These users read hundreds of
   rows and came to compare them.
 - **Do** tint every shadow with `rgba(94, 72, 55, …)`, the paper's own

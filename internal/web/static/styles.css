@@ -1591,12 +1591,20 @@ li.cycle:last-child { border-bottom: 0; }
   white-space: nowrap;
 }
 
-.status.never {
-  color: var(--muted);
+.status.never { color: var(--muted); }
+
+/* **Stale is not a fault, and it was wearing the fault's token.** The
+   comment three lines above says so and the rule said otherwise: the
+   only red on the routes list was the word for "we do not know", which
+   is the Two Exemptions Rule spent on a state that is neither an alarm
+   nor an accent. It takes the dashed spelling this identity uses for
+   "this is not settled", in the neutral stroke rather than in Alarm —
+   the same shape as `broken`, in a different tone, because they are the
+   same kind of fact about two different things. */
+.status.stale {
+  color: var(--ink);
   border-bottom: 1px dashed var(--line-strong);
 }
-
-.status.stale { color: var(--danger); }
 
 /* A step that did not hold. It is a different fact from a stale route
    and it was wearing the same token, so a route with failures showed

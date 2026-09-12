@@ -18,7 +18,7 @@ import {
   setBreadcrumb,
   setReadOnly,
 } from "./page.js";
-import { row } from "../rows.js";
+import { headerRow, row } from "../rows.js";
 
 export const NOTE_ROUTES =
   "A route is a claim that one thing can be reached from another, saved so it can be checked " +
@@ -89,6 +89,20 @@ export async function routesPage(opened) {
     // claiming there are no routes, which is the sharpest form of a page
     // saying something false. Found by opening it.
     const items = Array.isArray(answer.result.routes) ? answer.result.routes : [];
+    // **The columns say what they are.** This list shipped without a
+    // header, so "4 steps" sat beside "Checked against an older design"
+    // with nothing naming either, on a screen whose own row builder
+    // carries the comment that a column with no header is a number a
+    // reader has to guess at. It is emitted once, on the first page, so
+    // a pager does not stack three of them.
+    if (shown === 0 && items.length > 0) {
+      listEl.append(headerRow(doc, {
+        label: "Route",
+        key: "key",
+        cells: [{ text: "Length" }, { text: "Last check" }],
+        count: "",
+      }));
+    }
     for (const route of items) {
       const status = statusCell(route.status);
       listEl.append(

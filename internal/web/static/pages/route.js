@@ -122,8 +122,8 @@ export function paintSteps(doc, slug, route) {
   if (steps.length > 0) {
     listEl.append(
       headerRow(doc, {
-        label: "Step",
-        key: "type",
+        label: "Kind",
+        key: "key",
         cells: [{ text: "Verdict" }, { text: "Blocked by" }],
       }),
     );
@@ -133,13 +133,28 @@ export function paintSteps(doc, slug, route) {
     const blockers = Array.isArray(found && found.blockers) ? found.blockers : [];
     listEl.append(
       row(doc, {
-        label: step.key || "",
-        key: step.entity_type || "",
+        // **The two columns were swapped against every other list in the
+        // product.** A machine key was set in the serif the game's own
+        // words wear, and the type — the game's word — was in the mono
+        // slot for things a person copies. A step's entity *name* would
+        // be better than either, and the engine does not send one:
+        // `last_check.steps` carries the key and the type and nothing
+        // else, so the fix that would read best is a change to the
+        // engine and this is the honest reading of what arrives.
+        label: step.entity_type || "",
+        key: step.key || "",
         cells: [
           found
             ? { text: verdictWord(found.verdict), status: found.verdict === "ok" ? "checked" : "broken" }
             : { text: "not checked", absent: true },
-          blockers.length === 0 ? { text: "" } : { text: blockers.map((b) => b.key ?? "").join(", ") },
+          // **A word, not a blank.** Four rows under "Blocked by" were
+          // empty cells, which cannot be told from a value that failed
+          // to load — the rule this file's own unreachable section
+          // already follows with "no way in". A step nothing blocks is
+          // the good case and says so.
+          blockers.length === 0
+            ? { text: "nothing blocks it", absent: true }
+            : { text: blockers.map((b) => b.key ?? "").join(", ") },
         ],
         // One-based, because a designer reading their own claim counts
         // from one. The model's index started at zero and reached the

@@ -41,6 +41,26 @@ export const NOTE_CHECKED = "Each of these walks the game when you ask it to.";
 
 export const CYCLES_CLEAN = "Nothing depends on itself.";
 export const CONTAINMENT_CLEAN = "Nothing contains itself.";
+
+// **Both halves, always.** The verdict was built by pushing a sentence
+// for each half that came back *clean*, so the one report that can find
+// two kinds of thing at once was the one report that could end up with
+// no verdict at all: a game with prerequisite loops and no containment
+// loops said "Nothing contains itself." over its evidence, and a game
+// with both said nothing — `say()` hides an element whose text is empty.
+// The reassuring half was the half that survived, on a screen whose
+// whole premise is a sentence and then the evidence for it.
+export function cyclesVerdict(loops, contains) {
+  // The verb agrees with the count as well as the noun: "1 thing contain
+  // themselves" is the sentence `countLabel` alone produces, and this
+  // screen's whole claim is that it reads like a colleague's report.
+  const found = (count, one, many) =>
+    count === 1 ? "1 thing " + one + "." : count + " things " + many + ".";
+  return [
+    loops === 0 ? CYCLES_CLEAN : found(loops, "depends on itself", "depend on themselves"),
+    contains === 0 ? CONTAINMENT_CLEAN : found(contains, "contains itself", "contain themselves"),
+  ].join(" ");
+}
 export const UNREACHABLE_CLEAN = "Everything can be reached.";
 
 export const HEADING_PREREQUISITE = "Prerequisite loops";
@@ -149,7 +169,14 @@ function el(doc, id) {
 export function walkedLine(result) {
   const parts = [];
   if (Number.isFinite(result.seed_total)) {
-    parts.push("started from " + countLabel(result.seed_total, "entity", "entities"));
+    // **"Starting points", not "entities".** The cycles walk seeds every
+    // entity once per kind of loop, so on a game of 28 entities this
+    // number is 56 — and the two reports beside it were saying 28 in the
+    // same column of the same screen. A count that contradicts its
+    // neighbours is worse than no count, on the one line whose whole job
+    // is to be checkable. The noun is the engine's own shape: a seed row,
+    // which is what `seeds.total` is called two lines below.
+    parts.push("started from " + countLabel(result.seed_total, "starting point", "starting points"));
   }
   const seeds = result.seeds && typeof result.seeds === "object" ? result.seeds : null;
   if (seeds && Number.isFinite(seeds.total)) {
@@ -188,7 +215,19 @@ export function gateLine(result) {
   if (source.length === 0) return "";
   const named = source.map((entry) => {
     const traits = Array.isArray(entry.analysis_traits) ? entry.analysis_traits.join(", ") : "";
-    const how = entry.derived_from_role ? " (from its role)" : "";
+    // **The field the engine actually sends.** This read
+    // `entry.derived_from_role`, which is not on the wire: analysis's
+    // `Source` is `source: "declared" | "derived_from_role" |
+    // "caller_supplied"`, and its own doc comment says it exists so a
+    // designer can see the engine treated a type as a gate because of a
+    // role they set months ago. Reading a field nobody sends made that
+    // mechanism a lie in the one place it was meant to be visible: every
+    // type read as declared.
+    const how = entry.source === "derived_from_role"
+      ? " (from its role)"
+      : entry.source === "caller_supplied"
+        ? " (because you asked for it)"
+        : "";
     return traits === "" ? String(entry.key ?? "") : String(entry.key ?? "") + ": " + traits + how;
   });
   return "It followed " + named.join("; ") + ".";
@@ -436,10 +475,7 @@ export async function analysisPage(opened) {
     showTruncation(doc, "cycles", result);
     const loops = Array.isArray(result.cycles) ? result.cycles : [];
     const contains = Array.isArray(result.containment_cycles) ? result.containment_cycles : [];
-    const lines = [];
-    if (loops.length === 0) lines.push(CYCLES_CLEAN);
-    if (contains.length === 0) lines.push(CONTAINMENT_CLEAN);
-    say(parts.verdict, lines.join(" "));
+    say(parts.verdict, cyclesVerdict(loops.length, contains.length));
     parts.body.replaceChildren();
     // Two lists and not one: a containment loop is a hierarchy that is
     // not one, a prerequisite loop is a gate nobody can open. Different

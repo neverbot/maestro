@@ -13,14 +13,14 @@ colors:
   accent-ink: "#fbf8f2"
   accent-soft: "#fae1d1"
   danger: "#a72629"
-  data-1: "#96311d"
-  data-2: "#1086d3"
-  data-3: "#bf7101"
-  data-4: "#6e4fe9"
-  data-5: "#4e925a"
-  data-6: "#7a358c"
-  data-7: "#028f95"
-  data-8: "#8e3256"
+  data-1: "#791411"
+  data-2: "#0053cc"
+  data-3: "#a55803"
+  data-4: "#4400e0"
+  data-5: "#2c7249"
+  data-6: "#4d1778"
+  data-7: "#147290"
+  data-8: "#652049"
 typography:
   display:
     fontFamily: "ui-serif, Georgia, Times New Roman, serif"
@@ -241,10 +241,22 @@ like it came out of the same material as the page.
 
 Eight categorical hues, assigned by hashing a value's text, used **only
 inside a diagram or a legend** and never in the chrome. Chosen by search
-under three simultaneous constraints: at least 3:1 against the ground,
-at least 28 degrees apart on the hue wheel, and pairwise separable under
-both deuteranopia and protanopia. They ship as `data-1` to `data-8` and
-are re-validated by test, not by eye.
+under four simultaneous constraints: at least 3:1 against the ground, at
+least 28 degrees apart on the hue wheel, pairwise separable under both
+deuteranopia and protanopia, and **at least 4.5:1 against the tone a
+node's name is printed in**. They ship as `data-1` to `data-8` and are
+re-validated by test, not by eye.
+
+The fourth constraint arrived late and cost the light set a new search:
+four hues darkened to satisfy it collided under deuteranopia, so all
+eight were searched again under all four constraints at once. The set
+that ships clears the separation floor by five. The first three are all about the hue against
+something *behind* the node; the contrast a reader of a diagram actually
+performs is the name against the fill it sits on, and nothing measured
+it. With the label hard-wired to `ink`, eight of eight hues failed in
+the dark theme and four of eight in the light one. **A label printed on
+a hue is `paper` in both themes**, and a label printed on anything else
+— a plate, an unfilled box, a paper container — is `ink`.
 
 ### The dark set
 

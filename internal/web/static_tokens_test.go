@@ -461,6 +461,54 @@ func TestTextContrastMeetsWCAG(t *testing.T) {
 	}
 }
 
+// **The label is printed on the node, not on the ground.**
+//
+// The palette was searched and re-validated against three properties —
+// each hue at 3:1 against the ground, 28 degrees apart on the wheel, and
+// separable under both dichromacies — and none of them is the contrast a
+// reader of a diagram actually performs, which is the node's name
+// against the node's fill. Measured when this test was written: with the
+// label hard-wired to --ink, 8 of 8 hues failed in the dark theme, the
+// worst at 1.30:1, and 4 of 8 in the light one. Three labels on the
+// seeded palette view were coloured blanks.
+//
+// render/palette.js's labelOn answers --paper for every hue in both
+// themes, so this is the pair that has to hold. Four light hues were
+// darkened to make it hold by 4.5:1 rather than by 3:1: a node's name is
+// small text.
+//
+// Mutation: lighten any light hue back toward its old value, or point
+// labelOn at --ink, and this fails naming the hue and the ratio.
+func TestANodesNameIsLegibleOnItsOwnFill(t *testing.T) {
+	for _, th := range themes(t) {
+		label := th.colour(t, "--paper")
+		for i := 1; i <= dataSlots; i++ {
+			name := fmt.Sprintf("--data-%d", i)
+			got := contrastRatio(label, th.colour(t, name))
+			if got < 4.5 {
+				t.Errorf("%s theme: a label in --paper on %s is %.2f:1, want >= 4.5:1 — "+
+					"a node whose name cannot be read is a node with no name", th.name, name, got)
+			}
+		}
+	}
+}
+
+// TestTheLabelOnAHueIsTheTokenTheGuardMeasures pins the other half: the
+// test above measures --paper against the hues, and it is only worth
+// anything while that is the token the renderer prints. A change of mind
+// in palette.js with this file left alone would leave a green guard over
+// an unreadable diagram.
+func TestTheLabelOnAHueIsTheTokenTheGuardMeasures(t *testing.T) {
+	source, err := os.ReadFile("static/palette.js")
+	if err != nil {
+		t.Fatalf("read palette.js: %v", err)
+	}
+	if !strings.Contains(string(source), `const HUE_LABEL_FILL = "var(--paper)"`) {
+		t.Error("palette.js no longer sets a label on a hue in --paper, which is the pair " +
+			"TestANodesNameIsLegibleOnItsOwnFill measures")
+	}
+}
+
 // TestMeaningfulOutlinesMeetThreeToOne holds WCAG 1.4.11's threshold for
 // non-text content over the things whose *stroke or fill is the whole of
 // the signal*: the eight data hues a node wears, and --line-strong, which

@@ -12,8 +12,8 @@
 // number: a renderer that spelled it differently would be telling a
 // designer something different with the same picture.
 //
-// It is a pure function of plain data — no DOM, no state, one import —
-// for the reason render/scene.js and render/twin.js are: a Node harness
+// It is a pure function of plain data — no DOM, no state, two pure
+// imports — for the reason render/scene.js and render/twin.js are: a Node harness
 // reads it and a mutation turns it red. The marks it returns are the
 // contract render/scene.js declares and components/mst-canvas.js emits;
 // nothing here knows an SVG element exists.
@@ -24,6 +24,7 @@
 // name is the *chrome's* — a hairline outline, a muted edge, the ground
 // under an edge label — because those are not data.
 
+import { labelOn } from "../palette.js";
 import {
   LAYER_EDGES,
   LAYER_IMAGE,
@@ -192,6 +193,10 @@ export const ABSENT_DASH = "4 3";
 
 export const EDGE_STROKE = "var(--muted)";
 export const EDGE_STROKE_WIDTH = 1;
+// The default, for a label on a plate, on paper or on nothing. A label
+// printed *on a hue* asks palette.js's labelOn instead: see its comment
+// for the eight contrast measurements that made this a decision rather
+// than a constant.
 export const LABEL_FILL = "var(--ink)";
 export const PLATE_FILL = "var(--ground)";
 
@@ -265,7 +270,9 @@ export function nodeMarks(node) {
       x,
       y,
       text: typeof label === "string" ? label : "",
-      fill: LABEL_FILL,
+      // The box's own fill decides this: a hue takes the paper tone, and
+      // anything else takes ink.
+      fill: labelOn(fill),
       size: LABEL_SIZE,
       anchor: "middle",
       baseline: "middle",
@@ -795,7 +802,9 @@ export function containerMarks(container) {
       x: left + NODE_PADDING_X,
       y: top + header / 2,
       text: typeof label === "string" ? label : "",
-      fill: LABEL_FILL,
+      // The header is the one surface colour touches in this renderer,
+      // so the heading printed on it answers to the header's fill.
+      fill: labelOn(typeof headerFill === "string" ? headerFill : ""),
       size: LABEL_SIZE,
       anchor: "start",
       baseline: "middle",

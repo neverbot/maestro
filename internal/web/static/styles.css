@@ -119,14 +119,14 @@
      separated under both deuteranopia and protanopia. Adjacent indices
      are interleaved across the wheel, so a view that only uses three
      hues uses three that are far apart. */
-  --data-1: #96311d;
-  --data-2: #1086d3;
-  --data-3: #bf7101;
-  --data-4: #6e4fe9;
-  --data-5: #4e925a;
-  --data-6: #7a358c;
-  --data-7: #028f95;
-  --data-8: #8e3256;
+  --data-1: #791411;
+  --data-2: #0053cc;
+  --data-3: #a55803;
+  --data-4: #4400e0;
+  --data-5: #2c7249;
+  --data-6: #4d1778;
+  --data-7: #147290;
+  --data-8: #652049;
 
   /* Three stacks, no web fonts, nothing downloaded (spec §2.4): the
      game's words in a serif, the tool's words in system-ui, and machine

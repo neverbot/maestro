@@ -37,6 +37,27 @@ const DATA_TOKENS = [
   "var(--data-8)",
 ];
 
+// **What a label printed on one of these hues is set in.**
+//
+// It was `var(--ink)` unconditionally, whatever the box underneath it.
+// Measured against the eight hues: in the dark set 8 of 8 were below
+// 3:1, the worst at 1.30, and in the light set 4 of 8 — the palette had
+// been validated by test against the *ground*, which is behind the node,
+// and never against the fill the text is actually printed on. Three
+// node labels on the seeded palette view read as coloured blanks.
+//
+// The answer is one token, not eight: on every hue in both themes the
+// paper tone wins, and the four light hues that sat in the middle of the
+// range were darkened until it wins by 4.5:1. A label on anything else —
+// a plate, an unfilled box, a paper container — stays ink.
+// static_tokens_test.go holds both halves.
+const HUE_LABEL_FILL = "var(--paper)";
+const PLAIN_LABEL_FILL = "var(--ink)";
+
+export function labelOn(fill) {
+  return DATA_TOKENS.includes(fill) ? HUE_LABEL_FILL : PLAIN_LABEL_FILL;
+}
+
 // hueFor assigns a slot by hashing the value's JSON text, never by its
 // rank in the result.
 //

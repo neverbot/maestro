@@ -194,56 +194,56 @@
       "data-1": {
         "role": "data",
         "displayName": "Categorical 1",
-        "canonical": "#96311d",
+        "canonical": "#791411",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-2": {
         "role": "data",
         "displayName": "Categorical 2",
-        "canonical": "#1086d3",
+        "canonical": "#0053cc",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-3": {
         "role": "data",
         "displayName": "Categorical 3",
-        "canonical": "#bf7101",
+        "canonical": "#a55803",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-4": {
         "role": "data",
         "displayName": "Categorical 4",
-        "canonical": "#6e4fe9",
+        "canonical": "#4400e0",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-5": {
         "role": "data",
         "displayName": "Categorical 5",
-        "canonical": "#4e925a",
+        "canonical": "#2c7249",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-6": {
         "role": "data",
         "displayName": "Categorical 6",
-        "canonical": "#7a358c",
+        "canonical": "#4d1778",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-7": {
         "role": "data",
         "displayName": "Categorical 7",
-        "canonical": "#028f95",
+        "canonical": "#147290",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       },
       "data-8": {
         "role": "data",
         "displayName": "Categorical 8",
-        "canonical": "#8e3256",
+        "canonical": "#652049",
         "note": "Inside diagrams and legends only. Never in the chrome.",
         "tonalRamp": []
       }

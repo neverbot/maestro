@@ -6,202 +6,147 @@ of a game together: characters, places, missions, progression, story.**
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](license.md)
 ![Status: early development](https://img.shields.io/badge/status-early%20development-orange)
 
-Self-hosted. Open source. It holds the *design* of a game, never a
-running one: no live instances, no real players, no telemetry.
+Self-hosted and open source. Maestro holds the *design* of a game, never
+a running one: no live instances, no real players, no telemetry.
 
-> **Early days, but it draws now.** A game declares its own types, holds
-> content and versioned prose, and answers a saved view as a picture:
-> six renderers, a layout that keeps the positions you dragged, and a
-> text twin that describes the same answer for anyone who cannot see the
-> drawing. Agents work over MCP; people work in the browser.
->
-> One honest gap. **A person cannot yet compose a view from nothing** —
-> the query language was written for agents, and a query builder is its
-> own piece of work; you can copy an existing view and change how it is
-> drawn. See [Running it](#running-it) to start an instance, the
-> [Roadmap](#roadmap) for what is done.
+A game declares its own vocabulary, fills it with content, and Maestro
+answers questions nobody can answer by reading: what is unreachable,
+what depends on itself, what nothing points at. People work in the
+browser; their agents work over MCP against the same data.
+
+---
+
+## What it is for
+
+You are designing a game that has grown past what one person can hold at
+once: four hundred missions, a progression nobody can verify by eye, a
+zone somebody renamed last week. Maestro is where that design lives.
+
+**Catalogues.** Every class, every circuit, every mission the game
+contains, listed by type, searchable.
+
+**Views.** A saved diagram is a query plus a layout. A world map with
+real coordinates over a background image, a layered progression tree, a
+table, a timeline. Ask for *the quests a Mage can reach between level 20
+and 30, coloured by zone*, and that is a view rather than a feature
+request. Every diagram also has a text twin that describes the same
+answer for a reader who cannot see it.
+
+**Analysis.** Prerequisite cycles. Content no player can ever reach.
+Orphans. Saved routes such as *Mage levelling 1-20*, checked to prove a
+progression still holds together.
+
+**Prose.** Lore and mission scripts as versioned markdown, attached to
+the entities they describe.
 
 ## Maestro knows nothing about games
 
 No quest table. No zone table. No character table. Every game brings its
 own vocabulary, built from four primitives:
 
-| Primitive      | What it is                                    |
-| :------------- | :-------------------------------------------- |
-| `EntityType`   | a kind of thing, with a field schema           |
-| `Entity`       | one instance of that kind                      |
-| `RelationType` | a kind of directed edge, with its own schema   |
-| `Relation`     | one edge, from one entity to another           |
+| Primitive      | What it is                                   |
+| :------------- | :------------------------------------------- |
+| `EntityType`   | a kind of thing, with a field schema          |
+| `Entity`       | one instance of that kind                     |
+| `RelationType` | a kind of directed edge, with its own schema  |
+| `Relation`     | one edge, from one entity to another          |
 
-That is the whole model. A genre nobody anticipated has to fit without a
-code change, so nothing about any genre is baked in.
+That is the whole model, and a genre nobody anticipated has to fit
+without a code change.
 
-| Genre              | Declares                                                        | Connected by                                                                  |
-| :----------------- | :-------------------------------------------------------------- | :---------------------------------------------------------------------------- |
-| **MMORPG**         | `Class` `Zone` `Dungeon` `Quest` `Talent`                        | `connects_to` `takes_place_in` `requires` `rewards`                            |
-| **Racing career**  | `Driver` `Car` `Circuit` `Race` `Licence`                        | `unlocks` `contains` `requires`                                                |
-| **Metroidvania**   | `Room` `Ability` `Boss` `Item`                                   | `connects_to`, carrying its own `is_one_way`                                   |
+| Genre             | Declares                                     | Connected by                                  |
+| :---------------- | :------------------------------------------- | :-------------------------------------------- |
+| **MMORPG**        | `Class` `Zone` `Dungeon` `Quest` `Talent`     | `connects_to` `takes_place_in` `requires`      |
+| **Racing career** | `Driver` `Car` `Circuit` `Race` `Licence`     | `unlocks` `contains` `requires`                |
+| **Metroidvania**  | `Room` `Ability` `Boss` `Item`                | `connects_to`, carrying its own `is_one_way`   |
 
-That last one is the point of typed edges: whether a door swings both
-ways belongs to the door, not to either room. `is_one_way` is a real
-declared field on the relation type, validated on every write the way a
-field on an entity is.
+That last row is the point of typed edges: whether a door swings both
+ways belongs to the door, not to either room, so `is_one_way` is a
+declared field on the relation type and is validated on every write.
 
-A door can also record *what opens it* — `requires_ability:
-"mothwing_cloak"` — and that field is a weaker thing, worth being plain
-about: Maestro checks that the value is text, not that any such ability
-exists. It is a convention the game keeps, not a link the server
-follows. The references Maestro does guarantee are relations, and both
-ends of a relation are entities.
+## Agents
 
-## What you get on top of the graph
-
-**Catalogues.** Every class, every circuit, every mission the game
-contains, listed by type, filterable, searchable.
-
-**Views.** A saved diagram is a query plus a layout, and an agent can
-write one. A world map with real coordinates over a background image. A
-layered progression tree. A table. A timeline. Ask for *the quests a
-Mage can reach between level 20 and 30, coloured by zone*, and that is a
-view, not a feature request.
-
-**Analysis.** Prerequisite cycles. Content no player can ever reach.
-Orphans. Saved routes such as *Mage levelling 1-20*, used to prove a
-progression actually holds together. This is the reading nobody can do
-by eye across four hundred missions.
-
-**Prose.** Lore and mission scripts as versioned markdown, attached to
-the entities they describe.
-
-## Two ways in
-
-Humans work in a web UI. Agents drive the same data over **MCP** —
-sixty tools, mirrored in REST — and learn the metamodel from a skill
-bundle the instance serves them: `skill.install` hands back a
-short-lived download and the bundle's version, so an agent arrives
-knowing how to declare types and seed a few hundred entities without
-being told twice.
-
-The bundle teaches what a tool description cannot: what to do across
-several calls, which mistakes cost a rewrite rather than a retry, and
-two worked genres — an MMORPG and a racing career — whose transcripts
-are replayed against a real server by a test, because an example that
-no longer runs is worse than no example.
-
-### The skill bundle
-
-The bundle is that teaching material: an entry point, reference pages,
-modelling judgement, worked genres and step-by-step recipes, embedded in
-the binary and versioned by its own content hash. An agent asks for it
-with the `skill.install` tool, which answers with a short-lived signed
-download URL rather than the files themselves, and compares the version
-`whoami` reports against the copy it already has before fetching
-anything.
-
-It teaches what spans calls — the order to declare things in, the
-decisions taken before any call exists, the consequences that only
-appear later — and it **never restates a tool's contract**. Every
-argument, admitted value, bound and refusal stays in the description the
-wire already carries; the bundle routes to it, or quotes it verbatim
-with attribution. That is enforced rather than encouraged: a page that
-reworded a description, or a description reworded underneath a page that
-quotes it, fails the build (`make skill-check`).
-
-The genre pages are examples, and they are **never an argument**. "The
-MMORPG template needs this" is not a justification for a change under
-`internal/` and may not be cited as one in review. If a genre cannot be
-expressed, the gap is in the metamodel and belongs in a metamodel spec,
-where it will be argued generically or not at all.
+Agents drive the same data over **MCP**, with every tool mirrored in
+REST, and they learn the metamodel from a skill bundle the instance
+serves them: `skill.install` hands back a short-lived download and the
+bundle's version, so an agent arrives knowing how to declare types and
+seed a few hundred entities without being told twice. One token is one
+game.
 
 ## Running it
+
+Requires Docker. There is no published image yet, so the compose file
+builds from this repository:
 
 ```bash
 docker compose up --build
 ```
 
-Starts Maestro and Postgres together (`compose.yml`). On first boot it
-migrates the schema and, if `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
-are set, creates that account as an instance admin — log in with it at
-`http://localhost:8080`.
+That starts Maestro and Postgres together, migrates the schema on first
+boot, and creates the account named by `FIRST_ADMIN_EMAIL` /
+`FIRST_ADMIN_PASSWORD` as an instance admin. Open
+**http://localhost:8090** and sign in with it. (The container listens on
+8080; the compose file publishes it on 8090 by default, so it does not
+collide with anything else you have running. `MAESTRO_HOST_PORT`
+changes that.)
 
-For local development without a container: `make build && make run`
-(binary in `bin/maestro`, same environment variables as the compose
-service). `make check` runs the full commit gate — formatting, `go vet`,
-the linter, `sqlc diff`, and the test suite — the same one CI runs.
+### Configuration
 
-**Admitting a second person.** `invite_only` is the default
-`REGISTRATION_MODE`, so nobody else can sign up on their own. The admin
-account mints an invite from the terminal — no UI for this yet, no
-`psql` either:
+Every setting is an environment variable on the `maestro` service.
 
-```bash
-curl -s -b cookies.txt -X POST http://localhost:8080/api/invites \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"designer@studio.com"}'
-```
+| Variable | Default | What it does |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | *(required)* | Postgres connection string. |
+| `MAESTRO_ADDR` | `:8080` | Address the server listens on, inside the container. |
+| `REGISTRATION_MODE` | `invite_only` | `invite_only`, or `domain_open` to let anyone with an allowed address sign themselves up. |
+| `ALLOWED_EMAIL_DOMAINS` | *(empty)* | Comma-separated list. Required by `domain_open`. |
+| `SESSION_TTL` | `720h` | How long a sign-in lasts. |
+| `INVITE_TTL` | `336h` | How long an invitation link stays usable. |
+| `FIRST_ADMIN_EMAIL` | *(empty)* | The account seeded, and re-promoted to admin, at boot. |
+| `FIRST_ADMIN_PASSWORD` | *(empty)* | Its password, on a brand-new instance. |
+| `FIRST_ADMIN_PASSWORD_RESET` | `false` | One-shot break-glass: see *Recovering an admin*. |
+| `TRUSTED_PROXY_COUNT` | `0` | How many reverse proxies sit in front, for client addresses. |
 
-(`-b cookies.txt` reuses the session cookie saved from `POST
-/api/auth/login`.) The response carries `redeem_path`; paste it after
-the instance's own address and hand the link to whoever it's for —
-`http://localhost:8080/login#invite=<token>`. They open it, set a
-password, and they're in — with an account, and nothing else: an
-account-only invite grants no game. A game's own owner can invite
-someone straight into that game instead, at a role, from
-`POST /api/games/{game}/invites` with `{"email":"...","role":"editor"}`,
-the same way.
+### Adding people
 
-**Changing a password, and a second admin.** Anyone signed in can rotate
-their own password — it requires the current one, and it logs every
-*other* session out (not the one that made the request):
+Sign in as an admin and open **Administration** from the menu under your
+name. Create an invitation for an address, and Maestro answers with a
+link.
 
-```bash
-curl -s -b cookies.txt -X PATCH http://localhost:8080/api/me/password \
-  -H 'Content-Type: application/json' \
-  -d '{"current_password":"old-password","new_password":"a-new-password"}'
-```
+**Nothing is sent anywhere.** This instance delivers no email, by
+design, so you pass that link on yourself, and it is shown once. The
+person opens it, sets a password, and has an account — and nothing else:
+an account-only invitation grants no game. A game's owner invites
+somebody into a game, at a role, from that game.
 
-Rotating a password this way is the only way to get an attacker who
-merely stole a session cookie off the account: there is no
-forgot-my-password flow anywhere in this product — no email is ever
-sent, by design — and the one reset that does exist (below) is an
-operator restarting the process, not something a signed-in user or a
-locked-out one can reach. It is not a
-way to be sure a thief is locked out entirely: an API token minted
-before the rotation keeps working afterwards (tokens have no expiry,
-only explicit revocation), so anyone rotating a password on suspicion
-should also check that game's token list (`GET
-/api/games/{game}/tokens`) for anything unrecognised. An existing
-instance admin can also promote a colleague to admin, by email — the
-bootstrap account created at first boot is no longer the only one that
-can ever mint an account-only invite:
+The same screen makes somebody an administrator, or takes it away, by
+the address they sign in with. An admin may demote another admin, or
+themselves, as long as one remains: the instance refuses to be left with
+none.
 
-```bash
-curl -s -b cookies.txt -X PATCH http://localhost:8080/api/admins \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"colleague@studio.com","is_admin":true}'
-```
+### Passwords
 
-An admin may demote another admin, or themselves, as long as at least
-one remains — the instance refuses to ever be left with zero.
+Anybody signed in changes their own password from **Your account**. It
+requires the current one.
 
-**Recovering a locked-out admin.** With no password reset flow for
-users, a forgotten or leaked admin password is recovered by an operator
-restarting the process. Both `FIRST_ADMIN_EMAIL` and
-`FIRST_ADMIN_PASSWORD` must be set for either half below to happen; with
-either one empty, the boot is a no-op. Given both, and
-`FIRST_ADMIN_EMAIL` naming an account that already exists, two separate
-things happen at boot:
+**There is no password reset.** No email is ever sent, so there is
+nothing to send a reset to: an administrator invites somebody again
+instead. Changing a password does not revoke API tokens, which have no
+expiry and are revoked only explicitly, so anybody rotating a password
+on suspicion should also check that game's tokens.
 
-- **Restoring the admin flag** happens on every such restart. The named
-  account is made an instance admin, whether or not it was ever one
-  before — not only restored if it had lost the flag.
-- **Resetting that account's password** to `FIRST_ADMIN_PASSWORD`
-  happens **only** when `FIRST_ADMIN_PASSWORD_RESET=true` is also set.
-  Without it, `FIRST_ADMIN_PASSWORD` is only ever a seed for a brand-new
-  instance and can never overwrite an existing account's password. That
-  is why `compose.yml` can leave `FIRST_ADMIN_EMAIL`/`FIRST_ADMIN_PASSWORD`
-  set permanently, and why an admin who rotates their own password keeps
-  it across every ordinary restart.
+### Recovering an admin
+
+With no reset flow, a forgotten admin password is recovered by an
+operator restarting the process. Two things can happen at boot, and both
+need `FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` set:
+
+- **The admin flag** is restored on every restart, whether or not the
+  account ever had it.
+- **The password** is overwritten **only** when
+  `FIRST_ADMIN_PASSWORD_RESET=true` is also set. Without it,
+  `FIRST_ADMIN_PASSWORD` only ever seeds a brand-new instance, which is
+  why an admin who changes their own password keeps it across restarts.
 
 So a recovery is one deliberate boot:
 
@@ -212,59 +157,89 @@ FIRST_ADMIN_PASSWORD_RESET=true \
   docker compose up -d
 ```
 
-**The reset revokes every session for that account**, on every device,
-in the same transaction that writes the new hash — the same guarantee
-an ordinary password change gives. It does not revoke API tokens; those
-have no expiry and are revoked only explicitly, so check that game's
-token list afterwards. Both the promotion and the reset are logged at
-`WARN` with the account's user id, so a restart that changed either is
-visible in the process log.
+It revokes every session for that account in the same transaction that
+writes the new password, and logs what it did at `WARN`. **Unset
+`FIRST_ADMIN_PASSWORD_RESET` again afterwards**: left set, it is a
+standing credential for anyone who can read that environment.
 
-**Unset `FIRST_ADMIN_PASSWORD_RESET` again once you have logged in.**
-Left set, it is a standing break-glass credential: anyone who later
-learns `FIRST_ADMIN_PASSWORD`, or can write the environment it lives in,
-can reset that account on the next restart. Access to the process
-environment already implies database access, so this grants nothing new
-— it just turns a break-glass `psql` session into a documented restart —
-but there is no reason to leave the door open after walking through it.
-Note also that with the opt-in set, a `FIRST_ADMIN_PASSWORD` shorter
-than twelve characters aborts start-up rather than half-applying, since
-the reset goes through the same validation every other password change
-in this product does.
+## Building it
 
-**Clicking an invite while already signed in.** A project-bound invite
-redeemed by a browser tab that is already logged in grants membership to
-that same account — it never creates a second one. An email bound to a
-different account than the one currently logged in is refused, the same
-as an unknown token.
+Go 1.25 and a Postgres to test against. No Node, no bundler: the front
+end is vanilla CSS and ES modules, served from the binary.
+
+```bash
+make build        # bin/maestro
+make run          # build, then run it
+make check        # the full gate: gofmt, vet, lint, sqlc diff, skill guards, tests
+```
+
+`make check` is what CI runs on every push, and it is the bar for a
+commit.
+
+### Tests
+
+The test suite is integration-first: it runs against a real Postgres,
+and **every test that needs one skips silently when `TEST_DATABASE_URL`
+is unset**, with `go test` still printing `ok`. Set it:
+
+```bash
+docker run -d --name maestro-test-pg -e POSTGRES_PASSWORD=postgres \
+  -p 55432:5432 postgres:16
+
+export TEST_DATABASE_URL="postgres://postgres:postgres@localhost:55432/postgres?sslmode=disable"
+go test ./...
+```
+
+Each test gets its own database, created and dropped around it, so runs
+do not interfere. `internal/web` is the slow package, at a couple of
+minutes; a single test is seconds, so run the one you are working on.
+
+### A local instance while developing
+
+```bash
+make dev          # build the image and start it, on http://localhost:8090
+make dev-logs     # follow the server's log
+make dev-psql     # a psql shell on its database
+make dev-down     # stop it, keeping the data volume
+```
+
+`make dev` rebuilds, so it is also how a code change reaches the
+browser. The data lives in a named volume and survives `dev-down`.
+
+### Other targets
+
+```bash
+make tools        # install sqlc and the linter
+make sqlc         # regenerate the database layer from internal/db/queries
+make sqlc-check   # fail if the generated code is stale
+make skill-check  # the agent bundle's own guards
+```
+
+Queries are written in SQL and compiled by [sqlc](https://sqlc.dev); the
+generated code is committed, and `make check` fails if it drifts from
+the `.sql` files.
 
 ## Known limitations
 
-- **Single-process SSE, single-process rate limiting.** `/events` fans
-  events out from an in-memory hub inside one process, not Postgres
-  `LISTEN`/`NOTIFY`. A client only ever sees events published while its
-  own process has been running — there is no durable log behind it and
-  no catch-up on reconnect — and running more than one replica splits
-  subscribers across hubs that never talk to each other. The login,
-  invite-redemption and password-change rate limiters are in-process for
-  the same reason: N replicas means N independent budgets, not one
-  shared across the instance.
-- **The container image is not published anywhere.** CI builds it and
-  smoke-tests it against a real Postgres on every push to `master`, but
-  nothing pushes it to a registry. Building from this repository
-  (`docker compose up --build`, or `docker build .`) is currently the
-  only way to run it.
-- **argon2id cost parameters are fixed in code, not configurable.**
-  `Time=3`, `Memory=64MiB`, `Threads=2` (`internal/config/config.go`).
-  Changing them means changing the default and rebuilding, not setting
-  an environment variable.
-- **No backups and no documentation site.** Neither was ever built.
-  Backing up an instance means backing up its Postgres volume, the same
-  way you would any other database.
+Said plainly, rather than left to be discovered:
+
 - **A person cannot compose a view from nothing.** The query language
   was written for agents to write; the interface can copy a view and
-  change how it is drawn, and that is all. A query builder is real work
-  and was deliberately not smuggled in as a corner of another task.
+  change how it is drawn, and that is all. A query builder is its own
+  piece of work.
+- **One process only.** Events fan out from an in-memory hub rather than
+  Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so a
+  second replica has its own subscribers and its own budgets. A client
+  sees only events published while its process has been running: there
+  is no durable log and no catch-up on reconnect.
+- **No published image, no documentation site, no backups.** Backing up
+  an instance means backing up its Postgres volume, like any other
+  database.
+- **argon2id cost is fixed in code** (`Time=3`, `Memory=64MiB`,
+  `Threads=2`), not configurable.
+- **Nobody has verified that the skill bundle teaches.** Its guards
+  prove it agrees with the server, and say nothing about whether an
+  agent reading it can actually start.
 
 ## Roadmap
 

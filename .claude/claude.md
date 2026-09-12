@@ -136,6 +136,23 @@ by eye. Its loader looks for `product.md` and `design.md` at the repo
 root, then `.agents/context/`, then `docs/` — which is why they live in
 `docs/`.
 
+## The agent skill bundle
+
+Two rules govern it, and both were in `readme.md` until the readme
+became a readme. They are process, not product.
+
+- **The bundle never restates a tool's contract.** Every argument,
+  admitted value, bound and refusal stays in the description the wire
+  already carries; a page routes to it, or quotes it verbatim with
+  attribution. This is enforced, not encouraged: a page that rewords a
+  description, or a description reworded underneath a page that quotes
+  it, fails `make skill-check`.
+- **The genre pages are examples and never an argument.** "The MMORPG
+  template needs this" does not justify a change under `internal/` and
+  may not be cited as one in review. If a genre cannot be expressed, the
+  gap is in the metamodel and belongs in a metamodel spec, where it is
+  argued generically or not at all.
+
 ## Operational rules
 
 ### Documents

@@ -177,6 +177,23 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // sentence — is an interpolation of render/table.js's model, which is
 // what the scan above reads the templates for.
 //
+// mst-picker.js is the query builder's control over a game's own
+// vocabulary, and it holds **no Lit template at all** — it is a
+// `<details>` around a filtered list, built with createElement, because
+// a control that closes on a click has no state a framework would
+// manage. So the scan passes over it vacuously and the argument is here.
+//
+// It carries three words of its own and each names a *control* or an
+// absence rather than a state of the answer, which is
+// mst-view-frame.js's exception carried one step along: "Choose" is what
+// an unmade choice says, "no choice" is the option that means a clause
+// is not being used, and "nothing to choose from" is what a game that
+// declared no relation types offers. Everything else in it — every
+// label, every key — is the game's own vocabulary, and
+// internal/web/jstest/picker_test.mjs asserts exactly that: what it
+// offers comes from the listing, and what it answers with is the key the
+// game wrote.
+//
 // mst-save-as.js joined the list in Task 16, and it holds **no Lit
 // template at all** — so, like mst-canvas.js, the scan above passes over
 // it vacuously and the argument has to be made here. It carries words of
@@ -208,6 +225,7 @@ func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
 		filepath.Join("static", "components", "mst-ground.js"),
+		filepath.Join("static", "components", "mst-picker.js"),
 		filepath.Join("static", "components", "mst-save-as.js"),
 		filepath.Join("static", "components", "mst-table.js"),
 		filepath.Join("static", "components", "mst-twin.js"),

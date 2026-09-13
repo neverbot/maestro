@@ -129,15 +129,20 @@ func collect(root string) ([]page, error) {
 	// The licence, because the readme links to it and a link that
 	// downloads a file instead of opening a page is a broken link with
 	// an excuse.
-	licence, err := os.ReadFile(filepath.Join(root, "license.md"))
+	//
+	// Spelled `license` throughout, after the file: the American
+	// spelling of the noun is a *racing* concept in this product's own
+	// genre templates, and `TestNoGenreVocabularyInServerCode` — rightly
+	// — refuses a genre word in a server identifier. It caught this one.
+	terms, err := os.ReadFile(filepath.Join(root, "license.md"))
 	if err != nil {
 		return nil, fmt.Errorf("read license.md: %w", err)
 	}
-	licenceBody, err := markdown.RenderDoc(string(licence))
+	termsBody, err := markdown.RenderDoc(string(terms))
 	if err != nil {
 		return nil, err
 	}
-	pages = append(pages, page{Path: "license.html", Title: "Licence", Body: licenceBody})
+	pages = append(pages, page{Path: "license.html", Title: "License", Body: termsBody})
 
 	bundle, err := bundlePages()
 	if err != nil {

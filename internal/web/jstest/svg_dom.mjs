@@ -57,6 +57,7 @@ export function createDocument() {
       this.childNodes = [];
       this.parentNode = null;
       this.ownText = "";
+      this.listeners = {};
     }
 
     setAttribute(name, value) {
@@ -110,6 +111,60 @@ export function createDocument() {
       this.ownText = value;
     }
 
+    // **A listener is recorded, never invoked by the stub.** A component
+    // binding one is a fact a harness asserts (writes_test.mjs counts
+    // them on a gesture); firing them here would make this a small event
+    // loop and every test of one a test of it. `dispatch` below is how a
+    // harness runs one deliberately.
+    addEventListener(kind, handler) {
+      if (typeof handler !== "function") return;
+      (this.listeners[kind] ??= []).push(handler);
+    }
+
+    removeEventListener(kind, handler) {
+      const list = this.listeners[kind];
+      if (!list) return;
+      const at = list.indexOf(handler);
+      if (at >= 0) list.splice(at, 1);
+    }
+
+    // dispatch runs what a real click would run, and nothing else: no
+    // bubbling, no default action, no ordering rules. A harness that
+    // needs those needs a browser.
+    dispatch(kind, event = {}) {
+      for (const handler of this.listeners[kind] ?? []) handler({ target: this, ...event });
+    }
+
+    click() {
+      this.dispatch("click");
+    }
+
+    replaceChildren(...kids) {
+      for (const child of this.childNodes.slice()) this.removeChild(child);
+      for (const kid of kids) this.appendChild(kid);
+    }
+
+    // querySelector understands one selector, `.class`, because that is
+    // the only shape this front end asks a stub for. Anything else
+    // throws rather than quietly answering null: a selector a stub
+    // silently fails to match is a component that looks wired and is
+    // not.
+    querySelector(selector) {
+      if (typeof selector !== "string" || !selector.startsWith(".")) {
+        throw new Error(`stub: querySelector understands ".class" only, not ${selector}`);
+      }
+      const wanted = selector.slice(1);
+      const walk = (node) => {
+        for (const child of node.childNodes) {
+          if ((child.attributes.get("class") ?? "").split(" ").includes(wanted)) return child;
+          const deeper = walk(child);
+          if (deeper) return deeper;
+        }
+        return null;
+      };
+      return walk(this);
+    }
+
     get innerHTML() {
       throw new Error("stub: innerHTML parses markup, and nothing in this front end may read or write it");
     }
@@ -159,19 +214,48 @@ export function install() {
   globalThis.HTMLElement = class HTMLElement {
     constructor() {
       this.shadowRoot = null;
+      // Every event this element sent, in order: a harness that only
+      // wants to know *that* something was announced reads this.
       this.dispatched = [];
+      this.listeners = {};
     }
     attachShadow() {
       this.shadowRoot = dom.document.createElement("shadow-root");
       return this.shadowRoot;
     }
+    // **A listener added here is called.** It was a no-op, and the
+    // element still recorded what it dispatched — so a component that
+    // announced a choice and a harness that listened for one both
+    // "worked" and never met. That is the shape of defect this whole
+    // directory exists to catch, in the stub itself.
     dispatchEvent(event) {
       this.dispatched.push(event);
+      for (const handler of this.listeners[event?.type] ?? []) handler(event);
       return true;
     }
-    addEventListener() {}
-    removeEventListener() {}
+    addEventListener(kind, handler) {
+      if (typeof handler !== "function") return;
+      (this.listeners[kind] ??= []).push(handler);
+    }
+    removeEventListener(kind, handler) {
+      const list = this.listeners[kind];
+      if (!list) return;
+      const at = list.indexOf(handler);
+      if (at >= 0) list.splice(at, 1);
+    }
   };
+  // A component dispatches a CustomEvent; the stub needs one that
+  // carries a type and a detail and nothing else.
+  if (typeof globalThis.CustomEvent !== "function") {
+    globalThis.CustomEvent = class CustomEvent {
+      constructor(type, init = {}) {
+        this.type = type;
+        this.detail = init.detail ?? null;
+        this.bubbles = init.bubbles === true;
+        this.composed = init.composed === true;
+      }
+    };
+  }
   globalThis.customElements = {
     define(name, ctor) {
       defined.set(name, ctor);

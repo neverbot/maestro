@@ -14,7 +14,15 @@ This page is how to read them, and the two habits that cost the least.
   already received when it connected. Read the one you are about to
   call.
 - Over **REST**: `GET /api/mcp/tools` answers the same names and the
-  same text, so an agent driving the mirror is not left guessing.
+  same text, so an agent driving the mirror is not left guessing, and
+  `reference/rest.md` is the table of addresses those tools are mirrored
+  at. Both are generated from what the server registers.
+
+**If you have no MCP client, start with `reference/rest.md`.** The
+product mirrors every tool as a route on purpose, and until that table
+existed an agent holding these pages and an HTTP client could not find
+the surface at all: thirty-five probe requests to locate it, and two of
+its domains never reached.
 
 `reference/tools.md` is the index of what exists, one line each. It is
 generated from the same descriptions, so it can name a tool and never

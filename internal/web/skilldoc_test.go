@@ -373,3 +373,78 @@ func TestTheSeedingRecipeIsStillNeeded(t *testing.T) {
 			strings.Join(grown, " and "), conflictModeSpelling)
 	}
 }
+
+// TestRouteReferenceIsCurrent is TestToolReferenceIsCurrent for the
+// route table: a generated artefact committed to the tree, and a test
+// that goes red when the source moved and the artefact did not.
+func TestRouteReferenceIsCurrent(t *testing.T) {
+	want := web.NewToolReferenceServer().RouteReference()
+	got := readBundleFile(t, web.RouteReferencePath)
+	if got == want {
+		return
+	}
+	t.Fatalf("%s is stale.\n\nRegenerate it with:\n\n\tgo run ./cmd/maestro-skilldoc\n\n%s",
+		web.RouteReferencePath, lineDiff(want, got))
+}
+
+// TestTheRouteReferenceNamesEveryAPIRoute compares the committed table
+// against the **server**, in both directions, for the reason its tool
+// twin does: a file regenerated from a broken generator matches that
+// generator forever.
+//
+// What it closes: an agent given the bundle and no MCP client could not
+// start. It spent about thirty-five probe requests finding the surface,
+// guessed `relation-types` with a hyphen against every spelling in the
+// bundle, took six guesses to turn `games.counts` into `/summary`, and
+// never derived `routes.check` at all — fifteen path shapes, all 404 —
+// so a whole section of the analysis reference was unreachable for it.
+//
+// Mutation: make routeReference skip a group and this names every route
+// in it.
+func TestTheRouteReferenceNamesEveryAPIRoute(t *testing.T) {
+	srv := web.NewServer(web.Options{
+		Version:   "skilldoc-test",
+		Identity:  identity.New(nil, config.Config{}),
+		Projects:  projects.New(nil),
+		Metamodel: metamodel.New(nil, nil),
+		Markdown:  markdown.New(nil, nil),
+		Views:     views.New(nil, nil),
+		Analysis:  analysis.New(nil, nil),
+	})
+
+	registered := map[string]bool{}
+	for _, pattern := range srv.RegisteredPatternsForTest() {
+		method, path, found := strings.Cut(pattern, " ")
+		if !found || !strings.HasPrefix(path, "/api/") {
+			continue
+		}
+		registered[method+" "+path] = true
+	}
+	if len(registered) < 40 {
+		t.Fatalf("%d API route(s) registered, which is too few for this comparison to mean "+
+			"anything: a server that registered almost nothing would pass by having little to "+
+			"compare", len(registered))
+	}
+
+	listed := map[string]bool{}
+	for _, line := range strings.Split(readBundleFile(t, web.RouteReferencePath), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "- `") {
+			continue
+		}
+		listed[strings.Trim(strings.TrimPrefix(line, "- "), "`")] = true
+	}
+
+	for route := range registered {
+		if !listed[route] {
+			t.Errorf("%s is registered and missing from %s: an agent on the mirror cannot find it",
+				route, web.RouteReferencePath)
+		}
+	}
+	for route := range listed {
+		if !registered[route] {
+			t.Errorf("%s is listed in %s and answered by nothing: a route table that sends an agent "+
+				"to a 404 is worse than none", route, web.RouteReferencePath)
+		}
+	}
+}

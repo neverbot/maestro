@@ -146,7 +146,7 @@ changed under you unless you changed it.
 | choose keys, or wonder what a rename costs | `modelling/naming.md` |
 | recognise a shape that will cost a rewrite | `modelling/mistakes.md` |
 | find which of the tools exists | `reference/tools.md` |
-| read a tool's contract, or learn a shape before sending one | `reference/surface.md` |
+| read a contract, learn a shape, or drive REST instead of MCP | `reference/surface.md`, `reference/rest.md` |
 | declare a field type, or wonder what one costs later | `reference/fields.md` |
 | read an error and pick a recovery | `reference/errors.md` |
 | write a query or a saved view | `reference/queries.md` |

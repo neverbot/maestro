@@ -52,6 +52,20 @@
 <div class="tools">
   <input id="entities-search" type="search" placeholder="Find by name or key…"
          autocomplete="off" aria-label="Find an entity of this type">
+  <!-- **The one filter a person can compose.** Search answers the fifty
+       best matches for a word and cannot be paged past them; this narrows
+       the listing itself, so a thousand entities become the ones whose
+       name starts with what you typed and every one of them is reachable
+       by the pager underneath. The listing's order is by name, so the
+       server answers it by walking a contiguous stretch of the order it
+       was already walking. -->
+  <label class="tools-label" for="entities-prefix">Starting with</label>
+  <input id="entities-prefix" type="text" placeholder="Th" autocomplete="off" size="8"
+         aria-label="Show only the entities whose name starts with">
+  <!-- A row a schema edit stopped fitting is work a designer has to do,
+       and until now the only way to find those rows was to scroll a
+       thousand of them looking for the flag. -->
+  <label class="tools-check"><input id="entities-invalid" type="checkbox"> Only the ones that no longer fit</label>
   <span class="tools-note muted" id="entities-scope" aria-live="polite"></span>
 </div>
 

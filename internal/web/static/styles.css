@@ -1135,9 +1135,41 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.tools input {
+.tools input[type="search"] {
   width: 20rem;
   max-width: 100%;
+}
+
+/* The prefix box is as wide as what goes in it, which is two or three
+   letters. A 20rem field for "Th" would say the wrong thing about what
+   it wants. */
+.tools input[type="text"] {
+  width: 7rem;
+}
+
+/* A name for a control that is not a form field, in the Label role the
+   rest of the product uses for one. */
+.tools-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.tools-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 0.875rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.tools-check input[type="checkbox"] {
+  width: auto;
+  height: auto;
+  padding: 0;
+  accent-color: var(--focus);
 }
 
 .tools-note {

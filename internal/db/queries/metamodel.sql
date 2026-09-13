@@ -874,6 +874,15 @@ SELECT * FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
   AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  -- starts_with and not ILIKE: a prefix is a caller's text, and under
+  -- ILIKE a `%` in it is a wildcard rather than a per cent sign. This
+  -- asks the question the parameter is named after and nothing else.
+  -- Lowered on both sides because a designer looking for the quests
+  -- beginning "the" is not asking about capitalisation, and because the
+  -- listing's own order is by name, so a prefix narrows a contiguous
+  -- stretch of it rather than scattering the page.
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
   AND (sqlc.narg('after_id')::uuid IS NULL
        OR (name, id) > (sqlc.narg('after_name')::text, sqlc.narg('after_id')::uuid))
 ORDER BY name, id

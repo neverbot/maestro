@@ -176,6 +176,49 @@ export async function cataloguePage(opened) {
   let cursor = null;
   let rendered = 0;
   let query = "";
+  // The two filters the listing itself can take. They are the listing's
+  // and not the search's, which is what makes them pageable: search
+  // answers the fifty best matches for a word and cannot be paged past
+  // them, and these narrow the order the pager is already walking.
+  let prefix = "";
+  let onlyInvalid = false;
+
+  function filtering() {
+    return prefix !== "" || onlyInvalid;
+  }
+
+  // What the reader asked for, in their own words, so the count above the
+  // list says which set it is counting.
+  function describeFilters() {
+    const parts = [];
+    if (prefix !== "") parts.push("starting with \u201c" + prefix + "\u201d");
+    if (onlyInvalid) parts.push("no longer fitting this type");
+    return parts.join(" and ");
+  }
+
+  // The bold line over an empty filtered listing. It is built per case
+  // rather than from describeFilters, which reads as a clause after a
+  // count ("0 entities that no longer fit this type") and as nonsense
+  // after a word ("Nothing that no longer fit this type").
+  function nothingFound() {
+    if (prefix !== "" && onlyInvalid) {
+      return "Nothing starting with \u201c" + prefix + "\u201d has stopped fitting";
+    }
+    if (prefix !== "") return "No name starts with \u201c" + prefix + "\u201d";
+    return "Everything here still fits its type";
+  }
+
+  // Both filters restart the listing: a cursor belongs to the filter it
+  // was issued for, and the server refuses one carried across — which is
+  // the right answer and not one a reader should ever have to see.
+  async function refilter() {
+    if (missEl) missEl.hidden = true;
+    listEl.replaceChildren();
+    putHeader();
+    rendered = 0;
+    cursor = null;
+    await page();
+  }
 
   // The line under the title: the key, what the type holds, and — when a
   // search has narrowed it — what is being shown instead.
@@ -194,8 +237,24 @@ export async function cataloguePage(opened) {
       say(
         scopeEl,
         (capped ? "First " + rendered + " matches" : countLabel(rendered, "match", "matches")) +
-          " for \u201c" + query + "\u201d",
+          " for \u201c" + query + "\u201d" +
+          // **The cap is a door and not a wall.** A search answers the
+          // fifty best matches and cannot be paged past them, so a query
+          // matching three hundred rows left two hundred and fifty of
+          // them unreachable by any path on this screen. The listing's
+          // own filter has no such limit, and this is where a reader
+          // finds that out.
+          (capped ? ". Narrow it, or list by name with “Starting with”" : ""),
       );
+    } else if (filtering()) {
+      // **A filtered listing is not the type.** "Showing 12 of 1000"
+      // over a listing narrowed to names beginning "Th" would be a count
+      // of the wrong set: the reader asked a question and the sentence
+      // has to answer the one they asked. The denominator is gone
+      // because the server does not count a filtered listing, and a
+      // number nobody can check is worse than none.
+      say(scopeEl, countLabel(rendered, "entity", "entities") + " " + describeFilters()
+        + (cursor === null ? "" : ", so far"));
     } else if (total !== null && rendered < total) {
       say(scopeEl, "Showing " + rendered + " of " + total);
     } else {
@@ -205,9 +264,9 @@ export async function cataloguePage(opened) {
 
   async function page() {
     if (moreEl) moreEl.disabled = true;
-    const answer = await opened.client.listEntities(
-      cursor === null ? { typeKey, verbose: true } : { typeKey, cursor, verbose: true },
-    );
+    const request = { typeKey, verbose: true, prefix, invalid: onlyInvalid };
+    if (cursor !== null) request.cursor = cursor;
+    const answer = await opened.client.listEntities(request);
     if (!answer.ok) {
       if (expired(answer)) {
         goToLogin();
@@ -237,7 +296,32 @@ export async function cataloguePage(opened) {
       );
     }
     rendered += items.length;
-    emptyOrRows(listEl, emptyEl, rendered);
+    // The cursor before the sentence: `sayScope` says "so far" when
+    // there is more to fetch, and reading it a line later meant the
+    // first page of a filtered listing claimed to be all of it.
+    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    // **A filtered listing that found nothing is not an empty type.**
+    // The listing's own empty state reads "Nothing of this type yet" —
+    // which, under a filter, sits over a type holding a thousand rows
+    // and says the opposite of the truth. A filter that matched nothing
+    // is the same shape of fact as a search that did.
+    if (filtering() && rendered === 0) {
+      listEl.hidden = true;
+      if (emptyEl) emptyEl.hidden = true;
+      if (missEl) {
+        missEl.hidden = false;
+        say(missHeadEl, nothingFound());
+        say(
+          missBodyEl,
+          total === null
+            ? "This type has entities; none of them answers that."
+            : countLabel(total, "entity", "entities") + " of this type, and none of them answers that.",
+        );
+      }
+    } else {
+      if (missEl && query === "") missEl.hidden = true;
+      emptyOrRows(listEl, emptyEl, rendered);
+    }
     // **The type's count, not the page's.** This said
     // countLabel(rendered, …), which is how many rows are on screen: the
     // catalogue said a type had 1000 entities and this screen, dedicated
@@ -246,7 +330,6 @@ export async function cataloguePage(opened) {
     // wrong one was on the screen about it. `total` comes from the game's
     // summary, which the catalogue already reads for exactly this.
     sayScope();
-    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
     if (moreEl) {
       moreEl.hidden = cursor === null || rendered === 0;
       // It says how many it will fetch. "Show more" makes a reader guess
@@ -347,6 +430,42 @@ export async function cataloguePage(opened) {
         }
         await runSearch();
       }, 200);
+    });
+  }
+
+  const prefixEl = doc.getElementById("entities-prefix");
+  if (prefixEl) {
+    let timer = null;
+    prefixEl.addEventListener("input", () => {
+      const next = prefixEl.value.trim();
+      if (timer !== null) clearTimeout(timer);
+      // The same pause the search box takes, for the same reason: a
+      // keystroke is not a question.
+      timer = setTimeout(async () => {
+        if (next === prefix) return;
+        prefix = next;
+        // A prefix and a search are two answers to one question, and the
+        // search is the one that cannot be paged: narrowing the listing
+        // clears it rather than leaving a reader with a filter that does
+        // nothing to what is on screen.
+        if (query !== "") {
+          query = "";
+          if (searchEl) searchEl.value = "";
+        }
+        await refilter();
+      }, 200);
+    });
+  }
+
+  const invalidEl = doc.getElementById("entities-invalid");
+  if (invalidEl) {
+    invalidEl.addEventListener("change", async () => {
+      onlyInvalid = invalidEl.checked === true;
+      if (query !== "") {
+        query = "";
+        if (searchEl) searchEl.value = "";
+      }
+      await refilter();
     });
   }
 

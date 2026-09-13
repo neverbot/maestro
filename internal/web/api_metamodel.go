@@ -532,7 +532,16 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 	if !ok {
 		return
 	}
-	in := EntitiesListInput{TypeKey: typeKey, Cursor: cursor, Limit: limit, Verbose: verbose}
+	// The one filter a person can compose without a query language, and
+	// the reason the catalogue is usable on a type with a thousand rows:
+	// read here as well as over MCP, because this surface mirrors that
+	// one and a filter a person cannot spell in a URL is a filter this
+	// mirror does not have.
+	prefix, ok := queryString(w, r, "prefix")
+	if !ok {
+		return
+	}
+	in := EntitiesListInput{TypeKey: typeKey, Prefix: prefix, Cursor: cursor, Limit: limit, Verbose: verbose}
 	invalid, ok := queryTriState(w, r, "invalid")
 	if !ok {
 		return

@@ -1395,3 +1395,104 @@ func TestARenamedRowCanMoveBehindTheReader(t *testing.T) {
 		t.Fatalf("re-read %d rows, want the game's 6", len(whole.Entities))
 	}
 }
+
+// TestListFiltersByNamePrefix pins the one filter a designer can compose
+// without a query language.
+//
+// It is what makes a type with a thousand entities readable: the
+// listing's order is by name, so a prefix narrows a contiguous stretch
+// of it and pages exactly as an unfiltered listing does. Before it, a
+// catalogue of a thousand rows had no sort, no filter and a "show 50
+// more" button nineteen clicks from the end.
+//
+// The case-insensitivity is asserted rather than assumed: a designer
+// looking for the quests beginning "the" is not asking a question about
+// capitalisation.
+//
+// Mutation: drop the `prefix` clause from ListEntitiesPage, or the
+// `lower()` on either side of it, and this fails.
+func TestListFiltersByNamePrefix(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+
+	for _, row := range []struct{ key, name string }{
+		{"hogger", "Hogger"},
+		{"hoggers-lair", "hogger's lair"},
+		{"westfall", "Westfall"},
+		{"the-defias", "The Defias Brotherhood"},
+		// A per cent sign is a wildcard under LIKE and a character here.
+		{"fifty", "50% Off"},
+	} {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest", Key: row.key, Name: row.name,
+			Fields: map[string]any{"min_level": float64(1)},
+		}); err != nil {
+			t.Fatalf("seed %s: %v", row.key, err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		prefix string
+		want   []string
+	}{
+		{"a prefix narrows to the names that start with it", "Hog", []string{"hogger", "hoggers-lair"}},
+		{"and it does not care about case", "hOgG", []string{"hogger", "hoggers-lair"}},
+		{"a prefix matching nothing is an empty page, not everything", "zzz", nil},
+		{"no prefix is no filter", "", []string{"fifty", "hogger", "hoggers-lair", "the-defias", "westfall"}},
+		// Under ILIKE this would match every row; under starts_with it
+		// asks the question the parameter is named after.
+		{"a per cent sign is a character and not a wildcard", "%", nil},
+		{"and so is an underscore", "_", nil},
+		{"a literal per cent sign still matches its own row", "50%", []string{"fifty"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := svc.ListEntities(ctx, project,
+				metamodel.EntityFilter{TypeKey: "quest", Prefix: tc.prefix, Limit: 50})
+			if err != nil {
+				t.Fatalf("ListEntities: %v", err)
+			}
+			if got := keysOf(page); !equalStrings(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestACursorIssuedForOnePrefixIsRefusedUnderAnother pins that the
+// prefix is part of what a cursor belongs to.
+//
+// A cursor is a position in one listing. Carried into a differently
+// filtered one it would skip or repeat rows with nothing anywhere saying
+// so, which is the failure the fingerprint exists to prevent — and a
+// filter added to the query without being added to the fingerprint is
+// exactly how that hole opens.
+//
+// Mutation: remove `f.Prefix` from the fingerprint in ListEntities and
+// this fails.
+func TestACursorIssuedForOnePrefixIsRefusedUnderAnother(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 6)
+
+	first, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Prefix: "Quest 0", Limit: 2})
+	if err != nil {
+		t.Fatalf("ListEntities: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page carried no cursor, so this test is holding nothing")
+	}
+
+	if _, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Cursor: first.NextCursor, Limit: 2}); err == nil {
+		t.Error("a cursor from a prefixed listing was accepted by the unfiltered one: " +
+			"the page it answers is a position in a listing that is not this one")
+	}
+}

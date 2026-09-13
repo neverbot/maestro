@@ -280,8 +280,13 @@ type EntityItemInput struct {
 // them.
 type EntitiesListInput struct {
 	ScopedArgs
-	TypeKey   string          `json:"type_key,omitempty"`
-	Invalid   *bool           `json:"invalid,omitempty"`
+	TypeKey string `json:"type_key,omitempty"`
+	Invalid *bool  `json:"invalid,omitempty"`
+	// Prefix narrows the listing to names starting with it, matched
+	// without regard to case. It pages like any other filter: the
+	// listing is ordered by name, so a prefix is a contiguous stretch of
+	// that order.
+	Prefix    string          `json:"prefix,omitempty"`
 	RelatedTo *RelatedToInput `json:"related_to,omitempty"`
 	Cursor    string          `json:"cursor,omitempty"`
 	Limit     int32           `json:"limit,omitempty"`
@@ -1180,6 +1185,7 @@ func entitiesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uu
 	filter := metamodel.EntityFilter{
 		TypeKey: in.TypeKey,
 		Invalid: in.Invalid,
+		Prefix:  in.Prefix,
 		Cursor:  in.Cursor,
 		Limit:   in.Limit,
 	}
@@ -2002,7 +2008,10 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 		Name: "entities.list",
 		Description: fmt.Sprintf(
 			"List a game's entities. Filter by type_key, by invalid (rows whose values no "+
-				"longer fit their type's schema), or both. Pass the previous answer's "+
+				"longer fit their type's schema), by prefix (names starting with it, matched "+
+				"without regard to case), or any combination. A prefix narrows a contiguous "+
+				"stretch of the listing's own order, which is by name, so it pages exactly "+
+				"like an unfiltered listing does. Pass the previous answer's "+
 				"next_cursor to get the next page; a cursor belongs to the game and the "+
 				"filter it was issued for and is refused against any other. limit defaults "+
 				"to %d and is capped at %d — asking for more gets the cap, and asking for "+

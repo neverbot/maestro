@@ -78,8 +78,14 @@ const (
 // rather than a snapshot; EntityPage carries the whole contract, and it
 // is worth reading before paging a game that is being edited.
 type EntityFilter struct {
-	TypeKey   string
-	Invalid   *bool
+	TypeKey string
+	Invalid *bool
+	// Prefix narrows a listing to the entities whose name starts with
+	// it, case-insensitively. It is the one filter a person can compose
+	// without a query language, and it costs nothing to page: the
+	// listing is already ordered by name, so a prefix is a contiguous
+	// stretch of that order rather than a scatter through it.
+	Prefix    string
 	RelatedTo *RelatedFilter
 	Cursor    string
 	Limit     int32
@@ -290,8 +296,12 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 		return s.listRelated(ctx, projectID, *f.RelatedTo, typeID, typePart, f, limit)
 	}
 
+	// The prefix is part of the fingerprint for the reason the type and
+	// the invalid flag are: a cursor is a position *in one listing*, and
+	// carrying it into a differently filtered one would skip or repeat
+	// rows with nothing anywhere saying so.
 	fingerprint := fingerprintOf(projectID.String(), "entities", typePart,
-		invalidFilterPart(f.Invalid))
+		invalidFilterPart(f.Invalid), f.Prefix)
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
 		return EntityPage{}, err
@@ -302,6 +312,10 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 		EntityTypeID: typeID,
 		Invalid:      f.Invalid,
 		Limit:        limit,
+	}
+	if f.Prefix != "" {
+		prefix := f.Prefix
+		params.Prefix = &prefix
 	}
 	if after.ID != uuid.Nil {
 		params.AfterID = &after.ID

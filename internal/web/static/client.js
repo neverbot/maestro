@@ -744,6 +744,14 @@ export function client({
     if (typeof opts.typeKey === "string" && opts.typeKey !== "") {
       search.set("type_key", opts.typeKey);
     }
+    // The two filters a person can compose on this screen. A prefix
+    // narrows the listing's own order by name; `invalid` is the flag a
+    // schema edit leaves behind. Both belong to the listing rather than
+    // to search, which is why they page.
+    if (typeof opts.prefix === "string" && opts.prefix !== "") {
+      search.set("prefix", opts.prefix);
+    }
+    if (opts.invalid === true) search.set("invalid", "true");
     if (opts.verbose === true) search.set("verbose", "true");
     return get(paged(base + "/entities", opts, search));
   }

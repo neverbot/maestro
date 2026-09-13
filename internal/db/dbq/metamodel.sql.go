@@ -855,16 +855,26 @@ SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, sear
 WHERE project_id = $1::uuid
   AND ($2::uuid IS NULL OR entity_type_id = $2::uuid)
   AND ($3::boolean IS NULL OR invalid = $3::boolean)
-  AND ($4::uuid IS NULL
-       OR (name, id) > ($5::text, $4::uuid))
+  -- starts_with and not ILIKE: a prefix is a caller's text, and under
+  -- ILIKE a ` + "`" + `%` + "`" + ` in it is a wildcard rather than a per cent sign. This
+  -- asks the question the parameter is named after and nothing else.
+  -- Lowered on both sides because a designer looking for the quests
+  -- beginning "the" is not asking about capitalisation, and because the
+  -- listing's own order is by name, so a prefix narrows a contiguous
+  -- stretch of it rather than scattering the page.
+  AND ($4::text IS NULL
+       OR starts_with(lower(name), lower($4::text)))
+  AND ($5::uuid IS NULL
+       OR (name, id) > ($6::text, $5::uuid))
 ORDER BY name, id
-LIMIT $6::int
+LIMIT $7::int
 `
 
 type ListEntitiesPageParams struct {
 	ProjectID    uuid.UUID
 	EntityTypeID *uuid.UUID
 	Invalid      *bool
+	Prefix       *string
 	AfterID      *uuid.UUID
 	AfterName    *string
 	Limit        int32
@@ -920,6 +930,7 @@ func (q *Queries) ListEntitiesPage(ctx context.Context, arg ListEntitiesPagePara
 		arg.ProjectID,
 		arg.EntityTypeID,
 		arg.Invalid,
+		arg.Prefix,
 		arg.AfterID,
 		arg.AfterName,
 		arg.Limit,

@@ -44,7 +44,18 @@
      twin is the accessible content of the answer, and a control a
      keyboard can reach inside it is a control a screen reader will not
      announce. A dialog is not part of the picture. -->
-<div id="save-as-root"></div>
+<!-- **The view's own name, in the page head every other screen has.**
+     This page had no `h1` at all: the head was a 48px band holding one
+     right-aligned ghost button, and the name of the thing being looked
+     at reached the reader twice, both quietly — a 12.8px crumb and a
+     17.6px line inside the frame's shadow root. The one screen this
+     product exists for was the one that never said what it was showing.
+     pages/view.js fills these three; the frame keeps the key, the
+     renderer and the renamed-slot disclosure. -->
+<div class="page-head">
+  <h1 id="view-title"></h1>
+  <span class="page-actions" id="save-as-root"></span>
+</div>
 <!-- The fallback's hole. Below tablet width this page draws no picture
      and the text twin is the whole of the view (design spec §9), and
      this is where pages/view.js says so. It carries no words of its

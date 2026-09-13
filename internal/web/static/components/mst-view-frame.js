@@ -251,7 +251,15 @@ export class MstViewFrame extends LitElement {
     if (!title) return nothing;
     return html`
       <div class="strip">
-        <span class="name">${title.name}</span><span class="key">${title.key}</span
+        <!-- **The name is not here.** It was, in a serif at 17.6px inside
+             a shadow root, and the page around it had no heading at
+             all:
+             the view's own name reached a reader only in this strip and
+             in a 12.8px crumb. It is the page's own heading now,
+             and what stays here is what the strip is for — the key a
+             person copies, the renderer that drew this, and the slots a
+             rename moved. -->
+        <span class="key">${title.key}</span
         ><span class="renderer">${title.renderer}</span>
         ${title.renamed
           ? html`<details class="renamed">

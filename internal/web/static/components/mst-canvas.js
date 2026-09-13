@@ -726,6 +726,13 @@ export class MstCanvas extends HTMLElement {
       const button = this.doc.createElement("button");
       button.setAttribute("type", "button");
       button.setAttribute("data-action", action.id);
+      // **Ghosts, not primaries.** A bare button in this identity is the
+      // ink-filled primary, of which a screen has one, on its most
+      // likely action — and this screen's is reading. Two of them, both
+      // writes, one with no undo, were the loudest things on the page.
+      button.setAttribute("class", "ghost");
+      if (action.disabled) button.disabled = true;
+      if (action.destructive) button.setAttribute("data-destructive", "true");
       button.textContent = action.label;
       root.appendChild(button);
     }
@@ -939,7 +946,7 @@ export function worldDelta(dx, dy, zoom) {
 // Pure, so the whole of "a viewer gets the sentence without the button"
 // is one assertion over a returned object rather than a walk of a DOM
 // that might merely have failed to render.
-export function arrangementMenu({ mode, role, canUndo, drawn } = {}) {
+export function arrangementMenu({ mode, role, canUndo, drawn, selected } = {}) {
   // A canvas that is not on screen refuses first and for every mode: the
   // fallback below tablet width is not "the drawing is smaller", it is
   // "there is no drawing", and a menu that still offered *Switch this
@@ -955,9 +962,19 @@ export function arrangementMenu({ mode, role, canUndo, drawn } = {}) {
   }
   const notes = [NOTE_UNPIN_NEEDS_CLEAR, NOTE_UNDO_BOUND, NOTE_LAST_WRITER_WINS];
   if (!mayWrite) return { notes, actions: [] };
+  // **Both act on the selection, and both did nothing, silently, when
+  // there was none.** They are the first two things a designer meets on
+  // this screen, they arrive enabled on a fresh load, and `unpin` and
+  // `clearPositions` each begin by returning null on an empty list: a
+  // control that answers a click with nothing teaches that the screen is
+  // broken. Disabled with a reason is the honest state.
+  //
+  // `destructive` marks the one with no undo — the notes beside it say
+  // so in words, and the canvas arms it for a second click.
+  const nothingSelected = !(selected > 0);
   const actions = [
-    { id: ACTION_UNPIN, label: LABEL_UNPIN },
-    { id: ACTION_CLEAR, label: LABEL_CLEAR },
+    { id: ACTION_UNPIN, label: LABEL_UNPIN, disabled: nothingSelected },
+    { id: ACTION_CLEAR, label: LABEL_CLEAR, disabled: nothingSelected, destructive: true },
   ];
   if (canUndo) actions.push({ id: ACTION_UNDO, label: LABEL_UNDO });
   return { notes, actions };
@@ -1055,6 +1072,7 @@ export class Arrangement {
       role: this.role,
       canUndo: this.undoStep !== null,
       drawn: this.drawn,
+      selected: this.selection.size,
     });
   }
 

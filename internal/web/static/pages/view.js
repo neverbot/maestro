@@ -443,6 +443,9 @@ export async function viewPage(opened, options = {}) {
     { label: viewName },
   ]);
   doc.title = viewName + " \u00b7 Maestro";
+  // The page head, at Display, where every other screen in the product
+  // puts the name of the thing being looked at.
+  say(doc.getElementById("view-title"), viewName);
 
   const surface = mount(doc, rootEl, opened.slug, key, row.result, client, options);
   surface.role = summary.ok ? String(summary.result.role ?? "") : "";
@@ -1011,11 +1014,37 @@ export function wire(doc, panelEl, slug, client, state) {
 
   // The arrangement menu. Delegated on the panel host, which survives a
   // redraw, so a menu rebuilt after a write is still wired.
+  //
+  // **An action with no undo asks twice**, in the button's own label and
+  // not in a modal: the notes beside it say "saved positions keep no
+  // history and there is no undo on the server", and a single click was
+  // all that stood between a designer and that sentence being about
+  // them. The same arming the person menu's sign-out uses.
+  let armed = null;
+  const disarm = () => {
+    if (armed === null) return;
+    clearTimeout(armed.timer);
+    if (armed.button.isConnected !== false) {
+      armed.button.textContent = armed.label;
+      armed.button.removeAttribute("data-armed");
+    }
+    armed = null;
+  };
   canvas.shell.panels.addEventListener("click", async (event) => {
-    const action = event.target && event.target.getAttribute ? event.target.getAttribute("data-action") : null;
+    const button = event.target;
+    const action = button && button.getAttribute ? button.getAttribute("data-action") : null;
     if (!action) return;
     const run = MENU_ACTIONS[action];
     if (!run) return;
+    const destructive = button.getAttribute("data-destructive") === "true";
+    if (destructive && (armed === null || armed.button !== button)) {
+      disarm();
+      armed = { button, label: button.textContent, timer: setTimeout(disarm, 4000) };
+      button.textContent = button.textContent + " — click again";
+      button.dataset.armed = "true";
+      return;
+    }
+    disarm();
     await run(state.arrangement);
     canvas.showArrangement(state.arrangement);
   });

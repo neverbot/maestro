@@ -111,6 +111,14 @@ button.ghost:hover:not(:disabled) {
   background: var(--ground);
 }
 
+/* Armed: a destructive control that has asked once and is waiting for
+   the answer. The word is the one this system spends on a fault, on the
+   label that now says what the next click does. */
+button[data-armed="true"] {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 /* An action that reads as a sentence rather than as a target. It carries
    no box at all, because a box around three words in a paragraph is the
    thing that makes a paragraph look like a form. */

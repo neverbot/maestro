@@ -626,6 +626,43 @@ check("aViewerGetsTheSentenceWithoutTheButton", async () => {
   );
 });
 
+// **The two writes that act on a selection are refused by the menu when
+// there is none, rather than answered with silence.**
+//
+// `unpin` and `clearPositions` both begin by returning null on an empty
+// list, so the buttons "worked" — they were enabled on a fresh load, a
+// click sent no request and nothing on screen changed, which reads as a
+// broken page rather than as a missing selection. Their treatment was
+// the ink-filled primary, on a screen whose most likely action is
+// reading, and the one with no undo was one click from happening.
+check("theArrangementsWritesAreOfferedOnlyWhenThereIsSomethingToWriteAbout", async () => {
+  const { canvas, arrangement, nodes } = stage({ rows: 1 });
+
+  const idle = arrangement.menu();
+  const byId = (menu, id) => menu.actions.find((action) => action.id === id);
+  assertEqual(byId(idle, "unpin").disabled, true, "Unpin was offered with nothing selected");
+  assertEqual(byId(idle, "clear").disabled, true, "Clear was offered with nothing selected");
+  assertEqual(byId(idle, "clear").destructive, true, "the write with no undo is not marked as one");
+
+  arrangement.select(nodes[0].address);
+  const armed = arrangement.menu();
+  assertEqual(byId(armed, "unpin").disabled, false, "a selection did not enable Unpin");
+  assertEqual(byId(armed, "clear").disabled, false, "a selection did not enable Clear");
+
+  // And the canvas draws what the menu says: ghosts, disabled, and the
+  // destructive one marked for the page to arm.
+  arrangement.selection.clear();
+  const menu = canvas.showArrangement(arrangement);
+  const buttons = [...menu.childNodes].filter((node) => String(node.tagName).toLowerCase() === "button");
+  assert(buttons.length >= 2, "the menu drew no buttons at all");
+  for (const button of buttons) {
+    assertEqual(button.getAttribute("class"), "ghost", "a menu button is an ink primary");
+  }
+  const clear = buttons.find((button) => button.getAttribute("data-action") === "clear");
+  assertEqual(clear.disabled, true, "Clear was drawn enabled with nothing selected");
+  assertEqual(clear.getAttribute("data-destructive"), "true", "Clear is not marked destructive in the DOM");
+});
+
 check("aRefusedWriteRevertsAndBands", async () => {
   const { server, canvas, arrangement, nodes } = stage({ rows: 1 });
   const sentence = "this view was removed while you were dragging";

@@ -415,9 +415,9 @@ export function setBreadcrumb(doc, trail) {
 
 // countLabel spells a count with the right noun, so "1 entities" never
 // reaches a designer's screen.
-export function countLabel(count, singular, plural) {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
+// countLabel moved to ../rows.js, for the reason `row` did: app.js needs
+// it and page.js imports app.js. Re-exported so its seven callers here
+// are unchanged.
 
 // row and fill live in ../rows.js now and are re-exported here so the
 // seven page modules that import them from this file keep working. They
@@ -425,7 +425,7 @@ export function countLabel(count, singular, plural) {
 // own — and app.js is the module this one imports from, so importing it
 // back would close a cycle. A vocabulary two modules share belongs to
 // neither.
-export { row } from "../rows.js";
+export { countLabel, row } from "../rows.js";
 
 // fill replaces a list's rows and shows its empty state when there are
 // none. replaceChildren, never innerHTML, so a re-render can neither

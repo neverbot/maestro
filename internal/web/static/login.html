@@ -37,12 +37,27 @@
   <p class="lede">Sign in to reach your games.</p>
   <form id="login">
     <label for="login-email">Email</label>
-    <input id="login-email" type="email" name="email" placeholder="you@studio.com" autocomplete="username" required>
+    <!-- The one screen with one purpose and three controls: the cursor
+         starts where the reader would put it. -->
+    <input id="login-email" type="email" name="email" placeholder="you@studio.com" autocomplete="username" autofocus required>
     <label for="login-password">Password</label>
-    <input id="login-password" type="password" name="password" placeholder="Password" autocomplete="current-password" required>
-    <button type="submit">Sign in</button>
+    <input id="login-password" type="password" name="password" autocomplete="current-password" required>
+    <!-- **Under the field, above the button.** It was below the submit
+         button, so a refusal was read in the order field, action, reason:
+         `markRefused` moves the focus back to the password and marks it,
+         and the sentence explaining why sat 70px past the control the
+         reader had just been sent back to. -->
     <p class="error" id="login-error" role="alert" aria-live="assertive"></p>
+    <button type="submit">Sign in</button>
   </form>
+  <!-- **The recovery that does not exist, said where somebody locked out
+       would look for it.** There is no forgot-password flow anywhere in
+       this product and there cannot be: accounts are local and no email
+       is ever sent. Principle 5 is that what the product cannot do is
+       written on the screen where somebody would look for it, and this
+       is that screen. -->
+  <p class="muted sign-in-note">There is no password reset. This instance sends no email, so an
+    administrator invites you again instead.</p>
   <p id="register-toggle-wrap" hidden>
     <button type="button" id="register-toggle" class="link-button">Create an account</button>
   </p>

@@ -27,8 +27,13 @@
 </noscript>
 
 <main class="page picker">
-<h1>Your games</h1>
-<p class="muted" id="status" aria-live="polite">Loading your games…</p>
+<!-- The page head every other screen has: the title, and the count of
+     what is under it. It was a bare `h1` whose descenders touched the
+     list's top border at 0.0px. -->
+<div class="page-head">
+  <h1>Your games</h1>
+  <span class="page-actions" id="status" aria-live="polite"></span>
+</div>
 <!-- The picker's rows take the same scroller every other listing has:
      a 67-character game name exploded a row from 36px to 221px at 500px,
      which is the widest a row in this product has ever been. -->

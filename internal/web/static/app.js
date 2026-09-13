@@ -10,7 +10,7 @@
 // navigation for a pure convenience, and a remembered value can go stale
 // the moment the user loses access to that game or it is deleted, with no
 // natural place server-side to notice either has happened.
-import { row } from "./rows.js";
+import { countLabel, row } from "./rows.js";
 
 const LAST_GAME_KEY = "maestro:lastGame";
 
@@ -703,8 +703,27 @@ if (gamesList) {
   if (!result.ok) {
     if (result.expired) {
       goToLogin();
-    } else if (statusEl) {
-      statusEl.textContent = result.message;
+    } else {
+      // **A refusal is the refused state, not a grey line.** This wrote
+      // the server's sentence into the page head's count, in `--muted`,
+      // with no heading and no way on: the one shape `design.md` gives a
+      // refusal is a bold line in Alarm, the reason in plain words and
+      // one action. The empty state's element is where it goes, because
+      // the list it would have filled is not coming.
+      if (statusEl) statusEl.textContent = "";
+      if (emptyState) {
+        emptyState.className = "state refused";
+        emptyState.replaceChildren();
+        const heading = document.createElement("b");
+        heading.textContent = "Could not list your games";
+        const sentence = document.createElement("span");
+        sentence.textContent = result.message;
+        const again = document.createElement("a");
+        again.href = "/games";
+        again.textContent = "Try again";
+        emptyState.append(heading, sentence, again);
+        emptyState.hidden = false;
+      }
     }
   } else {
     const games = result.games;
@@ -732,7 +751,7 @@ if (gamesList) {
       // the SPA's job, so the empty state offers the one thing that gets
       // someone unstuck: creating a game (POST /api/games already exists
       // and already accepts a session caller).
-      if (statusEl) statusEl.hidden = true;
+      if (statusEl) statusEl.textContent = "";
       if (emptyState) emptyState.hidden = false;
       if (newGame) {
         newGame.hidden = false;
@@ -742,7 +761,9 @@ if (gamesList) {
         newGame.open = true;
       }
     } else {
-      if (statusEl) statusEl.hidden = true;
+      // The count belongs in the head, beside the title, which is where
+      // the page frame puts it on every other screen.
+      if (statusEl) statusEl.textContent = countLabel(games.length, "game", "games");
       gamesList.hidden = false;
       if (newGame) newGame.hidden = false;
       for (const game of games) {

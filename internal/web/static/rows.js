@@ -39,6 +39,17 @@
 // nothing.
 export const CATALOGUE_CELLS = 3;
 
+// countLabel spells a count with the right noun, so "1 entities" never
+// reaches a designer's screen.
+//
+// It lives here rather than in pages/page.js for the reason `row` does:
+// **app.js needs it too** — the picker counts games — and page.js
+// imports app.js, so importing it back would close a cycle. page.js
+// re-exports it, so the seven page modules are unaffected.
+export function countLabel(count, singular, plural) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 export function row(doc, spec) {
   const item = doc.createElement("li");
 

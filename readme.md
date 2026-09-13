@@ -194,6 +194,11 @@ Each test gets its own database, created and dropped around it, so runs
 do not interfere. `internal/web` is the slow package, at a couple of
 minutes; a single test is seconds, so run the one you are working on.
 
+A run that is interrupted never reaches its own cleanup, so its database
+stays behind. The next run sweeps anything over an hour old, and
+`make clean-test-dbs` does it now. `make clean-docker` adds the images
+and the build cache that repeated `make dev` rebuilds leave behind.
+
 ### A local instance while developing
 
 ```bash
@@ -213,6 +218,8 @@ make tools        # install sqlc and the linter
 make sqlc         # regenerate the database layer from internal/db/queries
 make sqlc-check   # fail if the generated code is stale
 make skill-check  # the agent bundle's own guards
+make clean-test-dbs  # drop test databases interrupted runs left behind
+make clean-docker    # those, plus Maestro's stale images and the build cache
 ```
 
 Queries are written in SQL and compiled by [sqlc](https://sqlc.dev); the

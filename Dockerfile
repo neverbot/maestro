@@ -9,6 +9,12 @@ RUN CGO_ENABLED=0 go build \
       -o /out/maestro ./cmd/maestro
 
 FROM gcr.io/distroless/static-debian12:nonroot
+# The label is what makes the leftovers findable. Every `make dev`
+# rebuild leaves the previous image untagged, and an untagged image has
+# no repository name to filter on — fifteen rebuilds in a day is most of
+# a gigabyte of layers nothing can name. `make dev` prunes by this label,
+# so the cleanup touches this project's images and nobody else's.
+LABEL org.opencontainers.image.title="maestro"
 COPY --from=build /out/maestro /maestro
 EXPOSE 8080
 USER nonroot:nonroot

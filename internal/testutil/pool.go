@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,75 @@ var (
 	adminPool *pgxpool.Pool
 	adminErr  error
 )
+
+// staleAfter is how old an abandoned test database has to be before a
+// later run drops it. An hour is far longer than any test in this
+// repository takes (the slowest package is under seven minutes) and far
+// shorter than the time it takes for leftovers to matter, so a sweep can
+// never touch a database another run is still using.
+const staleAfter = time.Hour
+
+// sweepStale drops the test databases that earlier runs abandoned.
+//
+// Every database here is created by newDatabase and dropped by the
+// cleanup it registers — but a run that is interrupted never reaches its
+// cleanup, and each leftover keeps a migrated schema on disk. They are
+// identified by the millisecond stamp in their own name, so this cannot
+// mistake a live one for a dead one and does not need to ask Postgres
+// when a database was made (it does not record it).
+//
+// It runs once per process, before the first test database is created,
+// and never fails a test: a leftover is untidy and a refused DROP is
+// not a reason to stop.
+var sweepOnce sync.Once
+
+func sweepStale(adminDB *pgxpool.Pool) {
+	sweepOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		rows, err := adminDB.Query(ctx,
+			`SELECT datname FROM pg_database WHERE datname LIKE 'maestro_test\_%'`)
+		if err != nil {
+			return
+		}
+		var names []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				continue
+			}
+			names = append(names, name)
+		}
+		rows.Close()
+		cutoff := time.Now().Add(-staleAfter).UnixMilli()
+		for _, name := range names {
+			made, ok := stampOf(name)
+			// A name with no stamp is from before this was written, and
+			// is therefore older than any run in flight.
+			if ok && made > cutoff {
+				continue
+			}
+			_, _ = adminDB.Exec(ctx, "DROP DATABASE "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
+		}
+	})
+}
+
+// stampOf reads the millisecond stamp out of `maestro_test_<millis>_<id>`.
+func stampOf(name string) (int64, bool) {
+	rest, ok := strings.CutPrefix(name, "maestro_test_")
+	if !ok {
+		return 0, false
+	}
+	digits, _, ok := strings.Cut(rest, "_")
+	if !ok {
+		return 0, false
+	}
+	made, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return made, true
+}
 
 // admin returns the pool shared by every test in this process for creating
 // and dropping per-test databases. Opening one admin pool instead of one
@@ -73,11 +143,17 @@ func newDatabase(t *testing.T) (testURL, name string) {
 	}
 
 	adminDB := admin(t, adminURL)
+	sweepStale(adminDB)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	name = "maestro_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	// **The name carries when it was made**, so a sweep can tell a
+	// database this run is using from one a killed run left behind. See
+	// sweepStale: a test that is interrupted — a Ctrl-C, a timeout, a
+	// laptop closing — never reaches its own cleanup, and sixty-two of
+	// them had accumulated to half a gigabyte before anybody looked.
+	name = fmt.Sprintf("maestro_test_%d_%s", time.Now().UnixMilli(), strings.ReplaceAll(uuid.NewString(), "-", ""))
 	ident := pgx.Identifier{name}.Sanitize()
 
 	if _, err := adminDB.Exec(ctx, "CREATE DATABASE "+ident); err != nil {

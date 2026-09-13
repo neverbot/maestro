@@ -756,6 +756,33 @@ export function client({
     return get(paged(base + "/entities", opts, search));
   }
 
+  // renameEntity is the product's **first write by a person**, and it is
+  // deliberately the smallest one there is: an entity's own name, on the
+  // screen that shows it, against the version that screen read.
+  //
+  // It goes through the batch route because that is the route the
+  // surface has — one item in it — and it carries `expected_version`,
+  // because every write in this product is a compare-and-set and this
+  // one is not an exception written for a browser. What the *page* does
+  // with a refusal is the whole of the design
+  // (.superpowers/specs/2026-09-11-writing-in-the-interface-design.md):
+  // it never retries, and it never merges on the caller's behalf.
+  async function renameEntity(entity, name) {
+    return send(base + "/entities", {
+      items: [{
+        type_key: entity.type_key,
+        key: entity.key,
+        name,
+        // The fields go back **unchanged and in full**: an upsert
+        // replaces the row, so an item carrying only a name would empty
+        // every field the entity has. The page holds them because it
+        // read them to draw them.
+        fields: entity.fields && typeof entity.fields === "object" ? entity.fields : {},
+        expected_version: entity.version,
+      }],
+    });
+  }
+
   // searchEntities is the catalogue's own search, over the route the MCP
   // surface mirrors: `GET /search` takes a query and a type_key, and the
   // server indexes a row's **key** alongside its name, which is the whole
@@ -1054,6 +1081,7 @@ export function client({
     getRoute,
     checkRoute,
     getEntity,
+    renameEntity,
     listRelations,
     listEntityDocs,
     connect,

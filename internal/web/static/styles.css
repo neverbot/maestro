@@ -984,6 +984,21 @@ form label {
   font-size: 0.75rem;
 }
 
+/* The rename form, in the page it renames. Two controls on one line
+   because the pair is one decision: save this, or do not. */
+.rename-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+/* Somebody else wrote while this was open. It takes the same dashed
+   surface a one-time secret does, for the same reason: read this, it
+   will not come back on its own. */
+.conflict .facts { max-width: 34rem; }
+
+.conflict dd { overflow-wrap: anywhere; }
+
 /* For a legend that names a group of radios the heading above already
    named: said to a screen reader, not drawn twice. */
 .sr-only {

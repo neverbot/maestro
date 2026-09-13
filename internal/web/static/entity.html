@@ -35,9 +35,41 @@
 
 <div class="page-head">
 <h1 id="entity-name">Loading…</h1>
-  <!-- What this screen cannot do, where the button would be.
-       pages/page.js setReadOnly fills it. -->
+  <!-- What this screen cannot do, where the button would be, **and what
+       it now can**: the rename control replaces the read-only notice on
+       this screen, because the notice is a claim about the screen and
+       this screen no longer refuses a name. pages/entity.js decides
+       which of the two goes here, from the caller's role. -->
   <span class="page-actions" id="page-actions"></span>
+</div>
+
+<!-- The rename, in place, opened by the control above. It is the
+     product's first write by a person, and what it does with a refusal
+     is the design: never a retry, never a silent merge.
+     .superpowers/specs/2026-09-11-writing-in-the-interface-design.md -->
+<form id="rename" hidden>
+  <label for="rename-name">Name</label>
+  <input id="rename-name" type="text" autocomplete="off" maxlength="200" required>
+  <p class="error" id="rename-error" role="alert" aria-live="assertive"></p>
+  <div class="rename-actions">
+    <button type="submit">Save the name</button>
+    <button type="button" class="ghost" id="rename-cancel">Cancel</button>
+  </div>
+</form>
+
+<!-- Somebody else wrote while this was open. Two values, labelled, and
+     two actions with no default: the product has no opinion about whose
+     text is better, and a pre-selected answer would be it having one. -->
+<div class="secret conflict" id="rename-conflict" role="status" aria-live="polite" hidden>
+  <b>Somebody changed this while you were editing</b>
+  <dl class="facts">
+    <dt>Theirs</dt><dd id="conflict-theirs"></dd>
+    <dt>Yours</dt><dd id="conflict-yours"></dd>
+  </dl>
+  <div class="rename-actions">
+    <button type="button" class="ghost" id="conflict-keep">Keep mine</button>
+    <button type="button" class="ghost" id="conflict-take">Take theirs</button>
+  </div>
 </div>
 <p class="mono" id="entity-address" aria-live="polite"></p>
 <p class="error" id="entity-error" hidden></p>

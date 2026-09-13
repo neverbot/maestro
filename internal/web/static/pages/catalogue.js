@@ -139,7 +139,11 @@ export async function cataloguePage(opened) {
     // The same call carries the caller's role, which is what decides
     // whether this screen says "an agent writes these" or "this instance
     // will refuse a write from you".
-    setReadOnly(doc, counts.result.role, "writes these entities");
+    // **The claim shrank when the entity page gained a rename**, and a
+    // notice that outlives the limitation it describes is the next
+    // "prose about code" defect. A name is the one thing a person can
+    // change now, and it is changed one screen along.
+    setReadOnly(doc, counts.result.role, "writes these entities; a name is changed on the entity's own page");
     const found = (counts.result.entity_types || []).find((entry) => entry.key === typeKey);
     if (found && Number.isFinite(found.entity_count)) total = found.entity_count;
   }

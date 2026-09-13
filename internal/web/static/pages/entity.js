@@ -32,6 +32,7 @@ import { absentCell, presentCell } from "../render/twin.js";
 import { CATALOGUE_CELLS, row } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
+  ROLE_VIEWER,
   STATE_EMPTY,
   countLabel,
   destinations,
@@ -49,7 +50,7 @@ import {
   typeURL,
   typesURL,
 } from "./page.js";
-import { goToLogin } from "../app.js";
+import { goToLogin, setFormBusy } from "../app.js";
 
 // The metamodel's declared field types, in its own spelling
 // (internal/metamodel/schema.go). They are constants because this module
@@ -418,6 +419,174 @@ export function entityBody(doc, slug, model) {
   return root;
 }
 
+// --- The one write a person makes here --------------------------------
+
+// wireRename is the product's first write by a person: an entity's own
+// name, on the screen that shows it.
+//
+// The whole of the design it obeys is in
+// `.superpowers/specs/2026-09-11-writing-in-the-interface-design.md`,
+// and it comes to two rules. **The edit is never lost**: a refusal
+// leaves what was typed in the field, because the person's sentence is
+// the one thing in the exchange that exists nowhere else. **The edit
+// never silently wins**: nothing here re-reads a version and writes
+// again on its own, which would be last-writer-wins with extra steps and
+// nobody told. A conflict is shown, both values are named, and the next
+// move is theirs.
+export function wireRename(doc, opened, model) {
+  const actions = doc.getElementById("page-actions");
+  const form = doc.getElementById("rename");
+  const field = doc.getElementById("rename-name");
+  const errorEl = doc.getElementById("rename-error");
+  const conflict = doc.getElementById("rename-conflict");
+  const nameEl = doc.getElementById("entity-name");
+  if (!actions || !form || !field) return null;
+
+  // The version this page read. Every write states it, and it advances
+  // only when the server says a write landed.
+  let entity = { ...model.entity };
+
+  const open = doc.createElement("button");
+  open.type = "button";
+  open.className = "ghost";
+  open.textContent = "Rename";
+  actions.replaceChildren(open);
+
+  const show = (showing) => {
+    form.hidden = !showing;
+    open.hidden = showing;
+    if (showing) {
+      field.value = entity.name || "";
+      say(errorEl, "");
+      if (conflict) conflict.hidden = true;
+      field.focus();
+      if (typeof field.select === "function") field.select();
+    }
+  };
+
+  open.addEventListener("click", () => show(true));
+  const cancel = doc.getElementById("rename-cancel");
+  if (cancel) cancel.addEventListener("click", () => show(false));
+
+  // Applied after a write the server accepted: the name on the screen,
+  // the tab, the last crumb and the version the next write will state.
+  const settle = (row) => {
+    entity = { ...entity, name: row.name, version: row.version };
+    say(nameEl, entity.name || entity.key);
+    doc.title = (entity.name || entity.key) + " \u00b7 Maestro";
+    const crumbs = doc.getElementById("crumbs");
+    const last = crumbs && crumbs.lastElementChild ? crumbs.lastElementChild : null;
+    if (last) last.textContent = entity.name || entity.key;
+    show(false);
+  };
+
+  // **A batch answers 200 with a list of what it refused.** The route
+  // this write goes through is the bulk one, and a stale
+  // `expected_version` comes back as `{failed: [{code:
+  // "version_conflict"}]}` under an OK status — not as a 409. Read as a
+  // success, which is what the first version of this function did, the
+  // screen showed the typed name over a row the server had kept: the
+  // page lying about a write is the one outcome worse than refusing it.
+  const write = async (name) => {
+    const answer = await opened.client.renameEntity(entity, name);
+    if (!answer.ok) {
+      if (expired(answer)) {
+        goToLogin();
+        return { done: false };
+      }
+      return { done: false, message: answer.error ? answer.error.message : "" };
+    }
+    const failed = Array.isArray(answer.result.failed) ? answer.result.failed[0] : null;
+    if (failed) {
+      if (failed.code === "version_conflict") return { done: false, conflict: true };
+      return { done: false, message: String(failed.message ?? "") };
+    }
+    const written = Array.isArray(answer.result.written) ? answer.result.written[0] : null;
+    settle({ name, version: written && Number.isFinite(written.version) ? written.version : entity.version + 1 });
+    return { done: true };
+  };
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const typed = field.value.trim();
+    if (typed === "") {
+      say(errorEl, "A name is what this screen is for; it cannot be empty.");
+      return;
+    }
+    say(errorEl, "");
+    setFormBusy(form, true, "Saving…");
+    const answer = await write(typed);
+    setFormBusy(form, false);
+    if (answer.done) return;
+    if (answer.conflict === true) {
+      await showConflict(doc, opened, entity, typed, settle);
+      return;
+    }
+    say(errorEl, answer.message ?? "");
+  });
+  return form;
+}
+
+// showConflict reads what the row says now and puts the two values side
+// by side, with two actions and no default.
+//
+// **When the two are equal the conflict is not shown at all**: the other
+// writer wrote the same words, the person's intent already holds, and a
+// refusal with no consequence is noise.
+export async function showConflict(doc, opened, entity, typed, settle) {
+  const box = doc.getElementById("rename-conflict");
+  const form = doc.getElementById("rename");
+  const errorEl = doc.getElementById("rename-error");
+  const current = await opened.client.getEntity(entity.type_key, entity.key);
+  if (!current.ok) {
+    say(errorEl, current.error.message);
+    return null;
+  }
+  const theirs = current.result.name || current.result.key;
+  if (theirs === typed) {
+    settle({ name: theirs, version: current.result.version });
+    return null;
+  }
+  if (!box) return null;
+  say(doc.getElementById("conflict-theirs"), theirs);
+  say(doc.getElementById("conflict-yours"), typed);
+  box.hidden = false;
+  if (form) form.hidden = true;
+
+  const keep = doc.getElementById("conflict-keep");
+  const take = doc.getElementById("conflict-take");
+  // **The only write in this product that states a version the person
+  // did not read on a page.** It is a decision and not a retry: they
+  // have just been shown both values and chosen one, in the same
+  // gesture that sends it.
+  if (keep) {
+    keep.onclick = async () => {
+      const again = await opened.client.renameEntity(
+        { ...entity, version: current.result.version, fields: current.result.fields },
+        typed,
+      );
+      box.hidden = true;
+      const refused = again.ok && Array.isArray(again.result.failed) ? again.result.failed[0] : null;
+      if (again.ok && !refused) {
+        settle({ name: typed, version: current.result.version + 1 });
+        return;
+      }
+      // Refused again: somebody wrote a third time between the read
+      // above and this write. The edit is still in the field, and the
+      // decision is still theirs.
+      if (form) form.hidden = false;
+      say(errorEl, refused ? String(refused.message ?? "") : again.error ? again.error.message : "");
+    };
+  }
+  if (take) {
+    take.onclick = () => {
+      box.hidden = true;
+      settle({ name: theirs, version: current.result.version });
+    };
+  }
+  return box;
+}
+
 // --- The page --------------------------------------------------------
 
 export async function entityPage(opened) {
@@ -459,7 +628,14 @@ export async function entityPage(opened) {
   // will not let you change, and whether that is the product or your
   // role saying so.
   const role = await opened.client.summary();
-  if (role.ok) setReadOnly(doc, role.result.role, "writes this entity");
+  const mayWrite = role.ok && role.result.role !== ROLE_VIEWER;
+  // **The notice is a claim about the screen**, so a screen that has
+  // gained a write loses the part of the claim that said it had none.
+  // A viewer still gets the notice, because for them it is still true:
+  // the instance will refuse the write, and offering a control that
+  // cannot succeed is worse than saying so.
+  if (mayWrite) wireRename(doc, opened, model);
+  else if (role.ok) setReadOnly(doc, role.result.role, "writes this entity");
   // Four crumbs, and the third is the type's **key** rather than its
   // plural label. The entity model carries `type_key` and not the type's
   // label, and fetching the type for a word in a trail would be a second

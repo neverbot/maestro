@@ -29,6 +29,13 @@ var assets = func() fs.FS {
 // api_projects.go since Task 12 (that stub's own doc comment said this
 // task would replace it).
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, name string) {
+	s.serveAssetWithStatus(w, r, name, http.StatusOK)
+}
+
+// serveAssetWithStatus is serveAsset for the one shell that is not a
+// success: the not-found page has to carry 404, or a crawler, a link
+// checker and a `curl -f` all read a missing page as a present one.
+func (s *Server) serveAssetWithStatus(w http.ResponseWriter, r *http.Request, name string, status int) {
 	body, err := fs.ReadFile(assets, name)
 	if err != nil {
 		http.NotFound(w, r)
@@ -58,6 +65,7 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, name string)
 	// local copy and revalidate cheaply rather than refetching the full
 	// body on every navigation.
 	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(status)
 	_, _ = w.Write(body)
 }
 

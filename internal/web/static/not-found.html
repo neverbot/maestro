@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nothing here · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- Applies the chosen theme before the first paint. Classic and not
+     deferred on purpose: see static/theme.js. -->
+<script src="/static/theme.js"></script>
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page narrow">
+<div class="page-head">
+<h1>Nothing here</h1>
+</div>
+
+<!-- Filled by pages/not-found.js, which knows the address that missed
+     and whether it named a game. The refusal is the shared negative
+     state, with the one action design.md allows it. -->
+<div id="not-found"></div>
+</main>
+
+<script type="module" src="/static/pages/not-found.js"></script>

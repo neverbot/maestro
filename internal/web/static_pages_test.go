@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -87,8 +88,14 @@ func TestEveryShellIsReachableByItsRoute(t *testing.T) {
 	routes := web.ShellRoutesForTest()
 	dispatching := web.DispatchingShellsForTest()
 	server, _, _ := newTestServer(t)
-	if len(dispatching) != 1 {
-		t.Fatalf("%d shell route(s) are exempt from the byte comparison below, want exactly 1: "+
+	// Two exemptions, and both are named. "/" is handleRoot's decision
+	// between the picker, one game and the sign-in page; "/" without a
+	// method is the catch-all every unmatched address falls to, which by
+	// definition is not reached at the pattern it is registered under.
+	// TestAnUnknownAddressIsStillThisProduct drives the second one for
+	// real.
+	if len(dispatching) != 2 {
+		t.Fatalf("%d shell route(s) are exempt from the byte comparison below, want exactly 2: "+
 			"an exemption nobody bounds is where the next unserved shell hides", len(dispatching))
 	}
 
@@ -383,7 +390,10 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", shell, err)
 		}
-		for _, hit := range regexp.MustCompile(`src="/static/pages/([a-z]+\.js)"`).FindAllStringSubmatch(string(raw), -1) {
+		for _, hit := range // A hyphen is part of a module name: `not-found.js` was invisible
+		// to this scan while being loaded by the shell it belongs to, which
+		// is the shape of hole this test exists to close.
+		regexp.MustCompile(`src="/static/pages/([a-z-]+\.js)"`).FindAllStringSubmatch(string(raw), -1) {
 			loaded[hit[1]] = true
 		}
 	}
@@ -451,4 +461,77 @@ func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 	if !strings.Contains(src, "state.arrangement.setDrawn(!fell);") {
 		t.Error("applyWidth no longer disarms the arrangement: hiding the canvas in CSS alone leaves a keyboard nudging a drawing nobody can see")
 	}
+}
+
+// TestAnUnknownAddressIsStillThisProduct drives the catch-all for real,
+// because the shell table above cannot: its entry is registered by hand
+// and is reached at no pattern of its own.
+//
+// What it closes: every address the mux did not know answered Go's own
+// `404 page not found` — the browser's default serif on a transparent
+// body, with no header, no game switcher and no way back. It was met by
+// anyone who mistyped a link, and by anyone following one to a
+// destination whose route is spelled differently from its name (the
+// Images destination is served at `/assets`).
+//
+// Four callers, three answers: a person gets the shell with a 404, a
+// client under /api/ gets the JSON envelope every other refusal on that
+// surface uses, a caller with the right address and the wrong method
+// still gets 405, and a known route is untouched.
+func TestAnUnknownAddressIsStillThisProduct(t *testing.T) {
+	server, _, _ := newTestServer(t)
+	shell, err := os.ReadFile(filepath.Join("static", "not-found.html"))
+	if err != nil {
+		t.Fatalf("read the shell: %v", err)
+	}
+
+	t.Run("a person gets the page", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/g/azeroth/images", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404: a missing page that answers 200 is a missing page "+
+				"no crawler, link checker or `curl -f` can see", rec.Code)
+		}
+		if got := rec.Body.String(); got != string(shell) {
+			t.Errorf("an unknown address did not serve not-found.html: it answered %q", got[:min(len(got), 60)])
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+			t.Errorf("Content-Type = %q, want text/html", ct)
+		}
+	})
+
+	t.Run("a client gets JSON", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/nothing-here", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rec.Code)
+		}
+		var body struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("an API caller was handed something that is not JSON: %v", err)
+		}
+		if body.Error != "not_found" || body.Message == "" {
+			t.Errorf("body = %+v, want the coded envelope every other refusal uses", body)
+		}
+	})
+
+	t.Run("a known address under the wrong method is still 405", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/healthz", nil))
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("status = %d, want 405: the catch-all swallowed the distinction between "+
+				"\"no such address\" and \"not that way\"", rec.Code)
+		}
+	})
+
+	t.Run("a known address is untouched", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200: the catch-all is shadowing a real route", rec.Code)
+		}
+	})
 }

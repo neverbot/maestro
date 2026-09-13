@@ -329,11 +329,34 @@ func statusForCode(code string) int {
 // writeError because every other call site in this package has no
 // details to pass and should not have to say so.
 func writeCodedError(w http.ResponseWriter, status int, code, message string, details map[string]any) {
-	body := map[string]any{"error": code, "message": message}
+	body := map[string]any{"error": code, "message": withoutCodePrefix(code, message)}
 	if len(details) > 0 {
 		body["details"] = details
 	}
 	writeJSON(w, status, body)
+}
+
+// withoutCodePrefix drops the sentinel's own name from the front of a
+// message that is about to be sent beside it.
+//
+// The domain wraps its sentinels — `fmt.Errorf("%w: no entity type %q in
+// this game", ErrNotFound, key)` — so `err.Error()` reads
+// `not_found: no entity type "quest" in this game`. Both halves then go
+// on the wire: `error: "not_found"` and a message that begins by saying
+// it again, in the domain's identifier rather than in words. A screen
+// that shows the message shows the code, which is how
+// `not_found: no entity type "nosuchtype" in this game` came to be the
+// sentence a designer met after mistyping a link.
+//
+// Stripped here rather than at each of the thirty call sites above, and
+// only when the prefix **is** the code being sent: a message that begins
+// with some other word keeps it.
+func withoutCodePrefix(code, message string) string {
+	prefix := code + ": "
+	if code == "" || !strings.HasPrefix(message, prefix) {
+		return message
+	}
+	return strings.TrimPrefix(message, prefix)
 }
 
 // --- Entity types ---

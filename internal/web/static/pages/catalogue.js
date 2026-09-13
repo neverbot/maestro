@@ -16,12 +16,14 @@
 
 import {
   DESTINATION_CATALOGUE,
+  STATE_REFUSED,
   countLabel,
   destinations,
   emptyOrRows,
   entityURL,
   expired,
   gameURL,
+  negativeState,
   openGame,
   say,
   segmentsOf,
@@ -92,8 +94,27 @@ export async function cataloguePage(opened) {
       goToLogin();
       return opened;
     }
-    say(nameEl, "Could not read this type");
-    say(errorEl, type.error.message);
+    // **A page that could not read its type has no catalogue on it**, so
+    // it keeps neither the note describing one nor the controls that
+    // narrow one. The search box stayed drawn and enabled over a refusal
+    // and answered nothing when typed into, because its listener is
+    // attached further down, after the fetch that just failed: a control
+    // that silently does nothing is worse than one that is not there.
+    say(noteEl, "");
+    const tools = doc.querySelector(".tools");
+    if (tools) tools.hidden = true;
+    say(nameEl, "This type is not in this game");
+    // The refusal in the one shape, with the way back that the address
+    // bar cannot offer: the catalogue this key was supposed to be in.
+    const refusal = negativeState(doc, {
+      kind: STATE_REFUSED,
+      heading: "Nothing here is called “" + typeKey + "”",
+      sentence: type.error.message,
+      action: { href: typesURL(opened.slug), label: "This game's catalogue" },
+    });
+    const host = doc.getElementById("entities-empty");
+    if (host && host.parentNode) host.parentNode.replaceChild(refusal, host);
+    else say(errorEl, type.error.message);
     return opened;
   }
   const typeName = type.result.label_plural || type.result.label || type.result.key;

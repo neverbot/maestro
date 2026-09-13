@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -181,6 +182,13 @@ type Server struct {
 	registeredPatterns    []string
 	projectScopedPatterns map[string]bool
 
+	// byPath is every registered pattern with its method stripped, and
+	// it exists for one answer: whether an address this product does not
+	// serve *under this method* is served under another one. Go's mux
+	// gave that answer for free until a catch-all was registered; see
+	// handleNotFound.
+	byPath *http.ServeMux
+
 	// contentPatterns and contentWritePatterns record the game-content
 	// surface (api_metamodel.go) the way registeredPatterns records the
 	// whole routing table, and for the same reason: a test, not
@@ -282,6 +290,7 @@ func NewServer(opts Options) *Server {
 
 	s := &Server{
 		mux:                        http.NewServeMux(),
+		byPath:                     http.NewServeMux(),
 		opts:                       opts,
 		loginLimiter:               identity.NewLimiter(10, time.Minute),
 		loginIPLimiter:             identity.NewLimiter(40, time.Minute),
@@ -350,6 +359,18 @@ func NewServer(opts Options) *Server {
 		})
 	}
 	s.route("GET /static/", s.staticFileServer())
+	// **Every other address, answered as this product rather than as a
+	// web server.** An unmatched path used to reach the mux's own 404:
+	// `404 page not found` in the browser's default serif on a
+	// transparent body, with no header, no switcher and no way back —
+	// met by anyone who mistyped a link or followed one to a destination
+	// whose route is spelled differently (`/images` is served at
+	// `/assets`). `/` is the least specific pattern there is, so every
+	// route above still wins and `GET /{$}` still owns the root. It
+	// carries no method: `GET /` is *more* specific in method and less
+	// in path than `/mcp`, which Go's mux refuses as ambiguous outright
+	// — the handler sorts the methods out instead.
+	s.routeFunc("/", s.handleNotFound)
 	s.routeFunc("GET /api/config", s.handleConfig)
 	s.route("GET /api/games", requireCaller(s.handleListGames))
 	s.route("POST /api/games", requireCaller(s.handleCreateGame))
@@ -571,6 +592,12 @@ var shellRoutes = []struct {
 	// admin-gated at the API, and the page says so in a sentence rather
 	// than being a 404 that cannot explain itself. The menu that leads
 	// there is drawn only for an admin.
+	// The catch-all, and the one entry whose pattern is not how the
+	// shell is reached: every address this product does not serve
+	// answers with it (handleNotFound), so it is registered by hand and
+	// exempt from the byte comparison — TestAnUnknownAddressIsStillThisProduct
+	// drives it through a real unmatched request instead.
+	{pattern: "/", file: "not-found.html", byHand: true, dispatches: true},
 	{pattern: "GET /account", file: "account.html"},
 	{pattern: "GET /admin", file: "admin.html"},
 	{pattern: "GET /g/{slug}", file: "game.html", byHand: true},
@@ -588,9 +615,33 @@ var shellRoutes = []struct {
 
 // route registers pattern on the mux and records it in
 // s.registeredPatterns — see that field's own doc comment for why.
+//
+// It also registers the pattern's *path* on s.byPath, so the catch-all
+// can tell "no such address" from "not that way".
 func (s *Server) route(pattern string, h http.Handler) {
 	s.registeredPatterns = append(s.registeredPatterns, pattern)
 	s.mux.Handle(pattern, h)
+	if path, ok := pathOfPattern(pattern); ok {
+		// One handler per path, whichever method got there first: what
+		// is asked of this mux is only ever "does anything serve this
+		// address", and a second registration of the same path would
+		// panic.
+		if _, existing := s.byPath.Handler(&http.Request{Method: http.MethodGet, URL: &url.URL{Path: path}}); existing != path {
+			s.byPath.Handle(path, http.NotFoundHandler())
+		}
+	}
+}
+
+// pathOfPattern splits "GET /healthz" into "/healthz". A pattern with no
+// method, and the catch-all itself, are not registered: the first is
+// already answered by the mux for every method, and the second is what
+// is asking.
+func pathOfPattern(pattern string) (string, bool) {
+	_, path, found := strings.Cut(pattern, " ")
+	if !found || path == "/" {
+		return "", false
+	}
+	return path, true
 }
 
 // routeFunc is route for a plain handler function, matching
@@ -741,6 +792,37 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// handleNotFound answers an address this product does not serve.
+//
+// Two answers, because there are two kinds of caller. Anything under
+// /api/ is an agent or the front end's own client, and gets the same
+// JSON envelope every other refusal on that surface uses — a caller that
+// parses JSON must never be handed HTML. Everything else is a person in
+// a browser, and gets the shell: the header, so there is a way to
+// another game, and a refusal naming the address that missed.
+func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
+	// **A path this product serves under another method is a 405, not a
+	// 404.** Until the catch-all below existed, Go's mux answered that
+	// by itself: `POST /healthz` matched the path of `GET /healthz` and
+	// got "method not allowed". A catch-all swallows that distinction
+	// unless it puts it back, and "there is no such address" in place of
+	// "not that way" is a worse answer to a caller who had the address
+	// right.
+	if _, pattern := s.byPath.Handler(r); pattern != "" {
+		w.Header().Set("Allow", pattern)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// A browser asks for a page with GET. Anything else reaching an
+	// address this product does not serve is a client, whatever the
+	// path, and a client that gets HTML learns nothing from it.
+	if r.Method != http.MethodGet || strings.HasPrefix(r.URL.Path, "/api/") {
+		writeCodedError(w, http.StatusNotFound, errCodeNotFound, "no such route", nil)
+		return
+	}
+	s.serveAssetWithStatus(w, r, "not-found.html", http.StatusNotFound)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

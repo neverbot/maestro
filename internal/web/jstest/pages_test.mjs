@@ -1525,7 +1525,13 @@ for (const [name, fn] of pending) {
     console.log("ok   " + name);
   } catch (error) {
     failures += 1;
-    console.error("FAIL " + name + ": " + (error && error.message ? error.message : error));
+    // JSTEST_STACK=1 adds the stack. A failure here is usually a module
+    // throwing several frames down, and the message alone sends whoever
+    // reads it hunting through four files for a `.map`.
+    console.error(
+      "FAIL " + name + ": " + (error && error.message ? error.message : error) +
+        (process.env.JSTEST_STACK ? "\n" + error.stack : ""),
+    );
   }
 }
 

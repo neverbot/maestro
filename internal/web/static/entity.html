@@ -43,38 +43,15 @@
 <p class="error" id="entity-error" hidden></p>
 
 <section id="entity-content" hidden>
-  <h2>Fields</h2>
-  <!-- Declared order, declared type, and a field the entity does not
-       carry rendered as declared-and-unset rather than hidden: *what
-       could be filled in here* is the question a designer is usually
-       asking, and a page that hid the empty rows would answer a
-       different one. -->
-  <dl class="fields" id="entity-fields"></dl>
-  <div class="state" id="entity-fields-empty" hidden>
-  <b>No fields</b>
-  <span>This type declares no fields.</span>
-</div>
-
-  <h2>Relations out</h2>
-  <div id="relations-out"></div>
-  <div class="state" id="relations-out-empty" hidden>
-  <b>Nothing leads out</b>
-  <span>Nothing leads out of this entity.</span>
-</div>
-
-  <h2>Relations in</h2>
-  <div id="relations-in"></div>
-  <div class="state" id="relations-in-empty" hidden>
-  <b>Nothing leads in</b>
-  <span>Nothing leads into this entity.</span>
-</div>
-
-  <h2>Documents</h2>
-  <ul class="catalogue" id="entity-docs"></ul>
-  <div class="state" id="entity-docs-empty" hidden>
-  <b>No prose attached</b>
-  <span>No document is attached to this entity. An agent attaches one over MCP (docs.links.add); nothing on this page attaches one.</span>
-</div>
+  <!-- **Empty on purpose.** Everything under this heading is built by
+       pages/entity.js's `entityBody`, which is the same builder the side
+       panel over a diagram uses, so the page and the panel can never
+       come to say different things. Four `.state` blocks lived here and
+       none of them ever rendered: the body replaces this element's
+       children wholesale, so the shell's own copy — including the half
+       naming who would attach a document — was read by nobody for as
+       long as this page has existed. The states are in the builder now,
+       where they are shown. -->
 </section>
 
 </main>

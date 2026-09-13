@@ -29,8 +29,10 @@
 // the panel over a diagram costs the diagram nothing.
 
 import { absentCell, presentCell } from "../render/twin.js";
+import { CATALOGUE_CELLS, row } from "../rows.js";
 import {
   DESTINATION_CATALOGUE,
+  STATE_EMPTY,
   countLabel,
   destinations,
   docURL,
@@ -38,6 +40,7 @@ import {
   expired,
   fail,
   gameURL,
+  negativeState,
   openGame,
   say,
   segmentsOf,
@@ -261,65 +264,66 @@ export function fieldList(doc, rows) {
 // the far end is a link to that entity's own page, and the edge's fields
 // follow it as text.
 export function relationList(doc, slug, groups) {
-  const root = doc.createElement("div");
+  // **One list, not one per relation type.** Each group used to build its
+  // own `ul.catalogue`, and sibling grids share nothing: two groups on
+  // one entity put their keys 25px apart, on a page whose whole claim is
+  // that a column is a column. They are one grid now, with a heading row
+  // per type inside it — the same shape `headerRow` gives a catalogue —
+  // so every row on the page lines up and a type with three edges costs
+  // one row of chrome instead of a heading, a count and a bordered box.
+  const list = doc.createElement("ul");
+  list.className = "catalogue";
   for (const group of groups) {
-    const heading = doc.createElement("h3");
-    heading.className = "relation-type";
+    const head = doc.createElement("li");
+    head.className = "catalogue-head";
+
     // The label the game gave this connection, with the key an agent
-    // addresses it by beside it in mono — the same pair every row in this
-    // product shows, rather than the key alone at heading size.
-    heading.textContent = group.label || group.type;
-    if (group.label && group.label !== group.type) {
-      const key = doc.createElement("code");
-      key.className = "catalogue-key";
-      key.textContent = group.type;
-      heading.append(" ", key);
+    // addresses it by beside it in mono — the same pair every row in
+    // this product shows, rather than the key alone at heading size.
+    const label = doc.createElement("span");
+    label.textContent = group.label || group.type;
+    head.append(label);
+
+    const key = doc.createElement("code");
+    key.className = "catalogue-key";
+    key.textContent = group.label && group.label !== group.type ? group.type : "";
+    head.append(key);
+
+    // The three content tracks a row has, so the heading is a row of the
+    // same grid and not a shape of its own.
+    for (let i = 0; i < CATALOGUE_CELLS; i += 1) {
+      head.append(doc.createElement("span"));
     }
-    root.append(heading);
 
-    const count = doc.createElement("p");
-    count.className = "muted";
-    count.textContent = countLabel(group.rows.length, "relation", "relations");
-    root.append(count);
+    const tally = doc.createElement("span");
+    tally.className = "catalogue-count";
+    tally.textContent = countLabel(group.rows.length, "relation", "relations");
+    head.append(tally);
+    list.append(head);
 
-    const list = doc.createElement("ul");
-    list.className = "catalogue";
     for (const edge of group.rows) {
-      const item = doc.createElement("li");
+      // **The shared row.** These were hand-built with a variable number
+      // of children — one or two, plus a cell per relation field, plus a
+      // flag — into a list whose grid has six tracks, so the rows of one
+      // group did not line up with the rows of the next.
+      const item = row(doc, {
+        label: edge.far === null ? "This end is no longer in the game" : edge.far.name || edge.far.key,
+        key: edge.far === null ? "" : edge.far.type + "/" + edge.far.key,
+        cells: edge.fields.map((field) => ({ text: field.key + " " + field.cell.text })),
+        count: "",
+        flag: edge.invalid ? "invalid" : "",
+        href: edge.far === null ? "" : entityURL(slug, edge.far.type, edge.far.key),
+      });
+      // A row whose far end is gone is an absence and says so in the one
+      // treatment this product spends on one.
       if (edge.far === null) {
-        const gone = doc.createElement("span");
-        gone.className = "catalogue-label absent";
-        gone.textContent = "This end is no longer in the game.";
-        item.append(gone);
-      } else {
-        const link = doc.createElement("a");
-        link.className = "catalogue-label";
-        link.href = entityURL(slug, edge.far.type, edge.far.key);
-        link.textContent = edge.far.name || edge.far.key;
-        item.append(link);
-
-        const handle = doc.createElement("code");
-        handle.className = "catalogue-key";
-        handle.textContent = edge.far.type + "/" + edge.far.key;
-        item.append(handle);
-      }
-      for (const field of edge.fields) {
-        const cell = doc.createElement("span");
-        cell.className = "relation-field";
-        cell.textContent = field.key + " " + field.cell.text;
-        item.append(cell);
-      }
-      if (edge.invalid) {
-        const flag = doc.createElement("span");
-        flag.className = "catalogue-invalid";
-        flag.textContent = "invalid";
-        item.append(flag);
+        const gone = item.querySelector ? item.querySelector(".catalogue-label") : null;
+        if (gone) gone.classList.add("absent");
       }
       list.append(item);
     }
-    root.append(list);
   }
-  return root;
+  return list;
 }
 
 // entityBody is the whole page under the heading, and it is what the
@@ -335,10 +339,19 @@ export function entityBody(doc, slug, model) {
   fieldsHeading.textContent = "Fields";
   fields.append(fieldsHeading);
   if (rows.length === 0) {
-    const none = doc.createElement("p");
-    none.className = "muted";
-    none.textContent = "This type declares no fields.";
-    fields.append(none);
+    // **The shared negative state, not a muted sentence.** This page
+    // builds its own body and replaces the shell's content wholesale, so
+    // the four `.state` blocks written into entity.html never rendered:
+    // `document.querySelectorAll('.state').length` was 0 on every entity
+    // page in the product, and what a reader got instead was three bare
+    // grey lines. Their copy is here now, which is what the shell was
+    // carrying — including the half that says *who would put one there*,
+    // which the muted lines had dropped.
+    fields.append(negativeState(doc, {
+      kind: STATE_EMPTY,
+      heading: "No fields",
+      sentence: "This type declares no fields.",
+    }));
   } else {
     fields.append(fieldList(doc, rows));
   }
@@ -354,11 +367,13 @@ export function entityBody(doc, slug, model) {
     section.append(title);
     const groups = relationGroups(relations, direction, model.relationLabels);
     if (groups.length === 0) {
-      const none = doc.createElement("p");
-      none.className = "muted";
-      none.textContent =
-        direction === DIRECTION_OUT ? "Nothing leads out of this entity." : "Nothing leads into this entity.";
-      section.append(none);
+      section.append(negativeState(doc, {
+        kind: STATE_EMPTY,
+        heading: direction === DIRECTION_OUT ? "Nothing leads out" : "Nothing leads in",
+        sentence: direction === DIRECTION_OUT
+          ? "No relation starts here. An agent writes relations over MCP; nothing on this page does."
+          : "No relation points at this. An agent writes relations over MCP; nothing on this page does.",
+      }));
     } else {
       section.append(relationList(doc, slug, groups));
     }
@@ -370,10 +385,13 @@ export function entityBody(doc, slug, model) {
   docsHeading.textContent = "Documents";
   docs.append(docsHeading);
   if (model.documents.length === 0) {
-    const none = doc.createElement("p");
-    none.className = "muted";
-    none.textContent = "No document is attached to this entity.";
-    docs.append(none);
+    docs.append(negativeState(doc, {
+      kind: STATE_EMPTY,
+      heading: "No prose attached",
+      // The half the muted line dropped: who would put one here. It is
+      // the sentence the shell had been carrying and nobody ever saw.
+      sentence: "No document is attached to this entity. An agent attaches one over MCP; nothing on this page attaches one.",
+    }));
   } else {
     const list = doc.createElement("ul");
     list.className = "catalogue";

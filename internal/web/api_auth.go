@@ -1,9 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"mime"
@@ -43,6 +45,90 @@ type registerRequest struct {
 	InviteToken string `json:"invite_token"`
 }
 
+// listOfMembers spells the refusal over one member or several.
+func listOfMembers(names []string) string {
+	if len(names) == 1 {
+		return names[0] + " is not a member of this request"
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] +
+		" are not members of this request"
+}
+
+// unknownMembers is every top-level member of the body that the target
+// has no field for, in the order they appear.
+//
+// It exists because encoding/json's DisallowUnknownFields reports the
+// first one and stops, and this surface promises the whole list. It
+// compares against the struct's own `json` tags rather than a list
+// written by hand, so a renamed field cannot make this quietly wrong,
+// and it only ever runs on a request that is already being refused.
+//
+// Nested members are not walked: a nested object is a field whose own
+// type the decoder checks, and a caller told which top-level member is
+// wrong can find the rest with the same trick this list is teaching.
+func unknownMembers(body []byte, target any) []string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	known := map[string]bool{}
+	value := reflect.ValueOf(target)
+	for value.Kind() == reflect.Pointer {
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return nil
+	}
+	var collect func(reflect.Type)
+	collect = func(typ reflect.Type) {
+		for i := range typ.NumField() {
+			field := typ.Field(i)
+			// An embedded struct's fields are this struct's fields on the
+			// wire — ScopedArgs is embedded in every MCP input — so they
+			// are collected too.
+			if field.Anonymous && field.Type.Kind() == reflect.Struct {
+				collect(field.Type)
+				continue
+			}
+			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if name == "-" {
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			known[name] = true
+		}
+	}
+	collect(value.Type())
+
+	// The order the body wrote them in, so the list reads like the
+	// request rather than like a map.
+	var unknown []string
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if _, err := decoder.Token(); err != nil {
+		return nil
+	}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil
+		}
+		name, ok := token.(string)
+		if !ok {
+			return nil
+		}
+		var skip json.RawMessage
+		if err := decoder.Decode(&skip); err != nil {
+			return nil
+		}
+		if !known[name] {
+			unknown = append(unknown, name)
+		}
+	}
+	return unknown
+}
+
 // decodeJSONBody enforces the two boundary checks every handler that
 // accepts a JSON body needs before it looks at the body at all: a
 // declared application/json content type (a browser form post, or a
@@ -78,7 +164,21 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	dec := json.NewDecoder(r.Body)
+	// Read once, decode twice: the second pass only happens on the
+	// unknown-member path below, and it needs the same bytes the first
+	// pass saw. The MaxBytesReader still bounds it, so a body too large
+	// is refused here exactly as before.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, errCodeRequestTooLarge, "request body too large")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, errCodeBadRequest, "could not read the request body")
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	// A member no input on this surface has is refused, never dropped.
 	//
 	// encoding/json's default is to discard what it does not recognise,
@@ -107,10 +207,29 @@ func decodeJSONBodyLimit(w http.ResponseWriter, r *http.Request, v any, limit in
 		// body" over a body that parsed cleanly is both false and
 		// unactionable.
 		if name, ok := unknownFieldName(err); ok {
+			// **Every unknown member, not the first one.**
+			// `DisallowUnknownFields` stops at the one it hit, and
+			// reference/errors.md promises this surface "reports every
+			// problem it can see at once" — measured against it, a body
+			// with three wrong field names took three round trips, which
+			// is the pattern that page exists to warn against. The
+			// decoder cannot be asked for the rest, so the body is read
+			// again as a map and compared against the target's own
+			// fields.
 			problem := "is not a member of this request"
+			names := unknownMembers(body, v)
+			if len(names) == 0 {
+				names = []string{name}
+			}
+			fields := make([]map[string]string, 0, len(names))
+			for _, member := range names {
+				fields = append(fields, map[string]string{"path": member, "message": problem})
+			}
+			// "titel, bodyy and markdownn are not members of this
+			// request" — the verb agrees with the count, because this
+			// sentence is read by a person as often as by an agent.
 			writeCodedError(w, http.StatusBadRequest, errCodeBadRequest,
-				name+" "+problem,
-				map[string]any{"fields": []map[string]string{{"path": name, "message": problem}}})
+				listOfMembers(names), map[string]any{"fields": fields})
 			return false
 		}
 		var wrongType *json.UnmarshalTypeError

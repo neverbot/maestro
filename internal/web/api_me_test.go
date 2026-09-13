@@ -51,11 +51,12 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 	}
 
 	var me struct {
-		UserID      string `json:"user_id"`
-		Email       string `json:"email"`
-		DisplayName string `json:"display_name"`
-		CreatedAt   string `json:"created_at"`
-		IsAdmin     bool   `json:"is_admin"`
+		UserID             string `json:"user_id"`
+		Email              string `json:"email"`
+		DisplayName        string `json:"display_name"`
+		CreatedAt          string `json:"created_at"`
+		SkillBundleVersion string `json:"skill_bundle_version"`
+		IsAdmin            bool   `json:"is_admin"`
 	}
 	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil {
 		t.Fatalf("decoding /api/me: %v", err)
@@ -71,6 +72,72 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 	}
 	if me.UserID == "" {
 		t.Error("user_id disappeared, and something still reads it")
+	}
+	// The bundle's first instruction tells an agent to read the bundle's
+	// version from this call. The MCP tool has always answered it and
+	// this mirror did not.
+	if me.SkillBundleVersion == "" {
+		t.Error("no skill_bundle_version: an agent following the bundle over REST cannot tell " +
+			"whether the copy it holds is the one this server would serve")
+	}
+}
+
+// TestMeAnswersATokenCallerTheAddressOfItsGame pins the other half of the
+// same repair.
+//
+// `skill.md` §1 tells an agent to call whoami and take the game's
+// **address** from the answer, because every route on both surfaces is
+// addressed by slug. The MCP tool answers `project_slug`; this mirror
+// answered a `project_id` and nothing else, so an agent that followed
+// the bundle's first instruction over REST could not address its second
+// call. A mirror that answers a different question from the tool it
+// mirrors is not a mirror.
+//
+// Mutation: remove the project block from handleMe and this fails.
+func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
+		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if err != nil {
+		t.Fatalf("Create project: %v", err)
+	}
+	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
+		ProjectID: project.ID, UserID: owner.ID, Label: "agent",
+	})
+	if err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/api/me with a token = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var me struct {
+		ProjectSlug        string `json:"project_slug"`
+		ProjectName        string `json:"project_name"`
+		SkillBundleVersion string `json:"skill_bundle_version"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &me); err != nil {
+		t.Fatalf("decoding /api/me: %v", err)
+	}
+	if me.ProjectSlug != "azeroth" {
+		t.Errorf("project_slug = %q, want the address every other route takes", me.ProjectSlug)
+	}
+	if me.ProjectName != "Azeroth" {
+		t.Errorf("project_name = %q, want the game's own name", me.ProjectName)
+	}
+	if me.SkillBundleVersion == "" {
+		t.Error("no skill_bundle_version for a token caller either")
 	}
 }
 

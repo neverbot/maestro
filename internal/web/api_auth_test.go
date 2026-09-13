@@ -1117,3 +1117,65 @@ func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
 		t.Fatal("login response must not include a password_hash field")
 	}
 }
+
+// TestARefusalNamesEveryUnknownMemberAtOnce pins the promise
+// reference/errors.md makes to an agent: "every refusal on this surface
+// reports every problem it can see at once".
+//
+// It was true for missing required fields and false for unknown ones:
+// `encoding/json`'s DisallowUnknownFields stops at the first it meets,
+// so a body with three wrong field names cost three round trips — the
+// exact pattern that page warns against, in the surface the page is
+// about. Found by giving the bundle to an agent with no other context
+// and watching what it did.
+//
+// Mutation: drop the `unknownMembers` call in decodeJSONBodyLimit and
+// this fails with one field where it wants three.
+func TestARefusalNamesEveryUnknownMemberAtOnce(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	req := jsonRequest(http.MethodPost, "/api/auth/login",
+		`{"email":"a@b.c","password":"x","titel":1,"bodyy":2,"markdownn":3}`)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Message string `json:"message"`
+		Details struct {
+			Fields []struct {
+				Path    string `json:"path"`
+				Message string `json:"message"`
+			} `json:"fields"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding the refusal: %v", err)
+	}
+
+	want := []string{"titel", "bodyy", "markdownn"}
+	if len(body.Details.Fields) != len(want) {
+		t.Fatalf("%d field(s) named, want %d: an agent fixing one member per round trip pays "+
+			"one round trip per typo, which is what this promise exists to prevent: %s",
+			len(body.Details.Fields), len(want), rec.Body.String())
+	}
+	for i, name := range want {
+		if body.Details.Fields[i].Path != name {
+			t.Errorf("field %d is %q, want %q: the order is the body's own", i, body.Details.Fields[i].Path, name)
+		}
+	}
+	// The sentence is read by people too.
+	if !strings.Contains(body.Message, "are not members of this request") {
+		t.Errorf("message = %q, want a plural sentence over three members", body.Message)
+	}
+
+	// One unknown member keeps the singular.
+	single := jsonRequest(http.MethodPost, "/api/auth/login", `{"email":"a@b.c","password":"x","titel":1}`)
+	singleRec := httptest.NewRecorder()
+	srv.ServeHTTP(singleRec, single)
+	if !strings.Contains(singleRec.Body.String(), "titel is not a member of this request") {
+		t.Errorf("one unknown member did not keep the singular: %s", singleRec.Body.String())
+	}
+}

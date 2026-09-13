@@ -28,6 +28,14 @@ description carries it together with the combinations that contradict
 each other. Nothing is enumerated here, because a second copy of a
 vocabulary is a copy that goes quietly false.
 
+**Read it before you need it.** The description is on the wire: an MCP
+client lists the tools and it is there, and over REST the same text is
+at `GET /mcp/tools` — you do not have to provoke a refusal to find out
+what you are allowed to say. An agent that skipped this step recovered
+four of the seven traits by grepping the genre templates for literals
+and never found the other three, which is a wall this paragraph exists
+to remove.
+
 A game whose relation types declare neither is refused with
 `semantics_undeclared`, carrying its whole relation type catalogue with
 whatever each one currently says. That refusal is the first thing you

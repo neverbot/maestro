@@ -20,9 +20,17 @@ this before the first audit and not again:
 2. For each type that gates, orders or contains: `relation_types.upsert`
    with `analysis_traits` and the `expected_version` you just read.
 3. For each type that is decoration — an illustration, a note, a
-   cross-reference — declare it `annotation` deliberately. Declaring
-   nothing and declaring inertness are different statements, and only
-   one of them keeps a half-finished idea off the orphan list.
+   cross-reference — declare it `annotation` deliberately. **This puts
+   things *on* the orphan report, which is the point**: the orphan report
+   counts edges of every type except the annotation ones, so an entity
+   whose only connection is `is_illustrated_by` is an entity nothing has
+   led to yet, and saying so is what stops a half-finished idea from
+   looking connected. Declaring nothing leaves that edge counted and the
+   idea hidden.
+
+   Measured on a real game: declaring `implicates` as `annotation` took
+   the orphan report from two entities to five; reverting it took them
+   back to two.
 
 Everything else may stay undeclared. An edge the engine was told nothing
 about is one it walks nowhere, which is the safe answer.

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 	"github.com/neverbot/maestro/internal/projects"
 	"github.com/neverbot/maestro/internal/realtime"
+	"github.com/neverbot/maestro/internal/skill"
 	"github.com/neverbot/maestro/internal/views"
 )
 
@@ -372,6 +374,15 @@ func NewServer(opts Options) *Server {
 	// — the handler sorts the methods out instead.
 	s.routeFunc("/", s.handleNotFound)
 	s.routeFunc("GET /api/config", s.handleConfig)
+	// **The tool descriptions, readable without an MCP client.**
+	// Every rule this surface enforces — the closed trait vocabulary, the
+	// admitted values, the bounds — lives in the description the MCP SDK
+	// puts on the wire, and the skill bundle routes to it rather than
+	// copying it. An agent driving the REST mirror could not read it at
+	// all: it had to provoke a refusal to learn what it was allowed to
+	// say, and one that skipped that step recovered four of seven traits
+	// by grepping the genre templates.
+	s.route("GET /api/mcp/tools", requireCaller(s.handleToolReference))
 	s.route("GET /api/games", requireCaller(s.handleListGames))
 	s.route("POST /api/games", requireCaller(s.handleCreateGame))
 	s.route("POST /api/invites", requireCaller(s.handleCreateInstanceInvite))
@@ -825,6 +836,22 @@ func (s *Server) handleNotFound(w http.ResponseWriter, r *http.Request) {
 	s.serveAssetWithStatus(w, r, "not-found.html", http.StatusNotFound)
 }
 
+// handleToolReference answers every registered tool and the description
+// it was registered with — the same map the skill bundle's generated
+// reference is built from, so the two cannot disagree.
+func (s *Server) handleToolReference(w http.ResponseWriter, _ *http.Request, _ Caller) {
+	names := make([]string, 0, len(s.mcpToolDescriptions))
+	for name := range s.mcpToolDescriptions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	tools := make([]map[string]string, 0, len(names))
+	for _, name := range names {
+		tools = append(tools, map[string]string{"name": name, "description": s.mcpToolDescriptions[name]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
+}
+
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte("ok"))
@@ -854,6 +881,24 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, caller Caller)
 	}
 	if caller.TokenID != nil {
 		payload["token_id"] = *caller.TokenID
+	}
+	// **The two facts the skill bundle's first instruction depends on.**
+	// `skill.md` §1 tells an agent to call whoami and take the game's
+	// *address* and the bundle's version from the answer, and the MCP
+	// tool carries both — while this mirror answered a project *id* and
+	// nothing else, so an agent following the bundle over REST could not
+	// obtain the slug every other route in this surface is addressed by.
+	// A mirror that answers a different question from the tool it mirrors
+	// is not a mirror.
+	payload["skill_bundle_version"] = skill.Version()
+	if projectID, ok := caller.ScopedProject(); ok {
+		project, err := s.opts.Projects.ByID(r.Context(), projectID)
+		if err != nil {
+			s.writeDomainError(w, r, err)
+			return
+		}
+		payload["project_slug"] = project.Slug
+		payload["project_name"] = project.Name
 	}
 	// **Who, in the words a person would use.** The three fields below
 	// are what the account screen shows and what the header says instead

@@ -14,10 +14,16 @@ limit_exceeded query_stale semantics_undeclared
 ## Fix everything in one pass
 
 Every refusal on this surface reports **every problem it can see at
-once**, at the path of each one. Read the whole list and fix all of it
+once**, at the path of each one — missing members and members that are
+not part of the request alike. Read the whole list and fix all of it
 before calling again. An agent fixing one typo per round trip on a
 200-row seed pays 200 round trips for one bad afternoon, and each of
 those round trips was answered with the complete list the first time.
+
+The unknown-member half of that promise was false until it was measured:
+a body with three misspelled field names was refused three times, one
+name per answer. It is true now, and
+`TestARefusalNamesEveryUnknownMemberAtOnce` is what keeps it true.
 
 ## The three that look alike
 

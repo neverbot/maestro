@@ -22,12 +22,11 @@ calls later.
 ## 1. Identify yourself
 
 Call `whoami` first. It says who you act for and which single game your
-token is bound to, and the slug it answers with is that game's address —
-the value the optional `game` argument on every other tool is checked against.
-
-One token, one game. A `scope_violation` is the answer to a request that
-names a different game, not a bug to route around. Ask the human for the
-right token.
+token is bound to; the slug it answers with is that game's address, and
+the value the optional `game` argument on every other tool is checked
+against. One token, one game: a `scope_violation` is the answer to a
+request naming a different one, not a bug to route around. Ask the human
+for the right token.
 
 ## 2. The four primitives
 
@@ -105,7 +104,9 @@ combinations it rules out. Read it once before your first edge type.
 The choice of language for a game's keys is **the game's**: a Spanish
 studio's `mision` is as correct as `quest`. Both rules are ASCII, so
 `misión` is no key at all — the case-folding index talking, not a
-preference about language.
+preference about language. An entity reference is spelled three ways,
+one per domain; `reference/surface.md` has them, and how to read a
+shape off the wire before you send it.
 
 ## 5. The seeding loop
 
@@ -145,6 +146,7 @@ changed under you unless you changed it.
 | choose keys, or wonder what a rename costs | `modelling/naming.md` |
 | recognise a shape that will cost a rewrite | `modelling/mistakes.md` |
 | find which of the tools exists | `reference/tools.md` |
+| read a tool's contract, or learn a shape before sending one | `reference/surface.md` |
 | declare a field type, or wonder what one costs later | `reference/fields.md` |
 | read an error and pick a recovery | `reference/errors.md` |
 | write a query or a saved view | `reference/queries.md` |
@@ -155,8 +157,7 @@ changed under you unless you changed it.
 | turn a question about the game into a picture | `recipes/composing-a-view.md` |
 | audit a design, or prove a progression still holds | `reference/analysis.md`, `recipes/auditing-a-design.md` |
 
-Nothing in this bundle is required, and a game none of its examples
-matches is the normal case.
+Nothing here is required, and a game none of these examples matches is the normal case.
 
 ## 8. Installing and updating
 

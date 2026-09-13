@@ -125,6 +125,60 @@ func admin(t *testing.T, adminURL string) *pgxpool.Pool {
 	return adminPool
 }
 
+// templateFor is the migrated database every other test database in this
+// process is copied from.
+//
+// Built once, from the same `db.Migrate` every caller would have run, so
+// the schema a test meets is the schema the product creates and not a
+// second description of it. A failure to build it is not fatal: the
+// caller falls back to creating an empty database and migrating it
+// itself, which is what every test did before this existed.
+//
+// The template is dropped when the process ends — `TestMain` is not
+// available to a library, so this registers the drop on the test that
+// happened to build it and relies on the sweep in sweepStale for the
+// case where that test is interrupted.
+var (
+	templateOnce sync.Once
+	templateName string
+)
+
+func templateFor(t *testing.T, adminDB *pgxpool.Pool, adminURL string) string {
+	t.Helper()
+	templateOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		name := fmt.Sprintf("maestro_test_%d_template", time.Now().UnixMilli())
+		ident := pgx.Identifier{name}.Sanitize()
+		if _, err := adminDB.Exec(ctx, "CREATE DATABASE "+ident); err != nil {
+			return
+		}
+		url, err := replaceDBName(adminURL, name)
+		if err != nil {
+			_, _ = adminDB.Exec(ctx, "DROP DATABASE "+ident+" WITH (FORCE)")
+			return
+		}
+		pool, err := pgxpool.New(ctx, url)
+		if err != nil {
+			_, _ = adminDB.Exec(ctx, "DROP DATABASE "+ident+" WITH (FORCE)")
+			return
+		}
+		err = db.Migrate(ctx, pool)
+		// **Closed before it is used as a template.** Postgres refuses to
+		// copy a database that has any other session connected to it, so
+		// a pool left open here would turn every later create into a
+		// failure.
+		pool.Close()
+		if err != nil {
+			_, _ = adminDB.Exec(ctx, "DROP DATABASE "+ident+" WITH (FORCE)")
+			return
+		}
+		templateName = name
+	})
+	return templateName
+}
+
 // newDatabase creates a uniquely named, empty (unmigrated) database and
 // registers its drop on test cleanup, returning its connection URL. It
 // skips the test when TEST_DATABASE_URL is unset. Both NewPool and
@@ -134,7 +188,7 @@ func admin(t *testing.T, adminURL string) *pgxpool.Pool {
 // so a caller that needs to exercise its own connect-and-migrate path (as
 // cmd/maestro's own start-up sequence does) can do so against a database
 // this package still owns the lifecycle of.
-func newDatabase(t *testing.T) (testURL, name string) {
+func newDatabase(t *testing.T, migrated bool) (testURL, name string) {
 	t.Helper()
 
 	adminURL := os.Getenv("TEST_DATABASE_URL")
@@ -156,7 +210,21 @@ func newDatabase(t *testing.T) (testURL, name string) {
 	name = fmt.Sprintf("maestro_test_%d_%s", time.Now().UnixMilli(), strings.ReplaceAll(uuid.NewString(), "-", ""))
 	ident := pgx.Identifier{name}.Sanitize()
 
-	if _, err := adminDB.Exec(ctx, "CREATE DATABASE "+ident); err != nil {
+	// **From a template that is already migrated**, when the caller wants
+	// a migrated database. Creating one and running thirteen migrations
+	// in it cost 230ms, and `internal/web` alone creates 544 of them:
+	// two minutes of a test run spent replaying the same DDL. Postgres
+	// copies a template's files instead, which is the same result in a
+	// fraction of the time and — more to the point — is the *same*
+	// schema, produced by the same migrations, once per process.
+	create := "CREATE DATABASE " + ident
+	if migrated {
+		template := templateFor(t, adminDB, adminURL)
+		if template != "" {
+			create += " TEMPLATE " + pgx.Identifier{template}.Sanitize()
+		}
+	}
+	if _, err := adminDB.Exec(ctx, create); err != nil {
 		if strings.Contains(err.Error(), "permission denied") {
 			t.Fatalf("create database %s: %v (does the TEST_DATABASE_URL user have CREATEDB?)", name, err)
 		}
@@ -190,7 +258,9 @@ func newDatabase(t *testing.T) (testURL, name string) {
 // TEST_DATABASE_URL is unset.
 func NewDatabaseURL(t *testing.T) string {
 	t.Helper()
-	testURL, _ := newDatabase(t)
+	// Unmigrated on purpose: this caller runs the real binary's own
+	// connect-and-migrate sequence, which is the thing it is testing.
+	testURL, _ := newDatabase(t, false)
 	return testURL
 }
 
@@ -199,7 +269,7 @@ func NewDatabaseURL(t *testing.T) string {
 func NewPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	testURL, name := newDatabase(t)
+	testURL, name := newDatabase(t, true)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -232,6 +302,11 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connected to database %q, want %q; TEST_DATABASE_URL was not rewritten correctly", current, name)
 	}
 
+	// The template already carries the schema, so this is a no-op that
+	// costs one query — and it is left in rather than skipped, because
+	// `Migrate` is what *defines* the schema a test runs against and a
+	// template built from a stale copy would be found here rather than
+	// three failing assertions later.
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

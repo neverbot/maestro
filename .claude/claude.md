@@ -205,6 +205,17 @@ defect during the build.
   look exactly like working code. Frontend work is not verified until
   something has opened it.
 
+### Saying and doing
+
+**"I'll go on with X" is a claim about the next tool call, not a way to
+end a message.** Announcing the next task and then stopping leaves the
+human waiting for work that was never started, and they have to ask for
+it again — which has happened more than once.
+
+So: either start the task in the same turn, or do not name it. If a turn
+genuinely has to end before the work begins, say what is blocking it
+instead of what is coming next.
+
 ### Git
 
 - Commit messages: single line, Conventional Commits. No body, no

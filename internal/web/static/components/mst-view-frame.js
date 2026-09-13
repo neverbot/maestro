@@ -43,6 +43,26 @@ function paintClass(row) {
   return "unset";
 }
 
+// RENDERER_TABLE is the one renderer whose picture is already the twin's
+// shape. Named here rather than imported from render/table.js: this
+// component knows the renderer as a word on the wire, and importing a
+// renderer module into the frame would put six of them in its graph.
+export const RENDERER_TABLE = "table";
+
+// twinWorthShowing answers whether a text twin adds anything to what is
+// already on the screen. See MstViewFrame.twin for the two cases it
+// closes, both measured.
+export function twinWorthShowing(frame) {
+  const twin = frame && frame.twin ? frame.twin : null;
+  if (!twin) return false;
+  const renderer = frame.title && typeof frame.title.renderer === "string" ? frame.title.renderer : "";
+  if (renderer === RENDERER_TABLE) return false;
+  // The twin is two tables, `nodes` and `edges`, each with its own rows.
+  return [twin.nodes, twin.edges].some(
+    (table) => table && Array.isArray(table.rows) && table.rows.length > 0,
+  );
+}
+
 export class MstViewFrame extends LitElement {
   static properties = {
     frame: { attribute: false },
@@ -353,15 +373,28 @@ export class MstViewFrame extends LitElement {
     return html`<div class="canvas"><slot></slot></div>${this.twin(frame)}`;
   }
 
-  // The twin is rendered for every answer, in the same place, whichever
-  // of the six renderers is in the slot above it — which is the whole of
-  // "every view has a text twin" (spec §8.1). It is not rendered for a
-  // refusal: there is no answer to describe, and a pair of empty tables
-  // under a panel of diagnostics would read as an answer that matched
-  // nothing, which is the one thing the frame is most careful never to
-  // let a refusal look like.
+  // The twin is rendered for every answer that needs describing, in the
+  // same place, whichever of the six renderers is in the slot above it —
+  // which is the whole of "every view has a text twin" (spec §8.1). It
+  // is not rendered for a refusal: there is no answer to describe, and a
+  // pair of empty tables under a panel of diagnostics would read as an
+  // answer that matched nothing, which is the one thing the frame is
+  // most careful never to let a refusal look like.
+  //
+  // **And not under the renderer that is already a table.** Measured on
+  // a 105-row view: a 630px table followed by a 3200px twin of the same
+  // 105 rows, in a 4251px page. The twin exists so an answer drawn as a
+  // picture can be read by somebody who cannot see the picture; the
+  // table renderer's own output is rows already, and repeating them is a
+  // page that says everything twice.
+  //
+  // **And not when it has nothing to say.** An empty answer got two
+  // header-only tables — "0 nodes" and "0 edges" with no rows — under a
+  // sentence that had already said there was nothing, which is the
+  // shape design.md forbids outright: a blank cell cannot be told from a
+  // value that failed to load.
   twin(frame) {
-    if (!frame.twin) return nothing;
+    if (!frame.twin || !twinWorthShowing(frame)) return nothing;
     return html`<mst-twin .twin=${frame.twin}></mst-twin>`;
   }
 

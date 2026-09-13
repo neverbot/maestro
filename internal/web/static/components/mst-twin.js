@@ -78,6 +78,7 @@ export class MstTwin extends LitElement {
     th,
     td {
       text-align: left;
+      box-sizing: border-box;
       height: var(--row-h);
       padding: 0 11px;
       line-height: 20px;

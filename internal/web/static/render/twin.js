@@ -47,8 +47,10 @@ import { labelFor } from "../palette.js";
 // it would fail that join silently.
 import { addressOf } from "../address.js";
 
-// ABSENT_TEXT is what a value that was not there looks like **in a
-// table**, and it is the text half of render/marks.js's absent dash.
+// ABSENT_TEXT is the fallback mark for a value that was not there and
+// has no column to be named after. It is the text half of
+// render/marks.js's absent dash; `absentTextFor` below is what a cell
+// with a column says instead.
 //
 // One spelling, one meaning, wherever this product writes an answer in
 // rows: *there was nothing here*. The twin below writes it for a
@@ -59,10 +61,10 @@ import { addressOf } from "../address.js";
 // other invent its own is the drift this module is shared to prevent —
 // the same correction render/marks.js's ABSENT_DASH already carries.
 //
-// An em dash, and never a blank cell: a blank cell is what the *empty
+// A mark, and never a blank cell: a blank cell is what the *empty
 // string* looks like, and folding the two together at the last step
 // would discard end to end what the envelope, the palette's `unset`
-// legend row and both tables keep apart. A reader sees a mark where
+// legend row and both tables keep apart. A reader sees something where
 // there is no answer and nothing where the answer is nothing.
 //
 // Because a game may legitimately hold an em dash as a value, the mark
@@ -71,6 +73,23 @@ import { addressOf } from "../address.js";
 // aValueThatLooksLikeTheAbsentMarkIsStillNotAbsent asserts is what tells
 // the two apart.
 export const ABSENT_TEXT = "—";
+
+// absentTextFor is the **word** for a value that is not there, which is
+// what the Named Absence Rule asks for: "no zone", not a dash. The
+// catalogue has said it in words since the rule was written and these
+// two tables said it with a mark, so one product spelled one rule two
+// ways.
+//
+// The em dash survives as the fallback for a cell with no column to name
+// — an edge label, where "no label" would be about the table rather than
+// about the game — and the argument the dash carried is untouched by the
+// change: a game may legitimately hold the words "no zone" as a value,
+// exactly as it may hold an em dash, so the `absent` flag stays the
+// carrier that tells the two apart and the text is never the only one.
+export function absentTextFor(column) {
+  const name = typeof column === "string" ? column.trim() : "";
+  return name === "" ? ABSENT_TEXT : "no " + name;
+}
 
 // OUTSIDE_NOTE labels the far end of a stub.
 //
@@ -254,7 +273,7 @@ function present(column, value, raw) {
 }
 
 function absent(column) {
-  return { column, text: ABSENT_TEXT, value: undefined, absent: true, outside: false, note: "" };
+  return { column, text: absentTextFor(column), value: undefined, absent: true, outside: false, note: "" };
 }
 
 function isObject(value) {

@@ -38,7 +38,7 @@
 
 import { addressOf } from "../static/address.js";
 import { UNSET_LABEL } from "../static/palette.js";
-import { ABSENT_TEXT, twinFor } from "../static/render/twin.js";
+import { ABSENT_TEXT, absentTextFor, twinFor } from "../static/render/twin.js";
 import { controlNamed } from "../static/render/controls.js";
 import {
   ASCENDING,
@@ -126,7 +126,7 @@ check("anAbsentValueIsAnEmDashNotAnEmptyCell", () => {
   const result = tableScene(envelope, { [PARAM_COLUMNS]: [BUILTIN_NAME, "zone"] });
 
   const missing = cellOf(result, "b", "zone");
-  assertEqual(missing.text, ABSENT_TEXT, "a slot that found nothing is an em dash");
+  assertEqual(missing.text, absentTextFor("zone"), "a slot that found nothing is not named");
   assertEqual(missing.absent, true, "and says so, because a game may hold an em dash as a value");
   assert(missing.text !== "", "and is emphatically not a blank cell");
 
@@ -148,7 +148,7 @@ check("theEmptyStringIsNotAnEmDash", () => {
   const empty = cellOf(result, "a", "zone");
   assertEqual(empty.text, "", "the empty string is a blank cell");
   assertEqual(empty.absent, false, "and is not an absence");
-  assertEqual(cellOf(result, "b", "zone").text, ABSENT_TEXT, "while the absent one still is");
+  assertEqual(cellOf(result, "b", "zone").text, absentTextFor("zone"), "while the absent one still is");
   assert(
     empty.text !== cellOf(result, "b", "zone").text,
     "and the two are two different cells, which is the whole of this pair",

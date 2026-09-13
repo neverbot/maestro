@@ -743,17 +743,24 @@ check("theEntityShowsDeclaredButUnsetFields", async () => {
     pathname: "/g/azeroth/e/quest/hogger",
     routes: entityRoutes({ type_key: "quest", key: "hogger", name: "Wanted: Hogger", fields: { level: 11 } }),
   });
-  const { ABSENT_TEXT } = await import("../static/render/twin.js");
+  const { absentTextFor } = await import("../static/render/twin.js");
   await load("entity");
   const rendered = text(dom.elements["entity-content"]);
   for (const field of QUEST_SCHEMA) {
     assert(rendered.includes(field.label), `the declared field ${field.key} is missing from the page`);
   }
   assert(rendered.includes("11"), "the field the entity carries is missing its value");
-  // Two absences, both wearing the twin's own mark, because the entity
-  // carries one of three declared fields.
-  const dashes = rendered.split(ABSENT_TEXT).length - 1;
-  assertEqual(dashes, 2, "a declared-and-unset field is not marked absent");
+  // Two absences, each **named** — "no repeatable", "no summary" — because
+  // the entity carries one of three declared fields. The mark used to be
+  // an em dash for all of them, which is the one spelling of the Named
+  // Absence Rule this product had that was not a word.
+  for (const field of QUEST_SCHEMA) {
+    if (field.key === "level") continue;
+    assert(
+      rendered.includes(absentTextFor(field.key)),
+      `the declared-and-unset field ${field.key} is not named as absent`,
+    );
+  }
 });
 
 check("theEntityShowsDeclaredFieldsInDeclaredOrder", async () => {

@@ -88,6 +88,9 @@ export class MstTable extends LitElement {
     th,
     td {
       border-bottom: 1px solid var(--line);
+      /* The border is inside the row, as it is in ul.catalogue: without
+         this the rule adds a pixel and a 36px token draws 37. */
+      box-sizing: border-box;
       height: var(--row-h);
       padding: 0 11px;
       line-height: 20px;
@@ -100,6 +103,7 @@ export class MstTable extends LitElement {
     thead th {
       position: sticky;
       top: 0;
+      box-sizing: border-box;
       height: var(--row-compact-h);
       background: var(--paper);
       color: var(--muted);

@@ -726,6 +726,15 @@ export const NOTICE_TOO_NARROW =
   "table below. The table is the same answer. Arranging the picture is off " +
   "until the window is wider.";
 
+// **A renderer that draws no picture takes nothing away at a narrow
+// width**, so the sentence above would be describing a loss that did not
+// happen: on a `table` view at 500px it read "too narrow to draw the
+// picture" over the same table it had drawn at 1440. A view with no
+// drawing to lose says nothing at all.
+export function narrowNotice(state) {
+  return state && state.pictured === true ? NOTICE_TOO_NARROW : "";
+}
+
 // applyWidth is the fallback, and it is two halves.
 //
 // The first half is that the twin becomes the content: the drawing goes,
@@ -761,7 +770,7 @@ export function applyWidth(state, narrow) {
       state.canvas.showArrangement(state.arrangement);
     }
   }
-  say(state.narrowEl, fell ? NOTICE_TOO_NARROW : "");
+  say(state.narrowEl, fell ? narrowNotice(state) : "");
   return fell;
 }
 

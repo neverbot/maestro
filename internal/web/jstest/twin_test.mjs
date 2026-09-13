@@ -103,7 +103,7 @@ register(new URL("./importmap_loader.mjs", import.meta.url), {
 });
 
 const { html } = await import("lit");
-const { ABSENT_TEXT, OUTSIDE_NOTE, twinFor } = await import("../static/render/twin.js");
+const { ABSENT_TEXT, OUTSIDE_NOTE, absentTextFor, twinFor } = await import("../static/render/twin.js");
 const { frameFor } = await import("../static/render/scene.js");
 const { legendFor } = await import("../static/palette.js");
 const { MstTwin, SELECT_EVENT } = await import("../static/components/mst-twin.js");
@@ -437,7 +437,7 @@ check("everyEdgeHasARowIncludingStubs", () => {
   // the projection slots make: e3 carries "" and e4 carries none.
   assertEqual(outgoing.cells[3].text, "", "an edge labelled with the empty string reads as empty");
   assertEqual(outgoing.cells[3].absent, false, "and is not absent");
-  assertEqual(incoming.cells[3].text, ABSENT_TEXT, "an edge with no label at all is absent");
+  assertEqual(incoming.cells[3].text, absentTextFor("label"), "an edge with no label at all is absent");
   assertEqual(incoming.cells[3].absent, true, "and says so");
 });
 
@@ -466,7 +466,7 @@ check("absentSlotsRenderAsAnEmDashNotBlank", () => {
   // string. Two different answers, two different cells.
   const missing = cellOf("orgrimmar", "level");
   assertEqual(missing.absent, true, "a slot the projection did not find is absent");
-  assertEqual(missing.text, ABSENT_TEXT, "and is a mark on the screen rather than a blank");
+  assertEqual(missing.text, absentTextFor("level"), "and is named on the screen rather than left blank");
   assert(missing.text.trim() !== "", "a blank cell is what the empty string looks like, and this is not that");
 
   const emptyString = cellOf("blackrock", "color_by");

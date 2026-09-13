@@ -378,3 +378,53 @@ func TestEveryAutolinkInAParagraphIsJudged(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderDocAdmitsATableAndRenderStillDoesNot pins the one difference
+// between the two renderers, in both directions.
+//
+// The documentation site publishes this repository's own pages — the
+// trait vocabulary, the route table, the field types — and half of them
+// are tables. A game's prose is a different audience with a different
+// promise: it is written by designers and agents, read in a panel this
+// product styles, and a table in it is a shape nothing here has agreed
+// to draw.
+//
+// Mutation: give `renderer` the Table extension and the second half
+// fails; take it off `docRenderer` and the first half does.
+func TestRenderDocAdmitsATableAndRenderStillDoesNot(t *testing.T) {
+	const body = "| Trait | What it means |\n| --- | --- |\n| `unlocks` | it opens something |\n"
+
+	site, err := markdown.RenderDoc(body)
+	if err != nil {
+		t.Fatalf("RenderDoc: %v", err)
+	}
+	if !strings.Contains(site, "<table") {
+		t.Errorf("the documentation site rendered a table as text: %q", site)
+	}
+	if !strings.Contains(site, "<code>unlocks</code>") {
+		t.Errorf("a cell's own markdown was not rendered: %q", site)
+	}
+
+	prose, err := markdown.Render(body)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(prose, "<table") {
+		t.Errorf("a game's prose rendered a table, which this product has never promised to draw: %q", prose)
+	}
+}
+
+// TestRenderDocKeepsTheLinkAllowlist pins that the site's renderer shares
+// the policy rather than restating it: one copy of the allowlist is the
+// whole point of `safeLinks` being a transformer.
+//
+// Mutation: drop the transformer from docRenderer and this fails.
+func TestRenderDocKeepsTheLinkAllowlist(t *testing.T) {
+	out, err := markdown.RenderDoc("[click](javascript:alert(1))")
+	if err != nil {
+		t.Fatalf("RenderDoc: %v", err)
+	}
+	if strings.Contains(strings.ToLower(out), "javascript:") {
+		t.Errorf("the site's renderer let a javascript: destination through: %q", out)
+	}
+}

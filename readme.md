@@ -214,6 +214,7 @@ browser. The data lives in a named volume and survives `dev-down`.
 ### Other targets
 
 ```bash
+make docs         # build the documentation site into site/
 make tools        # install sqlc and the linter
 make sqlc         # regenerate the database layer from internal/db/queries
 make sqlc-check   # fail if the generated code is stale
@@ -239,9 +240,8 @@ Said plainly, rather than left to be discovered:
   second replica has its own subscribers and its own budgets. A client
   sees only events published while its process has been running: there
   is no durable log and no catch-up on reconnect.
-- **No published image, no documentation site, no backups.** Backing up
-  an instance means backing up its Postgres volume, like any other
-  database.
+- **No published image and no backups.** Backing up an instance means
+  backing up its Postgres volume, like any other database.
 - **argon2id cost is fixed in code** (`Time=3`, `Memory=64MiB`,
   `Threads=2`), not configurable.
 - **Nobody has verified that the skill bundle teaches.** Its guards

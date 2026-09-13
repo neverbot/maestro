@@ -31,3 +31,8 @@ tmp-*.png
 # convenience and must not be versioned.
 .claude/skills/
 
+
+# The documentation site, built by `make docs` from files that are
+# already in the repository. Nothing commits it: GitHub Actions builds it
+# on every push and publishes that.
+/site/

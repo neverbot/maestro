@@ -113,8 +113,15 @@ artefacts written to disk are English regardless.
 - **Deployment:** Docker Compose, a reverse proxy in front. The primary
   branch is `master`. CI builds the image, smoke-tests it against a
   real Postgres, and publishes nothing: building from this repository
-  is the only way to run it. The binaries are `maestro` and
-  `maestro-skilldoc`.
+  is the only way to run it. The binaries are `maestro`,
+  `maestro-skilldoc` and `maestro-docs`.
+- **The documentation site** is built by `cmd/maestro-docs` from files
+  that are already here — the readme, the skill bundle's own pages, the
+  generated design system — and published by `.github/workflows/pages.yml`.
+  It invents no prose: a page about the product written beside the
+  product is a second description of it. `make docs-check` is in the
+  gate and fails on an internal link pointing at a page the site does not
+  have.
 
 ## The design system
 
@@ -275,7 +282,7 @@ Say these plainly rather than letting someone discover them:
   the query language was written for agents, and building one is its
   own sub-project. A person can copy an existing view and change how it
   is drawn, and nothing more.
-- **No published image, no documentation site, no backups.**
+- **No published image and no backups.**
 - **One process only.** Events fan out from an in-memory hub, not
   Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so
   a second replica has its own subscribers and its own budgets.

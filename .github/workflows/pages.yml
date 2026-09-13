@@ -1,0 +1,63 @@
+# Publishes the documentation site to GitHub Pages.
+#
+# The site is built by `cmd/maestro-docs` from files that are already in
+# this repository and already true — the readme, every page of the skill
+# bundle, the generated design system — and nothing commits it: the
+# artefact this workflow uploads is the only copy, so a page cannot drift
+# from the source it was made from.
+#
+# **It needs Pages turned on**, once, by hand: Settings → Pages → Source:
+# GitHub Actions. Until then this workflow builds the site and the deploy
+# step fails, which is the honest failure — a workflow that quietly did
+# nothing would leave `neverbot.github.io/maestro` answering 404 with
+# green ticks beside it, which is the defect that filed this work.
+name: pages
+
+on:
+  push:
+    branches: [master]
+  # So a change to the site can be published without waiting for a
+  # commit, and so the first run can be triggered the day Pages is
+  # enabled.
+  workflow_dispatch:
+
+# One deployment at a time, and a queued one waits rather than replacing
+# the running one: a half-published site is worse than a slightly old
+# one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.7"
+      # The same command `make docs` runs, with the link check the gate
+      # runs: a site whose internal links point at pages it does not have
+      # must not be published, which is exactly what happened to the
+      # product's onboarding link for a whole build.
+      - run: go run ./cmd/maestro-docs -o site -check
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

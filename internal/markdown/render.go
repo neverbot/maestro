@@ -8,6 +8,7 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 	"github.com/yuin/goldmark/util"
@@ -44,6 +45,36 @@ var renderer = goldmark.New(
 		util.Prioritized(safeLinks{}, 100),
 	)),
 )
+
+// docRenderer is the same renderer with tables, for the documentation
+// site (cmd/maestro-docs).
+//
+// **Tables are on there and off here, deliberately.** A game's prose is
+// written by designers and agents and read in a panel; a table in it is
+// a shape this product has never promised and would have to style. The
+// pages this repository publishes about itself are written by whoever
+// writes the repository, and half of them — the trait vocabulary, the
+// route table, the field types — are tables already.
+//
+// It shares `safeLinks` rather than restating the policy: the allowlist
+// is the interesting part and one copy of it is the point.
+var docRenderer = goldmark.New(
+	goldmark.WithExtensions(extension.Table),
+	goldmark.WithParserOptions(parser.WithASTTransformers(
+		util.Prioritized(safeLinks{}, 100),
+	)),
+)
+
+// RenderDoc turns one of this repository's own markdown pages into HTML
+// for the documentation site. See docRenderer for what it admits that
+// Render does not.
+func RenderDoc(body string) (string, error) {
+	var out bytes.Buffer
+	if err := docRenderer.Convert([]byte(body), &out); err != nil {
+		return "", fmt.Errorf("render markdown: %w", err)
+	}
+	return out.String(), nil
+}
 
 // safeLinks rewrites any link, image or autolink destination whose
 // scheme is not one of the three a design document has any business

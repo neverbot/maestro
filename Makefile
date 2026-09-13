@@ -1,7 +1,7 @@
 GO ?= go
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
+.PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check docs docs-check dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
 
 build:
 	$(GO) build -ldflags "-X github.com/neverbot/maestro/internal/version.Version=$(VERSION)" -o bin/maestro ./cmd/maestro
@@ -27,21 +27,38 @@ lint:
 	}
 	golangci-lint run
 
-# docs-check is deliberately not part of this gate: it would lint the
-# documentation site this project's own docs live in, and no such
-# generator exists yet in this repository (see .superpowers/plans,
-# which is plain Markdown consumed by nothing but a human reader today).
-# Adding docs-check here ahead of that generator existing would either be
+# docs-check is part of this gate now. The comment it replaces said it
+# was deliberately out of it "until the generator exists, and whoever
+# builds the generator adds docs-check to this list in the same change" —
+# which is this change: cmd/maestro-docs builds the site and checks that
+# every internal link in it resolves. The check that matters is exactly
+# the defect that filed the task: the product's onboarding link pointed
+# at a page of this site for the whole build and answered 404.
+#
+# The paragraph below is kept for its argument, which is still right
+# about what a check with no generator behind it would have been:
+# Adding docs-check ahead of that generator existing would either be
 # a no-op with a misleading name or block every commit on a tool that
-# doesn't ship anything. Whoever builds the generator adds docs-check to
-# this list in the same change.
+# doesn't ship anything.
 check:
 	@test -z "$$(gofmt -l . | tee /dev/stderr)" || (echo "gofmt found unformatted files" && exit 1)
 	$(MAKE) vet
 	$(MAKE) lint
 	$(MAKE) sqlc-check
 	$(MAKE) skill-check
+	$(MAKE) docs-check
 	$(MAKE) test
+
+# The documentation site: built from the readme, the skill bundle and the
+# generated design system, into a directory nothing commits. `docs-check`
+# builds it and fails on an internal link that points at a page the site
+# does not have — the defect that filed this task, which lived for a
+# whole build because nothing joined a link to a page.
+docs:
+	$(GO) run ./cmd/maestro-docs -o site
+
+docs-check:
+	@$(GO) run ./cmd/maestro-docs -o $${TMPDIR:-/tmp}/maestro-site-check -check
 
 run: build
 	./bin/maestro

@@ -72,6 +72,7 @@ import "../components/mst-table.js";
 import { entityBody, readEntity } from "./entity.js";
 import {
   DESTINATION_VIEWS,
+  countLabel,
   destinations,
   entityURL,
   expired,
@@ -509,6 +510,8 @@ function mount(doc, rootEl, slug, key, row, client, options) {
   // and "this window is too narrow" are two facts, and one element
   // holding both would show whichever arrived last.
   state.narrowEl = doc.getElementById("view-narrow");
+  // What the canvas is not showing, said in words under the picture.
+  state.outsideEl = doc.getElementById("view-outside");
   state.run = async () => run(state, options);
   state.redraw = (envelope) => draw(state, envelope, null, options);
   state.receive = (verdict) => receive(state, verdict);
@@ -540,7 +543,47 @@ async function draw(state, envelope, error, options) {
     return await drawPicture(state, envelope, error, options);
   } finally {
     applyWidth(state, state.narrow === true);
+    // **The fit comes after the width, and that is the bug this line
+    // closes.** It used to be the last thing inside `drawPicture`, which
+    // runs *before* this `finally` — and `watchWidth` applies the width
+    // once at mount, when `state.pictured` is still false, so the canvas
+    // is `hidden` for the whole of the first draw. A hidden element
+    // measures 0x0, `fitView` rightly answers null twice, and `fitOnce`
+    // reports false: the view stayed at the origin at 1x on every first
+    // load, and a 105-node graph drew 48 of its nodes outside a 1392x571
+    // clip with no scrollbar and no notice. Everything was correct in
+    // the module and dead at the call site, again, and only a browser
+    // could see it — measured on `marks-check/v/palette`, where calling
+    // `fitOnce` by hand afterwards brought all 105 into view.
+    await fitAfterLayout(state, options);
   }
+}
+
+// fitAfterLayout is the fit, once per view, now that the canvas is
+// whatever size the window has decided. A narrow window draws no
+// picture at all, so there is nothing to fit and nothing to mark done:
+// widening it redraws, and the fit happens then.
+export async function fitAfterLayout(state, options = {}) {
+  if (state.fitted || state.narrow === true || state.pictured !== true) return;
+  const scene = state.scene;
+  const marks = scene && Array.isArray(scene.marks) ? scene.marks : null;
+  if (marks === null) return;
+  state.fitted = await fitOnce(state.canvas, marks, { frame: state.frame, settle: options.settle });
+  sayOutside(state);
+}
+
+// sayOutside is the admission beside the fit: how much of the answer is
+// off the canvas right now. A fitted view says nothing, which is the
+// common case and the quiet one.
+export function sayOutside(state) {
+  const canvas = state.canvas;
+  if (!canvas || typeof canvas.outside !== "function") return "";
+  const counted = canvas.outside();
+  const text = counted.hidden === 0
+    ? ""
+    : counted.hidden + " of " + countLabel(counted.total, "node", "nodes") + " are outside the view.";
+  say(state.outsideEl, text);
+  return text;
 }
 
 async function drawPicture(state, envelope, error, options) {
@@ -647,12 +690,9 @@ async function drawPicture(state, envelope, error, options) {
   });
   state.canvas.showArrangement(state.arrangement);
 
-  // Fitted once, on the first drawing of this view, and *last*: the
-  // measurement it needs is a laid-out canvas, and everything above this
-  // line is what puts one on the screen.
-  if (!state.fitted) {
-    state.fitted = await fitOnce(state.canvas, scene.marks, { frame: state.frame, settle: options.settle });
-  }
+  // The fit is *not* here. It needs a canvas the window has already
+  // decided to show, and that decision is `applyWidth`, which runs in
+  // `draw`'s finally — after this function returns. See fitAfterLayout.
   return state;
 }
 
@@ -890,7 +930,7 @@ export function wire(doc, panelEl, slug, client, state) {
 
   surface.addEventListener("pointerdown", (event) => {
     const address = addressAt(event.target);
-    press = { address, at: { x: event.clientX, y: event.clientY }, dragging: false };
+    press = { address, at: { x: event.clientX, y: event.clientY }, dragging: false, panning: false };
   });
 
   surface.addEventListener("pointermove", (event) => {
@@ -916,7 +956,9 @@ export function wire(doc, panelEl, slug, client, state) {
     // A press that never moved: the node is selected and its panel
     // opens over the canvas. The canvas stays mounted — losing an
     // arrangement to read a field would make reading fields expensive.
-    if (held.address === null) return;
+    // A press that panned the view is not a click either: it began on
+    // nothing and ended somewhere else.
+    if (held.address === null || held.panning === true) return;
     state.arrangement.select(held.address, { shift: event.shiftKey === true });
     await openPanel(doc, panelEl, slug, client, held.address);
   });
@@ -1005,10 +1047,38 @@ export function wire(doc, panelEl, slug, client, state) {
   });
 
   // Pan and zoom, the canvas's own two transforms.
+  //
+  // **The wheel asks for a modifier, and the page keeps its scroll.**
+  // It used to `preventDefault()` every wheel event over the canvas, so
+  // on a page 7000px tall the one gesture a reader makes to move down it
+  // did nothing but zoom, from the origin rather than from the pointer.
+  // A modifier is the convention every map in every browser uses.
   surface.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
     const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
     canvas.zoomTo(canvas.view.k * factor);
+    sayOutside(state);
+  });
+
+  // **Dragging empty canvas moves the picture.** `panBy` has existed
+  // since the canvas was written and nothing called it: a diagram bigger
+  // than its box could not be moved at all, by any gesture, and the only
+  // reason that was survivable is that the fit above now starts every
+  // view showing the whole answer. A reader who zooms in still needs to
+  // get to the rest of it.
+  //
+  // It is the same press the drag above tracks — a press that began on a
+  // node moves the node, a press that began on nothing moves the view —
+  // so the two can never both be running.
+  surface.addEventListener("pointermove", (event) => {
+    if (press === null || press.address !== null || press.dragging) return;
+    if (state.ground && state.ground.placing) return;
+    const moved = Math.abs(event.clientX - press.at.x) + Math.abs(event.clientY - press.at.y);
+    if (!press.panning && moved < DRAG_THRESHOLD_PX) return;
+    press.panning = true;
+    canvas.panBy(event.movementX ?? 0, event.movementY ?? 0);
+    sayOutside(state);
   });
 
   // A hidden tab is work nobody is looking at, and the client defers a

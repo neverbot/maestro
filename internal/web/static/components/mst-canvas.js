@@ -81,6 +81,7 @@ import {
   PLACEABLE_LAYERS,
   SVG_NS,
   isDrawableHref,
+  offscreen,
 } from "../render/scene.js";
 // The tail's texture. Its *name* is palette.js's, for the reason that
 // module gives: the paint and its definition have to agree, and there is
@@ -452,6 +453,7 @@ export class MstCanvas extends HTMLElement {
     this.doc = options.document || this.ownerDocument || globalThis.document;
     this.view = { x: 0, y: 0, k: 1 };
     this.tree = null;
+    this.scene = null;
     this.drag = null;
     // The layout budget's band and its retry action are declared in
     // layout/budget.js in scene.js's vocabulary and are deliberately not
@@ -477,11 +479,36 @@ export class MstCanvas extends HTMLElement {
   // path a drag deliberately does not take.
   draw(scene) {
     this.tree = emitScene(scene, { document: this.doc });
+    // Held so `fit` and `outside` can answer without the caller passing
+    // the scene back in: the canvas is the only thing that knows both
+    // the picture and the box it has to fit in.
+    this.scene = scene;
     const host = this.shell.surfaceHost;
     while (host.childNodes.length > 0) host.removeChild(host.childNodes[host.childNodes.length - 1]);
     host.appendChild(this.tree.root);
     this.applyView();
     return this.tree;
+  }
+
+  // surfaceSize is the box the picture has to live in. A canvas that is
+  // `hidden`, or that the frame has not laid out yet, reports zero — and
+  // that zero is the whole of the defect this pair of methods exists
+  // around, so it is answered rather than hidden.
+  surfaceSize() {
+    const host = this.shell.surfaceHost;
+    const box = typeof host.getBoundingClientRect === "function" ? host.getBoundingClientRect() : null;
+    return {
+      width: box && Number.isFinite(box.width) ? box.width : 0,
+      height: box && Number.isFinite(box.height) ? box.height : 0,
+    };
+  }
+
+  // outside is how much of the answer the reader cannot see, for the
+  // sentence the frame says out loud. It stays true after a deliberate
+  // zoom: a designer who has zoomed in is looking at part of the answer
+  // on purpose and should still be told which part.
+  outside() {
+    return offscreen(this.scene, this.view, this.surfaceSize());
   }
 
   // setLayoutResult carries budget.js's answer onto the surface that

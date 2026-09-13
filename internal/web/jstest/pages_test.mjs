@@ -1264,6 +1264,71 @@ check("aViewOpensFittedEvenWhenTheFrameHasNotLaidOutYet", async () => {
   assert(canvas.view.x !== 0 || canvas.view.y !== 0, "and it panned off the origin");
 });
 
+// **The fit has to happen when the canvas has a size, and the canvas has
+// no size until the window's width has decided there is a picture.**
+//
+// This is the call site, and the call site was the bug. `fitOnce` was
+// called at the end of `drawPicture`, which runs *before* `draw`'s
+// `finally` — and `watchWidth` applies the width once at mount, when
+// `state.pictured` is still false, so the canvas is `hidden` for the
+// whole of the first draw. A hidden element measures 0x0, the fit
+// answered null twice and reported false, and every view opened at the
+// origin at 1x: on a real 105-node view, 48 nodes drawn outside a
+// 1392x571 clip with no scrollbar and no notice.
+//
+// The three checks above hold `fitOnce` itself and stayed green through
+// all of it, which is this repository's standing failure: correct in the
+// module, dead at the call site.
+check("theFitWaitsForTheWidthToDecideThereIsAPicture", async () => {
+  const view = await load("view");
+  const canvas = fakeCanvas([{ width: 800, height: 600 }]);
+  canvas.outside = () => ({ total: 2, hidden: 0 });
+  const outsideEl = fakeElement("p");
+  const state = {
+    canvas,
+    scene: { marks: FIT_MARKS },
+    pictured: true,
+    narrow: false,
+    outsideEl,
+  };
+  await view.fitAfterLayout(state, { settle: async () => {} });
+  assertEqual(state.fitted, true, "a drawn picture in a wide window was not fitted");
+  assert(canvas.view.k > 0 && canvas.view.k <= view.FIT_MAX_ZOOM, "it zoomed within the cap");
+  assertEqual(outsideEl.textContent, "", "a fitted view claimed something was outside it");
+});
+
+check("aNarrowWindowFitsNothingAndDoesNotRecordItself", async () => {
+  const view = await load("view");
+  const canvas = fakeCanvas([{ width: 800, height: 600 }]);
+  const narrow = { canvas, scene: { marks: FIT_MARKS }, pictured: true, narrow: true };
+  await view.fitAfterLayout(narrow, { settle: async () => {} });
+  assertEqual(narrow.fitted, undefined, "a window with no drawing in it recorded a fit");
+  assertEqual(canvas.measured, 0, "and measured a canvas that is not on screen");
+
+  // The same for a renderer that drew a table rather than a picture.
+  const tabular = { canvas, scene: { marks: FIT_MARKS }, pictured: false, narrow: false };
+  await view.fitAfterLayout(tabular, { settle: async () => {} });
+  assertEqual(tabular.fitted, undefined, "a table view recorded a fit it never needed");
+});
+
+// **A picture that does not contain its answer says so.** Fitting is the
+// fix; this is the admission, for the designer who has zoomed in on
+// purpose and for the view that could not be fitted at all.
+check("aViewThatIsNotShowingEverythingSaysHowMuch", async () => {
+  const view = await load("view");
+  const outsideEl = fakeElement("p");
+  const said = view.sayOutside({
+    canvas: { outside: () => ({ total: 105, hidden: 48 }) },
+    outsideEl,
+  });
+  assertEqual(said, "48 of 105 nodes are outside the view.", "the sentence did not name both numbers");
+  assertEqual(outsideEl.hidden, false, "and it was not shown");
+
+  const quiet = fakeElement("p");
+  view.sayOutside({ canvas: { outside: () => ({ total: 105, hidden: 0 }) }, outsideEl: quiet });
+  assertEqual(quiet.textContent, "", "a view showing everything still said something");
+});
+
 check("aFitThatCouldNotMeasureSaysSoRatherThanRecordingItself", async () => {
   const view = await load("view");
   const canvas = fakeCanvas([{ width: 0, height: 0 }]);

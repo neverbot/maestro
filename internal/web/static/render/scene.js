@@ -998,6 +998,44 @@ export const MARK_ORIGINS = {
 // `data:` document with a script in it, an off-instance host on a
 // self-hosted server with no outbound network — is refused here rather
 // than argued about at six call sites.
+// --- What a view does not show ---------------------------------------
+
+// offscreen counts the nodes a view does not show.
+//
+// **The picture lies by omission.** Measured on a 105-node view whose
+// fit had silently failed: 48 nodes drew outside a 1392x571 canvas with
+// `overflow: hidden`, no scrollbar and no notice, and the result looks
+// exactly like a complete diagram — the worst shape a failure can have
+// on a screen whose job is "is anything missing".
+//
+// Fitting is the fix and this is the admission: a designer who has
+// zoomed in is looking at part of the answer on purpose and should still
+// be told which part. It lives here, beside the marks it counts, and the
+// arithmetic is pure so a harness can drive it.
+export function offscreen(scene, view, size) {
+  const marks = Array.isArray(scene) ? scene : Array.isArray(scene && scene.marks) ? scene.marks : [];
+  const width = size && Number.isFinite(size.width) ? size.width : 0;
+  const height = size && Number.isFinite(size.height) ? size.height : 0;
+  const at = view && typeof view === "object" ? view : { x: 0, y: 0, k: 1 };
+  const k = Number.isFinite(at.k) && at.k > 0 ? at.k : 1;
+  let total = 0;
+  let hidden = 0;
+  for (const mark of marks) {
+    // Nodes only: an edge is shown by its endpoints and a label by the
+    // thing it names, so counting those would report one missing node
+    // three times.
+    if (!mark || mark.kind !== MARK_RECT || typeof mark.key !== "string" || mark.key === "") continue;
+    total += 1;
+    if (width <= 0 || height <= 0) continue;
+    const left = mark.x * k + (at.x ?? 0);
+    const top = mark.y * k + (at.y ?? 0);
+    const right = left + (mark.w ?? 0) * k;
+    const bottom = top + (mark.h ?? 0) * k;
+    if (right < 0 || bottom < 0 || left > width || top > height) hidden += 1;
+  }
+  return { total, hidden };
+}
+
 export function isDrawableHref(value) {
   if (typeof value !== "string" || value.length < 2) return false;
   if (!value.startsWith("/") || value.startsWith("//")) return false;

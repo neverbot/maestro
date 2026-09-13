@@ -50,6 +50,10 @@
      this is where pages/view.js says so. It carries no words of its
      own for the same reason nothing else in this shell does. -->
 <p class="notice" id="view-narrow" hidden></p>
+<!-- What the canvas is not showing. It is filled by pages/view.js after
+     the fit, and a fitted view leaves it empty: a picture that contains
+     its whole answer has nothing to admit. -->
+<p class="muted" id="view-outside" hidden></p>
 <div id="view-root"></div>
 <!-- The only thing this page says for itself, and only when the view
      could not be read at all: the frame needs an envelope or a refusal

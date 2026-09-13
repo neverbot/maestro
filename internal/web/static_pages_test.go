@@ -437,7 +437,15 @@ func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 	// The `finally` is the point and not the call: a redraw that threw
 	// must still leave the fallback applied, and a call placed after the
 	// three returns of drawPicture would miss two of them.
-	if !regexp.MustCompile(`(?s)finally\s*\{\s*applyWidth\(state, state\.narrow === true\);\s*\}`).MatchString(src) {
+	//
+	// **First in the block, and not alone in it.** This used to require
+	// the `finally` to contain nothing else, which is a shape and not a
+	// property: the fit was later moved in beside it, precisely because
+	// it has to run *after* the width decides whether the canvas is on
+	// screen (static_view_fit_test.go holds that ordering). What matters
+	// here is that the width is applied on every exit, including a throw,
+	// and that nothing runs before it.
+	if !regexp.MustCompile(`(?s)finally\s*\{\s*applyWidth\(state, state\.narrow === true\);`).MatchString(src) {
 		t.Error("draw no longer re-applies the fallback in a finally: a redraw would put the drawing back and re-arm the writes")
 	}
 	if !strings.Contains(src, "state.arrangement.setDrawn(!fell);") {

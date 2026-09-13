@@ -229,7 +229,14 @@ type RouteStep struct {
 	EntityID   *uuid.UUID `json:"entity_id"`
 	EntityType string     `json:"entity_type"`
 	Key        string     `json:"key"`
-	Note       string     `json:"note"`
+	// Name is the entity's own name, carried so a route can be read by a
+	// person. A step is *written* by key, and the screen showing one had
+	// nothing else to print: it listed `body_on_the_rocks` where every
+	// other list in the product lists "The body on the rocks". It is
+	// empty when the step names an entity this game no longer has, which
+	// is the case a route check exists to find.
+	Name string `json:"name,omitempty"`
+	Note string `json:"note"`
 }
 
 // RouteStatus is the three-state health of a route, and the three are
@@ -587,9 +594,13 @@ func (s *Service) routeFromRow(ctx context.Context, projectID uuid.UUID, row dbq
 	}
 	out.Steps = make([]RouteStep, 0, len(steps))
 	for _, step := range steps {
+		name := ""
+		if step.EntityName != nil {
+			name = *step.EntityName
+		}
 		out.Steps = append(out.Steps, RouteStep{
 			Position: step.Position, EntityID: step.EntityID,
-			EntityType: step.EntityTypeKey, Key: step.EntityKey, Note: step.Note,
+			EntityType: step.EntityTypeKey, Key: step.EntityKey, Name: name, Note: step.Note,
 		})
 	}
 	current, err := s.q.GetDesignVersion(ctx, projectID)

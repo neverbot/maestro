@@ -549,8 +549,9 @@ func (q *Queries) ListRelationsByIDs(ctx context.Context, arg ListRelationsByIDs
 }
 
 const listRouteStepsByRouteID = `-- name: ListRouteStepsByRouteID :many
-SELECT s.position, s.entity_id, s.entity_type_key, s.entity_key, s.note
+SELECT s.position, s.entity_id, s.entity_type_key, s.entity_key, s.note, e.name AS entity_name
 FROM route_steps s
+LEFT JOIN entities e ON e.id = s.entity_id AND e.project_id = s.project_id
 WHERE s.project_id = $1::uuid AND s.route_id = $2::uuid
 ORDER BY s.position
 `
@@ -566,11 +567,22 @@ type ListRouteStepsByRouteIDRow struct {
 	EntityTypeKey string
 	EntityKey     string
 	Note          string
+	EntityName    *string
 }
 
 // One route's steps in order, addressed by the route's id and this
 // game's id. entity_id is nullable and a null is a tombstone; the
 // stored key pair beside it is what a check reports as missing or moved.
+// The entity's **name** comes back with it, by a left join, because a
+// step is written by key and read by a person. Without it the route
+// screen could only show `body_on_the_rocks` where every other list in
+// the product shows "The body on the rocks", and the alternative — the
+// client looking each step up — is one request per step for a fact this
+// query already has its hands on.
+//
+// LEFT, not INNER: a step whose entity has been removed is exactly what
+// a route check is for, and an inner join would drop the row that the
+// verdict is about.
 func (q *Queries) ListRouteStepsByRouteID(ctx context.Context, arg ListRouteStepsByRouteIDParams) ([]ListRouteStepsByRouteIDRow, error) {
 	rows, err := q.db.Query(ctx, listRouteStepsByRouteID, arg.ProjectID, arg.RouteID)
 	if err != nil {
@@ -586,6 +598,7 @@ func (q *Queries) ListRouteStepsByRouteID(ctx context.Context, arg ListRouteStep
 			&i.EntityTypeKey,
 			&i.EntityKey,
 			&i.Note,
+			&i.EntityName,
 		); err != nil {
 			return nil, err
 		}

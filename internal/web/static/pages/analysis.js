@@ -333,13 +333,50 @@ function unreachableSection(doc, slug, reason, findings) {
 // it currently declares, which is the list the recovery needs in front
 // of it — the error carries it rather than pointing at it for exactly
 // this reason.
+// adviceForDesigner keeps the words a designer would set and drops the
+// call an agent would make.
+//
+// The engine's advice quotes every admitted trait and every admitted
+// role, so the quoted terms are the vocabulary itself, generated from
+// the same columns that validate a write. Everything around them is
+// about a tool this reader does not have.
+export function adviceForDesigner(advice) {
+  const quoted = String(advice ?? "").match(/"[^"]+"/g) || [];
+  const words = [...new Set(quoted.map((term) => term.slice(1, -1)).filter((term) => term !== ""))];
+  if (words.length === 0) return "";
+  return "A relation type says what it means to this analysis by declaring what it does — " +
+    words.join(", ") + " — and nothing on this page declares one. An agent does, over MCP.";
+}
+
+// One finding, as a row. Lifted out of the painter so the pager can
+// append to a list the painter built.
+export function orphanRow(doc, slug, orphan) {
+  return row(doc, {
+    label: orphan.name || orphan.key,
+    key: orphan.key,
+    cells: [
+      { text: orphan.entity_type ?? "" },
+      { text: String(orphan.in_degree ?? 0), numeric: true },
+      { text: String(orphan.out_degree ?? 0), numeric: true },
+    ],
+    count: "",
+    href: entityURL(slug, orphan.entity_type ?? "", orphan.key ?? ""),
+  });
+}
+
 export function showUndeclared(doc, slug, error) {
   say(el(doc, "undeclared-head"), UNDECLARED_HEAD);
   say(el(doc, "undeclared-body"), UNDECLARED_BODY);
-  // The advice is the engine's own, generated from the vocabulary rather
-  // than written here, so it cannot promise a word the column refuses.
   const details = error && error.details ? error.details : {};
-  say(el(doc, "undeclared-advice"), String(details.advice ?? ""));
+  // **The vocabulary is the engine's; the sentence is this screen's.**
+  // The advice on the wire is written for an agent — it names
+  // `relation_types.upsert` and reads as a call to make — and it was
+  // rendered verbatim to a designer, 470 characters of it, inside a
+  // negative state whose own spec says "never a tutorial: a person
+  // reading it has no API". What a designer needs from it is the
+  // vocabulary, which is generated from the columns and cannot promise a
+  // word they refuse, so that is what is kept.
+  say(el(doc, "undeclared-advice"), adviceForDesigner(String(details.advice ?? "")));
   const box = el(doc, "undeclared");
   if (box) box.hidden = false;
 
@@ -512,10 +549,40 @@ export async function analysisPage(opened) {
   // The mode is this screen's one control, and exactly one is selected.
   let mode = ORPHAN_MODES[0];
   const modesEl = el(doc, "orphans-modes");
-  const runOrphans = report(doc, opened.slug, "orphans", () => opened.client.analysisOrphans({ mode: mode.mode }), (result, parts) => {
+  // **The pager the shell has always carried and no code ever read.**
+  // The engine pages this report at fifty with a `next_cursor`, and the
+  // button sat in analysis.html referenced by nothing: a game with three
+  // hundred isolated entities read "50 entities are connected to
+  // nothing" with no caveat and no way to the rest. Held here rather
+  // than inside the painter because a cursor belongs to a mode, and
+  // changing the mode starts the report again.
+  let orphanCursor = null;
+  let orphanShown = 0;
+  const orphansMoreEl = el(doc, "orphans-more");
+  const runOrphans = report(doc, opened.slug, "orphans", () => opened.client.analysisOrphans(
+    orphanCursor === null ? { mode: mode.mode } : { mode: mode.mode, cursor: orphanCursor },
+  ), (result, parts) => {
     const findings = Array.isArray(result.orphans) ? result.orphans : [];
-    // The sentence this mode's answer actually makes.
-    say(parts.verdict, findings.length === 0 ? mode.clean : mode.found(findings.length));
+    const appending = orphanCursor !== null;
+    orphanShown = appending ? orphanShown + findings.length : findings.length;
+    orphanCursor = typeof result.next_cursor === "string" && result.next_cursor !== "" ? result.next_cursor : null;
+    // The sentence this mode's answer actually makes, and — while there
+    // is more to fetch — the fact that it is a floor rather than a
+    // count.
+    say(parts.verdict, orphanShown === 0
+      ? mode.clean
+      : mode.found(orphanShown) + (orphanCursor === null ? "" : " So far: there are more than this."));
+    if (orphansMoreEl) {
+      orphansMoreEl.hidden = orphanCursor === null;
+      orphansMoreEl.disabled = false;
+    }
+    if (appending) {
+      const existing = parts.body.querySelector ? parts.body.querySelector("ul.catalogue") : null;
+      if (existing) {
+        for (const orphan of findings) existing.append(orphanRow(doc, opened.slug, orphan));
+        return;
+      }
+    }
     parts.body.replaceChildren();
     const list = doc.createElement("ul");
     list.className = "catalogue wide";
@@ -528,21 +595,7 @@ export async function analysisPage(opened) {
         cells: [{ text: "Type" }, { text: "Leads in", numeric: true }, { text: "Leads out", numeric: true }],
       }),
     );
-    for (const orphan of findings) {
-      list.append(
-        row(doc, {
-          label: orphan.name || orphan.key,
-          key: orphan.key,
-          cells: [
-            { text: orphan.entity_type ?? "" },
-            { text: String(orphan.in_degree ?? 0), numeric: true },
-            { text: String(orphan.out_degree ?? 0), numeric: true },
-          ],
-          count: "",
-          href: entityURL(opened.slug, orphan.entity_type ?? "", orphan.key ?? ""),
-        }),
-      );
-    }
+    for (const orphan of findings) list.append(orphanRow(doc, opened.slug, orphan));
     parts.body.append(scroller(doc, list));
     const excluded = Array.isArray(result.excluded_relation_types) ? result.excluded_relation_types : [];
     if (excluded.length > 0) {
@@ -571,10 +624,21 @@ export async function analysisPage(opened) {
         for (const other of modesEl.querySelectorAll("button")) {
           other.setAttribute("aria-pressed", String(other === chip));
         }
+        // A new mode is a new report: the cursor belongs to the one it
+        // was issued for, and the server refuses one carried across.
+        orphanCursor = null;
+        orphanShown = 0;
         runOrphans();
       });
       modesEl.append(chip);
     }
+  }
+
+  if (orphansMoreEl) {
+    orphansMoreEl.addEventListener("click", () => {
+      orphansMoreEl.disabled = true;
+      runOrphans();
+    });
   }
 
   return opened;

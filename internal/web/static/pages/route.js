@@ -94,10 +94,24 @@ export function paintVerdict(doc, slug, route) {
   // The negative half: five `ok`s from a check that walked nothing and
   // five from one that walked four hundred edges are the same answer
   // without this line.
+  //
+  // **And what the walk did not reach.** `truncated` and `depth_limited`
+  // have always been in this payload and this page read neither, so
+  // "Every step held." could stand over a walk that stopped early — on
+  // the one analysis screen with no truncation component, while its
+  // sibling has one. Two of eleven fields were read; these are the two
+  // that change what the verdict means.
   const parts = [];
   if (Number.isFinite(check.edges_walked)) parts.push("followed " + countLabel(check.edges_walked, "edge", "edges"));
   if (Number.isFinite(check.steps_checked)) parts.push("over " + countLabel(check.steps_checked, "step", "steps"));
-  say(walkedEl, parts.length === 0 ? "" : "This check " + parts.join(" ") + ".");
+  const cut = [];
+  if (check.depth_limited === true) cut.push("stopped at the depth it was willing to walk");
+  if (check.truncated === true) cut.push("stopped at the number of rows it was willing to read");
+  const sentence = parts.length === 0 ? "" : "This check " + parts.join(" ") + ".";
+  const caveat = cut.length === 0
+    ? ""
+    : " It " + cut.join(" and ") + ", so a step it did not reach is not a step that held.";
+  say(walkedEl, sentence === "" && caveat === "" ? "" : (sentence + caveat).trim());
 }
 
 // paintSteps draws **one table**: the ordered claim and the verdict at
@@ -122,7 +136,7 @@ export function paintSteps(doc, slug, route) {
   if (steps.length > 0) {
     listEl.append(
       headerRow(doc, {
-        label: "Kind",
+        label: "Step",
         key: "key",
         cells: [{ text: "Verdict" }, { text: "Blocked by" }],
       }),
@@ -133,15 +147,14 @@ export function paintSteps(doc, slug, route) {
     const blockers = Array.isArray(found && found.blockers) ? found.blockers : [];
     listEl.append(
       row(doc, {
-        // **The two columns were swapped against every other list in the
-        // product.** A machine key was set in the serif the game's own
-        // words wear, and the type — the game's word — was in the mono
-        // slot for things a person copies. A step's entity *name* would
-        // be better than either, and the engine does not send one:
-        // `last_check.steps` carries the key and the type and nothing
-        // else, so the fix that would read best is a change to the
-        // engine and this is the honest reading of what arrives.
-        label: step.entity_type || "",
+        // The entity's own name, which the engine now sends with the
+        // step (`analysis.RouteStep.Name`). This page listed
+        // `body_on_the_rocks` in the serif the game's words wear, with
+        // the type in the mono slot a person copies from: the two
+        // columns swapped, on the one screen that names four entities in
+        // a row. A step whose entity is gone has no name, and the key is
+        // then the only true thing to show.
+        label: step.name || step.key || "",
         key: step.key || "",
         cells: [
           found
@@ -219,6 +232,9 @@ export async function routePage(opened) {
     { label: name },
   ]);
   say(metaEl, metaLine(route));
+  // The sentence saying what this claim is about, which the server has
+  // always carried and no screen ever drew.
+  say(doc.getElementById("route-about"), String(route.description ?? ""));
 
   // Above the claim, not below it: a reader who scrolls past a caveat
   // has already believed what it qualifies.

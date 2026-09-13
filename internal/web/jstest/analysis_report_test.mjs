@@ -27,9 +27,8 @@ globalThis.document = {
   createElement: () => ({ append() {}, setAttribute() {}, addEventListener() {}, classList: { add() {} } }),
 };
 
-const { cyclesVerdict, walkedLine, gateLine, CYCLES_CLEAN, CONTAINMENT_CLEAN } = await import(
-  "../static/pages/analysis.js"
-);
+const { cyclesVerdict, walkedLine, gateLine, adviceForDesigner, CYCLES_CLEAN, CONTAINMENT_CLEAN } =
+  await import("../static/pages/analysis.js");
 
 let failures = 0;
 function check(what, got, want) {
@@ -104,6 +103,25 @@ check(
   "It followed leads_to: gate (because you asked for it).",
 );
 check("no semantics, no sentence", gateLine({}), "");
+
+// **The refusal's advice is written for an agent.** It names
+// `relation_types.upsert` and reads as a call to make; a designer has no
+// API, which the negative state's own spec says in as many words. What
+// survives is the vocabulary, which the engine generates from the same
+// columns that validate a write.
+check(
+  "the vocabulary survives and the tool call does not",
+  adviceForDesigner(
+    'Declare analysis_traits on the relation types that gate progression — relation_types.upsert takes ' +
+      'them, from "prerequisite_of", "unlocks", "containment" — or set a semantic_role of "prerequisite", ' +
+      '"unlock", which this engine translates into traits.',
+  ),
+  "A relation type says what it means to this analysis by declaring what it does — " +
+    "prerequisite_of, unlocks, containment, prerequisite, unlock — and nothing on this page declares one. " +
+    "An agent does, over MCP.",
+);
+check("no vocabulary, no sentence", adviceForDesigner(""), "");
+check("advice with nothing quoted says nothing", adviceForDesigner("Declare some traits."), "");
 
 if (failures > 0) {
   console.error(failures + " assertion(s) failed");

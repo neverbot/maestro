@@ -29,7 +29,12 @@
 <main class="page picker">
 <h1>Your games</h1>
 <p class="muted" id="status" aria-live="polite">Loading your games…</p>
-<ul class="catalogue games" id="games" hidden></ul>
+<!-- The picker's rows take the same scroller every other listing has:
+     a 67-character game name exploded a row from 36px to 221px at 500px,
+     which is the widest a row in this product has ever been. -->
+<div class="scroller">
+  <ul class="catalogue games wide" id="games" hidden></ul>
+</div>
 
 <!-- The first thing a brand-new account sees, in the same shape as every
      other empty state in the product. It was a bare sentence, which made

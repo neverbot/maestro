@@ -1228,9 +1228,29 @@ input.refused:focus {
    than the page: capping the page centred the whole screen in the window
    while the header's wordmark stayed at the left edge, which made the two
    look like different pages. */
-.picker ul.games,
+/* **The cap is on the scroller, not on the list inside it.** Capping the
+   list meant that at 500px the grid could not grow past 46rem, so the
+   name track was compressed and a long game name wrapped to a 221px row
+   — the widest row this product has ever drawn — while the scroller
+   beside it had nothing to scroll. The scroller is what the window
+   narrows; the list keeps its own minimum and slides. */
+.picker .scroller,
 .picker #new-game {
   max-width: 46rem;
+}
+
+/* **A name and its own address, side by side.** The shared row carries
+   six tracks and this list fills two of them, so a `1fr` name track
+   stretched to 562px for twenty characters and put the slug 558px from
+   the name it belongs to. The component stays shared; the track set is
+   this list's own. */
+.picker ul.games {
+  /* `minmax(0, max-content)`, not a bare `max-content`: the bare form
+     cannot shrink, so a long name took 666px of a 736px grid and left
+     the slug 20px to render in — a `code` broken one character per line,
+     140px tall. The name asks for its natural width and gives it up
+     before anything else has to. */
+  grid-template-columns: minmax(0, max-content) auto auto auto auto 1fr;
 }
 
 ul.games a { color: inherit; }
@@ -1386,6 +1406,13 @@ ul.catalogue li summary { position: relative; }
 ul.catalogue a { text-decoration: none; }
 ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
+.catalogue-key,
+.catalogue-count {
+  /* A slug is one word and never a paragraph: with a narrow track it
+     broke one character per line and made a 140px row. */
+  white-space: nowrap;
+}
+
 .catalogue-label,
 .catalogue-key,
 .catalogue-count {
@@ -1394,7 +1421,19 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   line-height: 20px;
 }
 
-.catalogue-label { font-weight: 600; font-family: var(--serif); }
+/* **A row is one line, at every width.** A long name wrapped instead:
+   measured at 500px, a 67-character game name made a 221px row — the
+   tallest this product has ever drawn — and a 62-character entity name
+   did the same inside a lane. The stated invariant is that a row stays
+   36px and that wide content scrolls in its own container, so the name
+   keeps its line and the ellipsis says it has more to it. */
+.catalogue-label {
+  font-weight: 600;
+  font-family: var(--serif);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .catalogue-key {
   font-family: var(--mono);

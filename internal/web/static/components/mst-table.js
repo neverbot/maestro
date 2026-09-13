@@ -79,18 +79,32 @@ export class MstTable extends LitElement {
        boundary and a stripe is a decoration that competes with the
        game's own colour, which is the one channel this interface has
        already given away. */
+    /* **The row is the product's row.** These were 31.6px against a
+       36px token, beside a twin at 29.4px and a catalogue at 36: one
+       shape with three heights, in three files. The height is the token
+       and the padding is horizontal only, exactly as ul.catalogue does
+       it, because a cell carrying a chip is otherwise a pixel taller
+       than one that does not. */
     th,
     td {
       border-bottom: 1px solid var(--line);
-      padding: 0.3rem 0.6rem;
+      height: var(--row-h);
+      padding: 0 11px;
+      line-height: 20px;
       text-align: left;
       font-weight: 400;
     }
+    /* The Label role, stated rather than inherited: a header cell takes
+       its column's font, so a name column set in the serif gave the
+       product a header row with two typefaces in it, side by side. */
     thead th {
       position: sticky;
       top: 0;
+      height: var(--row-compact-h);
       background: var(--paper);
       color: var(--muted);
+      font: 600 0.75rem/20px var(--sans);
+      letter-spacing: 0.03em;
       border-bottom: 1px solid var(--line-strong);
     }
     /* A group's sub-header is sticky too, under the column header, so a

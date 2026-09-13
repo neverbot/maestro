@@ -72,14 +72,20 @@ export class MstTwin extends LitElement {
       font-family: var(--mono);
       font-size: 0.8rem;
     }
+    /* The product's row height, as the catalogue and the table renderer
+       have it: these were 29.4px against a 36px token, which made one
+       shape three heights across three files. */
     th,
     td {
       text-align: left;
-      padding: 0.25rem 0.75rem;
+      height: var(--row-h);
+      padding: 0 11px;
+      line-height: 20px;
       border-bottom: 1px solid var(--line);
-      vertical-align: top;
+      vertical-align: middle;
     }
     th {
+      height: var(--row-compact-h);
       color: var(--muted);
       font-weight: normal;
       font-family: var(--mono);

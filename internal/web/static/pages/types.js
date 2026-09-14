@@ -8,9 +8,11 @@
 // entities renders exactly as fast as one with four.
 //
 // An entity type is a link to its own catalogue of entities; a relation
-// type is not, because there is no page of edges — an edge is read
-// beside the entity it touches, on the entity page, where both of its
-// ends are.
+// type is a link to its own page, which says what it may join, what the
+// analysis engine makes of it and what its edges carry. There is still
+// no page *of edges* — an edge is read beside the entity it touches —
+// and that is a different thing from the type's own declaration, which
+// until now could be read nowhere.
 
 import {
   DESTINATION_CATALOGUE,
@@ -21,6 +23,7 @@ import {
   fill,
   gameURL,
   openGame,
+  relationTypeURL,
   row,
   say,
   setBreadcrumb,
@@ -86,6 +89,11 @@ export async function typesPage(opened) {
         key: type.key,
         count: countLabel(Number(type.relation_count ?? 0), "relation", "relations"),
         flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
+        // **It goes somewhere now.** These rows hovered like links and
+        // led nowhere, which is the worse half of the two ways to fix
+        // it: the page a relation type never had is the one that says
+        // what it may join and what a walk makes of it.
+        href: relationTypeURL(opened.slug, type.key),
       }),
     ),
   );

@@ -617,6 +617,11 @@ var shellRoutes = []struct {
 	{pattern: "GET /g/{slug}/v/{key}", file: "view.html"},
 	{pattern: "GET /g/{slug}/types", file: "types.html"},
 	{pattern: "GET /g/{slug}/t/{typeKey}", file: "type.html"},
+	// A relation type's own page. It exists because the Catalogue listed
+	// relation types as rows that hovered like links and went nowhere,
+	// so what an edge may join, what a walk makes of it and what its
+	// fields are could be read nowhere in the interface.
+	{pattern: "GET /g/{slug}/rt/{key}", file: "relation-type.html"},
 	{pattern: "GET /g/{slug}/e/{typeKey}/{key}", file: "entity.html"},
 	{pattern: "GET /g/{slug}/assets", file: "assets.html"},
 	{pattern: "GET /g/{slug}/analysis", file: "analysis.html"},

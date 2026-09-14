@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relation type · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- Applies the chosen theme before the first paint. Classic and not
+     deferred on purpose: see static/theme.js. -->
+<script src="/static/theme.js"></script>
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page narrow">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+  <h1 id="relation-type-name">Loading…</h1>
+  <span class="page-actions" id="page-actions"></span>
+</div>
+<p class="muted" id="relation-type-meta" aria-live="polite"></p>
+<!-- The type's own description, when it declared one. -->
+<p id="relation-type-about" class="muted"></p>
+
+<!-- **What this edge is allowed to join.** A relation type declares
+     which entity types may sit at each end, and that rule was readable
+     nowhere in the interface: a designer met `requires` on an entity
+     page and could not find out what it connects. -->
+<h2>What it connects</h2>
+<p id="relation-type-endpoints"></p>
+
+<!-- **What a walk does with it.** semantic_role and analysis_traits are
+     what the analysis engine reads to decide whether an edge gates,
+     contains or merely annotates, so they belong on the page that
+     describes the type rather than only inside a report. -->
+<h2>What analysis makes of it</h2>
+<p id="relation-type-role"></p>
+
+<!-- The fields an edge of this type carries, which is the other half a
+     designer meets on an entity page with nothing explaining it. -->
+<h2>What each relation carries</h2>
+<div class="scroller">
+  <ul class="catalogue wide" id="relation-type-fields" hidden></ul>
+</div>
+<div class="state" id="relation-type-fields-empty" hidden>
+  <b>No fields</b>
+  <span>A relation of this type is the connection itself, and carries no values of its own.</span>
+</div>
+
+<p class="error" id="relation-type-error" hidden></p>
+
+</main>
+
+<script type="module" src="/static/pages/relation-type.js"></script>

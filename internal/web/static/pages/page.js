@@ -34,6 +34,7 @@ export const SEGMENT_VIEW = "/v/";
 export const SEGMENT_TYPES = "/types";
 export const SEGMENT_TYPE = "/t/";
 export const SEGMENT_ENTITY = "/e/";
+export const SEGMENT_RELATION_TYPE = "/rt/";
 export const SEGMENT_DOC = "/doc";
 export const SEGMENT_ASSETS = "/assets";
 export const SEGMENT_ANALYSIS = "/analysis";
@@ -160,6 +161,15 @@ export function typesURL(slug) {
 
 export function typeURL(slug, typeKey) {
   return gameURL(slug) + SEGMENT_TYPE + encodeURIComponent(String(typeKey));
+}
+
+// relationTypeURL addresses a relation type's own page. `/rt/` and not
+// `/t/`: the two vocabularies are separate namespaces in the metamodel —
+// a game may declare an entity type and a relation type with the same
+// key — so one segment for both would be an address that means two
+// things.
+export function relationTypeURL(slug, key) {
+  return gameURL(slug) + SEGMENT_RELATION_TYPE + encodeURIComponent(String(key ?? ""));
 }
 
 export function entityURL(slug, typeKey, key) {

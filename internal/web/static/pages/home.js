@@ -37,6 +37,7 @@ import {
   row,
   say,
   setReadOnly,
+  relationTypeURL,
   typeURL,
   typesURL,
   viewURL,
@@ -238,6 +239,10 @@ async function catalogueLane(doc, slug, client, summaryEl) {
         // type's field schema too, so a relation type can hold rows a
         // designer has to go and fix.
         flag: Number(type.invalid_count ?? 0) > 0 ? `${Number(type.invalid_count)} invalid` : "",
+        // The same destination the Catalogue's own list points at: a row
+        // that hovers like a link and goes nowhere is the state this
+        // lane and that one were both in.
+        href: relationTypeURL(slug, type.key),
       }),
     ),
   );

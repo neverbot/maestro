@@ -226,6 +226,14 @@ const SHELL_IDS = [
   "type-name",
   "type-meta",
   "type-note",
+  "relation-type-name",
+  "relation-type-meta",
+  "relation-type-about",
+  "relation-type-endpoints",
+  "relation-type-role",
+  "relation-type-fields",
+  "relation-type-fields-empty",
+  "relation-type-error",
   "entities",
   "entities-columns",
   "entities-empty",
@@ -702,6 +710,117 @@ check("theCatalogueSaysWhichColumnsItIsNotShowing", async () => {
   // product.
   assertEqual(hiddenColumnsSentence(declared.slice(0, 3), 3, "Ship"), "", "nothing is hidden");
   assertEqual(hiddenColumnsSentence([], 3, "Ship"), "", "no fields are declared at all");
+});
+
+// --- The relation type's own page -------------------------------------
+//
+// It exists because a relation type had no screen at all: the Catalogue
+// listed them as rows that hovered like links and went nowhere, so what
+// an edge may join, what a walk makes of it and what its fields are
+// could be read nowhere in the interface.
+
+check("aRelationTypeSaysWhatItJoinsAndWhatAWalkMakesOfIt", async () => {
+  const { endpointSentence, roleSentence, ANY_TYPE, NO_ROLE, NO_TRAITS } = await load("relation-type");
+
+  assertEqual(
+    endpointSentence(["quest"], ["zone"]),
+    "From quest to zone.",
+    "the endpoint sentence",
+  );
+  // **An empty endpoint list is a permission, not an omission.** The
+  // server means "no restriction" by it, and a screen drawing it as a
+  // blank would read as a missing answer.
+  assertEqual(
+    endpointSentence([], ["zone"]),
+    `From ${ANY_TYPE} to zone.`,
+    "an unrestricted source end",
+  );
+  assertEqual(
+    endpointSentence(["quest", "class"], []),
+    `From quest or class to ${ANY_TYPE}.`,
+    "two allowed source types, and an unrestricted target end",
+  );
+
+  assertEqual(
+    roleSentence("prerequisite", ["prerequisite_of", "acyclic"]),
+    "Its role is prerequisite. A walk reads it as prerequisite_of, acyclic.",
+    "a type the analysis engine has something to say about",
+  );
+  // Two statements and not one: a type can declare a role and no traits,
+  // or traits and no role, and an undeclared trait list is not an empty
+  // one — the server keeps that distinction and this page keeps it too.
+  assertEqual(
+    roleSentence("", []),
+    `${NO_ROLE}. ${NO_TRAITS}.`,
+    "a type that declares neither",
+  );
+  assertEqual(
+    roleSentence("containment", []),
+    `Its role is containment. ${NO_TRAITS}.`,
+    "a role with no traits",
+  );
+});
+
+check("theRelationTypePageDrawsTheDeclarationThroughThePage", async () => {
+  const dom = mount({
+    ids: SHELL_IDS,
+    pathname: "/g/azeroth/rt/requires",
+    routes: [
+      [(url) => url === base + "/relation-types/by-key/requires", {
+        body: {
+          key: "requires", label: "Requires", description: "What must be done first.",
+          source_type_keys: ["quest"], target_type_keys: ["quest"],
+          semantic_role: "prerequisite", analysis_traits: ["prerequisite_of"],
+          field_schema: [
+            { key: "weight", type: "number", required: true },
+            // A default of `false` is a declared default, and reading the
+            // value for truth would draw "no default" over it — the very
+            // defect internal/metamodel/schema.go grew HasDefault to
+            // prevent, one layer up.
+            { key: "hard", type: "bool", default: false },
+          ],
+        },
+      }],
+      [(url) => url.endsWith("/summary"), { body: { role: "editor", relation_types: [{ key: "requires", relation_count: 21 }] } }],
+      events,
+    ],
+  });
+  await load("relation-type");
+
+  assertEqual(dom.elements["relation-type-name"].textContent, "Requires", "the type's label");
+  assertEqual(dom.elements["relation-type-meta"].textContent, "requires · 21 relations", "the key and the count");
+  assertEqual(
+    dom.elements["relation-type-about"].textContent,
+    "What must be done first.",
+    "the description the server has always carried",
+  );
+  assertEqual(
+    dom.elements["relation-type-endpoints"].children.map((child) => child.textContent).join(""),
+    "From quest to quest.",
+    "the endpoints, drawn through the page",
+  );
+  assert(
+    dom.elements["relation-type-endpoints"].children.some((child) => child.href === "/g/azeroth/t/quest"),
+    "each named type is a link to its own catalogue",
+  );
+  assertEqual(
+    dom.elements["relation-type-role"].textContent,
+    "Its role is prerequisite. A walk reads it as prerequisite_of.",
+    "what a walk makes of it",
+  );
+  assertEqual(dom.elements["relation-type-fields"].hidden, false, "the field table stayed hidden");
+  assertEqual(dom.elements["relation-type-fields-empty"].hidden, true, "the empty state showed over two fields");
+  const cells = dom.elements["relation-type-fields"].children
+    .slice(1)
+    .map((line) => line.children.map((cell) => cell.textContent));
+  assertEqual(
+    JSON.stringify(cells),
+    JSON.stringify([
+      ["weight", "weight", "number", "required", "no default", ""],
+      ["hard", "hard", "bool", "optional", "false", ""],
+    ]),
+    "the declared fields",
+  );
 });
 
 // The trail replaced four differently-worded back links, and the thing

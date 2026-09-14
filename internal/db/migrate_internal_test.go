@@ -8,6 +8,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"net/url"
 	"os"
@@ -39,7 +40,20 @@ func newTestDatabase(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(adminDB.Close)
 
-	name := "maestro_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	// **The millisecond stamp is load-bearing and this file is where it
+	// was missing.** internal/testutil sweeps abandoned test databases by
+	// reading that stamp out of the name, and treats a name without one
+	// as older than any run in flight — because before the stamp existed
+	// there was no way to tell a live database from a leftover. `go test
+	// ./...` runs one process per package, so another package's sweep
+	// force-dropped this database *while this test was migrating it*, and
+	// the failure surfaced as "terminating connection due to
+	// administrator command" against migration 0001. This package cannot
+	// import internal/testutil (it would import internal/db back), so it
+	// builds its own name and has to build the same shape:
+	// maestro_test_<millis>_<id>. TestEveryTestDatabaseNameCarriesItsStamp
+	// in internal/testutil holds every such name in the repository to it.
+	name := fmt.Sprintf("maestro_test_%d_%s", time.Now().UnixMilli(), strings.ReplaceAll(uuid.NewString(), "-", ""))
 	ident := pgx.Identifier{name}.Sanitize()
 
 	if _, err := adminDB.Exec(ctx, "CREATE DATABASE "+ident); err != nil {

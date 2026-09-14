@@ -39,6 +39,26 @@
 // nothing.
 export const CATALOGUE_CELLS = 3;
 
+// nextCursorOf reads a listing answer's cursor, and is the one place
+// this front end decides what "there is more" means.
+//
+// **An empty string is not a cursor.** Six pages wrote
+// `typeof body.next_cursor === "string" ? body.next_cursor : null`, and
+// every server listing answers `next_cursor: ""` when the page is the
+// last one — so `""` passed the test, the pager stayed on screen, and
+// pressing it re-fetched the first page and appended it again: two
+// images became four, under a count that then said "4 images". Seen in
+// a browser on the images list, which is the one listing that had never
+// been rendered with a row in it.
+//
+// It lives here, beside `row`, for the reason `row` does: every module
+// that draws a listing already imports this one, and `pages/page.js`
+// cannot be imported by `app.js` or by `doc.js`.
+export function nextCursorOf(body) {
+  const cursor = body && typeof body.next_cursor === "string" ? body.next_cursor : "";
+  return cursor === "" ? null : cursor;
+}
+
 // countLabel spells a count with the right noun, so "1 entities" never
 // reaches a designer's screen.
 //

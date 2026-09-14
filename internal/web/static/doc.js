@@ -22,6 +22,7 @@ import {
   fetchMe,
   renderHeader,
 } from "./app.js";
+import { nextCursorOf } from "./rows.js";
 // The chrome every other page gets. This reading view was rendering the
 // header with no destinations at all, which is one of the three
 // different chromes the 2026-09-09 audit found inside a single game.
@@ -420,7 +421,7 @@ async function renderHistory(game, docPath, currentVersion, membersByID, role) {
       addOption(toEl, item.version);
     }
     shown += items.length;
-    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    cursor = nextCursorOf(body);
     if (moreEl) {
       // The same rule the four list pages carry: a pager on a list that
       // rendered nothing is a control with nothing to fetch. This was the

@@ -32,6 +32,7 @@ import {
   setReadOnly,
   typesURL,
 } from "./page.js";
+import { nextCursorOf } from "../rows.js";
 import { headerRow, row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
@@ -385,7 +386,7 @@ export async function cataloguePage(opened) {
     // The cursor before the sentence: `sayScope` says "so far" when
     // there is more to fetch, and reading it a line later meant the
     // first page of a filtered listing claimed to be all of it.
-    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    cursor = nextCursorOf(body);
     // **A filtered listing that found nothing is not an empty type.**
     // The listing's own empty state reads "Nothing of this type yet" —
     // which, under a filter, sits over a type holding a thousand rows
@@ -485,7 +486,7 @@ export async function cataloguePage(opened) {
     // The cursor before the sentence, as the listing does it: `sayScope`
     // says "so far" while there is more to fetch, and reading it a line
     // later made the first page claim to be the whole answer.
-    cursor = typeof answer.result.next_cursor === "string" ? answer.result.next_cursor : null;
+    cursor = nextCursorOf(answer.result);
     // **A miss is not an empty type.** emptyOrRows shows the listing's
     // own empty state, which reads "Nothing of this type yet" — three
     // lines under a heading that says the type has 105 entities. A search

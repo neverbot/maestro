@@ -26,6 +26,7 @@ import {
   setReadOnly,
   viewURL,
 } from "./page.js";
+import { nextCursorOf } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 export async function viewsPage(opened) {
@@ -92,7 +93,7 @@ export async function viewsPage(opened) {
       onboardingEl.hidden = rendered > 0;
     }
     say(noteEl, rendered === 0 ? "" : countLabel(rendered, "view", "views"));
-    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    cursor = nextCursorOf(body);
     if (moreEl) {
       moreEl.hidden = cursor === null || rendered === 0;
       moreEl.disabled = false;

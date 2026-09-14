@@ -134,6 +134,26 @@ check("and it still says its columns",
   [plain.children[0].textContent, plain.children[1].textContent],
   ["Quest", "key"]);
 
+// --- What "there is more" means ---------------------------------------
+//
+// Every listing answer carries `next_cursor`, and a server that has
+// reached the end sends `""`. Six pages tested it with
+// `typeof body.next_cursor === "string"`, which `""` passes — so the
+// pager stayed on screen at the end of a listing, and pressing it
+// re-fetched the first page and appended it again. Seen in a browser on
+// the images list: two images became four, under a count that then said
+// "4 images".
+
+const { nextCursorOf } = await import("../static/rows.js");
+
+check("the end of a listing is not a cursor", [
+  nextCursorOf({ next_cursor: "" }),
+  nextCursorOf({}),
+  nextCursorOf(null),
+  nextCursorOf({ next_cursor: 7 }),
+  nextCursorOf({ next_cursor: "abc" }),
+], [null, null, null, null, "abc"]);
+
 // --- What a screen reader is told ------------------------------------
 //
 // A catalogue is a `ul` of `li`s in a subgrid: the right thing to look

@@ -44,6 +44,7 @@ import {
   viewsURL,
   whoWrites,
 } from "./page.js";
+import { nextCursorOf } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // What the two role-dependent empty states are about, in the words the
@@ -335,7 +336,7 @@ function proseLane(doc, slug, client) {
     emptyOrRows(listEl, emptyEl, rendered);
     // The listing issues a cursor whenever a page came back full, so the
     // page that reports the end is the empty one after the last row.
-    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    cursor = nextCursorOf(body);
     if (moreEl) {
       moreEl.hidden = cursor === null || rendered === 0;
       moreEl.disabled = false;

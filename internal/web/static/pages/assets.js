@@ -22,7 +22,7 @@ import {
   setReadOnly,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
-import { row } from "../rows.js";
+import { nextCursorOf, row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // Where an uploaded image is served from: **the URL the server spelled**,
@@ -132,7 +132,7 @@ export async function assetsPage(opened) {
     rendered += items.length;
     emptyOrRows(listEl, emptyEl, rendered);
     say(noteEl, rendered === 0 ? "" : countLabel(rendered, "image", "images"));
-    cursor = typeof body.next_cursor === "string" ? body.next_cursor : null;
+    cursor = nextCursorOf(body);
     if (moreEl) {
       // **A pager on an empty list is a control with nothing to fetch.**
       // The condition was the cursor alone, and an empty first page that

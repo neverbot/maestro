@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-09-10T18:11:20Z",
-  "title": "Design System: Maestro",
+  "title": "Design system",
   "extensions": {
     "colorMeta": {
       "paper": {
@@ -72,6 +72,13 @@
           "#f5ede8"
         ]
       },
+      "ink-hover": {
+        "role": "neutral",
+        "displayName": "Pressed Ink",
+        "canonical": "oklch(0.195 0.018 58)",
+        "dark": "oklch(0.974 0.010 82)",
+        "darkHex": "#faf6ef"
+      },
       "muted": {
         "role": "neutral",
         "displayName": "Sepia",
@@ -123,7 +130,7 @@
           "#f4ede7"
         ]
       },
-      "accent": {
+      "focus": {
         "role": "primary",
         "displayName": "Kiln Rust",
         "canonical": "oklch(0.500 0.130 48)",
@@ -140,7 +147,7 @@
           "#ffe1c5"
         ]
       },
-      "accent-ink": {
+      "focus-ink": {
         "role": "primary",
         "displayName": "Rust Ink",
         "canonical": "oklch(0.980 0.008 88)",
@@ -155,23 +162,6 @@
           "#adaba5",
           "#d3d1cb",
           "#f0eeeb"
-        ]
-      },
-      "accent-soft": {
-        "role": "primary",
-        "displayName": "Rust Wash",
-        "canonical": "oklch(0.925 0.035 55)",
-        "dark": "oklch(0.320 0.045 50)",
-        "darkHex": "#452c1d",
-        "tonalRamp": [
-          "#110904",
-          "#311f13",
-          "#513e31",
-          "#735e50",
-          "#978172",
-          "#bda696",
-          "#e4ccbc",
-          "#f9ebe3"
         ]
       },
       "danger": {
@@ -367,7 +357,7 @@
       "refersTo": "button-primary",
       "description": "The single most likely action on a screen. Ink on paper, never accent-filled.",
       "html": "<button class=\"ds-btn\">Save as view</button>",
-      "css": ".ds-btn{font:600 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--ink);border-radius:3px;background:var(--ink);color:var(--paper);box-shadow:0 1px 2px rgba(94,72,55,.12);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn:hover{background:#1d1611}.ds-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+      "css": ".ds-btn{font:600 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--ink);border-radius:3px;background:var(--ink);color:var(--paper);box-shadow:var(--shadow-1);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn:hover{background:var(--ink-hover)}.ds-btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
     },
     {
       "name": "Ghost Button",
@@ -375,7 +365,7 @@
       "refersTo": "button-ghost",
       "description": "Every secondary action. No fill until hover.",
       "html": "<button class=\"ds-btn-ghost\">Copy view</button>",
-      "css": ".ds-btn-ghost{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn-ghost:hover{background:var(--ground)}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+      "css": ".ds-btn-ghost{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn-ghost:hover{background:var(--ground)}.ds-btn-ghost:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
     },
     {
       "name": "Text Input",
@@ -383,7 +373,7 @@
       "refersTo": "input",
       "description": "Leaf fill on paper, rust border on focus. No glow.",
       "html": "<input class=\"ds-input\" placeholder=\"Search this game…\">",
-      "css": ".ds-input{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:5px 9px;border:1px solid var(--line);border-radius:3px;background:var(--raised);color:var(--ink);width:220px}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:2px}"
+      "css": ".ds-input{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:5px 9px;border:1px solid var(--line);border-radius:3px;background:var(--raised);color:var(--ink);width:220px}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--focus);outline:2px solid var(--focus);outline-offset:2px}"
     },
     {
       "name": "Filter Chips",
@@ -391,7 +381,7 @@
       "refersTo": "chip",
       "description": "Exactly one selected per group. The selected chip is the only place the accent fills anything.",
       "html": "<div class=\"ds-chips\"><button class=\"ds-chip\" aria-pressed=\"true\">All</button><button class=\"ds-chip\" aria-pressed=\"false\">Main</button><button class=\"ds-chip\" aria-pressed=\"false\">No zone</button></div>",
-      "css": ".ds-chips{display:flex;gap:6px}.ds-chip{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}.ds-chip:hover{background:var(--ground)}.ds-chip[aria-pressed=\"true\"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}.ds-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}"
+      "css": ".ds-chips{display:flex;gap:6px}.ds-chip{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}.ds-chip:hover{background:var(--ground)}.ds-chip[aria-pressed=\"true\"]{background:var(--focus);border-color:var(--focus);color:var(--focus-ink);font-weight:500}.ds-chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}"
     },
     {
       "name": "Catalogue Table",
@@ -408,7 +398,7 @@
       "refersTo": "panel",
       "description": "Always present inside a game. Marks the current game with weight and aria-current, never with colour.",
       "html": "<details class=\"ds-sw\" open><summary>Hollow Reach</summary><ul><li><a href=\"#\" aria-current=\"page\">Hollow Reach</a></li><li><a href=\"#\">Le Mans 1971</a></li><li><a href=\"#\">All games</a></li></ul></details>",
-      "css": ".ds-sw{position:relative;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;width:220px}.ds-sw summary{list-style:none;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 1px 2px rgba(94,72,55,.12)}.ds-sw summary::-webkit-details-marker{display:none}.ds-sw summary::after{content:'\\25be';float:right;color:var(--muted)}.ds-sw ul{list-style:none;margin:4px 0 0;padding:4px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 2px 9px rgba(94,72,55,.14)}.ds-sw a{display:block;padding:5px 8px;border-radius:3px;color:var(--ink);text-decoration:none}.ds-sw a:hover{background:var(--ground)}.ds-sw a[aria-current=\"page\"]{font-weight:600}"
+      "css": ".ds-sw{position:relative;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;width:220px}.ds-sw summary{list-style:none;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:var(--shadow-1)}.ds-sw summary::-webkit-details-marker{display:none}.ds-sw summary::after{content:'\\25be';float:right;color:var(--muted)}.ds-sw ul{list-style:none;margin:4px 0 0;padding:4px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:var(--shadow-2)}.ds-sw a{display:block;padding:5px 8px;border-radius:3px;color:var(--ink);text-decoration:none}.ds-sw a:hover{background:var(--ground)}.ds-sw a[aria-current=\"page\"]{font-weight:600}"
     },
     {
       "name": "Read-Only Notice",
@@ -432,7 +422,7 @@
       "refersTo": "page-header",
       "description": "One row, one order, on every screen: wordmark, game switcher, destinations, spacer, account, sign out.",
       "html": "<header class=\"ds-hdr\"><a class=\"ds-wordmark\" href=\"#\">Maestro</a><span class=\"ds-sw-stub\">Hollow Reach ▾</span><nav class=\"ds-dest\"><a href=\"#\" aria-current=\"page\">Catalogue</a><a href=\"#\">Views</a><a href=\"#\">Prose</a><a href=\"#\">Images</a><a href=\"#\">Analysis</a></nav><span class=\"ds-sp\"></span><span class=\"ds-who\">ivan</span><button class=\"ds-btn-ghost\">Sign out</button></header>",
-      "css": ".ds-hdr{display:flex;align-items:center;gap:24px;height:48px;padding:0 24px;background:var(--paper);border-bottom:1px solid var(--line);font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-wordmark{font:600 1rem/1 Literata,Georgia,serif;letter-spacing:-.01em;color:var(--ink);text-decoration:none}.ds-sw-stub{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 1px 2px rgba(94,72,55,.12)}.ds-dest{display:flex;gap:16px}.ds-dest a{color:var(--muted);text-decoration:none;padding:2px 0;border-bottom:2px solid transparent}.ds-dest a[aria-current=\"page\"]{color:var(--ink);font-weight:600;border-bottom-color:var(--accent)}.ds-sp{flex:1}.ds-who{color:var(--muted)}",
+      "css": ".ds-hdr{display:flex;align-items:center;gap:24px;height:48px;padding:0 24px;background:var(--paper);border-bottom:1px solid var(--line);font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-wordmark{font:600 1rem/1 Literata,Georgia,serif;letter-spacing:-.01em;color:var(--ink);text-decoration:none}.ds-sw-stub{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:var(--shadow-1)}.ds-dest{display:flex;gap:16px}.ds-dest a{color:var(--muted);text-decoration:none;padding:2px 0;border-bottom:2px solid transparent}.ds-dest a[aria-current=\"page\"]{color:var(--ink);font-weight:600;border-bottom-color:var(--focus)}.ds-sp{flex:1}.ds-who{color:var(--muted)}",
       "full": true
     },
     {

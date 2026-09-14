@@ -3,112 +3,15 @@
      docs/design.md or docs/design-tokens.json and regenerate. -->
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Design System: Maestro</title>
-<style>
-/* **The faces this product actually serves, from this repository.** This
-   page fetched them from a font CDN, which is the one thing the
-   product's own CSP forbids — a page documenting a design system should
-   not reach an origin the system it documents refuses — and it asked for
-   two faces that are not vendored at all (Fira Mono, and the 500 of Fira
-   Sans). The paths are relative to the published site, where
-   cmd/maestro-docs copies the same three files the server serves; opened
-   straight out of docs/ the page falls back to the reader's own serif
-   and sans, which is what every one of these specimens looked like
-   before the fonts were vendored. */
-@font-face { font-family: Literata; font-style: normal; font-weight: 400 600; font-display: swap;
-  src: url("fonts/literata-var-latin.woff2") format("woff2"); }
-@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 400; font-display: swap;
-  src: url("fonts/fira-sans-400-latin.woff2") format("woff2"); }
-@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 600; font-display: swap;
-  src: url("fonts/fira-sans-600-latin.woff2") format("woff2"); }
-:root {
-  --paper: #f7f3e9;
-  --ground: #efe9dc;
-  --raised: #fcfaf4;
-  --ink: #2c221b;
-  --muted: #6e625a;
-  --line: #d8d2c7;
-  --line-strong: #8e8279;
-  --accent: #9c470d;
-  --accent-ink: #fbf8f2;
-  --accent-soft: #fae1d1;
-  --danger: #a72629;
-  --data-1: #791411;
-  --data-2: #0053cc;
-  --data-3: #a55803;
-  --data-4: #4400e0;
-  --data-5: #2c7249;
-  --data-6: #4d1778;
-  --data-7: #147290;
-  --data-8: #652049;
-  --shadow-1: 0 1px 2px rgba(94, 72, 55, 0.12);
-  --shadow-2: 0 2px 9px rgba(94, 72, 55, 0.14);
-  --shadow-3: 0 10px 30px rgba(94, 72, 55, 0.18);
-}
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --paper: #1c1913;
-  --ground: #13100b;
-  --raised: #26221c;
-  --ink: #e7e2d9;
-  --muted: #9a9289;
-  --line: #36312a;
-  --line-strong: #81776d;
-  --accent: #d78958;
-  --accent-ink: #17130e;
-  --accent-soft: #452c1d;
-  --danger: #e67a73;
-  --data-1: #791411;
-  --data-2: #0053cc;
-  --data-3: #a55803;
-  --data-4: #4400e0;
-  --data-5: #2c7249;
-  --data-6: #4d1778;
-  --data-7: #147290;
-  --data-8: #652049;
-  --shadow-1: 0 1px 2px rgba(0,0,0,.4); --shadow-2: 0 2px 9px rgba(0,0,0,.45); --shadow-3: 0 10px 30px rgba(0,0,0,.5);
-} }
-*,*::before,*::after { box-sizing: border-box; }
-body { margin:0; background: var(--ground); color: var(--ink); font:400 0.875rem/1.5 Fira Sans, system-ui, sans-serif; }
-header { padding: 2rem 2rem 1rem; }
-header h1 { font:600 1.75rem/1.15 Literata, ui-serif, Georgia, Times New Roman, serif; margin:0 0 .3rem; letter-spacing:-0.015em; }
-header p { margin:0; color: var(--muted); max-width: 68ch; }
-main { padding: 0 2rem 4rem; display:grid; gap:1.25rem; }
-h2 { font:600 1.25rem/1.3 Fira Sans, system-ui, sans-serif; margin:1.5rem 0 0; letter-spacing:-0.005em; }
-.panel { background: var(--paper); border:1px solid var(--line); border-radius:3px; box-shadow: var(--shadow-1); padding: 16px; }
-code { font:400 0.78rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
-code.dim { opacity:.75; }
-.swatches { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:.7rem; }
-.sw { display:grid; gap:1px; } .sw b { font-weight:600; }
-.sw i { height:46px; border:1px solid var(--line); border-radius:3px; margin-bottom:.3rem; }
-.data { display:flex; gap:.3rem; margin-top:.5rem; }
-.data i { height:30px; flex:1; border-radius:3px; }
-.row { display:grid; grid-template-columns:250px minmax(0,1fr); gap:1.25rem; padding:.85rem 0; border-bottom:1px solid var(--line); align-items:baseline; }
-.row:last-child { border-bottom:0; }
-.meta { display:grid; gap:.1rem; }
-.meta b { font:600 0.75rem/1.2 Fira Sans, system-ui, sans-serif; letter-spacing:0.03em; }
-.meta span { color:var(--muted); font-size:.8rem; }
-.shadows { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:1rem; }
-.sh { display:grid; gap:.25rem; } .sh b { font-weight:600; } .sh span { color:var(--muted); font-size:.82rem; }
-.sh .chip { height:52px; background:var(--raised); border:1px solid var(--line); border-radius:3px; margin-bottom:.4rem; }
-.comps { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
-.comp h3 { font:600 1.125rem/1.35 Fira Sans, system-ui, sans-serif; margin:0 0 .2rem; }
-.comp p { margin:0 0 .7rem; color:var(--muted); }
-.comp .stage { background:var(--ground); border:1px solid var(--line); border-radius:3px; padding:1rem; }
-.comp .stage.wide { overflow-x:auto; padding:0; }
-.comp.full { grid-column:1 / -1; }
-ul.rules { margin:0; padding-left:1.1rem; display:grid; gap:.45rem; max-width:80ch; }
-ul.plain { list-style:none; margin:0; padding:0; display:grid; gap:.3rem; }
-.cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
-.cols h3, .dd h3 { font:600 0.75rem/1.2 Fira Sans, system-ui, sans-serif; letter-spacing:0.03em; color:var(--muted); margin:0 0 .4rem; }
-.dd { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:1rem; }
-.dd ul { margin:.3rem 0 0; padding-left:1.1rem; display:grid; gap:.3rem; }
-footer { padding:0 2rem 3rem; color:var(--muted); }
-</style></head><body>
-<header>
-  <h1>Maestro</h1>
-  <p>The Workshop Notebook. A warm-paper workbench for reading, judging and correcting the design of a game. Every token, every named rule and every shared component, rendered by the system itself.</p>
-</header>
-<main>
+<title>Design system</title>
+<link rel="stylesheet" href="design-system.css">
+<style>body { margin:0; padding:2rem; background: var(--ground); }</style>
+</head><body>
+<!-- site:body -->
+<div class="ds">
+<h1>Design system</h1>
+<p class="ds-lede">The Workshop Notebook. A warm-paper workbench for reading, judging and correcting the design of a game. Every token, every named rule and every shared component, rendered by the system itself.</p>
+<div class="ds-main">
   <h2>Colours</h2>
   <div class="panel"><div class="swatches"><div class="sw"><i style="background:#f7f3e9"></i>
   <b>Ledger Paper</b><code>paper</code><code class="dim">#f7f3e9</code>
@@ -122,6 +25,9 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
 <div class="sw"><i style="background:#2c221b"></i>
   <b>Bister Ink</b><code>ink</code><code class="dim">#2c221b</code>
   <code class="dim">oklch(0.260 0.020 55)</code><code class="dim">dark #e7e2d9</code></div>
+<div class="sw"><i style="background:#1b130d"></i>
+  <b>Pressed Ink</b><code>ink-hover</code><code class="dim">#1b130d</code>
+  <code class="dim">oklch(0.195 0.018 58)</code><code class="dim">dark #faf6ef</code></div>
 <div class="sw"><i style="background:#6e625a"></i>
   <b>Sepia</b><code>muted</code><code class="dim">#6e625a</code>
   <code class="dim">oklch(0.505 0.020 58)</code><code class="dim">dark #9a9289</code></div>
@@ -132,14 +38,11 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
   <b>Stroke</b><code>line-strong</code><code class="dim">#8e8279</code>
   <code class="dim">oklch(0.615 0.020 62)</code><code class="dim">dark #81776d</code></div>
 <div class="sw"><i style="background:#9c470d"></i>
-  <b>Kiln Rust</b><code>accent</code><code class="dim">#9c470d</code>
+  <b>Kiln Rust</b><code>focus</code><code class="dim">#9c470d</code>
   <code class="dim">oklch(0.500 0.130 48)</code><code class="dim">dark #d78958</code></div>
 <div class="sw"><i style="background:#fbf8f2"></i>
-  <b>Rust Ink</b><code>accent-ink</code><code class="dim">#fbf8f2</code>
+  <b>Rust Ink</b><code>focus-ink</code><code class="dim">#fbf8f2</code>
   <code class="dim">oklch(0.980 0.008 88)</code><code class="dim">dark #17130e</code></div>
-<div class="sw"><i style="background:#fae1d1"></i>
-  <b>Rust Wash</b><code>accent-soft</code><code class="dim">#fae1d1</code>
-  <code class="dim">oklch(0.925 0.035 55)</code><code class="dim">dark #452c1d</code></div>
 <div class="sw"><i style="background:#a72629"></i>
   <b>Alarm</b><code>danger</code><code class="dim">#a72629</code>
   <code class="dim">oklch(0.480 0.165 25)</code><code class="dim">dark #e67a73</code></div></div>
@@ -196,27 +99,27 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
   <div class="comps"><section class="comp">
   <h3>Primary Button</h3><p>The single most likely action on a screen. Ink on paper, never accent-filled.</p>
   <div class="stage"><button class="ds-btn">Save as view</button></div>
-  <style>.ds-btn{font:600 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--ink);border-radius:3px;background:var(--ink);color:var(--paper);box-shadow:0 1px 2px rgba(94,72,55,.12);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn:hover{background:#1d1611}.ds-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}</style>
+  <style>.ds-btn{font:600 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--ink);border-radius:3px;background:var(--ink);color:var(--paper);box-shadow:var(--shadow-1);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn:hover{background:var(--ink-hover)}.ds-btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}</style>
 </section>
 <section class="comp">
   <h3>Ghost Button</h3><p>Every secondary action. No fill until hover.</p>
   <div class="stage"><button class="ds-btn-ghost">Copy view</button></div>
-  <style>.ds-btn-ghost{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn-ghost:hover{background:var(--ground)}.ds-btn-ghost:focus-visible{outline:2px solid var(--accent);outline-offset:2px}</style>
+  <style>.ds-btn-ghost{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:6px 13px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--ink);cursor:pointer;transition:background 120ms cubic-bezier(.25,1,.5,1)}.ds-btn-ghost:hover{background:var(--ground)}.ds-btn-ghost:focus-visible{outline:2px solid var(--focus);outline-offset:2px}</style>
 </section>
 <section class="comp">
   <h3>Text Input</h3><p>Leaf fill on paper, rust border on focus. No glow.</p>
   <div class="stage"><input class="ds-input" placeholder="Search this game…"></div>
-  <style>.ds-input{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:5px 9px;border:1px solid var(--line);border-radius:3px;background:var(--raised);color:var(--ink);width:220px}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:2px}</style>
+  <style>.ds-input{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;height:32px;padding:5px 9px;border:1px solid var(--line);border-radius:3px;background:var(--raised);color:var(--ink);width:220px}.ds-input::placeholder{color:var(--muted)}.ds-input:focus{border-color:var(--focus);outline:2px solid var(--focus);outline-offset:2px}</style>
 </section>
 <section class="comp">
   <h3>Filter Chips</h3><p>Exactly one selected per group. The selected chip is the only place the accent fills anything.</p>
   <div class="stage"><div class="ds-chips"><button class="ds-chip" aria-pressed="true">All</button><button class="ds-chip" aria-pressed="false">Main</button><button class="ds-chip" aria-pressed="false">No zone</button></div></div>
-  <style>.ds-chips{display:flex;gap:6px}.ds-chip{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}.ds-chip:hover{background:var(--ground)}.ds-chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}.ds-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}</style>
+  <style>.ds-chips{display:flex;gap:6px}.ds-chip{font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer}.ds-chip:hover{background:var(--ground)}.ds-chip[aria-pressed="true"]{background:var(--focus);border-color:var(--focus);color:var(--focus-ink);font-weight:500}.ds-chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}</style>
 </section>
 <section class="comp">
   <h3>Game Switcher</h3><p>Always present inside a game. Marks the current game with weight and aria-current, never with colour.</p>
   <div class="stage"><details class="ds-sw" open><summary>Hollow Reach</summary><ul><li><a href="#" aria-current="page">Hollow Reach</a></li><li><a href="#">Le Mans 1971</a></li><li><a href="#">All games</a></li></ul></details></div>
-  <style>.ds-sw{position:relative;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;width:220px}.ds-sw summary{list-style:none;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 1px 2px rgba(94,72,55,.12)}.ds-sw summary::-webkit-details-marker{display:none}.ds-sw summary::after{content:'\25be';float:right;color:var(--muted)}.ds-sw ul{list-style:none;margin:4px 0 0;padding:4px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 2px 9px rgba(94,72,55,.14)}.ds-sw a{display:block;padding:5px 8px;border-radius:3px;color:var(--ink);text-decoration:none}.ds-sw a:hover{background:var(--ground)}.ds-sw a[aria-current="page"]{font-weight:600}</style>
+  <style>.ds-sw{position:relative;font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif;width:220px}.ds-sw summary{list-style:none;cursor:pointer;padding:5px 10px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:var(--shadow-1)}.ds-sw summary::-webkit-details-marker{display:none}.ds-sw summary::after{content:'\25be';float:right;color:var(--muted)}.ds-sw ul{list-style:none;margin:4px 0 0;padding:4px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:var(--shadow-2)}.ds-sw a{display:block;padding:5px 8px;border-radius:3px;color:var(--ink);text-decoration:none}.ds-sw a:hover{background:var(--ground)}.ds-sw a[aria-current="page"]{font-weight:600}</style>
 </section>
 <section class="comp">
   <h3>Read-Only Notice</h3><p>States the limitation where the missing button would be, rather than leaving it to be inferred.</p>
@@ -246,7 +149,7 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
 <section class="comp full">
   <h3>Page Header</h3><p>One row, one order, on every screen: wordmark, game switcher, destinations, spacer, account, sign out.</p>
   <div class="stage wide"><header class="ds-hdr"><a class="ds-wordmark" href="#">Maestro</a><span class="ds-sw-stub">Hollow Reach ▾</span><nav class="ds-dest"><a href="#" aria-current="page">Catalogue</a><a href="#">Views</a><a href="#">Prose</a><a href="#">Images</a><a href="#">Analysis</a></nav><span class="ds-sp"></span><span class="ds-who">ivan</span><button class="ds-btn-ghost">Sign out</button></header></div>
-  <style>.ds-hdr{display:flex;align-items:center;gap:24px;height:48px;padding:0 24px;background:var(--paper);border-bottom:1px solid var(--line);font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-wordmark{font:600 1rem/1 Literata,Georgia,serif;letter-spacing:-.01em;color:var(--ink);text-decoration:none}.ds-sw-stub{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:0 1px 2px rgba(94,72,55,.12)}.ds-dest{display:flex;gap:16px}.ds-dest a{color:var(--muted);text-decoration:none;padding:2px 0;border-bottom:2px solid transparent}.ds-dest a[aria-current="page"]{color:var(--ink);font-weight:600;border-bottom-color:var(--accent)}.ds-sp{flex:1}.ds-who{color:var(--muted)}</style>
+  <style>.ds-hdr{display:flex;align-items:center;gap:24px;height:48px;padding:0 24px;background:var(--paper);border-bottom:1px solid var(--line);font:400 0.875rem/1.5 'Fira Sans',system-ui,sans-serif}.ds-wordmark{font:600 1rem/1 Literata,Georgia,serif;letter-spacing:-.01em;color:var(--ink);text-decoration:none}.ds-sw-stub{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid var(--line);border-radius:3px;background:var(--raised);box-shadow:var(--shadow-1)}.ds-dest{display:flex;gap:16px}.ds-dest a{color:var(--muted);text-decoration:none;padding:2px 0;border-bottom:2px solid transparent}.ds-dest a[aria-current="page"]{color:var(--ink);font-weight:600;border-bottom-color:var(--focus)}.ds-sp{flex:1}.ds-who{color:var(--muted)}</style>
 </section></div>
 
   <h2>Scales</h2>
@@ -266,6 +169,8 @@ footer { padding:0 2rem 3rem; color:var(--muted); }
     <div><h3>Do</h3><ul><li>Do set every game-owned word in Literata and every tool-owned word in Fira Sans.</li><li>Do keep rows at 36px and lists dense.</li><li>Do tint every shadow with rgba(94, 72, 55, ...).</li><li>Do name absences in words: 'no zone', 'never reviewed', 'no requirement'.</li><li>Do state read-only where the missing action would be.</li><li>Do mark the current item with weight and aria-current.</li><li>Do cap prose at 68ch.</li><li>Do build every repeated pattern once, as a shared component.</li><li>Do cap prose at 68ch, and nothing else.</li><li>Do let wide content scroll inside its own container so the page never scrolls sideways.</li><li>Do put a breadcrumb on every screen inside a game, and delete the back links it replaces.</li></ul></div>
     <div><h3>Don't</h3><ul><li>Don't build the generic admin panel: no icon sidebar, no card grid of counters.</li><li>Don't reach for the dark blue SaaS dashboard.</li><li>Don't borrow GitHub's chrome.</li><li>Don't bury content the way the ad-choked game wiki does.</li><li>Don't produce the empty beautiful landing page.</li><li>Don't use #000 or #fff anywhere, including in a shadow.</li><li>Don't fill a button, a badge or a header with the accent.</li><li>Don't use border-left or border-right above 1px as a coloured stripe.</li><li>Don't set a label in all caps.</li><li>Don't nest a panel inside a panel.</li><li>Don't leave a cell blank when the value is absent.</li><li>Don't animate layout properties, and never use bounce or elastic easing.</li><li>Don't add a modal before an inline alternative has been ruled out in writing.</li><li>Don't put a measure meant for prose on the page.</li><li>Don't hide navigation at a breakpoint without moving it somewhere.</li><li>Don't write a bare element selector for a control inside a component and expect the global stylesheet to have styled it.</li></ul></div>
   </div>
-</main>
-<footer><code>Generated from docs/design.md and docs/design-tokens.json by docs/design-system.mjs</code></footer>
+</div>
+<p class="ds-foot"><code>Generated from docs/design.md and docs/design-tokens.json by docs/design-system.mjs</code></p>
+</div>
+<!-- /site:body -->
 </body></html>

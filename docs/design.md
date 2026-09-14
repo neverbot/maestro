@@ -6,12 +6,12 @@ colors:
   ground: "#efe9dc"
   raised: "#fcfaf4"
   ink: "#2c221b"
+  ink-hover: "#1b130d"
   muted: "#6e625a"
   line: "#d8d2c7"
   line-strong: "#8e8279"
-  accent: "#9c470d"
-  accent-ink: "#fbf8f2"
-  accent-soft: "#fae1d1"
+  focus: "#9c470d"
+  focus-ink: "#fbf8f2"
   danger: "#a72629"
   data-1: "#791411"
   data-2: "#0053cc"
@@ -87,7 +87,7 @@ components:
     padding: "6px 13px"
     height: "32px"
   button-primary-hover:
-    backgroundColor: "#1d1611"
+    backgroundColor: "{colors.ink-hover}"
     textColor: "{colors.paper}"
   button-ghost:
     backgroundColor: "transparent"
@@ -113,8 +113,8 @@ components:
     rounded: "{rounded.pill}"
     padding: "3px 10px"
   chip-selected:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.accent-ink}"
+    backgroundColor: "{colors.focus}"
+    textColor: "{colors.focus-ink}"
     typography: "{typography.body}"
     rounded: "{rounded.pill}"
     padding: "3px 10px"
@@ -201,13 +201,19 @@ like it came out of the same material as the page.
 
 ### Primary
 
-- **Kiln Rust** (`#9c470d`): the one accent. It marks focus, selection,
+- **Kiln Rust** (`focus`, `#9c470d`): the one accent. **The token is
+  named after its job and not after its status**: a token called
+  `accent` invites a second accent, and one accent used for four things
+  is four meanings wearing one colour. It marks focus, selection,
   the current item and the single active filter, and nothing else. It
   never fills a button and never carries a mood. At 5.7:1 on paper it is
   legible as text, which is why the selected filter chip can wear it.
-- **Rust Wash** (`#fae1d1`): the accent at reading weight, for the
-  background of a selected row or a highlighted search match. Never for
-  text.
+  The wash that used to be documented beside it — the accent at reading
+  weight, for a selected row or a highlighted search match — **is gone,
+  because the product never had it.** It was a token named here, spelled
+  in no stylesheet and read by nothing, which is the "a mechanism
+  nothing reads is a lie" rule pointed at this document. The day a
+  search highlight ships, it comes back with the rule that draws it.
 
 ### Neutral
 
@@ -275,10 +281,12 @@ give two that vanish and two that glow.
 | ground | `#efe9dc` | `#13100b` |
 | raised | `#fcfaf4` | `#26221c` |
 | ink | `#2c221b` | `#e7e2d9` |
+| ink-hover | `#1b130d` | `#faf6ef` |
 | muted | `#6e625a` | `#9a9289` |
 | line | `#d8d2c7` | `#36312a` |
 | line-strong | `#8e8279` | `#81776d` |
-| accent / focus | `#9c470d` | `#d78958` |
+| focus | `#9c470d` | `#d78958` |
+| focus-ink | `#fbf8f2` | `#17130e` |
 | danger | `#a72629` | `#e67a73` |
 
 Measured on the dark set: ink on ground 14.71:1, muted on ground 6.19:1,
@@ -289,7 +297,7 @@ failure, not a discovery made by a reader in the dark.
 ### Named Rules
 
 **The Two Exemptions Rule.** The chrome is achromatic. Exactly two
-chromatic tokens exist outside the data palette, `accent` and `danger`,
+chromatic tokens exist outside the data palette, `focus` and `danger`,
 and a third is admitted only against this test: not "would a colour
 help" but "is there a fact on screen that nothing else says". Colour is
 a channel the diagram already spends; the interface does not compete for
@@ -429,9 +437,19 @@ flat.
 - **Shape:** barely rounded (3px), 32px tall.
 - **Primary:** Bister Ink fill, Ledger Paper text, 6px by 13px padding,
   resting shadow. One per screen, on the single most likely action.
-- **Hover / Focus:** hover darkens the fill to `#1d1611`; focus draws a
+- **Hover / Focus:** hover takes the fill to `ink-hover`; focus draws a
   2px Kiln Rust ring at 2px offset. Both transition in 120ms
   ease-out-quart.
+
+  **It is a token and not a computed darkening, because a computed
+  colour has no theme.** On paper "pressed harder" is darker than ink
+  (`#1b130d`); on the dark ground it is *lighter* (`#faf6ef`), because
+  the ink is the pale one there. This document said `#1d1611` for a
+  whole build — a value the product has never used and which, read
+  against the dark theme's own `paper` text, renders the hover state at
+  1.0:1. The design-system page drew it that way and nothing was red:
+  the colour table is checked against the stylesheet now, by
+  `TestTheDesignDocumentAndTheStylesheetAgreeOnEveryColour`.
 - **Ghost:** transparent, ink text, Stroke border. Every secondary
   action. Hover fills with Desk.
 - **Link button:** no box at all, ink text with a 2px-offset underline.
@@ -441,7 +459,7 @@ flat.
 
 - **Style:** pill, 1px Hairline border, Sepia text, transparent fill.
 - **State:** the selected chip fills with Kiln Rust and takes
-  `accent-ink` text, the near-paper tone that stays legible on it. Rust
+  `focus-ink` text, the near-paper tone that stays legible on it. Rust
   Wash is a background, never text, including here. Exactly one chip in a group is ever selected; a multi-select
   group uses checkboxes, not chips.
 

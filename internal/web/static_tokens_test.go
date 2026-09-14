@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -822,5 +823,125 @@ func TestTheDiffsGutterOutranksItsOwnDefault(t *testing.T) {
 			t.Errorf("%s is not written as `.diff > %s`: `.diff > div` outranks a bare class, so its gutter silently computes to transparent and added and removed look the same",
 				class, class)
 		}
+	}
+}
+
+// --- The design document and the stylesheet ---------------------------
+
+// designDocPath and designTokensPath are the two files claude.md names
+// as owning the design system. They are read here, not restated.
+const (
+	designDocPath    = "../../docs/design.md"
+	designTokensPath = "../../docs/design-tokens.json"
+)
+
+// colourLineRE is one entry of design.md's frontmatter `colors:` map.
+var colourLineRE = regexp.MustCompile(`(?m)^  ([a-z0-9-]+):\s*"(#[0-9a-fA-F]{6})"`)
+
+// statedColours reads the light set out of docs/design.md's frontmatter.
+func statedColours(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(designDocPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", designDocPath, err)
+	}
+	src := string(raw)
+	start := strings.Index(src, "\ncolors:\n")
+	if start < 0 {
+		t.Fatalf("%s has no `colors:` map in its frontmatter: this guard reads it", designDocPath)
+	}
+	rest := src[start+len("\ncolors:\n"):]
+	// The map ends at the next key in column zero.
+	if end := regexp.MustCompile(`(?m)^[a-z]`).FindStringIndex(rest); end != nil {
+		rest = rest[:end[0]]
+	}
+	out := map[string]string{}
+	for _, m := range colourLineRE.FindAllStringSubmatch(rest, -1) {
+		out[m[1]] = strings.ToLower(m[2])
+	}
+	if len(out) == 0 {
+		t.Fatalf("parsed no colours out of %s: the guard found nothing to hold", designDocPath)
+	}
+	return out
+}
+
+// statedDarkColours reads the dark set out of docs/design-tokens.json,
+// which is where each colour's dark hex lives.
+func statedDarkColours(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(designTokensPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", designTokensPath, err)
+	}
+	var doc struct {
+		Extensions struct {
+			ColorMeta map[string]struct {
+				DarkHex string `json:"darkHex"`
+			} `json:"colorMeta"`
+		} `json:"extensions"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", designTokensPath, err)
+	}
+	out := map[string]string{}
+	for name, meta := range doc.Extensions.ColorMeta {
+		if hexRE.MatchString(meta.DarkHex) {
+			out[name] = strings.ToLower(meta.DarkHex)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("parsed no dark colours out of %s: the guard found nothing to hold", designTokensPath)
+	}
+	return out
+}
+
+// TestTheDesignDocumentAndTheStylesheetAgreeOnEveryColour is the guard
+// that was missing, and it was missing for the whole build.
+//
+// `docs/design.md` said the primary button's hover was `#1d1611`. The
+// product has never used that value: it ships `--ink-hover`, `#1b130d`
+// on paper and `#faf6ef` on the dark ground, because "pressed harder" is
+// a different direction in each theme and a computed darkening has no
+// theme. The document said one thing, the stylesheet did another, and
+// the generated design-system page drew the document's version — which
+// on the dark ground is the dark theme's own `paper` text on a near-ink
+// fill, 1.0:1, a button whose label is invisible. Nothing was red.
+//
+// That is this repository's most expensive defect class ("prose about
+// code is code, and rots the same way") landing on the one document that
+// claims to be normative. Every other claim in design.md is prose a
+// reader has to check by hand; the colour table is machine-checkable, so
+// it is checked.
+func TestTheDesignDocumentAndTheStylesheetAgreeOnEveryColour(t *testing.T) {
+	light, dark := themeTokens(t)
+
+	var wrong []string
+	for name, stated := range statedColours(t) {
+		got, ok := light["--"+name]
+		if !ok {
+			wrong = append(wrong, "--"+name+": stated in docs/design.md, declared nowhere in the stylesheet")
+			continue
+		}
+		if !strings.EqualFold(got, stated) {
+			wrong = append(wrong, "--"+name+": docs/design.md says "+stated+", the stylesheet says "+got)
+		}
+	}
+	for name, stated := range statedDarkColours(t) {
+		got, ok := dark["--"+name]
+		if !ok {
+			wrong = append(wrong, "--"+name+": a dark hex in docs/design-tokens.json, no dark declaration in the stylesheet")
+			continue
+		}
+		if !strings.EqualFold(got, stated) {
+			wrong = append(wrong, "--"+name+" (dark): docs/design-tokens.json says "+stated+", the stylesheet says "+got)
+		}
+	}
+	if len(wrong) > 0 {
+		sort.Strings(wrong)
+		t.Fatalf("%d colour(s) where the design system and the product disagree:\n  %s\n\n"+
+			"docs/design.md and docs/design-tokens.json are the normative statement of this palette and "+
+			"internal/web/static/styles.css is what a reader actually sees. When they differ one of them is "+
+			"lying, and the generated design-system page renders the document's version.",
+			len(wrong), strings.Join(wrong, "\n  "))
 	}
 }

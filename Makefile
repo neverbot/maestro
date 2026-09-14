@@ -1,7 +1,7 @@
 GO ?= go
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
-.PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check docs docs-check dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
+.PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check docs docs-check demo dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
 
 build:
 	$(GO) build -ldflags "-X github.com/neverbot/maestro/internal/version.Version=$(VERSION)" -o bin/maestro ./cmd/maestro
@@ -105,6 +105,24 @@ skill-check:
 # its data in a named volume across restarts; `dev-down` stops it and
 # leaves that volume alone, which is deliberate — a game you seeded to
 # try something out survives until you remove the volume yourself.
+# The demo game, written into the running dev instance: a prerequisite
+# cycle, an entity reachable only behind it, one connected to nothing, a
+# type declaring more fields than a catalogue draws, three hundred rows
+# to page, a document with two versions and an uploaded image.
+#
+# It exists because three defects in this product were found the first
+# time a screen was ever rendered with data in it, each on a game that
+# had been seeded by hand and was in nobody's repository. `make dev` then
+# `make demo` is the shortest path to a Maestro that can be looked at.
+#
+# It writes through the domain rather than over the wire, so a demo this
+# product would refuse cannot be written; cmd/maestro-demo's own test
+# runs the same function against a throwaway database.
+demo:
+	$(GO) run ./cmd/maestro-demo \
+	  -database-url "postgres://maestro:maestro@localhost:$${MAESTRO_DB_HOST_PORT:-5433}/maestro?sslmode=disable" \
+	  -slug $${DEMO_SLUG:-demo}
+
 dev:
 	docker compose up --build -d
 	@# The rebuild leaves the image it replaced untagged, and an untagged

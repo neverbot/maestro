@@ -114,7 +114,14 @@ artefacts written to disk are English regardless.
   branch is `master`. CI builds the image, smoke-tests it against a
   real Postgres, and publishes nothing: building from this repository
   is the only way to run it. The binaries are `maestro`,
-  `maestro-skilldoc` and `maestro-docs`.
+  `maestro-skilldoc`, `maestro-docs` and `maestro-demo` — the last is a
+  development tool the image does not contain, and `make demo` writes
+  the game the screens need in order to be *seen*: a prerequisite cycle,
+  something reachable only behind it, something connected to nothing, a
+  type with more fields than a catalogue draws, three hundred rows to
+  page, prose with two versions and an image. Three defects in this
+  product were found the first time a screen was rendered with data in
+  it, each on a game nobody had committed.
 - **The documentation site** is built by `cmd/maestro-docs` from files
   that are already here — the readme, the skill bundle's own pages, the
   generated design system — and published by `.github/workflows/pages.yml`.

@@ -203,6 +203,7 @@ and the build cache that repeated `make dev` rebuilds leave behind.
 
 ```bash
 make dev          # build the image and start it, on http://localhost:8090
+make demo         # write a game into it that the screens can be seen on
 make dev-logs     # follow the server's log
 make dev-psql     # a psql shell on its database
 make dev-down     # stop it, keeping the data volume
@@ -210,6 +211,13 @@ make dev-down     # stop it, keeping the data volume
 
 `make dev` rebuilds, so it is also how a code change reaches the
 browser. The data lives in a named volume and survives `dev-down`.
+
+**`make demo` is worth running the first time.** A fresh instance is
+empty, and several of Maestro's screens only exist when something is in
+them: the analysis reports need a design with a loop and a dead end in
+it, the catalogue's ordering and paging need a type with more rows than
+one page, and the images list needs an image. The demo writes one game
+with all of that in it, through the same domain code the API uses.
 
 ### Other targets
 

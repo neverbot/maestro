@@ -2126,7 +2126,15 @@ li.cycle:last-child { border-bottom: 0; }
    could be filled in, which is the question this page is for. */
 dl.fields {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* **Three columns that hug what is in them**, with the leftover width
+     left as paper. `1fr` on the value put a field's declared type — the
+     one word that explains the value beside it — at the far right of a
+     1440px window: "25" at x=133 and "number" at x=1345, which is the
+     same mistake the catalogue's row made with a name and its key.
+     `start` rather than a spacer track here because these rows carry no
+     rule of their own, so nothing looks cut short. */
+  grid-template-columns: auto fit-content(44rem) auto;
+  justify-content: start;
   gap: 0.35rem 1rem;
   margin: 0;
   align-items: baseline;

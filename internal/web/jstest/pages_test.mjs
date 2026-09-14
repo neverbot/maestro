@@ -715,6 +715,48 @@ check("thePagesGrowSoAThousandRowsIsFourPressesNotEighteen", async () => {
   );
 });
 
+// **One value, one spelling, on both screens that show it.** A quest
+// with `repeatable: false` read "false" in the catalogue and "no" on its
+// own page, and a list of tags read "elwynn,quest" here and
+// "elwynn, quest" there — two spellings of one value, on two screens a
+// designer moves between by clicking a row. The catalogue calls the
+// entity page's own formatter now.
+check("theCatalogueSpellsAValueTheWayTheEntityPageDoes", async () => {
+  const dom = mount({
+    ids: CATALOGUE_IDS,
+    pathname: "/g/azeroth/t/quest",
+    routes: [
+      [(url) => url === base + "/types/by-key/quest", {
+        body: {
+          key: "quest", label: "Quest", label_plural: "Quests",
+          field_schema: [
+            { key: "repeatable", type: "bool" },
+            { key: "tags", type: "list<text>" },
+            { key: "min_level", type: "number" },
+          ],
+        },
+      }],
+      [(url) => url.startsWith(base + "/entities"), {
+        body: {
+          items: [{
+            type_key: "quest", key: "hogger", name: "Wanted: Hogger",
+            fields: { repeatable: false, tags: ["elwynn", "wanted"], min_level: 9 },
+          }],
+        },
+      }],
+      events,
+    ],
+  });
+  await load("catalogue");
+  const row = dom.elements["entities"].children.find((child) => child.className !== "catalogue-head");
+  const cells = row.children.filter((child) => child.className.includes("catalogue-cell"));
+  assertEqual(
+    JSON.stringify(cells.slice(0, 3).map((cell) => cell.textContent)),
+    JSON.stringify(["no", "elwynn, wanted", "9"]),
+    "the catalogue's cells",
+  );
+});
+
 // **Three of eight fields, said out loud.** The catalogue draws at most
 // three of a type's declared fields — a lane of ten columns is a
 // spreadsheet — and it used to say nothing about the rest, so a type

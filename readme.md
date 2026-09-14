@@ -39,6 +39,15 @@ progression still holds together.
 **Prose.** Lore and mission scripts as versioned markdown, attached to
 the entities they describe.
 
+**And what a person can change themselves.** Most writing here is an
+agent's job — declaring types, writing relations, filling a game — but
+three things are edited where they are read: an entity's name, an
+entity's field values, and a document's body. Every one of them states
+the version it was read at, so a save that lands on somebody else's is
+shown as a conflict with both values named rather than quietly winning.
+A view can also be composed in the browser, clause by clause, for the
+half of the query language a sentence can hold.
+
 ## Maestro knows nothing about games
 
 No quest table. No zone table. No character table. Every game brings its

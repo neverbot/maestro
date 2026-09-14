@@ -34,6 +34,7 @@ import {
 } from "./page.js";
 import { nextCursorOf } from "../rows.js";
 import { headerRow, row } from "../rows.js";
+import { formatValue } from "./entity.js";
 import { goToLogin } from "../app.js";
 
 // The line this page carries about itself. It is a constant so the
@@ -238,7 +239,13 @@ export async function cataloguePage(opened) {
         return { text: "no " + name, absent: true };
       }
       if (value === "") return { text: "empty", absent: true };
-      return { text: String(value), numeric: field.type === "number" };
+      // **The same words the entity page uses**, which is the whole
+      // reason this calls a shared function rather than `String(value)`.
+      // A quest with `repeatable: false` read "false" in this table and
+      // "no" on its own page, and a list of tags read "elwynn,quest"
+      // here and "elwynn, quest" there: two spellings of one value, on
+      // two screens a designer moves between by clicking a row.
+      return { text: formatValue(field.type, value), numeric: field.type === "number" };
     });
   }
 

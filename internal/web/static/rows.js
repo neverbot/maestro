@@ -223,9 +223,15 @@ export function headerRow(doc, spec) {
   // The count track, empty. It exists so the header spans the same six
   // tracks a row does; without it the header is one track short and
   // everything after the name drifts.
+  // The count track's own heading. It was always empty, which was right
+  // while the only thing in that track was a count of something the
+  // label already named — and wrong on the two listings that put a
+  // *value* there: a view's renderer and, on the images list, nothing at
+  // all. "graph" and "layered" sat right-aligned under a blank heading.
   const tally = doc.createElement("span");
   tally.className = "catalogue-count";
   tally.setAttribute("role", "columnheader");
+  tally.textContent = spec.count ?? "";
   item.append(tally);
   return item;
 }

@@ -83,9 +83,14 @@ func TestTheDocumentScriptsHTMLSinkIsOnlyFedByARenderedView(t *testing.T) {
 	// One declaration plus the call sites; the declaration's argument
 	// list is the parameter list, which is skipped by name.
 	allowed := map[string]bool{
-		"el, html":                 true, // the declaration itself
-		"bodyEl, doc.html":         true, // GET /docs/rendered
-		"outEl, result.body?.html": true, // GET /docs/comparison
+		"el, html":         true, // the declaration itself
+		"bodyEl, doc.html": true, // GET /docs/rendered
+		// GET /docs/comparison. The answer is bound to a local first —
+		// the page reads three other fields off it to decide whether the
+		// diff is worth drawing at all — so the binding itself is
+		// checked below rather than the guard being loosened to "any
+		// `.html`".
+		"outEl, comparison.html": true,
 	}
 	seen := []string{}
 	for _, call := range calls {
@@ -94,6 +99,13 @@ func TestTheDocumentScriptsHTMLSinkIsOnlyFedByARenderedView(t *testing.T) {
 		if !allowed[args] {
 			t.Errorf("setRenderedHTML(%s): the one HTML sink may only be fed a rendered view's own html field", args)
 		}
+	}
+	// The local the comparison arm feeds the sink from, spelled out, so
+	// "comparison.html" above cannot come to mean a string this page
+	// assembled and called `comparison`.
+	if !strings.Contains(source, "const comparison = result.body ?? {};") {
+		t.Error("the comparison arm no longer binds the server's answer to `comparison`, " +
+			"so `setRenderedHTML(outEl, comparison.html)` is no longer known to be a rendered view's own html")
 	}
 	if len(seen) != 3 {
 		sort.Strings(seen)

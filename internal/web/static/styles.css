@@ -1548,7 +1548,18 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* The measure lives here now, and only here: this is the game's own
    writing, which is the one thing on screen a 68-character line was
    ever the right shape for. */
-.prose { line-height: 1.6; font-family: var(--serif); max-width: var(--measure); }
+/* The Prose role, in full. docs/design.md sets it at serif 400,
+   **0.95rem**, 1.6, capped at the measure — and the size was the one
+   part never implemented, so the game's own writing was set at the
+   tool's 0.875rem body size. A document read at the size of a button
+   label is the Two Voices Rule kept in the typeface and dropped in the
+   scale. */
+.prose {
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: var(--measure);
+}
 .prose h1, .prose h2, .prose h3 { color: var(--ink); font-weight: 600; }
 .prose h1 { font-size: 1.35rem; margin: 1.8rem 0 0.6rem; letter-spacing: 0; }
 .prose h2 { font-size: 1.15rem; margin: 1.6rem 0 0.5rem; letter-spacing: 0; }
@@ -2050,6 +2061,19 @@ dl.fields dt.undeclared {
    is a hint rather than a picture: the filename beside it is the name,
    and the row links to the image itself for a reader who wants to see
    it at its own size. */
+/* **The hole the drawing will fill, reserved before it arrives.**
+   `#view-root` is empty until pages/view.js mounts the frame, so the
+   page laid out at its natural height and then jumped 570px when the
+   picture landed — under a reader who had already started reading the
+   sentence above it. The reservation is the same box mst-canvas gives
+   itself (70vh with a 22rem floor), and it applies only while the hole
+   is empty, so the table renderer — which is slotted into the same
+   place and must size itself — is untouched. */
+#view-root:empty {
+  display: block;
+  min-height: max(22rem, 70vh);
+}
+
 .asset-thumb {
   width: auto;
   height: 20px;

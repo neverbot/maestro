@@ -559,16 +559,27 @@ function describeComparison(comparison) {
   if (comparison.from_deleted && !comparison.to_deleted) {
     return "The document was deleted at the earlier of these two versions and written again after it.";
   }
-  const unified = typeof comparison.unified === "string" ? comparison.unified : "";
-  const changed = unified.split("\n").some(
+  if (!hasChangedLines(comparison.unified)) {
+    return "These two versions are identical.";
+  }
+  return "";
+}
+
+// hasChangedLines reports whether a unified diff says anything at all.
+//
+// A diff of two identical versions is nothing but its own `---`/`+++`
+// file headers, and the page **drew it**: a bordered box holding two
+// grey lines, under a sentence that had just said the versions are
+// identical. The box is the second statement, and it contradicted the
+// first by existing. This predicate is what both the sentence and the
+// box now ask, so they cannot disagree.
+export function hasChangedLines(unified) {
+  const text = typeof unified === "string" ? unified : "";
+  return text.split("\n").some(
     (line) =>
       (line.startsWith("+") && !line.startsWith("+++")) ||
       (line.startsWith("-") && !line.startsWith("---")),
   );
-  if (!changed) {
-    return "These two versions are identical.";
-  }
-  return "";
 }
 
 // wireCompareForm turns the two pickers into a request to
@@ -606,13 +617,29 @@ function wireCompareForm(game, docPath) {
       if (errorEl) errorEl.textContent = result.message;
       return;
     }
-    setRenderedHTML(outEl, result.body?.html);
-    outEl.hidden = false;
+    const comparison = result.body ?? {};
+    // **Nothing to draw is not a box with nothing in it.** An identical
+    // comparison rendered as a bordered frame holding the diff's own two
+    // header lines, beside a sentence saying the versions are identical:
+    // the reader was told the truth and shown something that looked like
+    // a failed render of it.
+    // **A diff with no changed line draws nothing.** That is every case
+    // with an empty diff and not only the identical one: a comparison
+    // spanning a deletion is empty too — the tombstone carries the body
+    // the document had when it went — and its answer is the sentence
+    // beside it, not a bordered box holding the diff's own two file
+    // headers. A coarse comparison has real changed lines and draws like
+    // any other, so there is no branch for it here; a branch nothing
+    // reaches is the lie this file would have grown.
+    const draws = hasChangedLines(comparison.unified);
+    if (draws) setRenderedHTML(outEl, comparison.html);
+    else outEl.replaceChildren();
+    outEl.hidden = !draws;
     // Both of these are *correct* answers, which is why they go in
     // #compare-note and not in #compare-error: the error line is red,
     // and a reader who is told the truth in the colour reserved for
     // failure reads it as one.
-    const note = describeComparison(result.body ?? {});
+    const note = describeComparison(comparison);
     if (noteEl && note) {
       noteEl.textContent = note;
       noteEl.hidden = false;

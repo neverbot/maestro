@@ -141,3 +141,37 @@ func TestTheSharedControlSheetSpellsNoColour(t *testing.T) {
 			strings.TrimSpace(string(body)[loc[0]:loc[1]]))
 	}
 }
+
+// TestTheProseRoleIsSetAtTheSizeTheSystemStates is a source guard over
+// one number, and it exists because the number was stated in
+// docs/design.md, implemented nowhere, and invisible to every other
+// test: a document rendered at 14px instead of 0.95rem looks like a
+// document, just the tool's size rather than the game's.
+//
+// **The design system is the authority and the stylesheet answers to
+// it** (see claude.md), so the assertion reads the size out of
+// docs/design.md rather than repeating it — a guard that hard-coded
+// 0.95rem would go on passing the day the system says something else.
+func TestTheProseRoleIsSetAtTheSizeTheSystemStates(t *testing.T) {
+	system, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))
+	if err != nil {
+		t.Fatalf("read docs/design.md: %v", err)
+	}
+	stated := regexp.MustCompile(`\*\*Prose\*\* \(serif \d+, ([0-9.]+rem)`).FindStringSubmatch(string(system))
+	if stated == nil {
+		t.Fatal("docs/design.md no longer states the Prose role's size in the shape this guard reads; " +
+			"it is the authority, so fix the guard and not the document")
+	}
+
+	styles, err := os.ReadFile("static/styles.css")
+	if err != nil {
+		t.Fatalf("read styles.css: %v", err)
+	}
+	rule := regexp.MustCompile(`\n\.prose \{[^}]*\}`).FindString(string(styles))
+	if rule == "" {
+		t.Fatal("no `.prose` rule at all: the game's own writing has no role")
+	}
+	if !strings.Contains(rule, "font-size: "+stated[1]) {
+		t.Errorf("the Prose role is stated as %s in docs/design.md and the stylesheet sets:\n%s", stated[1], rule)
+	}
+}

@@ -26,7 +26,7 @@ import {
   setReadOnly,
   viewURL,
 } from "./page.js";
-import { nextCursorOf } from "../rows.js";
+import { headerRow, nextCursorOf } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 export async function viewsPage(opened) {
@@ -72,6 +72,12 @@ export async function viewsPage(opened) {
     say(errorEl, "");
     const body = answer.result;
     const items = Array.isArray(body.items) ? body.items : [];
+    // **The header, once, above the first page.** The catalogue has one
+    // and this list did not, so the renderer's name sat right-aligned in
+    // the count track with nothing saying what that word was.
+    if (rendered === 0 && items.length > 0) {
+      listEl.append(headerRow(doc, { label: "View", key: "key", count: "Renderer" }));
+    }
     for (const view of items) {
       listEl.append(
         row(doc, {

@@ -22,7 +22,7 @@ import {
   setReadOnly,
 } from "./page.js";
 import { isDrawableHref } from "../render/scene.js";
-import { nextCursorOf, row } from "../rows.js";
+import { headerRow, nextCursorOf, row } from "../rows.js";
 import { goToLogin } from "../app.js";
 
 // Where an uploaded image is served from: **the URL the server spelled**,
@@ -106,6 +106,12 @@ export async function assetsPage(opened) {
     // repeated the visible filename as its alt text, which a screen
     // reader reads twice. Both are gone with the hand-built row.
     const items = Array.isArray(body.assets) ? body.assets : [];
+    // The same header the catalogue and the views list carry. This
+    // listing puts the pixel size in the first content cell and the id
+    // in the key track, and neither was named.
+    if (rendered === 0 && items.length > 0) {
+      listEl.append(headerRow(doc, { label: "Image", key: "id", cells: [{ text: "Size" }] }));
+    }
     for (const asset of items) {
       const source = assetURL(asset);
       const item = row(doc, {

@@ -583,6 +583,17 @@ async function runCase({
   if (elements["compare-error"].textContent !== "") {
     fail(`an identical comparison wrote to the error line: ${JSON.stringify(elements["compare-error"].textContent)}`);
   }
+  // **And the box is gone.** The sentence was right and the page drew a
+  // bordered frame beside it holding the diff's own two header lines, so
+  // the reader was told the versions are identical and shown something
+  // that looked like a failed render of them. A comparison with nothing
+  // in it draws nothing.
+  if (elements.comparison.hidden !== true) {
+    fail("an identical comparison still drew its diff box, which holds nothing but the diff's own file headers");
+  }
+  if (elements.comparison.innerHTML !== "") {
+    fail(`an identical comparison left markup behind: ${JSON.stringify(elements.comparison.innerHTML)}`);
+  }
 }
 
 // Case 9b: a comparison that spans a deletion. A tombstone version
@@ -625,6 +636,13 @@ async function runCase({
   assertVisible(elements["compare-note"], "compare-note", "the deletion sentence was written but never revealed");
   if (elements["compare-error"].textContent !== "") {
     fail(`a successful comparison wrote to the error line: ${JSON.stringify(elements["compare-error"].textContent)}`);
+  }
+  // The diff itself is empty here too — a tombstone carries the body the
+  // document had when it went — so the sentence is the whole answer and
+  // there is no box. Drawing one would put the diff's own file headers
+  // on screen under a sentence about a deletion.
+  if (elements.comparison.hidden !== true) {
+    fail("a comparison spanning a deletion drew a diff box holding nothing but file headers");
   }
 }
 

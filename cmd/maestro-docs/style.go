@@ -293,7 +293,7 @@ img { max-width: 100%; }
    instead and a group is never broken across them. */
 .index { columns: 2; column-gap: 2rem; }
 .index section { break-inside: avoid; margin: 0 0 1.5rem; }
-.index h3 { margin-top: 0; }
+.index h2 { font: 600 1.125rem/1.35 var(--sans); margin: 0 0 0.6rem; padding: 0; border: 0; }
 .index ul { list-style: none; margin: 0; padding: 0; max-width: none; }
 .index li { margin: 0 0 0.75rem; }
 .index a { text-decoration: none; }
@@ -309,8 +309,12 @@ footer {
   font-size: 0.875rem;
 }
 
-/* The one page whose content is not prose. */
+/* The one page whose content is not prose. Its content *is* panels, and
+   panels do not nest: a bordered paper panel inside a bordered paper
+   sheet is the defect design.md names by that word, so here the sheet
+   steps back and the panels are what sits on the desk. */
 .page.wide { grid-template-columns: minmax(0, 1fr) var(--rail); }
+.page.wide main { background: none; border: 0; box-shadow: none; padding: 0; }
 
 @media (max-width: 1100px) {
   .page { grid-template-columns: minmax(0, 1fr); }

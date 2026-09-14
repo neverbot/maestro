@@ -109,9 +109,15 @@ const dataSwatches = Object.entries(colorMeta)
   .map(([k, meta]) => `<i style="background:${meta.canonical}" title="${esc(k)}"></i>`)
   .join("");
 
+// **The chip wears the token and not the literal.** It rendered
+// `shadows[i].value`, which is the light theme's warm brown — so on the
+// dark ground the specimen of "Resting" was a rust glow, which is the
+// one thing this palette's shadow rule exists to avoid, drawn by the
+// page that states the rule. The code line below it still prints the
+// light value, because that is what the token resolves to on paper.
 const shadowCards = shadows
   .map(
-    (s) => `<div class="sh"><div class="chip" style="box-shadow:${s.value}"></div>
+    (s, i) => `<div class="sh"><div class="chip" style="box-shadow:var(--shadow-${i + 1})"></div>
   <b>${esc(s.name)}</b><span>${esc(s.purpose)}</span><code>${esc(s.value)}</code></div>`,
   )
   .join("\n");

@@ -489,7 +489,10 @@ func agentsIndexPage(bundle []page) page {
 		"description of it: the same files, rendered.</p>\n")
 	out.WriteString(`<div class="index">` + "\n")
 	for _, group := range grouped(bundle) {
-		out.WriteString("<section>\n<h3>" + escape(groupLabels[groupOf(group[0])]) + "</h3>\n<ul>\n")
+		// h2 and not h3: an h1 followed by an h3 skips a level, which is
+		// what a reader on a screen reader hears as a missing section.
+		out.WriteString("<section>\n<h2 id=\"" + groupOf(group[0]) + "\">" +
+			escape(groupLabels[groupOf(group[0])]) + "</h2>\n<ul>\n")
 		for _, p := range group {
 			href := strings.TrimPrefix(p.Path, "agents/")
 			out.WriteString(`<li><a href="` + href + `"><b>` + escape(p.Title) + "</b></a>")

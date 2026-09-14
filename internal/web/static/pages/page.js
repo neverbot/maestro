@@ -70,17 +70,28 @@ export const DESTINATIONS = [DESTINATION_VIEWS, DESTINATION_CATALOGUE, DESTINATI
 // The sentence a game with no views at all reads, and the one piece of
 // onboarding in this product (the plan's O1).
 //
-// **It is a sentence and a link and never a button.** Nothing in this
-// interface writes a view — a saved query is an agent's job over MCP,
-// taught by the skill bundle — so a *New view* control here would lead
-// nowhere, and a page offering an action it cannot perform is the defect
-// this whole sub-project is written against.
-// The heading is the fact, and it is short because it is read first and
-// often alone. The sentence beneath it is the explanation, and it keeps
-// the wording it has always had.
+// **It said only an agent could write a view, and that stopped being
+// true when the builder shipped.** The sentence was written when nothing
+// in this interface composed a query: it named MCP to a designer who has
+// no MCP client, and it went on saying "an agent writes one" beside a
+// *New view* button that opens the builder. Two defects in one line —
+// the prose-about-code rot this project keeps finding, and a negative
+// state teaching an API, which negativeState's own comment forbids.
+//
+// The heading is the fact. The sentence is what a view is, and the half
+// that says who may make one depends on the reader: a viewer's write is
+// refused by every content route, so they are told that rather than told
+// to open a builder that will refuse them. The link stays the skill
+// bundle, because the questions the builder cannot hold are still an
+// agent's job and that is where they are taught.
 export const NO_VIEWS_HEADING = "No saved views yet";
-export const NO_VIEWS_SENTENCE =
-  "A view is a saved query plus a renderer, written by an agent over MCP.";
+export const NO_VIEWS_SENTENCE = "A view is a saved query plus a renderer.";
+export const NO_VIEWS_COMPOSE =
+  "The builder composes the half of the query language a sentence can hold; an agent writes the " +
+  "rest.";
+export const NO_VIEWS_VIEWER =
+  "Your role in this game is viewer, so this instance will refuse a write from you: an editor, " +
+  "an admin or the owner composes one.";
 export const SKILL_BUNDLE_LABEL = "How an agent writes one";
 
 // The one line in this front end that names an address outside this
@@ -535,13 +546,17 @@ export { STATE_EMPTY, STATE_LOADING, STATE_REFUSED, negativeState, fillState } f
 
 // onboarding is the no-views state, and it is now the shared shape with
 // the product's one piece of onboarding in it rather than a component of
-// its own. It kept its name and its sentence; what it lost is the box and
-// the 3px coloured left stripe, which the identity bans by name.
-export function onboarding(doc) {
+// its own. It kept its name; what it lost is the box and the 3px
+// coloured left stripe, which the identity bans by name.
+//
+// It takes the reader's role for the same reason the types and prose
+// states do: this screen gained a write, and a state that tells a viewer
+// to use it would be promising an action the server refuses.
+export function onboarding(doc, role) {
   return negativeState(doc, {
     kind: STATE_EMPTY,
     heading: NO_VIEWS_HEADING,
-    sentence: NO_VIEWS_SENTENCE,
+    sentence: NO_VIEWS_SENTENCE + " " + (role === ROLE_VIEWER ? NO_VIEWS_VIEWER : NO_VIEWS_COMPOSE),
     action: { href: SKILL_BUNDLE_HREF, label: SKILL_BUNDLE_LABEL },
   });
 }

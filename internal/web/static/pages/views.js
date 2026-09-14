@@ -7,9 +7,10 @@
 //
 // A game with no views at all gets the product's one piece of
 // onboarding, from `pages/page.js` so that this page and the home lane
-// cannot come to say two different things: a sentence saying a view is
-// written by an agent over MCP, a link to the documentation that teaches
-// it, and **no create control of any kind**.
+// cannot come to say two different things: what a view is, who may make
+// one here — which depends on the reader's role, because the builder
+// arrived and a viewer's write is still refused — and a link to the
+// documentation that teaches an agent the half the builder cannot hold.
 
 import {
   DESTINATION_VIEWS,
@@ -110,7 +111,7 @@ export async function viewsPage(opened) {
     rendered += items.length;
     emptyOrRows(listEl, null, rendered);
     if (onboardingEl) {
-      onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc)] : []));
+      onboardingEl.replaceChildren(...(rendered === 0 ? [onboarding(doc, role.ok ? role.result.role : "")] : []));
       onboardingEl.hidden = rendered > 0;
     }
     say(noteEl, rendered === 0 ? "" : countLabel(rendered, "view", "views"));

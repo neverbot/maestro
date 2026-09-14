@@ -447,7 +447,7 @@ check("theHomeLanesAreViewsCatalogueProseInThatOrder", async () => {
 // **A sentence and a link, and no button.** Nothing in this interface
 // writes a view, so a create control here would lead nowhere — the
 // plan's O1, and the one piece of onboarding this product ships.
-check("aGameWithNoViewsGetsTheAgentSentenceAndNoCreateButton", async () => {
+check("aGameWithNoViewsIsToldWhatAViewIsAndGetsNoCreateButtonInTheLane", async () => {
   const dom = mount({
     ids: HOME_IDS,
     pathname: "/g/azeroth",
@@ -522,9 +522,15 @@ check("emptyStateActionsFollowTheRole", async () => {
       // longer has a span of its own for it to be written into.
       types: dom.elements["types-empty"].textContent,
       docs: dom.elements["docs-empty"].textContent,
+      // The views state branches on the role for the same reason, and
+      // it started to the day the builder shipped: before that it said
+      // only an agent could write a view, to everybody, which was a
+      // sentence about a product that no longer existed.
+      views: text(dom.elements["views-onboarding"]),
     };
     assert(!dom.elements["types-empty"].hidden, `the ${role} did not get the entity-types empty state`);
     assert(!dom.elements["docs-empty"].hidden, `the ${role} did not get the documents empty state`);
+    assert(!dom.elements["views-onboarding"].hidden, `the ${role} did not get the views empty state`);
   }
   assert(
     sentences.viewer.types !== sentences.editor.types,
@@ -534,7 +540,15 @@ check("emptyStateActionsFollowTheRole", async () => {
     sentences.viewer.docs !== sentences.editor.docs,
     "a viewer and an editor read the same sentence about writing a document",
   );
-  for (const what of ["types", "docs"]) {
+  assert(
+    sentences.viewer.views !== sentences.editor.views,
+    "a viewer and an editor read the same sentence about composing a view",
+  );
+  assert(
+    sentences.editor.views.includes("builder"),
+    `the editor's views sentence does not name the builder: ${JSON.stringify(sentences.editor.views)}`,
+  );
+  for (const what of ["types", "docs", "views"]) {
     assert(
       sentences.viewer[what].includes("will refuse a write from you"),
       `the viewer's ${what} sentence does not say the instance will refuse the write`,

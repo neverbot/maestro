@@ -175,7 +175,7 @@ export async function home(opened) {
   // stay hidden, because two empty catalogues under a message read as a
   // game with nothing in it.
   if (!summary.ok) return { ...opened, onEvent: null };
-  await viewsLane(doc, slug, client);
+  await viewsLane(doc, slug, client, summary.role);
   setReadOnly(doc, summary.role, "writes this game's content");
   await prose.load(summary.role);
 
@@ -282,7 +282,7 @@ async function catalogueLane(doc, slug, client, summaryEl) {
 
 // viewsLane lists the saved views, and answers a game that has none with
 // the product's one piece of onboarding.
-async function viewsLane(doc, slug, client) {
+async function viewsLane(doc, slug, client, role) {
   const listEl = doc.getElementById("views");
   const errorEl = doc.getElementById("views-error");
   const onboardingEl = doc.getElementById("views-onboarding");
@@ -310,7 +310,7 @@ async function viewsLane(doc, slug, client) {
     ),
   );
   if (onboardingEl) {
-    onboardingEl.replaceChildren(...(items.length === 0 ? [onboarding(doc)] : []));
+    onboardingEl.replaceChildren(...(items.length === 0 ? [onboarding(doc, role)] : []));
     onboardingEl.hidden = items.length > 0;
   }
 }

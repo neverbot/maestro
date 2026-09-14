@@ -292,6 +292,22 @@ check("theOrderTheHeadersSetReachesTheURL", async () => {
   assert(!plain.includes("order="), `asked ${plain}`);
 });
 
+// The search pages now, and a cursor only travels with its kind: the
+// server refuses one on a merged answer, so a page walking a matching
+// set has to say it is asking for entities.
+check("aPagedSearchCarriesItsKindAndItsCursor", async () => {
+  const { server, client: c } = await harness();
+  await c.searchEntities("gnoll", "quest", { limit: 50, verbose: true, kind: "entity", cursor: "abc" });
+  const last = server.calls[server.calls.length - 1].path;
+  assert(last.includes("kind=entity"), `asked ${last}`);
+  assert(last.includes("cursor=abc"), `asked ${last}`);
+
+  // A first page has no cursor, and asks for none.
+  await c.searchEntities("gnoll", "quest", { limit: 50, verbose: true, kind: "entity" });
+  const first = server.calls[server.calls.length - 1].path;
+  assert(!first.includes("cursor="), `asked ${first}`);
+});
+
 check("theClientNeverPatchesFromAPayload", () => {
   // Every payload field this product ever puts on the wire, plus a
   // poison value in each non-identity slot and a field no kind has. The

@@ -51,8 +51,10 @@ export const CATALOGUE_NOTE =
 // second call for one sentence is the wrong trade, so the sentence says
 // what is true for everybody and stops.
 
-// How many a search asks for. It is named because two places read it:
-// the call, and the sentence that admits the cap.
+// How many matches a search asks for at a time. It is a page size now
+// and not a cap: the search pages, so this is how much arrives per
+// press of the same button the listing uses, and no sentence has to
+// admit a wall any more.
 export const SEARCH_LIMIT = 50;
 
 export async function cataloguePage(opened) {
@@ -286,18 +288,16 @@ export async function cataloguePage(opened) {
       // "50 matches" — the same defect this pass exists to fix, a count
       // naming the page rather than the thing, re-introduced in the new
       // code path. The honest sentence is the one that admits the cap.
-      const capped = rendered >= SEARCH_LIMIT;
+      // **The count says what is on screen, and "so far" says there is
+      // more.** It read "First 50 matches … narrow it" when fifty was
+      // all a search could ever answer; the search pages now, so the
+      // honest sentence is the listing's own — what has been fetched,
+      // and whether the set goes on.
       say(
         scopeEl,
-        (capped ? "First " + rendered + " matches" : countLabel(rendered, "match", "matches")) +
+        countLabel(rendered, "match", "matches") +
           " for \u201c" + query + "\u201d" +
-          // **The cap is a door and not a wall.** A search answers the
-          // fifty best matches and cannot be paged past them, so a query
-          // matching three hundred rows left two hundred and fifty of
-          // them unreachable by any path on this screen. The listing's
-          // own filter has no such limit, and this is where a reader
-          // finds that out.
-          (capped ? ". Narrow it, or list by name with “Starting with”" : ""),
+          (cursor === null ? "" : ", so far"),
       );
     } else if (filtering()) {
       // **A filtered listing is not the type.** "Showing 12 of 1000"
@@ -400,8 +400,21 @@ export async function cataloguePage(opened) {
     putHeader();
     rendered = 0;
     cursor = null;
-    if (moreEl) moreEl.hidden = true;
-    const answer = await opened.client.searchEntities(query, typeKey, { limit: SEARCH_LIMIT, verbose: true });
+    await searchPage();
+  }
+
+  // **A search pages, and that is what turned its cap from a wall into a
+  // door.** It answered the fifty best matches and hid the pager, so a
+  // query matching three hundred rows left two hundred and fifty of them
+  // unreachable by any path on this screen. The server walks the whole
+  // matching set now, in the ranking's own order, and this reads it the
+  // way `page` reads the listing — same button, same cursor rule, same
+  // sentence about what is on screen.
+  async function searchPage() {
+    if (moreEl) moreEl.disabled = true;
+    const request = { limit: SEARCH_LIMIT, verbose: true, kind: "entity" };
+    if (cursor !== null) request.cursor = cursor;
+    const answer = await opened.client.searchEntities(query, typeKey, request);
     if (!answer.ok) {
       if (expired(answer)) {
         goToLogin();
@@ -435,7 +448,11 @@ export async function cataloguePage(opened) {
         }),
       );
     }
-    rendered = entities.length;
+    rendered += entities.length;
+    // The cursor before the sentence, as the listing does it: `sayScope`
+    // says "so far" while there is more to fetch, and reading it a line
+    // later made the first page claim to be the whole answer.
+    cursor = typeof answer.result.next_cursor === "string" ? answer.result.next_cursor : null;
     // **A miss is not an empty type.** emptyOrRows shows the listing's
     // own empty state, which reads "Nothing of this type yet" — three
     // lines under a heading that says the type has 105 entities. A search
@@ -458,6 +475,10 @@ export async function cataloguePage(opened) {
       if (emptyEl) emptyEl.hidden = true;
     } else {
       emptyOrRows(listEl, emptyEl, rendered);
+    }
+    if (moreEl) {
+      moreEl.hidden = cursor === null;
+      moreEl.disabled = false;
     }
     sayScope();
   }
@@ -522,7 +543,10 @@ export async function cataloguePage(opened) {
     });
   }
 
-  if (moreEl) moreEl.addEventListener("click", () => page());
+  // One button, two sources. Which one it continues is which one is on
+  // screen: a search and the listing are never both showing, and the
+  // cursor belongs to whichever answered last.
+  if (moreEl) moreEl.addEventListener("click", () => (query === "" ? page() : searchPage()));
   putHeader();
   await page();
   return opened;

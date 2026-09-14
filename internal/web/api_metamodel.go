@@ -871,9 +871,17 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, caller Cal
 	if !ok {
 		return
 	}
+	// The cursor that pages an entity search, read here for the reason
+	// every other listing's is: this surface mirrors MCP route for
+	// route, and the catalogue's own search walks a matching set through
+	// it.
+	cursor, ok := queryString(w, r, "cursor")
+	if !ok {
+		return
+	}
 	out, err := searchContent(r.Context(), s.deps(), caller, scope.ProjectID, SearchInput{
 		Query: query, Kind: kind, TypeKey: typeKey, DocKind: docKind,
-		Limit: limit, Verbose: verbose,
+		Cursor: cursor, Limit: limit, Verbose: verbose,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)

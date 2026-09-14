@@ -2513,6 +2513,130 @@ func (q *Queries) SearchEntities(ctx context.Context, arg SearchEntitiesParams) 
 	return items, nil
 }
 
+const searchEntitiesPage = `-- name: SearchEntitiesPage :many
+SELECT e.id, e.project_id, e.entity_type_id, e.key, e.name, e.fields, e.invalid, e.version, e.search, e.created_at, e.updated_at, e.updated_by_user_id, e.updated_by_token_id,
+       ts_rank(e.search, plainto_tsquery('simple', $1::text)) AS rank,
+       (ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', $1::text))::bool AS name_match
+FROM entities e
+WHERE e.project_id = $2::uuid
+  AND ($3::uuid IS NULL OR e.entity_type_id = $3::uuid)
+  AND e.search @@ plainto_tsquery('simple', $1::text)
+  AND ($4::uuid IS NULL
+       OR (ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', $1::text))::bool
+            < $5::boolean
+       OR ((ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', $1::text))::bool
+             = $5::boolean
+           AND ts_rank(e.search, plainto_tsquery('simple', $1::text))
+             < $6::real)
+       OR ((ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', $1::text))::bool
+             = $5::boolean
+           AND ts_rank(e.search, plainto_tsquery('simple', $1::text))
+             = $6::real
+           AND (e.name, e.id) > ($7::text, $4::uuid)))
+ORDER BY name_match DESC, rank DESC, e.name, e.id
+LIMIT $8::int
+`
+
+type SearchEntitiesPageParams struct {
+	Query          string
+	ProjectID      uuid.UUID
+	EntityTypeID   *uuid.UUID
+	AfterID        *uuid.UUID
+	AfterNameMatch *bool
+	AfterRank      *float32
+	AfterName      *string
+	Limit          int32
+}
+
+type SearchEntitiesPageRow struct {
+	ID               uuid.UUID
+	ProjectID        uuid.UUID
+	EntityTypeID     uuid.UUID
+	Key              string
+	Name             string
+	Fields           []byte
+	Invalid          bool
+	Version          int32
+	Search           pgtype.TSVector
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	UpdatedByUserID  *uuid.UUID
+	UpdatedByTokenID *uuid.UUID
+	Rank             float32
+	NameMatch        bool
+}
+
+// One page of the same search, from a keyset position.
+//
+// **The sort key is all four columns, so the position is all four.** The
+// order is `name_match DESC, rank DESC, name, id`, and a cursor that
+// carried only the last row's name would compare a name against rows
+// that are ordered by two other things first: it would page into the
+// middle of the ranking and skip whatever sits between. SearchPage's own
+// comment in internal/metamodel/search.go states what the position is
+// and why nothing smaller would do.
+//
+// **Written as three arms rather than one row comparison**, because the
+// order mixes directions: a row-wise `<` is only the sort order when
+// every column runs the same way, and here two descend and two ascend.
+// The arms are the lexicographic expansion of exactly that order, in
+// exactly that sequence, and they are what makes this statement's
+// comparison agree with its own ORDER BY — the agreement a keyset lives
+// or dies by.
+//
+// `name_match` and `rank` are recomputed here rather than read back from
+// the cursor's row: the cursor carries the *values* the previous page
+// ended on, and the expressions in the comparison are the same
+// expressions the ORDER BY sorts by, so nothing has to be stored server
+// side for a page to continue.
+//
+// Everything else — the project filter that is load-bearing, the tsquery
+// written three times, the weights — is SearchEntities'. See it.
+func (q *Queries) SearchEntitiesPage(ctx context.Context, arg SearchEntitiesPageParams) ([]SearchEntitiesPageRow, error) {
+	rows, err := q.db.Query(ctx, searchEntitiesPage,
+		arg.Query,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.AfterID,
+		arg.AfterNameMatch,
+		arg.AfterRank,
+		arg.AfterName,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchEntitiesPageRow
+	for rows.Next() {
+		var i SearchEntitiesPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+			&i.Rank,
+			&i.NameMatch,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertEntity = `-- name: UpsertEntity :one
 INSERT INTO entities (project_id, entity_type_id, key, name, fields, search,
                       updated_by_user_id, updated_by_token_id)

@@ -2,6 +2,7 @@ package metamodel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
@@ -113,14 +114,25 @@ const MaxSearchQuery = 4 << 10
 // quest, a creature or a place. typeKey narrows it to one, and an
 // unknown one is a not_found naming the key rather than an empty answer.
 //
-// **It is not paginated.** The answer is the top `limit` rows in the
-// `(name_match, rank)` order above — not by rank alone, which is a
-// weaker and narrower claim now that name_match leads the sort — and a
-// caller holding exactly `limit` rows cannot tell whether there were
-// more. A cursor over that order is not the keyset the listings use —
-// neither key is unique, neither is stable under an edit, and neither is
-// a position a caller can resume from — and the useful recovery for a
-// search that returned too much is a narrower query, not a deeper page.
+// **It is the top `limit` rows and it does not page.** SearchPage below
+// does, and the two exist side by side deliberately: this one answers
+// "the best matches", which is what an agent asks for, and a caller
+// holding exactly `limit` rows cannot tell whether there were more.
+//
+// **This comment used to argue that a cursor over this order was
+// impossible, and that argument was wrong** — it is kept here, named,
+// rather than deleted, because it is the kind of claim that gets
+// re-derived. It said the order's keys are not unique, not stable under
+// an edit, and not a position a caller can resume from. The first is
+// false: the order ends in `id`, so the four columns together are
+// unique. The third follows from the first. The second is true and is
+// not special — the entity listing's own sort key is `name`, which every
+// rename moves, and EntityPage has stated for as long as it has existed
+// what a mutable sort key means for a paged walk. The real reason there
+// was no cursor was that nothing needed one, and then something did:
+// a search matching three hundred rows left two hundred and fifty of
+// them unreachable by any path in the interface.
+//
 // **Task 7 states the cap in the tool description**, and puts
 // name_match itself on the wire on SearchHit, so an agent knows the
 // answer is a top-N and can read the grouping the order is built from
@@ -261,4 +273,139 @@ func searchQueryProblem(message string) error {
 	return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
 		Path: "query", Message: message,
 	}}}
+}
+
+// SearchFilter is one page of a search: the question, what it is
+// narrowed to, and where the previous page stopped.
+type SearchFilter struct {
+	Query   string
+	TypeKey string
+	Cursor  string
+	Limit   int32
+}
+
+// SearchPage is Search with a cursor, and it is what the interface uses.
+//
+// **Why it exists at all**, since Search's own comment argued against
+// it: a search matching three hundred rows answered fifty and left the
+// rest unreachable by any path on the screen. A narrower query is the
+// right recovery when a reader can think of one; it is not an answer to
+// "show me the rest of what I asked for".
+//
+// **The position is all four sort columns** — whether the row's *name*
+// matched, its rank, its name, its id — because the order is
+// `name_match DESC, rank DESC, name, id` and a position carrying less
+// than the whole of that key does not name a place in it. The keyset in
+// SearchEntitiesPage expands the same four in the same sequence; a
+// comparison that disagreed with its own ORDER BY would skip rows at a
+// page boundary and report nothing.
+//
+// **A cursor belongs to the search that issued it**: the game, the
+// query as written and the type it was narrowed to. The query is part of
+// the fingerprint because it is the whole sort key's source — the same
+// row ranks differently under a different question — so carrying a
+// cursor across two searches would page through positions that never
+// existed in either.
+//
+// What it inherits from every other cursor in this package is stated on
+// EntityPage, and one line of it matters more here than there: a cursor
+// is a position, not a snapshot. The rank of a row a designer edits
+// mid-walk moves, and a row can therefore be seen twice or not at all.
+// That is the same trade the entity listing makes with `name`, and the
+// answer to needing a consistent whole is the same: read it again from
+// no cursor.
+func (s *Service) SearchPage(ctx context.Context, projectID uuid.UUID, f SearchFilter) (SearchResultPage, error) {
+	if err := checkSearchQuery(f.Query); err != nil {
+		return SearchResultPage{}, err
+	}
+	limit := pageSize(f.Limit, defaultSearchLimit, maxSearchLimit)
+
+	params := dbq.SearchEntitiesPageParams{
+		ProjectID: projectID,
+		Query:     f.Query,
+		Limit:     limit,
+	}
+	typePart := ""
+	if f.TypeKey != "" {
+		typ, err := s.EntityTypeByKey(ctx, projectID, f.TypeKey)
+		if err != nil {
+			return SearchResultPage{}, err
+		}
+		params.EntityTypeID = &typ.ID
+		typePart = typ.ID.String()
+	}
+
+	fingerprint := fingerprintOf(projectID.String(), "search", typePart, f.Query)
+	after, err := decodeCursor(f.Cursor, fingerprint)
+	if err != nil {
+		return SearchResultPage{}, err
+	}
+	if after.ID != uuid.Nil {
+		position, err := decodeSearchPosition(after.Sort)
+		if err != nil {
+			return SearchResultPage{}, err
+		}
+		params.AfterID = &after.ID
+		params.AfterNameMatch = &position.NameMatch
+		params.AfterRank = &position.Rank
+		params.AfterName = &position.Name
+	}
+
+	rows, err := s.q.SearchEntitiesPage(ctx, params)
+	if err != nil {
+		return SearchResultPage{}, fmt.Errorf("search entities: %w", err)
+	}
+
+	page := SearchResultPage{Entities: rows}
+	if len(rows) == int(limit) {
+		last := rows[len(rows)-1]
+		page.NextCursor = encodeCursor(cursor{
+			Sort: encodeSearchPosition(searchPosition{
+				NameMatch: last.NameMatch, Rank: last.Rank, Name: last.Name,
+			}),
+			ID:          last.ID,
+			Fingerprint: fingerprint,
+		})
+	}
+	return page, nil
+}
+
+// SearchResultPage is one page of SearchPage's answer.
+type SearchResultPage struct {
+	Entities   []dbq.SearchEntitiesPageRow
+	NextCursor string
+}
+
+// searchPosition is the three-part half of the position that is not the
+// id. It travels inside the cursor's Sort field as JSON because
+// paging.Cursor's position is one string and this order's is three
+// values — and because a separator-joined string would have to escape a
+// name, which can hold anything a game writes.
+type searchPosition struct {
+	NameMatch bool    `json:"m"`
+	Rank      float32 `json:"r"`
+	Name      string  `json:"n"`
+}
+
+func encodeSearchPosition(p searchPosition) string {
+	raw, err := json.Marshal(p)
+	if err != nil {
+		// A bool, a float32 and a string always marshal. Returning ""
+		// here would issue a cursor that decodes to nothing, so the
+		// impossible case is loud rather than quietly wrong.
+		panic("marshal search position: " + err.Error())
+	}
+	return string(raw)
+}
+
+func decodeSearchPosition(raw string) (searchPosition, error) {
+	var p searchPosition
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		// Only a hand-edited cursor reaches this: the fingerprint has
+		// already agreed, and this package writes what it reads. It is
+		// the caller's own argument, so it is answered as one, with
+		// paging's shared sentence rather than a second one.
+		return searchPosition{}, malformedCursor("it carries no search position")
+	}
+	return p, nil
 }

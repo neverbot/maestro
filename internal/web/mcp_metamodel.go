@@ -2243,10 +2243,16 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"**Bounds.** The query is at most %d bytes, must be valid UTF-8, must hold no "+
 				"control character and must contain at least one letter or digit; each of "+
 				"those is invalid_input at path `query` rather than an empty answer.\n\n"+
-				"**This is a top-N, not a page.** limit defaults to %d and is capped at %d "+
-				"(and a limit below one gets the default rather than an error), there is no "+
-				"cursor, and truncated only means the answer filled the limit — the recovery "+
-				"for too many hits is a narrower query, not a deeper page.\n\n"+
+				"**A merged answer is a top-N; an entity search pages.** limit defaults to "+
+				"%d and is capped at %d (and a limit below one gets the default rather than "+
+				"an error). With kind omitted or \"document\", the answer is the best hits and "+
+				"truncated only means it filled the limit — the recovery for too many is a "+
+				"narrower query. With kind \"entity\", pass the previous answer's next_cursor "+
+				"to walk the whole matching set; the cursor belongs to the game, the query "+
+				"as written and the type it was narrowed to, and is refused against any "+
+				"other. A cursor with any other kind is invalid_input at path `cursor`: a "+
+				"merged answer interleaves two indexes with two orders, and one position "+
+				"cannot name a place in both.\n\n"+
 				"%s",
 			metamodel.MaxIndexedText, markdown.MaxIndexedChars, metamodel.MaxSearchQuery,
 			metamodel.DefaultSearchLimit, metamodel.MaxSearchLimit, retryAdvice),

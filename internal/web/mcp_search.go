@@ -80,6 +80,12 @@ type SearchInput struct {
 	Kind    string `json:"kind,omitempty"`
 	TypeKey string `json:"type_key,omitempty"`
 	DocKind string `json:"doc_kind,omitempty"`
+	// Cursor pages the **entity** half of a search, and is accepted only
+	// with kind "entity". A merged answer interleaves two indexes with
+	// two orders, and one position cannot name a place in both; rather
+	// than invent a rule for that, a paged search is asked for by kind.
+	// See searchContent for the refusal.
+	Cursor  string `json:"cursor,omitempty"`
 	Limit   int32  `json:"limit,omitempty"`
 	Verbose bool   `json:"verbose,omitempty"`
 }
@@ -150,6 +156,11 @@ type LinkedRef struct {
 type SearchOutput struct {
 	Items     []SearchHit `json:"items"`
 	Truncated bool        `json:"truncated"`
+	// NextCursor is set only for a paged search — kind "entity" — and
+	// only when that page came back full. Everywhere else it is absent,
+	// which is the honest answer: the merged search is a top-N and says
+	// so through Truncated.
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 // MCPSearch implements search over both of a game's indexes.
@@ -206,6 +217,16 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 		}
 	}
 
+	// **A cursor is a position in one listing**, and the merged answer is
+	// not one: two indexes, two orders, interleaved. Refused rather than
+	// applied to the entity half of a merged answer, which would page
+	// one half while the other restarted on every call.
+	if in.Cursor != "" && in.Kind != searchKindEntity {
+		return SearchOutput{}, invalidInput("cursor",
+			`pages an entity search: pass kind "entity" with it, because a merged answer `+
+				`interleaves two indexes and one position cannot name a place in both`)
+	}
+
 	limit := metamodel.SearchLimit(in.Limit)
 	// Items is built with make so an empty answer marshals as [] rather
 	// than null: "this game holds nothing matching" and "the server sent
@@ -217,16 +238,13 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 		if err != nil {
 			return SearchOutput{}, err
 		}
-		rows, err := deps.Metamodel.Search(ctx, projectID, in.Query, in.TypeKey, limit)
+		rows, next, err := searchEntities(ctx, deps, projectID, in, limit)
 		if err != nil {
 			return SearchOutput{}, err
 		}
+		out.NextCursor = next
 		for _, row := range rows {
-			entity, err := entityOf(dbq.Entity{
-				ID: row.ID, ProjectID: row.ProjectID, EntityTypeID: row.EntityTypeID,
-				Key: row.Key, Name: row.Name, Fields: row.Fields,
-				Invalid: row.Invalid, Version: row.Version,
-			}, names, in.Verbose)
+			entity, err := entityOf(row.Entity, names, in.Verbose)
 			if err != nil {
 				return SearchOutput{}, err
 			}
@@ -311,4 +329,65 @@ func searchContent(ctx context.Context, deps MCPDeps, _ Caller, projectID uuid.U
 	// See SearchOutput.
 	out.Truncated = len(out.Items) == int(limit)
 	return out, nil
+}
+
+// searchEntities runs the entity half of a search, paged or not, and
+// returns the rows in one shape so the caller above builds a hit exactly
+// once.
+//
+// **Two calls into the domain and one shape out of this function.** The
+// unpaged Search is what an agent asking for the best matches gets, and
+// it is what the merged answer is built from; SearchPage is what a
+// screen walking a whole matching set uses. They are separate in the
+// domain because they make different promises (see metamodel.Search's
+// own comment on what a top-N answer is), and folding them together here
+// would put that distinction in this file instead.
+func searchEntities(ctx context.Context, deps MCPDeps, projectID uuid.UUID, in SearchInput, limit int32) (
+	[]searchedEntity, string, error,
+) {
+	if in.Kind != searchKindEntity {
+		rows, err := deps.Metamodel.Search(ctx, projectID, in.Query, in.TypeKey, limit)
+		if err != nil {
+			return nil, "", err
+		}
+		out := make([]searchedEntity, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, searchedEntity{
+				Entity: dbq.Entity{
+					ID: row.ID, ProjectID: row.ProjectID, EntityTypeID: row.EntityTypeID,
+					Key: row.Key, Name: row.Name, Fields: row.Fields,
+					Invalid: row.Invalid, Version: row.Version,
+				},
+				NameMatch: row.NameMatch, Rank: row.Rank,
+			})
+		}
+		return out, "", nil
+	}
+
+	page, err := deps.Metamodel.SearchPage(ctx, projectID, metamodel.SearchFilter{
+		Query: in.Query, TypeKey: in.TypeKey, Cursor: in.Cursor, Limit: limit,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	out := make([]searchedEntity, 0, len(page.Entities))
+	for _, row := range page.Entities {
+		out = append(out, searchedEntity{
+			Entity: dbq.Entity{
+				ID: row.ID, ProjectID: row.ProjectID, EntityTypeID: row.EntityTypeID,
+				Key: row.Key, Name: row.Name, Fields: row.Fields,
+				Invalid: row.Invalid, Version: row.Version,
+			},
+			NameMatch: row.NameMatch, Rank: row.Rank,
+		})
+	}
+	return out, page.NextCursor, nil
+}
+
+// searchedEntity is one matched row and the two numbers the order is
+// built from, in the one shape both domain calls come back as.
+type searchedEntity struct {
+	Entity    dbq.Entity
+	NameMatch bool
+	Rank      float32
 }

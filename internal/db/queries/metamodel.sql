@@ -1188,3 +1188,52 @@ WHERE e.project_id = sqlc.arg('project_id')::uuid
   AND e.search @@ plainto_tsquery('simple', sqlc.arg('query')::text)
 ORDER BY name_match DESC, rank DESC, e.name, e.id
 LIMIT sqlc.arg('limit')::int;
+
+-- name: SearchEntitiesPage :many
+-- One page of the same search, from a keyset position.
+--
+-- **The sort key is all four columns, so the position is all four.** The
+-- order is `name_match DESC, rank DESC, name, id`, and a cursor that
+-- carried only the last row's name would compare a name against rows
+-- that are ordered by two other things first: it would page into the
+-- middle of the ranking and skip whatever sits between. SearchPage's own
+-- comment in internal/metamodel/search.go states what the position is
+-- and why nothing smaller would do.
+--
+-- **Written as three arms rather than one row comparison**, because the
+-- order mixes directions: a row-wise `<` is only the sort order when
+-- every column runs the same way, and here two descend and two ascend.
+-- The arms are the lexicographic expansion of exactly that order, in
+-- exactly that sequence, and they are what makes this statement's
+-- comparison agree with its own ORDER BY — the agreement a keyset lives
+-- or dies by.
+--
+-- `name_match` and `rank` are recomputed here rather than read back from
+-- the cursor's row: the cursor carries the *values* the previous page
+-- ended on, and the expressions in the comparison are the same
+-- expressions the ORDER BY sorts by, so nothing has to be stored server
+-- side for a page to continue.
+--
+-- Everything else — the project filter that is load-bearing, the tsquery
+-- written three times, the weights — is SearchEntities'. See it.
+SELECT e.*,
+       ts_rank(e.search, plainto_tsquery('simple', sqlc.arg('query')::text)) AS rank,
+       (ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', sqlc.arg('query')::text))::bool AS name_match
+FROM entities e
+WHERE e.project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR e.entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND e.search @@ plainto_tsquery('simple', sqlc.arg('query')::text)
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', sqlc.arg('query')::text))::bool
+            < sqlc.narg('after_name_match')::boolean
+       OR ((ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', sqlc.arg('query')::text))::bool
+             = sqlc.narg('after_name_match')::boolean
+           AND ts_rank(e.search, plainto_tsquery('simple', sqlc.arg('query')::text))
+             < sqlc.narg('after_rank')::real)
+       OR ((ts_filter(e.search, '{a}') @@ plainto_tsquery('simple', sqlc.arg('query')::text))::bool
+             = sqlc.narg('after_name_match')::boolean
+           AND ts_rank(e.search, plainto_tsquery('simple', sqlc.arg('query')::text))
+             = sqlc.narg('after_rank')::real
+           AND (e.name, e.id) > (sqlc.narg('after_name')::text, sqlc.narg('after_id')::uuid)))
+ORDER BY name_match DESC, rank DESC, e.name, e.id
+LIMIT sqlc.arg('limit')::int;

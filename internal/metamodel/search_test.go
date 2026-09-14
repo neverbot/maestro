@@ -2,7 +2,10 @@ package metamodel_test
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -614,5 +617,200 @@ func TestAKeyMatchDoesNotClaimToBeANameMatch(t *testing.T) {
 		if row.NameMatch {
 			t.Fatalf("row %q was found by its key and reported name_match true", row.Key)
 		}
+	}
+}
+
+// --- The paged search -------------------------------------------------
+
+// **Every match is reachable, and each one once.** The complaint this
+// closes is that a search matching three hundred rows answered fifty and
+// left the rest unreachable by any path: the cap was a wall. It is a
+// door now, and this is the assertion that it opens onto the whole set
+// rather than onto a second copy of the first page.
+//
+// The seed is deliberately built so the ranking has ties in both of its
+// leading columns: twenty rows that carry the word in their *name* and
+// twenty that carry it only in a field, all with the same shape, so the
+// walk crosses a page boundary inside a run of equal `name_match` and
+// equal `rank`. That is the case a keyset that dropped `name` or `id`
+// from its comparison answers with repeats.
+func TestAPagedSearchReachesEveryMatchExactlyOnce(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedSearchableType(t, svc, project)
+
+	for i := range 20 {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest",
+			Key:     fmt.Sprintf("named-%02d", i),
+			Name:    fmt.Sprintf("Gnoll Patrol %02d", i),
+			Fields:  map[string]any{"min_level": float64(1), "summary": "a patrol"},
+		}); err != nil {
+			t.Fatalf("seed named %d: %v", i, err)
+		}
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest",
+			Key:     fmt.Sprintf("mentioned-%02d", i),
+			Name:    fmt.Sprintf("Errand %02d", i),
+			// **Different ranks inside one name_match group.** Repeating
+			// the word moves ts_rank, so these twenty rows fall into
+			// several distinct ranks and a page boundary lands between
+			// two of them — which is the only way the rank arm of the
+			// keyset is exercised at all. With one rank for all twenty,
+			// removing that arm changes nothing and the test says so.
+			Fields: map[string]any{
+				"min_level": float64(1),
+				"summary":   strings.TrimSpace(strings.Repeat("a gnoll is mentioned here. ", i%5+1)),
+			},
+		}); err != nil {
+			t.Fatalf("seed mentioned %d: %v", i, err)
+		}
+	}
+
+	var seen []string
+	filter := metamodel.SearchFilter{Query: "gnoll", Limit: 7}
+	for page := 1; ; page++ {
+		if page > 20 {
+			t.Fatal("paging did not end")
+		}
+		got, err := svc.SearchPage(ctx, project, filter)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		for _, row := range got.Entities {
+			seen = append(seen, row.Key)
+		}
+		if got.NextCursor == "" {
+			break
+		}
+		filter.Cursor = got.NextCursor
+	}
+
+	if len(seen) != 40 {
+		t.Fatalf("the walk saw %d rows, want 40: %v", len(seen), seen)
+	}
+	unique := map[string]bool{}
+	for _, key := range seen {
+		if unique[key] {
+			t.Fatalf("%s came back twice: %v", key, seen)
+		}
+		unique[key] = true
+	}
+	// And the order the unpaged search promises survives paging: every
+	// row that carries the word in its name comes before every row that
+	// only mentions it, across page boundaries and not merely inside one
+	// page.
+	for i, key := range seen {
+		named := strings.HasPrefix(key, "named-")
+		if i < 20 && !named {
+			t.Fatalf("row %d of the walk is %s; the name matches should come first: %v", i, key, seen)
+		}
+		if i >= 20 && named {
+			t.Fatalf("row %d of the walk is %s; the name matches should be over by then: %v", i, key, seen)
+		}
+	}
+}
+
+// A cursor belongs to the search that issued it: the query is the sort
+// key's whole source, so a position in one question means nothing in
+// another.
+func TestASearchCursorBelongsToItsQuery(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedSearchableType(t, svc, project)
+	for i := range 6 {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest",
+			Key:     fmt.Sprintf("gnoll-%02d", i),
+			Name:    fmt.Sprintf("Gnoll Patrol %02d", i),
+			Fields:  map[string]any{"min_level": float64(1), "summary": "kobolds too"},
+		}); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	first, err := svc.SearchPage(ctx, project, metamodel.SearchFilter{Query: "gnoll", Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page issued no cursor")
+	}
+	if _, err := svc.SearchPage(ctx, project,
+		metamodel.SearchFilter{Query: "kobolds", Limit: 3, Cursor: first.NextCursor}); err == nil {
+		t.Error("a cursor from one question paged another")
+	}
+	if _, err := svc.SearchPage(ctx, project,
+		metamodel.SearchFilter{Query: "gnoll", TypeKey: "quest", Limit: 3, Cursor: first.NextCursor}); err == nil {
+		t.Error("a cursor from an unnarrowed search paged a narrowed one")
+	}
+	// The same question, from the same cursor, is the one call that works.
+	second, err := svc.SearchPage(ctx, project,
+		metamodel.SearchFilter{Query: "gnoll", Limit: 3, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(second.Entities) != 3 {
+		t.Fatalf("second page held %d rows, want 3", len(second.Entities))
+	}
+}
+
+// A cursor whose fingerprint agrees and whose position is not a search
+// position is the caller's own argument, answered as one rather than as
+// a server fault — the arm decodeSearchPosition exists for.
+func TestASearchCursorWithAForgedPositionIsMalformed(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedSearchableType(t, svc, project)
+	for i := range 4 {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest",
+			Key:     fmt.Sprintf("gnoll-%02d", i),
+			Name:    fmt.Sprintf("Gnoll Patrol %02d", i),
+			Fields:  map[string]any{"min_level": float64(1)},
+		}); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+	page, err := svc.SearchPage(ctx, project, metamodel.SearchFilter{Query: "gnoll", Limit: 2})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+
+	// The same forging ListRelations' own malformed-cursor test does:
+	// keep the fingerprint, replace the position half. A cursor whose
+	// fingerprint disagrees is refused one step earlier and would not
+	// reach the arm this test is about.
+	raw, err := base64.RawURLEncoding.DecodeString(page.NextCursor)
+	if err != nil {
+		t.Fatalf("decode cursor: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("unmarshal cursor: %v", err)
+	}
+	forgedRaw, err := json.Marshal(map[string]json.RawMessage{
+		"n": json.RawMessage(`"not a position"`),
+		"i": fields["i"],
+		"f": fields["f"],
+	})
+	if err != nil {
+		t.Fatalf("marshal forged cursor: %v", err)
+	}
+	forged := base64.RawURLEncoding.EncodeToString(forgedRaw)
+	_, err = svc.SearchPage(ctx, project,
+		metamodel.SearchFilter{Query: "gnoll", Limit: 2, Cursor: forged})
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("got %v, want a validation error", err)
+	}
+	if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "cursor" {
+		t.Fatalf("refused at %+v, want one problem at path cursor", invalid.Fields)
 	}
 }

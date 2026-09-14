@@ -801,7 +801,9 @@ export function client({
   //
   // It is a separate function from listEntities rather than a `query`
   // option on it, because they are different routes with different
-  // shapes: a listing pages with a cursor and a search does not.
+  // shapes — but both page now: a search asked for with kind "entity"
+  // answers a cursor, which is how a query matching three hundred rows
+  // stopped leaving two hundred and fifty of them unreachable.
   async function searchEntities(query, typeKey, options) {
     const opts = options && typeof options === "object" ? options : {};
     const search = new URLSearchParams();
@@ -814,6 +816,13 @@ export function client({
     // for a field the call simply had not asked for, which is a false
     // statement about the data rather than a missing one.
     if (opts.verbose === true) search.set("verbose", "true");
+    // **A cursor comes with its kind.** The server refuses a cursor on a
+    // merged answer — two indexes, two orders, one position that cannot
+    // name a place in both — so the page that walks a matching set asks
+    // for entities and this function does not guess which the caller
+    // wanted.
+    if (typeof opts.kind === "string" && opts.kind !== "") search.set("kind", opts.kind);
+    if (typeof opts.cursor === "string" && opts.cursor !== "") search.set("cursor", opts.cursor);
     return get(base + "/search?" + search.toString());
   }
 

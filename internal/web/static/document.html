@@ -48,6 +48,25 @@
 
 <article class="prose" id="doc-body" hidden></article>
 
+<!-- **The write this page carries**, and it is the only one whose
+     subject is the game's own prose rather than a value in a schema.
+     doc.js fills and reveals it; the shell holds the holes and no words
+     of its own. The source, not the rendered view: rendering is not
+     reversible, so the editor opens from GET /docs/one, which answers
+     with the markdown the document is stored as. -->
+<form id="doc-edit" hidden>
+  <label for="doc-edit-body">Text</label>
+  <textarea id="doc-edit-body" rows="18" spellcheck="true"></textarea>
+  <label for="doc-edit-message">What changed</label>
+  <input id="doc-edit-message" type="text" autocomplete="off"
+         placeholder="Rewrote the second paragraph">
+  <p class="muted field-note">Every version in the history carries this line. It is what the next
+    reader has to go on.</p>
+  <button type="submit">Save</button>
+  <button type="button" class="ghost" id="doc-edit-cancel">Cancel</button>
+  <p class="error" id="doc-edit-error" role="alert" aria-live="assertive"></p>
+</form>
+
 <section id="doc-content" hidden>
   <h2>Attached to</h2>
   <ul class="catalogue" id="doc-entities"></ul>

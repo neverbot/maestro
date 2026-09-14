@@ -19,6 +19,7 @@ import {
   fetchGames,
   goToLogin,
   postJSON,
+  setFormBusy,
   fetchMe,
   renderHeader,
 } from "./app.js";
@@ -142,6 +143,160 @@ function entityRow(link) {
 }
 
 const titleEl = document.getElementById("doc-title");
+// --- Writing the document ---------------------------------------------
+//
+// The third write a person can make in this product, and the one whose
+// subject is the game's own prose. What it inherits from the entity's
+// rename is the whole of its behaviour under refusal: the edit is never
+// lost, and it never silently wins. What is its own is stated here.
+//
+// **It opens from the source, not from the page.** This page holds the
+// *rendered* HTML and rendering is not reversible; `GET /docs/one`
+// answers with the markdown the document is stored as, and that is what
+// the textarea is filled from.
+//
+// **A body the server cut is not editable.** `/docs/one` answers
+// `truncated: true` when a document is longer than the read cap, and
+// saving what came back would silently cut the document to the length of
+// the answer. That is refused, in a sentence, rather than offered.
+//
+// **`links` is omitted, and that is load-bearing.** internal/markdown's
+// own contract is that a `links` array replaces the whole attachment set
+// and omitting it preserves it, so an editor that sent `[]` because it
+// has no control for attachments would detach every entity the document
+// is attached to, quietly, on a save about a typo.
+
+export const EDIT_DOC_LABEL = "Edit";
+export const TRUNCATED_REFUSAL =
+  "This document is longer than this page can read in one piece, so it cannot be edited here. " +
+  "An agent can write it over MCP.";
+export const EMPTY_MESSAGE = "Say what changed: the history is what the next reader has to go on.";
+export const EDIT_CONFLICT =
+  "Somebody saved this document while you were writing. Yours is still here; theirs is on the page.";
+
+// wireDocEditor puts the Edit control where the read-only notice would
+// be, and swaps the rendered document for its source when it is pressed.
+//
+// It takes the version the page drew from, because that is what the
+// write states — the compare-and-set is against what the reader was
+// actually looking at, not against whatever the document is by the time
+// they press Save.
+function wireDocEditor(game, docPath, state) {
+  const actions = document.getElementById("page-actions");
+  const form = document.getElementById("doc-edit");
+  const body = document.getElementById("doc-edit-body");
+  const message = document.getElementById("doc-edit-message");
+  const errorEl = document.getElementById("doc-edit-error");
+  const cancel = document.getElementById("doc-edit-cancel");
+  const rendered = document.getElementById("doc-body");
+  if (!actions || !form || !body || !message) return null;
+
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "ghost";
+  open.textContent = EDIT_DOC_LABEL;
+  actions.replaceChildren(open);
+
+  const close = () => {
+    form.hidden = true;
+    open.hidden = false;
+    if (rendered) rendered.hidden = false;
+    if (errorEl) errorEl.textContent = "";
+  };
+  if (cancel) cancel.addEventListener("click", close);
+
+  open.addEventListener("click", async () => {
+    open.disabled = true;
+    const source = await fetchAPI(
+      `/api/games/${game}/docs/one?path=${encodeURIComponent(docPath)}`,
+    );
+    open.disabled = false;
+    if (!source.ok) {
+      if (source.expired) {
+        goToLogin();
+        return;
+      }
+      if (errorEl) errorEl.textContent = source.message || fallbackMessage;
+      form.hidden = false;
+      return;
+    }
+    const read = source.body ?? {};
+    if (read.truncated === true) {
+      // Refused rather than offered: saving a cut body would cut the
+      // document, and the reader would have no way to know it had.
+      if (errorEl) errorEl.textContent = TRUNCATED_REFUSAL;
+      form.hidden = false;
+      body.hidden = true;
+      return;
+    }
+    body.hidden = false;
+    body.value = String(read.body ?? "");
+    message.value = "";
+    state.version = Number(read.version ?? state.version);
+    form.hidden = false;
+    open.hidden = true;
+    if (rendered) rendered.hidden = true;
+    if (typeof body.focus === "function") body.focus();
+  });
+
+  form.addEventListener("submit", async (event) => {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    const said = String(message.value ?? "").trim();
+    if (said === "") {
+      if (errorEl) errorEl.textContent = EMPTY_MESSAGE;
+      return;
+    }
+    if (errorEl) errorEl.textContent = "";
+    setFormBusy(form, true, "Saving…");
+    const result = await postJSON(`/api/games/${game}/docs`, {
+      path: docPath,
+      content: String(body.value ?? ""),
+      message: said,
+      // The version this page was drawn from. A save somebody else
+      // landed in the meantime is a conflict, not a silent overwrite.
+      expected_version: Number(state.version),
+      // `links` is deliberately absent. See this section's own comment:
+      // an empty array would detach everything.
+    });
+    setFormBusy(form, false);
+    if (result.ok) {
+      // **Re-read rather than render.** This page's one HTML sink may
+      // only ever be fed a rendered view (internal/web/static_docjs_test.go),
+      // and the markdown just saved is not one. Reloading is also what
+      // the revert does, and for the same reason: a write moves the
+      // version, the history, both compare pickers and the body.
+      window.location.reload();
+      return;
+    }
+    if (result.expired) {
+      goToLogin();
+      return;
+    }
+    if (errorEl) {
+      // **Two sentences, on two lines, and neither is edited.** A
+      // conflict is the one refusal this page can explain better than
+      // the server can — what happened to *your* text is not something
+      // the server knows — and the server's own sentence says which
+      // version the document is on now, which this page cannot write for
+      // itself. Concatenated they ran together as one lowercase
+      // half-sentence; stacked, each is whole and the server's is
+      // character for character its own.
+      if (result.status === 409) {
+        const mine = document.createElement("span");
+        mine.textContent = EDIT_CONFLICT;
+        const theirs = document.createElement("span");
+        theirs.className = "muted";
+        theirs.textContent = result.message || "";
+        errorEl.replaceChildren(mine, document.createElement("br"), theirs);
+      } else {
+        errorEl.textContent = result.message || fallbackMessage;
+      }
+    }
+  });
+
+  return form;
+}
+
 if (titleEl) {
   // /g/{slug}/doc?path=… — the slug in the path, the document's path in
   // the query string, mirroring the API's own shape (a document path
@@ -249,7 +404,13 @@ async function renderDocument(game, docPath, gameName) {
   // view is the one screen whose content is most obviously editable-
   // looking and it said nothing at all.
   const summary = await fetchAPI(`/api/games/${game}/summary`);
-  if (summary.ok) setReadOnly(document, summary.body.role, "writes this document");
+  // **The notice is a claim about the screen**, so a screen that has
+  // gained a write loses the half of the claim that said it had none —
+  // the same swap the entity page makes. A viewer still gets the
+  // notice, because for them it is still true.
+  const mayWrite = summary.ok && summary.body.role !== "viewer";
+  if (mayWrite) wireDocEditor(game, docPath, { version });
+  else if (summary.ok) setReadOnly(document, summary.body.role, "writes this document");
   if (metaEl) {
     // The kind is optional on the wire, so the line is assembled from
     // the parts that are actually there rather than printing an empty

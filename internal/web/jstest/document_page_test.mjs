@@ -78,9 +78,20 @@ function fakeElement(tag = "div") {
     async click() {
       await this.fire("click");
     },
-    querySelector() {
-      return null;
+    // The one selector this page's own code asks a form for:
+    // `setFormBusy` finds the submit button that way. Spelled out rather
+    // than parsed, exactly as the other DOM stub in this directory does
+    // it — a stub with a selector engine is a second, worse browser.
+    querySelector(selector) {
+      if (selector !== "button[type=submit]") return null;
+      return this.children.find((child) => child.tagName === "button") ?? null;
     },
+    // `form.elements`, which setFormBusy disables while a write is in
+    // flight, and `dataset`, where a busy button stashes its idle label.
+    get elements() {
+      return this.children;
+    },
+    dataset: {},
   };
   // `hidden` counts its writes. An assertion about visibility that the
   // code under test never wrote is an assertion about this stub's own
@@ -168,6 +179,14 @@ const IDS = [
   "compare-error",
   "compare-note",
   "comparison",
+  // The write: the control's home, the source, the message and the
+  // refusal line.
+  "page-actions",
+  "doc-edit",
+  "doc-edit-body",
+  "doc-edit-message",
+  "doc-edit-cancel",
+  "doc-edit-error",
 ];
 
 async function runCase({
@@ -180,12 +199,21 @@ async function runCase({
   revert = null,
   revertStatus = 200,
   comparison = null,
+  // The raw markdown the editor opens from, and what the write comes
+  // back with. `one` is GET /docs/one; `write` is POST /docs, whose
+  // status the case chooses so a conflict can be driven.
+  one = null,
+  writeStatus = 200,
+  write = null,
   startVisible = false,
 } = {}) {
   const elements = {};
   for (const id of IDS) {
     elements[id] = fakeElement(id.startsWith("compare-f") || id.startsWith("compare-t") ? "select" : "div");
   }
+  // The editor's form ships hidden, as the shell does, so "it opened" is
+  // something the page had to do rather than the stub's initial state.
+  elements["doc-edit"].hidden = true;
   // Every flag starts at the *opposite* of what the case that follows
   // asserts, so an assertion can only pass because doc.js actually set
   // it. document.html ships these elements hidden, which is what a
@@ -246,6 +274,16 @@ async function runCase({
     requested.push(url);
     if (init && init.method === "POST") {
       posted.push({ url, body: JSON.parse(init.body) });
+      // The document write and the revert are two different POSTs to two
+      // different routes, and a case that drives one must not be
+      // answered by the other's script.
+      if (url === `/api/games/${GAME.slug}/docs`) {
+        return {
+          ok: writeStatus === 200,
+          status: writeStatus,
+          json: async () => write ?? {},
+        };
+      }
       return {
         ok: revertStatus === 200,
         status: revertStatus,
@@ -258,6 +296,9 @@ async function runCase({
     const base = `/api/games/${GAME.slug}`;
     if (url.startsWith(`${base}/docs/rendered`)) {
       return { ok: renderedStatus === 200, status: renderedStatus, json: async () => rendered };
+    }
+    if (url.startsWith(`${base}/docs/one`)) {
+      return { ok: one != null, status: one == null ? 404 : 200, json: async () => one ?? { error: "not_found", message: "no such document" } };
     }
     if (url.startsWith(`${base}/docs/history`)) {
       return { ok: true, status: 200, json: async () => history };
@@ -800,3 +841,143 @@ console.log(
     "compare-and-sets its reverts, states a comparison's bounds in its own voice rather than the error line, " +
     "refuses to guess on a failure and offers a viewer nothing it cannot do",
 );
+
+// Case 12: the document's own body, written from the page that reads it.
+//
+// The third write a person can make in this product, and the first whose
+// subject is the game's prose. Three properties are asserted here and
+// each of them is a way this could be quietly wrong:
+//
+//   - **it opens from the source.** The page holds the *rendered* HTML
+//     and rendering is not reversible, so an editor filled from what is
+//     on screen would hand a designer their own document turned into
+//     HTML.
+//   - **the write states the version the page drew from**, which is what
+//     makes somebody else's save a conflict instead of an overwrite.
+//   - **`links` is absent, deliberately.** internal/markdown's contract
+//     is that a links array replaces the whole attachment set and
+//     omitting it preserves it, so an editor sending `[]` would detach
+//     every entity the document is attached to, on a save about a typo.
+{
+  const { elements, posted, location } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
+    one: { path: "lore/duskwood", version: 2, body: "# Duskwood\n\nDark.\n", truncated: false },
+    write: { path: "lore/duskwood", version: 3 },
+  });
+
+  const open = elements["page-actions"].children[0];
+  if (!open || open.textContent !== "Edit") {
+    fail(`the reading view offers no way to write: ${JSON.stringify(elements["page-actions"].children.map((c) => c.textContent))}`);
+  }
+  await open.fire("click");
+  if (elements["doc-edit-body"].value !== "# Duskwood\n\nDark.\n") {
+    fail(`the editor did not open from the document's source: ${JSON.stringify(elements["doc-edit-body"].value)}`);
+  }
+  if (elements["doc-edit"].hidden !== false) fail("the editor stayed hidden");
+  if (elements["doc-body"].hidden !== true) fail("the rendered document stayed on screen behind its own editor");
+
+  // A save with no message is refused by the page, before any request:
+  // every version in the history carries one, and a blank row in that
+  // list is a change nobody can account for.
+  elements["doc-edit-body"].value = "# Duskwood\n\nDarker.\n";
+  await elements["doc-edit"].fire("submit");
+  if (posted.length !== 0) {
+    fail(`a write with no message was sent anyway: ${JSON.stringify(posted)}`);
+  }
+  if (!elements["doc-edit-error"].textContent.includes("Say what changed")) {
+    fail(`the empty message was not explained: ${JSON.stringify(elements["doc-edit-error"].textContent)}`);
+  }
+
+  elements["doc-edit-message"].value = "Darker";
+  await elements["doc-edit"].fire("submit");
+  if (posted.length !== 1) fail(`expected one write, got ${posted.length}`);
+  const sent = posted[0].body;
+  if (posted[0].url !== "/api/games/azeroth/docs") fail(`the write went to ${posted[0].url}`);
+  if (sent.content !== "# Duskwood\n\nDarker.\n") fail(`the write carried ${JSON.stringify(sent.content)}`);
+  if (sent.message !== "Darker") fail(`the write carried no message: ${JSON.stringify(sent.message)}`);
+  if (sent.expected_version !== 2) {
+    fail(`the write stated version ${sent.expected_version}; the page was drawn from 2`);
+  }
+  if ("links" in sent) {
+    fail("the write carried a links array, which replaces the whole attachment set: omitting it is what preserves it");
+  }
+  if (location.reloaded !== true) {
+    fail("a landed write left the page showing the document it had just replaced");
+  }
+}
+
+// Case 13: somebody saved while this reader was writing.
+//
+// The page says what happened to *their* text — which the server does
+// not know — and the server says which version the document is on now,
+// which the page cannot know. Both, each whole, and the edit is still in
+// the box.
+{
+  const { elements, location } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
+    one: { path: "lore/duskwood", version: 2, body: "# Duskwood\n", truncated: false },
+    writeStatus: 409,
+    write: { error: "version_conflict", message: "this document is at version 3; merge onto it and write again" },
+  });
+
+  await elements["page-actions"].children[0].fire("click");
+  elements["doc-edit-body"].value = "# Duskwood\n\nMine.\n";
+  elements["doc-edit-message"].value = "Mine";
+  await elements["doc-edit"].fire("submit");
+
+  const said = elements["doc-edit-error"].children.map((child) => child.textContent);
+  if (!said.some((line) => line.includes("Somebody saved this document"))) {
+    fail(`the conflict was not explained in the page's own words: ${JSON.stringify(said)}`);
+  }
+  if (!said.some((line) => line.includes("version 3"))) {
+    fail(`the server's own sentence was dropped: ${JSON.stringify(said)}`);
+  }
+  if (elements["doc-edit-body"].value !== "# Duskwood\n\nMine.\n") {
+    fail("a refusal lost the edit, which is the one thing in the exchange that exists nowhere else");
+  }
+  if (elements["doc-edit"].hidden !== false) fail("the editor closed over a refused write");
+  if (location.reloaded === true) fail("a refused write reloaded the page and threw the edit away");
+}
+
+// Case 14: a document longer than the read cap.
+//
+// GET /docs/one answers `truncated: true` when it could not return the
+// whole body, and saving what came back would silently cut the document
+// to the length of the answer. It is refused, in a sentence, rather than
+// offered — and the textarea is not even filled, so there is nothing to
+// press Save on.
+{
+  const { elements, posted } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
+    one: { path: "lore/duskwood", version: 2, body: "# Duskwood\n(cut here)", truncated: true },
+  });
+
+  await elements["page-actions"].children[0].fire("click");
+  if (!elements["doc-edit-error"].textContent.includes("longer than this page can read")) {
+    fail(`a truncated body was not refused: ${JSON.stringify(elements["doc-edit-error"].textContent)}`);
+  }
+  if (elements["doc-edit-body"].hidden !== true) {
+    fail("a truncated body was offered for editing, which would cut the document on save");
+  }
+  if (posted.length !== 0) fail("a truncated document was written anyway");
+}
+
+// Case 15: a viewer.
+//
+// The read-only notice is a claim about the screen, so a screen that has
+// gained a write loses the half of the claim that said it had none — and
+// a viewer still gets it, because for them it is still true.
+{
+  const { elements } = await runCase({
+    rendered: { path: "lore/duskwood", title: "Duskwood", version: 2, html: "<p>Dark.</p>", links: [] },
+    role: "viewer",
+    one: { path: "lore/duskwood", version: 2, body: "# Duskwood\n", truncated: false },
+  });
+  const offered = elements["page-actions"].children.map((child) => child.textContent).join(" ");
+  if (offered.includes("Edit")) {
+    fail(`a viewer was offered a control the server would refuse: ${offered}`);
+  }
+  if (!offered.includes("Read-only")) {
+    fail(`a viewer was told nothing about why they cannot write: ${JSON.stringify(offered)}`);
+  }
+}

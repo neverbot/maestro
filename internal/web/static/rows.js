@@ -112,19 +112,30 @@ export function row(doc, spec) {
 // which the reward and which the requirement.
 //
 // It is the same grid as a row, so the two line up without either knowing
-// the other's widths, and it carries no link: a heading is not a target.
+// the other's widths, and it carries no link: a heading is not a
+// destination.
+//
+// **A heading is not a destination and may still be a control.** A
+// column the listing can be ordered by carries a button — `spec.sort`
+// names the order it sets, `spec.sorted` the order the listing is
+// currently in, and `spec.onSort` is called with the order to ask for.
+// The button is a button and not a link because it changes what is being
+// shown rather than where the reader is, and because a link would put a
+// sort in the browser's history between a reader and the page they came
+// from.
+//
+// A column with no `sort` renders exactly what it did before: the only
+// orders that exist are the ones the server has a statement for, and a
+// header that looked sortable and was not would be worse than a plain
+// one. `fields` cannot be ordered yet, and their headings say nothing
+// about it rather than offering a control that refuses.
 export function headerRow(doc, spec) {
   const item = doc.createElement("li");
   item.className = "catalogue-head";
 
-  const label = doc.createElement("span");
-  label.textContent = spec.label ?? "";
-  item.append(label);
+  item.append(headCell(doc, spec.label ?? "", "", spec.sort && spec.sort.label, spec));
 
-  const key = doc.createElement("span");
-  key.className = "catalogue-key";
-  key.textContent = spec.key ?? "";
-  item.append(key);
+  item.append(headCell(doc, spec.key ?? "", "catalogue-key", spec.sort && spec.sort.key, spec));
 
   const heads = Array.isArray(spec.cells) ? spec.cells : [];
   for (let i = 0; i < CATALOGUE_CELLS; i += 1) {
@@ -141,4 +152,46 @@ export function headerRow(doc, spec) {
   tally.className = "catalogue-count";
   item.append(tally);
   return item;
+}
+
+// SORT_MARKS is what a sorted column says beside its name. The arrow is
+// never the only carrier: the button's own accessible name says which
+// way the next press would order the listing, in words, because an arrow
+// is a glyph a screen reader reads as a character and a colour is a
+// carrier this product does not let stand alone.
+export const SORT_MARKS = { asc: "\u2191", desc: "\u2193" };
+
+// headCell writes one heading, as a plain span or as the button that
+// reorders the listing by that column.
+function headCell(doc, text, className, order, spec) {
+  const cell = doc.createElement("span");
+  if (className !== "") cell.className = className;
+  if (!order) {
+    cell.textContent = text;
+    return cell;
+  }
+  const sorted = typeof spec.sorted === "string" ? spec.sorted : "";
+  const active = sorted === order || sorted === "-" + order;
+  const descending = sorted === "-" + order;
+  // Pressing the column the listing is already sorted by reverses it;
+  // pressing another starts that column ascending, which is the reading
+  // order a person expects of a column they have not touched.
+  const next = active && !descending ? "-" + order : order;
+
+  const button = doc.createElement("button");
+  button.type = "button";
+  button.className = "catalogue-sort";
+  if (active) button.classList.add("sorted");
+  button.textContent = text + (active ? " " + (descending ? SORT_MARKS.desc : SORT_MARKS.asc) : "");
+  button.setAttribute("aria-label",
+    active && !descending
+      ? "Sorted by " + text + ", first to last. Sort last to first."
+      : active
+        ? "Sorted by " + text + ", last to first. Sort first to last."
+        : "Sort by " + text);
+  button.addEventListener("click", () => {
+    if (typeof spec.onSort === "function") spec.onSort(next);
+  });
+  cell.append(button);
+  return cell;
 }

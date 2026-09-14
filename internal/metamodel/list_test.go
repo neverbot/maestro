@@ -1496,3 +1496,255 @@ func TestACursorIssuedForOnePrefixIsRefusedUnderAnother(t *testing.T) {
 			"the page it answers is a position in a listing that is not this one")
 	}
 }
+
+// --- Order -------------------------------------------------------------
+//
+// The catalogue's column headers are what these exist for: a thousand
+// rows in one order and no way to ask for another was half of why that
+// screen could not be read. The properties worth holding are not "the
+// rows came back sorted" — Postgres does that — but the two a second
+// order breaks: a cursor that carries the position of the order it was
+// issued in, and a cursor that cannot walk into a different one.
+
+// namesOf is keysOf's sibling for the orders whose sort key is the name.
+func namesOf(page metamodel.EntityPage) []string {
+	names := make([]string, 0, len(page.Entities))
+	for _, e := range page.Entities {
+		names = append(names, e.Name)
+	}
+	return names
+}
+
+func TestAListingIsReadInTheOrderItWasAskedFor(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 5)
+
+	cases := []struct {
+		order string
+		first string
+		last  string
+	}{
+		{"", "quest-00", "quest-04"},
+		{"name", "quest-00", "quest-04"},
+		{"-name", "quest-04", "quest-00"},
+		{"key", "quest-00", "quest-04"},
+		{"-key", "quest-04", "quest-00"},
+		// The seed writes them in key order, one upsert at a time, so
+		// the recency order and the key order agree here — which is what
+		// makes the *reverse* worth asserting: it is the order a
+		// catalogue opens on when a designer asks what changed.
+		{"updated", "quest-00", "quest-04"},
+		{"-updated", "quest-04", "quest-00"},
+	}
+	for _, tc := range cases {
+		page, err := svc.ListEntities(ctx, project,
+			metamodel.EntityFilter{TypeKey: "quest", Order: tc.order, Limit: 10})
+		if err != nil {
+			t.Fatalf("order %q: %v", tc.order, err)
+		}
+		keys := keysOf(page)
+		if len(keys) != 5 {
+			t.Fatalf("order %q: got %d rows, want 5", tc.order, len(keys))
+		}
+		if keys[0] != tc.first || keys[len(keys)-1] != tc.last {
+			t.Errorf("order %q ran %v; want it to start at %s and end at %s",
+				tc.order, keys, tc.first, tc.last)
+		}
+	}
+}
+
+// **The keyset half, which is the one that breaks in silence.** A page
+// carries the position of the row it ended on *in the order being
+// walked*; a cursor carrying the name while the statement compares keys
+// pages from a position that is not in that order at all, and the answer
+// is a stretch of rows nobody asked for with nothing red anywhere.
+//
+// Mutation: make pageOf write last.Name whatever the order is, and the
+// key and recency arms here come back with repeated or missing rows.
+func TestEveryOrderPagesThroughEveryRowExactlyOnce(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 25)
+
+	for _, order := range []string{"name", "-name", "key", "-key", "updated", "-updated"} {
+		var seen []string
+		filter := metamodel.EntityFilter{TypeKey: "quest", Order: order, Limit: 4}
+		for page := 1; ; page++ {
+			if page > 20 {
+				t.Fatalf("order %q: paging did not end", order)
+			}
+			got, err := svc.ListEntities(ctx, project, filter)
+			if err != nil {
+				t.Fatalf("order %q page %d: %v", order, page, err)
+			}
+			seen = append(seen, keysOf(got)...)
+			if got.NextCursor == "" {
+				break
+			}
+			filter.Cursor = got.NextCursor
+		}
+		if len(seen) != 25 {
+			t.Errorf("order %q walked %d rows, want 25: %v", order, len(seen), seen)
+		}
+		unique := map[string]bool{}
+		for _, key := range seen {
+			if unique[key] {
+				t.Errorf("order %q returned %s twice", order, key)
+			}
+			unique[key] = true
+		}
+	}
+}
+
+// A position in one order means nothing in another: carried across, it
+// would page perfectly and answer a different question. The order is
+// therefore part of what a cursor belongs to, exactly as the prefix is.
+func TestACursorCannotWalkIntoAnotherOrder(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 6)
+
+	first, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Order: "name", Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page issued no cursor")
+	}
+	for _, order := range []string{"-name", "key", "updated", "-updated"} {
+		_, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+			TypeKey: "quest", Order: order, Limit: 3, Cursor: first.NextCursor,
+		})
+		if err == nil {
+			t.Errorf("a name cursor paged the %q listing", order)
+		}
+	}
+	// And the two spellings of the default order are one listing, not
+	// two: a caller that omitted the order and one that wrote "name"
+	// asked the same question.
+	if _, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		TypeKey: "quest", Limit: 3, Cursor: first.NextCursor,
+	}); err != nil {
+		t.Errorf("an omitted order refused a cursor from the same listing: %v", err)
+	}
+}
+
+// An unrecognised order is refused, not defaulted: a listing quietly
+// ordered by name when asked for something else answers a question
+// nobody asked and looks like it worked.
+func TestAnUnknownOrderIsRefusedAndNamesTheOnesThereAre(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 2)
+
+	_, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Order: "level", Limit: 10})
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("got %v, want a validation error", err)
+	}
+	if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "order" {
+		t.Fatalf("refused at %+v, want one problem at path order", invalid.Fields)
+	}
+	for _, spelling := range []string{"name", "key", "updated"} {
+		if !strings.Contains(invalid.Fields[0].Message, spelling) {
+			t.Errorf("the refusal does not name %q: %s", spelling, invalid.Fields[0].Message)
+		}
+	}
+}
+
+// A traversal has one sort key, so an order on one is refused rather
+// than accepted and not obeyed. A filter silently dropped on one of the
+// two shapes of this call is a defect this package has already met.
+func TestATraversalRefusesAnOrderItCouldNotObey(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 2)
+
+	_, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		Order: "-updated",
+		Limit: 10,
+		RelatedTo: &metamodel.RelatedFilter{
+			RelationTypeKey: "takes_place_in",
+			EntityTypeKey:   "quest",
+			EntityKey:       "quest-00",
+			Direction:       metamodel.DirectionOutgoing,
+		},
+	})
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("got %v, want a validation error", err)
+	}
+	if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "order" {
+		t.Fatalf("refused at %+v, want one problem at path order", invalid.Fields)
+	}
+}
+
+// Ten rows sharing one timestamp and a page of three: the tiebreak is
+// what keeps a page boundary from landing inside the tie. The name
+// order's own version of this is TestPagingIsStableWhenEveryRowSharesOne
+// Name; the recency order needs its own because a tie there is not
+// contrived — a bulk write stamps a whole page of rows with one
+// `updated_at`, which is how content actually arrives in this product.
+//
+// The tie is made here rather than hoped for: ten separate upserts land
+// ten distinct microsecond timestamps, so the rows are flattened onto
+// one instant before the walk. Drop `id` from either the ORDER BY or
+// the comparison of the two recency statements and this returns six
+// distinct rows of ten with three of them twice.
+func TestTheRecencyOrderPagesThroughRowsWrittenTogether(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 10)
+	if _, err := pool.Exec(ctx,
+		"UPDATE entities SET updated_at = now() WHERE project_id = $1", project); err != nil {
+		t.Fatalf("flatten the timestamps: %v", err)
+	}
+
+	var seen []string
+	filter := metamodel.EntityFilter{TypeKey: "quest", Order: "-updated", Limit: 3}
+	for page := 1; ; page++ {
+		if page > 10 {
+			t.Fatal("paging did not end")
+		}
+		got, err := svc.ListEntities(ctx, project, filter)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		seen = append(seen, namesOf(got)...)
+		if got.NextCursor == "" {
+			break
+		}
+		filter.Cursor = got.NextCursor
+	}
+	unique := map[string]bool{}
+	for _, name := range seen {
+		if unique[name] {
+			t.Fatalf("%s came back twice: %v", name, seen)
+		}
+		unique[name] = true
+	}
+	if len(seen) != 10 {
+		t.Fatalf("walked %d rows, want 10: %v", len(seen), seen)
+	}
+}

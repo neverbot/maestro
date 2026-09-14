@@ -85,6 +85,53 @@ export function createDocument() {
       log.push({ element: this, name, value: null, at: sequence++ });
     }
 
+    // className and classList are the same attribute read two ways, and
+    // both are here because this front end writes both: a fresh element
+    // takes its whole class in one assignment and a conditional one is
+    // added afterwards. A stub carrying only the first turns the second
+    // into `Cannot read properties of undefined`, which is a harness
+    // crash rather than the assertion the test came to make.
+    get className() {
+      return this.attributes.get("class") ?? "";
+    }
+
+    set className(value) {
+      if (typeof value !== "string") throw new Error("stub: className is a string");
+      this.setAttribute("class", value);
+    }
+
+    get classList() {
+      const owner = this;
+      const names = () => (owner.className === "" ? [] : owner.className.split(" "));
+      return {
+        add(...wanted) {
+          const has = names();
+          for (const name of wanted) if (!has.includes(name)) has.push(name);
+          owner.className = has.join(" ");
+        },
+        remove(...unwanted) {
+          owner.className = names().filter((name) => !unwanted.includes(name)).join(" ");
+        },
+        contains(name) {
+          return names().includes(name);
+        },
+      };
+    }
+
+    // children is the element children, which is every child this stub
+    // can hold: it has no text nodes, because textContent is a string on
+    // the element itself rather than a node in the list.
+    get children() {
+      return this.childNodes.slice();
+    }
+
+    // append takes several children where appendChild takes one. Both
+    // exist because both are used, and a stub with only one of them
+    // pushes its own shape into the product's code.
+    append(...kids) {
+      for (const kid of kids) this.appendChild(kid);
+    }
+
     appendChild(child) {
       if (!(child instanceof StubElement)) throw new Error("stub: only elements can be appended");
       if (child.parentNode) child.parentNode.removeChild(child);

@@ -632,6 +632,48 @@ func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 	}
 }
 
+// The order the catalogue's column headers set, read off a URL.
+//
+// It is asserted here and not only in internal/metamodel because that is
+// where this product's most repeated defect lives: a parameter correct
+// in the domain and never wired at the call site, with every unit test
+// green. The mirror is the call site a person's browser uses.
+func TestTheOrderReachesTheListingThroughTheURL(t *testing.T) {
+	f := newRESTFixture(t)
+	questType(t, f)
+	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
+		map[string]any{"type_key": "quest", "key": "alpha", "name": "Alpha"},
+		map[string]any{"type_key": "quest", "key": "bravo", "name": "Bravo"},
+		map[string]any{"type_key": "quest", "key": "charlie", "name": "Charlie"},
+	}}); rec.Code != http.StatusOK {
+		t.Fatalf("seed = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	ascending := entityKeys(t, f, "?type_key=quest&order=name")
+	descending := entityKeys(t, f, "?type_key=quest&order=-name")
+	if len(ascending) != 3 || ascending[0] != "alpha" {
+		t.Fatalf("order=name = %v", ascending)
+	}
+	if len(descending) != 3 || descending[0] != "charlie" {
+		t.Fatalf("order=-name = %v", descending)
+	}
+	// Not "the two are different": two wrong orders are different too.
+	// The reverse of one is the other, row for row.
+	for i, key := range ascending {
+		if descending[len(descending)-1-i] != key {
+			t.Fatalf("order=-name %v is not the reverse of order=name %v", descending, ascending)
+		}
+	}
+	if got := entityKeys(t, f, "?type_key=quest&order=-updated"); len(got) != 3 {
+		t.Fatalf("order=-updated = %v, want three rows", got)
+	}
+
+	// An unrecognised order is the caller's own argument at its own
+	// path, not a 500 and not a listing quietly ordered by name.
+	assertError(t, f.as(t, http.MethodGet, "/entities?type_key=quest&order=level", nil),
+		http.StatusBadRequest, "invalid_input", "order")
+}
+
 // TestRESTListingBoundsComeThroughUnchanged pins that the bounds the
 // domain enforces reach this surface as the caller's own problem, at
 // the caller's own path, rather than as a 500.

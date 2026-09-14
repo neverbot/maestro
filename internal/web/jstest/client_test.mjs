@@ -273,6 +273,25 @@ check("theFourOutcomesEachHaveACaseOnlyTheyProduce", () => {
   assertEqual(seen.size, 4, "four distinct outcomes, each from a case only it produces");
 });
 
+// **The order the catalogue's headers set has to reach the URL.** A
+// column header that changes a variable nobody sends is the defect this
+// front end has met most often, and it looks like a working sort: the
+// arrow moves, the list re-reads, and the rows come back in the order
+// they were already in.
+check("theOrderTheHeadersSetReachesTheURL", async () => {
+  const { server, client: c } = await harness();
+  await c.listEntities({ typeKey: "quest", order: "-updated" });
+  const last = server.calls[server.calls.length - 1].path;
+  assert(last.includes("order=-updated"), `asked ${last}`);
+
+  // The default is the server's own, so a catalogue nobody has sorted
+  // asks the URL it always asked. An `order=name` on every listing would
+  // be a new cursor fingerprint for every page already in the wild.
+  await c.listEntities({ typeKey: "quest", order: "name" });
+  const plain = server.calls[server.calls.length - 1].path;
+  assert(!plain.includes("order="), `asked ${plain}`);
+});
+
 check("theClientNeverPatchesFromAPayload", () => {
   // Every payload field this product ever puts on the wire, plus a
   // poison value in each non-identity slot and a field no kind has. The

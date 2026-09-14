@@ -564,7 +564,18 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request, call
 	if !ok {
 		return
 	}
-	in := EntitiesListInput{TypeKey: typeKey, Prefix: prefix, Cursor: cursor, Limit: limit, Verbose: verbose}
+	// The catalogue's column headers set this, and it is read here for
+	// the reason the prefix is: this surface mirrors MCP route for
+	// route, and an order a person cannot spell in a URL is an order
+	// this mirror does not have.
+	order, ok := queryString(w, r, "order")
+	if !ok {
+		return
+	}
+	in := EntitiesListInput{
+		TypeKey: typeKey, Prefix: prefix, Order: order,
+		Cursor: cursor, Limit: limit, Verbose: verbose,
+	}
 	invalid, ok := queryTriState(w, r, "invalid")
 	if !ok {
 		return

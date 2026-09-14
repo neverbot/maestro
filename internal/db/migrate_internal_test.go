@@ -181,6 +181,11 @@ func TestMigrateRefusesToServeAgainstANewerSchema(t *testing.T) {
 // bump_design_version() does not exist". A migration is the one thing in
 // this repository that is hard to take back, so its reversal is asserted
 // object by object.
+// analysisMigrationVersion is 0013's version, which is its filename's
+// number: the migration this test is about, named so that a later
+// migration cannot quietly become the subject.
+const analysisMigrationVersion = 13
+
 func TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt(t *testing.T) {
 	t.Parallel()
 	pool := newTestDatabase(t)
@@ -223,8 +228,13 @@ func TestTheAnalysisMigrationRollsBackToTheSchemaBeforeIt(t *testing.T) {
 		}
 	}
 
-	if err := migrateDown(ctx, pool); err != nil {
-		t.Fatalf("migrateDown: %v", err)
+	// **Down *to* a version, not one step down.** This test used to take
+	// a single step, which was the analysis migration only while it was
+	// the newest one in the repository; the next migration added after
+	// it turned this into an assertion about that one instead, and the
+	// analysis rollback it claims to check stopped being run at all.
+	if err := migrateDownTo(ctx, pool, analysisMigrationVersion-1); err != nil {
+		t.Fatalf("migrateDownTo: %v", err)
 	}
 
 	for i, p := range probes {

@@ -6,8 +6,9 @@
 // is deliberately close in appearance to the `table` renderer and is a
 // different thing: a table is a saved query answered by the view engine,
 // with a projection, parameters and a renderer; this is every row of one
-// declared type, in key order, answering nothing. A designer who mistook
-// one for the other would think a filter had been applied when none had.
+// declared type, in whichever order its headings were last pressed,
+// answering nothing. A designer who mistook one for the other would
+// think a filter had been applied when none had.
 //
 // It pages over the **existing** cursor and does not invent one: the
 // listing issues `next_cursor` whenever a page came back full, so the
@@ -38,7 +39,8 @@ import { goToLogin } from "../app.js";
 // harness asks for it by identity and never by matching prose, and so
 // there is exactly one place it can be softened.
 export const CATALOGUE_NOTE =
-  "This is the catalogue of one declared type: every entity of it, in key order. " +
+  "This is the catalogue of one declared type: every entity of it, in the order " +
+  "you choose from the column headings. " +
   "It is not a view — a view is a saved query with a renderer, and lives under Views.";
 
 // **The empty state here names no action, and that is the role rule
@@ -188,6 +190,26 @@ export async function cataloguePage(opened) {
         label: type.result.label || type.result.key,
         key: "key",
         cells: columns.map((field) => ({ text: field.label || field.key, numeric: field.type === "number" })),
+        // The two columns the server has an order for. A declared field
+        // is not among them yet — ordering by one means ordering inside
+        // jsonb by the field's declared type, which is a statement per
+        // type and not a fourth constant — so those headings stay plain
+        // rather than offering a control the listing would refuse.
+        sort: { label: "name", key: "key" },
+        sorted: order,
+        onSort: (next) => {
+          order = next;
+          // Ordering the listing clears a search, the way the two
+          // filters do and for the same reason: a search answers the
+          // fifty best matches for a word and is not the listing, so an
+          // order pressed over one would reorder something that is not
+          // on screen.
+          if (query !== "") {
+            query = "";
+            if (searchEl) searchEl.value = "";
+          }
+          void refilter();
+        },
       }),
     );
   }
@@ -207,6 +229,10 @@ export async function cataloguePage(opened) {
   // them, and these narrow the order the pager is already walking.
   let prefix = "";
   let onlyInvalid = false;
+  // The order the column headers set. "name" is the server's default
+  // and is spelled out here rather than left empty, so the header can
+  // say which column the listing is in from the first paint.
+  let order = "name";
 
   function filtering() {
     return prefix !== "" || onlyInvalid;
@@ -289,7 +315,7 @@ export async function cataloguePage(opened) {
 
   async function page() {
     if (moreEl) moreEl.disabled = true;
-    const request = { typeKey, verbose: true, prefix, invalid: onlyInvalid };
+    const request = { typeKey, verbose: true, prefix, invalid: onlyInvalid, order };
     if (cursor !== null) request.cursor = cursor;
     const answer = await opened.client.listEntities(request);
     if (!answer.ok) {

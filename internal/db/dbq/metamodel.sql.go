@@ -967,6 +967,361 @@ func (q *Queries) ListEntitiesPage(ctx context.Context, arg ListEntitiesPagePara
 	return items, nil
 }
 
+const listEntitiesPageByKey = `-- name: ListEntitiesPageByKey :many
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND ($2::uuid IS NULL OR entity_type_id = $2::uuid)
+  AND ($3::boolean IS NULL OR invalid = $3::boolean)
+  AND ($4::text IS NULL
+       OR starts_with(lower(name), lower($4::text)))
+  AND ($5::uuid IS NULL
+       OR (key, id) > ($6::text, $5::uuid))
+ORDER BY key, id
+LIMIT $7::int
+`
+
+type ListEntitiesPageByKeyParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID *uuid.UUID
+	Invalid      *bool
+	Prefix       *string
+	AfterID      *uuid.UUID
+	AfterKey     *string
+	Limit        int32
+}
+
+// The sibling of ListEntitiesPage above; see it for the whole argument.
+func (q *Queries) ListEntitiesPageByKey(ctx context.Context, arg ListEntitiesPageByKeyParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesPageByKey,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.Invalid,
+		arg.Prefix,
+		arg.AfterID,
+		arg.AfterKey,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntitiesPageByKeyDesc = `-- name: ListEntitiesPageByKeyDesc :many
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND ($2::uuid IS NULL OR entity_type_id = $2::uuid)
+  AND ($3::boolean IS NULL OR invalid = $3::boolean)
+  AND ($4::text IS NULL
+       OR starts_with(lower(name), lower($4::text)))
+  AND ($5::uuid IS NULL
+       OR (key, id) < ($6::text, $5::uuid))
+ORDER BY key DESC, id DESC
+LIMIT $7::int
+`
+
+type ListEntitiesPageByKeyDescParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID *uuid.UUID
+	Invalid      *bool
+	Prefix       *string
+	AfterID      *uuid.UUID
+	AfterKey     *string
+	Limit        int32
+}
+
+// The sibling of ListEntitiesPage above; see it for the whole argument.
+func (q *Queries) ListEntitiesPageByKeyDesc(ctx context.Context, arg ListEntitiesPageByKeyDescParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesPageByKeyDesc,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.Invalid,
+		arg.Prefix,
+		arg.AfterID,
+		arg.AfterKey,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntitiesPageByUpdated = `-- name: ListEntitiesPageByUpdated :many
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND ($2::uuid IS NULL OR entity_type_id = $2::uuid)
+  AND ($3::boolean IS NULL OR invalid = $3::boolean)
+  AND ($4::text IS NULL
+       OR starts_with(lower(name), lower($4::text)))
+  AND ($5::uuid IS NULL
+       OR (updated_at, id) > ($6::timestamptz, $5::uuid))
+ORDER BY updated_at, id
+LIMIT $7::int
+`
+
+type ListEntitiesPageByUpdatedParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID *uuid.UUID
+	Invalid      *bool
+	Prefix       *string
+	AfterID      *uuid.UUID
+	AfterUpdated pgtype.Timestamptz
+	Limit        int32
+}
+
+// The recency order, whose sort value is a timestamp: the cursor
+// carries it as RFC 3339 text and it is compared as timestamptz here,
+// exactly as the relation listing's own created_at cursor is.
+func (q *Queries) ListEntitiesPageByUpdated(ctx context.Context, arg ListEntitiesPageByUpdatedParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesPageByUpdated,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.Invalid,
+		arg.Prefix,
+		arg.AfterID,
+		arg.AfterUpdated,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntitiesPageByUpdatedDesc = `-- name: ListEntitiesPageByUpdatedDesc :many
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND ($2::uuid IS NULL OR entity_type_id = $2::uuid)
+  AND ($3::boolean IS NULL OR invalid = $3::boolean)
+  AND ($4::text IS NULL
+       OR starts_with(lower(name), lower($4::text)))
+  AND ($5::uuid IS NULL
+       OR (updated_at, id) < ($6::timestamptz, $5::uuid))
+ORDER BY updated_at DESC, id DESC
+LIMIT $7::int
+`
+
+type ListEntitiesPageByUpdatedDescParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID *uuid.UUID
+	Invalid      *bool
+	Prefix       *string
+	AfterID      *uuid.UUID
+	AfterUpdated pgtype.Timestamptz
+	Limit        int32
+}
+
+// The order a catalogue opens on when a designer asks what changed:
+// newest first. See ListEntitiesPageByUpdated for the cursor's type.
+func (q *Queries) ListEntitiesPageByUpdatedDesc(ctx context.Context, arg ListEntitiesPageByUpdatedDescParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesPageByUpdatedDesc,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.Invalid,
+		arg.Prefix,
+		arg.AfterID,
+		arg.AfterUpdated,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntitiesPageNameDesc = `-- name: ListEntitiesPageNameDesc :many
+SELECT id, project_id, entity_type_id, key, name, fields, invalid, version, search, created_at, updated_at, updated_by_user_id, updated_by_token_id FROM entities
+WHERE project_id = $1::uuid
+  AND ($2::uuid IS NULL OR entity_type_id = $2::uuid)
+  AND ($3::boolean IS NULL OR invalid = $3::boolean)
+  AND ($4::text IS NULL
+       OR starts_with(lower(name), lower($4::text)))
+  AND ($5::uuid IS NULL
+       OR (name, id) < ($6::text, $5::uuid))
+ORDER BY name DESC, id DESC
+LIMIT $7::int
+`
+
+type ListEntitiesPageNameDescParams struct {
+	ProjectID    uuid.UUID
+	EntityTypeID *uuid.UUID
+	Invalid      *bool
+	Prefix       *string
+	AfterID      *uuid.UUID
+	AfterName    *string
+	Limit        int32
+}
+
+// One page of a game's entities in one of the catalogue's other orders.
+//
+// **Five statements and not one with a parameter**, which is the
+// decision worth reading before changing any of them. An order chosen at
+// run time inside a single statement — `CASE WHEN descending THEN ...`
+// in the ORDER BY, or a comparison switched by a boolean — is a sort
+// Postgres cannot serve from an index, so the listing this whole family
+// exists to make seekable would go back to reading the game and sorting
+// it on every page, silently and only at a thousand rows. Each statement
+// here is written so its keyset comparison and its ORDER BY are the same
+// order spelled the same way, because a keyset that disagrees with its
+// own sort skips or repeats rows at a page boundary and reports nothing.
+//
+// Every filter is the one ListEntitiesPage carries, including the
+// prefix; see that statement for why it is starts_with and not ILIKE.
+// The prefix narrows a contiguous stretch of the *name* order only, so
+// under these orders it is a filter like any other rather than a free
+// one, which is true and costs nothing to allow.
+//
+// `id` is in every sort key and in every comparison for the reason
+// ListEntitiesPage records: with ten rows sharing one sort value and a
+// page of three, a sort without the tiebreak returns five distinct rows
+// of ten and three of them twice.
+func (q *Queries) ListEntitiesPageNameDesc(ctx context.Context, arg ListEntitiesPageNameDescParams) ([]Entity, error) {
+	rows, err := q.db.Query(ctx, listEntitiesPageNameDesc,
+		arg.ProjectID,
+		arg.EntityTypeID,
+		arg.Invalid,
+		arg.Prefix,
+		arg.AfterID,
+		arg.AfterName,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Entity
+	for rows.Next() {
+		var i Entity
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.EntityTypeID,
+			&i.Key,
+			&i.Name,
+			&i.Fields,
+			&i.Invalid,
+			&i.Version,
+			&i.Search,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedByUserID,
+			&i.UpdatedByTokenID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEntitiesRelatedTo = `-- name: ListEntitiesRelatedTo :many
 SELECT e.id, e.project_id, e.entity_type_id, e.key, e.name, e.fields, e.invalid, e.version, e.search, e.created_at, e.updated_at, e.updated_by_user_id, e.updated_by_token_id FROM entities e
 JOIN relations r

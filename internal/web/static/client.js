@@ -752,6 +752,16 @@ export function client({
       search.set("prefix", opts.prefix);
     }
     if (opts.invalid === true) search.set("invalid", "true");
+    // The order the catalogue's column headers set: "name" (the
+    // server's default), "key" or "updated", each with a leading "-"
+    // for the reverse. It is sent only when it is not the default, so a
+    // page that never sorts asks the same URL it always did — and an
+    // unrecognised spelling is refused by the server at path `order`
+    // rather than quietly ignored, which is why nothing here validates
+    // it a second time.
+    if (typeof opts.order === "string" && opts.order !== "" && opts.order !== "name") {
+      search.set("order", opts.order);
+    }
     if (opts.verbose === true) search.set("verbose", "true");
     return get(paged(base + "/entities", opts, search));
   }

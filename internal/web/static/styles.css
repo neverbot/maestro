@@ -1382,6 +1382,38 @@ ul.catalogue li.catalogue-head {
 }
 
 ul.catalogue li.catalogue-head:hover { background: var(--paper); }
+
+/* A sortable column is a button that looks like the heading it replaces
+   until it is reached for. It inherits the header's own type rather than
+   carrying its own, because the two sit in one row and a control that
+   announced itself in a different face would read as a different kind of
+   thing — which it is not: it is the same word, and pressing it reorders
+   the listing under it.
+
+   The affordance is the hover and the focus ring, not a border: five
+   bordered boxes across the top of a listing would be a second toolbar
+   over a screen whose whole point is the rows. */
+.catalogue-sort {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+.catalogue-sort:hover { color: var(--ink); }
+
+/* The column the listing is actually in. It is the one heading in full
+   ink, so the answer to "which order am I reading?" is legible without
+   finding the arrow first — and the arrow is still there, and the
+   button's accessible name still says it in words. */
+.catalogue-sort.sorted { color: var(--ink); }
 ul.catalogue li.catalogue-head .catalogue-key { font-family: var(--sans); }
 
 /* The row answers to the pointer, which is the only thing a border per

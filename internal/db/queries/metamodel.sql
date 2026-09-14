@@ -888,6 +888,96 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 ORDER BY name, id
 LIMIT sqlc.arg('limit')::int;
 
+-- name: ListEntitiesPageNameDesc :many
+-- One page of a game's entities in one of the catalogue's other orders.
+--
+-- **Five statements and not one with a parameter**, which is the
+-- decision worth reading before changing any of them. An order chosen at
+-- run time inside a single statement — `CASE WHEN descending THEN ...`
+-- in the ORDER BY, or a comparison switched by a boolean — is a sort
+-- Postgres cannot serve from an index, so the listing this whole family
+-- exists to make seekable would go back to reading the game and sorting
+-- it on every page, silently and only at a thousand rows. Each statement
+-- here is written so its keyset comparison and its ORDER BY are the same
+-- order spelled the same way, because a keyset that disagrees with its
+-- own sort skips or repeats rows at a page boundary and reports nothing.
+--
+-- Every filter is the one ListEntitiesPage carries, including the
+-- prefix; see that statement for why it is starts_with and not ILIKE.
+-- The prefix narrows a contiguous stretch of the *name* order only, so
+-- under these orders it is a filter like any other rather than a free
+-- one, which is true and costs nothing to allow.
+--
+-- `id` is in every sort key and in every comparison for the reason
+-- ListEntitiesPage records: with ten rows sharing one sort value and a
+-- page of three, a sort without the tiebreak returns five distinct rows
+-- of ten and three of them twice.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (name, id) < (sqlc.narg('after_name')::text, sqlc.narg('after_id')::uuid))
+ORDER BY name DESC, id DESC
+LIMIT sqlc.arg('limit')::int;
+
+-- name: ListEntitiesPageByKey :many
+-- The sibling of ListEntitiesPage above; see it for the whole argument.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (key, id) > (sqlc.narg('after_key')::text, sqlc.narg('after_id')::uuid))
+ORDER BY key, id
+LIMIT sqlc.arg('limit')::int;
+
+-- name: ListEntitiesPageByKeyDesc :many
+-- The sibling of ListEntitiesPage above; see it for the whole argument.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (key, id) < (sqlc.narg('after_key')::text, sqlc.narg('after_id')::uuid))
+ORDER BY key DESC, id DESC
+LIMIT sqlc.arg('limit')::int;
+
+-- name: ListEntitiesPageByUpdated :many
+-- The recency order, whose sort value is a timestamp: the cursor
+-- carries it as RFC 3339 text and it is compared as timestamptz here,
+-- exactly as the relation listing's own created_at cursor is.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (updated_at, id) > (sqlc.narg('after_updated')::timestamptz, sqlc.narg('after_id')::uuid))
+ORDER BY updated_at, id
+LIMIT sqlc.arg('limit')::int;
+
+-- name: ListEntitiesPageByUpdatedDesc :many
+-- The order a catalogue opens on when a designer asks what changed:
+-- newest first. See ListEntitiesPageByUpdated for the cursor's type.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR (updated_at, id) < (sqlc.narg('after_updated')::timestamptz, sqlc.narg('after_id')::uuid))
+ORDER BY updated_at DESC, id DESC
+LIMIT sqlc.arg('limit')::int;
+
 -- name: ListEntitiesRelatedTo :many
 -- One page of the entities one hop from an anchor, along one relation
 -- type, in one direction.

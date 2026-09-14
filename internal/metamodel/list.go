@@ -2,6 +2,7 @@ package metamodel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -85,7 +86,19 @@ type EntityFilter struct {
 	// without a query language, and it costs nothing to page: the
 	// listing is already ordered by name, so a prefix is a contiguous
 	// stretch of that order rather than a scatter through it.
-	Prefix    string
+	Prefix string
+	// Order is which way the listing is read: "name" (the default),
+	// "key" or "updated", each with a leading "-" for the reverse. It is
+	// part of the cursor's fingerprint, because a position in one order
+	// means nothing in another — carried across, it would page
+	// perfectly and return a stretch of rows nobody asked for.
+	//
+	// **It applies to the plain listing only.** A traversal is ordered by
+	// name and says so by refusing an order rather than accepting one it
+	// would not obey: ListEntitiesRelatedTo has a single sort key, and
+	// an order silently dropped on one of the two shapes of this call is
+	// the defect this package has already met once in the filters.
+	Order     string
 	RelatedTo *RelatedFilter
 	Cursor    string
 	Limit     int32
@@ -292,22 +305,38 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 		typePart = typ.ID.String()
 	}
 
+	order, err := parseEntityOrder(f.Order)
+	if err != nil {
+		return EntityPage{}, err
+	}
+
 	if f.RelatedTo != nil {
+		if f.Order != "" {
+			return EntityPage{}, &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
+				Path:    "order",
+				Message: "a listing narrowed by related_to is read in name order and cannot be reordered",
+			}}}
+		}
 		return s.listRelated(ctx, projectID, *f.RelatedTo, typeID, typePart, f, limit)
 	}
 
-	// The prefix is part of the fingerprint for the reason the type and
-	// the invalid flag are: a cursor is a position *in one listing*, and
-	// carrying it into a differently filtered one would skip or repeat
-	// rows with nothing anywhere saying so.
+	// The prefix and the order are part of the fingerprint for the reason
+	// the type and the invalid flag are: a cursor is a position *in one
+	// listing*, and carrying it into a differently filtered one would
+	// skip or repeat rows with nothing anywhere saying so. For the order
+	// it is sharper still — a position in the name order carried into the
+	// recency order compares a name against a timestamp, which is not an
+	// error anywhere, just a page of rows that answers nothing. The
+	// canonical spelling is what is fingerprinted, not the caller's, so
+	// "name" and "" are one listing.
 	fingerprint := fingerprintOf(projectID.String(), "entities", typePart,
-		invalidFilterPart(f.Invalid), f.Prefix)
+		invalidFilterPart(f.Invalid), f.Prefix, order.String())
 	after, err := decodeCursor(f.Cursor, fingerprint)
 	if err != nil {
 		return EntityPage{}, err
 	}
 
-	params := dbq.ListEntitiesPageParams{
+	base := listingParams{
 		ProjectID:    projectID,
 		EntityTypeID: typeID,
 		Invalid:      f.Invalid,
@@ -315,18 +344,14 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	}
 	if f.Prefix != "" {
 		prefix := f.Prefix
-		params.Prefix = &prefix
-	}
-	if after.ID != uuid.Nil {
-		params.AfterID = &after.ID
-		params.AfterName = &after.Sort
+		base.Prefix = &prefix
 	}
 
-	rows, err := s.q.ListEntitiesPage(ctx, params)
+	rows, err := s.listEntitiesPage(ctx, order, base, after)
 	if err != nil {
-		return EntityPage{}, fmt.Errorf("list entities: %w", err)
+		return EntityPage{}, listingError(err)
 	}
-	return pageOf(rows, limit, fingerprint), nil
+	return pageOf(rows, limit, fingerprint, order), nil
 }
 
 // listRelated resolves the one-hop filter and pages its answer.
@@ -389,20 +414,25 @@ func (s *Service) listRelated(ctx context.Context, projectID uuid.UUID, rel Rela
 	if err != nil {
 		return EntityPage{}, fmt.Errorf("list related entities: %w", err)
 	}
-	return pageOf(rows, limit, fingerprint), nil
+	return pageOf(rows, limit, fingerprint, entityOrder{By: OrderByName}), nil
 }
 
 // pageOf wraps the rows a listing read, issuing a cursor when the page
 // came back full. Both listings share it so that neither can end up
 // issuing a cursor the other's decoder would refuse.
-func pageOf(rows []dbq.Entity, limit int32, fingerprint string) EntityPage {
+func pageOf(rows []dbq.Entity, limit int32, fingerprint string, order entityOrder) EntityPage {
 	page := EntityPage{Entities: rows}
 	// pageSize never returns a limit below one, so a full page is never
 	// an empty one and there is no separate emptiness check to make.
 	if len(rows) == int(limit) {
 		last := rows[len(rows)-1]
 		page.NextCursor = encodeCursor(cursor{
-			Sort: last.Name, ID: last.ID, Fingerprint: fingerprint,
+			// The position is the row's value in *this* order, which is
+			// the half of a keyset a listing with more than one order
+			// gets wrong first: a cursor carrying the name while the
+			// statement compares keys pages from a position that is not
+			// in the order being walked.
+			Sort: order.sortValue(last), ID: last.ID, Fingerprint: fingerprint,
 		})
 	}
 	return page
@@ -451,3 +481,16 @@ const (
 	// re-read intact but is not findable; see Search.
 	MaxIndexedText = searchTextLimit
 )
+
+// listingError keeps a refusal a refusal. The order dispatch reads a
+// recency cursor's position back before the statement runs, so the one
+// error that comes out of it that is not Postgres's is this package's
+// own malformed-cursor refusal; wrapping that in "list entities: %w"
+// would turn a caller's own bad argument into an internal_error.
+func listingError(err error) error {
+	var invalid *ValidationError
+	if errors.As(err, &invalid) {
+		return invalid
+	}
+	return fmt.Errorf("list entities: %w", err)
+}

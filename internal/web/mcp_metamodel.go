@@ -286,7 +286,16 @@ type EntitiesListInput struct {
 	// without regard to case. It pages like any other filter: the
 	// listing is ordered by name, so a prefix is a contiguous stretch of
 	// that order.
-	Prefix    string          `json:"prefix,omitempty"`
+	Prefix string `json:"prefix,omitempty"`
+	// Order is which way the page is read: "name" (the default), "key"
+	// or "updated", each with a leading "-" for the reverse, so
+	// "-updated" is what changed most recently. An unrecognised order is
+	// invalid_input at path `order` naming every spelling there is,
+	// rather than a listing quietly ordered by name.
+	//
+	// It is part of what a cursor belongs to: a position in one order
+	// means nothing in another, and a cursor carried across is refused.
+	Order     string          `json:"order,omitempty"`
 	RelatedTo *RelatedToInput `json:"related_to,omitempty"`
 	Cursor    string          `json:"cursor,omitempty"`
 	Limit     int32           `json:"limit,omitempty"`
@@ -1186,6 +1195,7 @@ func entitiesList(ctx context.Context, deps MCPDeps, caller Caller, projectID uu
 		TypeKey: in.TypeKey,
 		Invalid: in.Invalid,
 		Prefix:  in.Prefix,
+		Order:   in.Order,
 		Cursor:  in.Cursor,
 		Limit:   in.Limit,
 	}
@@ -2010,10 +2020,15 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 			"List a game's entities. Filter by type_key, by invalid (rows whose values no "+
 				"longer fit their type's schema), by prefix (names starting with it, matched "+
 				"without regard to case), or any combination. A prefix narrows a contiguous "+
-				"stretch of the listing's own order, which is by name, so it pages exactly "+
-				"like an unfiltered listing does. Pass the previous answer's "+
+				"stretch of the listing's own default order, which is by name, so it pages "+
+				"exactly like an unfiltered listing does. order reads the page another way: "+
+				"\"name\" (the default), \"key\" or \"updated\", each with a leading \"-\" for the "+
+				"reverse, so \"-updated\" is what changed most recently and \"-name\" is Z to A. "+
+				"An unrecognised order is refused at path `order` rather than silently "+
+				"ignored, and an order cannot be combined with related_to, which is read in "+
+				"name order. Pass the previous answer's "+
 				"next_cursor to get the next page; a cursor belongs to the game and the "+
-				"filter it was issued for and is refused against any other. limit defaults "+
+				"filter and order it was issued for and is refused against any other. limit defaults "+
 				"to %d and is capped at %d — asking for more gets the cap, and asking for "+
 				"less than one gets the default rather than an error. "+
 				"fields are omitted unless verbose is true. "+

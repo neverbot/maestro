@@ -94,6 +94,29 @@ func checkNoSchemaDrift(ctx context.Context, provider *goose.Provider) error {
 	return nil
 }
 
+// migrateDownTo rolls back to a stated version, one migration at a
+// time, and is what a test asserting the reversal of a *particular*
+// migration uses.
+//
+// It exists because `migrateDown` rolls back the most recent migration,
+// whichever that happens to be: a test that called it once to undo
+// migration N kept passing as N stayed newest and started asserting the
+// reversal of N+1 the day one was added, with nothing saying so. Naming
+// the version is what makes such a test keep meaning what it says.
+func migrateDownTo(ctx context.Context, pool *pgxpool.Pool, version int64) error {
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	defer func() { _ = sqlDB.Close() }()
+
+	provider, err := newProvider(sqlDB)
+	if err != nil {
+		return err
+	}
+	if _, err := provider.DownTo(ctx, version); err != nil {
+		return fmt.Errorf("migrate down to %d: %w", version, err)
+	}
+	return nil
+}
+
 // migrateDown rolls back the single most recent migration. It is
 // unexported and used only by this package's own tests to exercise the
 // Down side of a migration; nothing outside internal/db can reach it.

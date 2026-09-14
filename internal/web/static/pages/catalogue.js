@@ -57,6 +57,27 @@ export const CATALOGUE_NOTE =
 // admit a wall any more.
 export const SEARCH_LIMIT = 50;
 
+// hiddenColumnsSentence says which declared fields the lane is not
+// showing, and where they can be read.
+//
+// It is exported and pure so the harness can read the sentence itself:
+// the three-column cap is deliberate, and what was wrong was the
+// silence, so the assertion worth holding is about the words rather than
+// about the element.
+export function hiddenColumnsSentence(declared, shown, typeLabel) {
+  const names = declared.slice(shown).map((field) => field.label || field.key).filter((name) => name !== "");
+  if (names.length === 0) return "";
+  // "a, b and c" rather than "a, b, c": this is a sentence a person
+  // reads, not a list a machine parses.
+  const last = names[names.length - 1];
+  const list = names.length === 1 ? last : names.slice(0, -1).join(", ") + " and " + last;
+  return (
+    "Showing " + shown + " of " + countLabel(declared.length, "declared field", "declared fields") +
+    ". " + list + (names.length === 1 ? " is" : " are") +
+    " on each " + String(typeLabel || "").toLowerCase() + "'s own page."
+  );
+}
+
 export async function cataloguePage(opened) {
   const doc = opened.document;
   const nameEl = doc.getElementById("type-name");
@@ -156,7 +177,19 @@ export async function cataloguePage(opened) {
   // because a lane of ten columns is a spreadsheet and this is a reading
   // surface; the first three declared are the ones the game's author put
   // first, which is a better order than any this page could invent.
-  const columns = (Array.isArray(type.result.field_schema) ? type.result.field_schema : []).slice(0, 3);
+  const declared = Array.isArray(type.result.field_schema) ? type.result.field_schema : [];
+  const columns = declared.slice(0, 3);
+  // **A hidden column is said out loud.** Three is the cap and the cap
+  // is right; a screen that shows three of eight fields and says nothing
+  // is a screen claiming the type has three. The sentence names what is
+  // missing and where it can be read, because "5 more fields" on its own
+  // tells a reader they are lost rather than where they are.
+  const columnsEl = doc.getElementById("entities-columns");
+  if (columnsEl) {
+    const sentence = hiddenColumnsSentence(declared, columns.length, type.result.label || type.result.key);
+    columnsEl.hidden = sentence === "";
+    say(columnsEl, sentence);
+  }
 
   // A value the entity does not carry is named, never blank: a blank cell
   // cannot be told from a value that failed to load.

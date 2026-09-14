@@ -50,8 +50,44 @@ export function countLabel(count, singular, plural) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+// **The list is a table and says so.** A catalogue is a `ul` of `li`s
+// carrying a fixed six cells in a subgrid, which is the right thing
+// visually and, to a screen reader, ten flat strings per row with no
+// column ever named. The four ARIA roles below cost four attributes and
+// are meaningful precisely because the shape is fixed: every row emits
+// the same cells in the same order, so a cell always sits under the
+// heading that names it.
+//
+// `markTable` is what a page calls on the list element itself, because
+// the list is in the shell's HTML and these functions only build its
+// children. A `ul` with `role="table"` must hold rows and nothing else,
+// which is already true of every catalogue in this product.
+export function markTable(listEl, label) {
+  if (!listEl) return;
+  listEl.setAttribute("role", "table");
+  if (typeof label === "string" && label !== "") listEl.setAttribute("aria-label", label);
+}
+
+// markTables marks every catalogue on a page, and is what the pages
+// actually call.
+//
+// It is one sweep over the shell rather than a call beside each list
+// because the roles below are **not optional once a row carries one**:
+// `role="row"` is only meaningful inside a table, and a row role in a
+// plain list is worse than no role at all. Every catalogue in this
+// product is the same fixed-shape grid, so every one of them is a table
+// — and a sweep cannot be the thing somebody forgets when they add the
+// next screen.
+export function markTables(doc) {
+  const lists = doc && typeof doc.querySelectorAll === "function"
+    ? doc.querySelectorAll("ul.catalogue")
+    : [];
+  for (const list of lists) markTable(list, "");
+}
+
 export function row(doc, spec) {
   const item = doc.createElement("li");
+  item.setAttribute("role", "row");
 
   // **The whole row is the target, or the hover is a lie.** The row
   // highlights on hover and the comment beside that rule says "the row
@@ -64,10 +100,15 @@ export function row(doc, spec) {
   label.className = spec.href ? "catalogue-label stretched" : "catalogue-label";
   if (spec.href) label.href = spec.href;
   label.textContent = spec.label ?? "";
+  // The anchor carries the cell role rather than being wrapped in one:
+  // an extra element between the row and the link would break the
+  // subgrid the whole row's alignment rests on.
+  label.setAttribute("role", "cell");
   item.append(label);
 
   const handle = doc.createElement("code");
   handle.className = "catalogue-key";
+  handle.setAttribute("role", "cell");
   handle.textContent = spec.key ?? "";
   item.append(handle);
 
@@ -88,18 +129,24 @@ export function row(doc, spec) {
     // the call site, so the stylesheet stays the one place a meaning is
     // spelled.
     if (cell && cell.status) value.classList.add("status", cell.status);
+    value.setAttribute("role", "cell");
     value.textContent = cell ? (cell.text ?? "") : "";
     item.append(value);
   }
 
   const tally = doc.createElement("span");
   tally.className = "catalogue-count";
+  tally.setAttribute("role", "cell");
   tally.textContent = spec.count ?? "";
   item.append(tally);
 
   if (spec.flag) {
     const flag = doc.createElement("span");
     flag.className = "catalogue-invalid";
+    // The flag shares the count's cell rather than adding a seventh
+    // column: it is a mark *on* a row, and a column that is empty on
+    // every row but one is a column that says nothing six times.
+    flag.setAttribute("role", "cell");
     flag.textContent = spec.flag;
     item.append(flag);
   }
@@ -132,6 +179,7 @@ export function row(doc, spec) {
 export function headerRow(doc, spec) {
   const item = doc.createElement("li");
   item.className = "catalogue-head";
+  item.setAttribute("role", "row");
 
   item.append(headCell(doc, spec.label ?? "", "", spec.sort && spec.sort.label, spec));
 
@@ -141,6 +189,8 @@ export function headerRow(doc, spec) {
   for (let i = 0; i < CATALOGUE_CELLS; i += 1) {
     const head = doc.createElement("span");
     head.className = "catalogue-cell";
+    head.setAttribute("role", "columnheader");
+    markSort(head, spec, heads[i] && typeof heads[i] === "object" ? heads[i].order : "");
     if (heads[i] && heads[i].numeric) head.classList.add("numeric");
     // A cell heading naming an order is a control like the two named
     // ones; a cell that names none stays a label. Which columns can be
@@ -155,6 +205,7 @@ export function headerRow(doc, spec) {
   // everything after the name drifts.
   const tally = doc.createElement("span");
   tally.className = "catalogue-count";
+  tally.setAttribute("role", "columnheader");
   item.append(tally);
   return item;
 }
@@ -171,8 +222,35 @@ export const SORT_MARKS = { asc: "\u2191", desc: "\u2193" };
 function headCell(doc, text, className, order, spec) {
   const cell = doc.createElement("span");
   if (className !== "") cell.className = className;
+  cell.setAttribute("role", "columnheader");
+  markSort(cell, spec, order);
   cell.append(headContent(doc, text, order, spec));
   return cell;
+}
+
+// markSort states, on the heading itself, which way the listing is
+// sorted.
+//
+// **`aria-sort` and not only the button's name.** The button says what
+// pressing it would do, which is the right thing for a control and the
+// wrong thing for a reader asking "how is this table ordered?" — a
+// screen reader announces `aria-sort` when the column is reached, so the
+// two answers are both available and neither depends on seeing an arrow.
+// A column that can be sorted and is not says "none", which is a
+// different statement from a column that cannot be sorted at all and
+// carries no attribute.
+function markSort(cell, spec, order) {
+  if (!order) return;
+  const sorted = typeof spec.sorted === "string" ? spec.sorted : "";
+  if (sorted === order) {
+    cell.setAttribute("aria-sort", "ascending");
+    return;
+  }
+  if (sorted === "-" + order) {
+    cell.setAttribute("aria-sort", "descending");
+    return;
+  }
+  cell.setAttribute("aria-sort", "none");
 }
 
 // headContent is the heading itself: a text node's worth of words, or

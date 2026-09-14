@@ -33,7 +33,7 @@ function check(what, got, want) {
   console.log("FAIL " + what + "\n  got  " + JSON.stringify(got) + "\n  want " + JSON.stringify(want));
 }
 
-const { headerRow, SORT_MARKS } = await import("../static/rows.js");
+const { headerRow, row, SORT_MARKS } = await import("../static/rows.js");
 
 const doc = dom.document;
 
@@ -133,6 +133,53 @@ check("a header nobody said was sortable has no controls", controls, 0);
 check("and it still says its columns",
   [plain.children[0].textContent, plain.children[1].textContent],
   ["Quest", "key"]);
+
+// --- What a screen reader is told ------------------------------------
+//
+// A catalogue is a `ul` of `li`s in a subgrid: the right thing to look
+// at, and ten flat strings per row to listen to, with no column ever
+// named. The roles are meaningful precisely because the shape is fixed —
+// every row emits the same cells in the same order — so a cell is always
+// under the heading that names it.
+
+const { markTables } = await import("../static/rows.js");
+
+const sorted = header("-name");
+check("a row is a row and every one of its cells is a cell",
+  [sorted.row.getAttribute("role"), ...sorted.row.children.map((c) => c.getAttribute("role"))],
+  ["row", "columnheader", "columnheader", "columnheader", "columnheader", "columnheader", "columnheader"]);
+
+const line = row(doc, { label: "Hogger", key: "hogger", cells: [{ text: "12" }], count: "3", flag: "invalid" });
+check("a content row names its cells too",
+  [line.getAttribute("role"), ...line.children.map((c) => c.getAttribute("role"))],
+  ["row", "cell", "cell", "cell", "cell", "cell", "cell", "cell"]);
+
+// **aria-sort, and the button's name, are two answers to two
+// questions.** The button says what pressing it would do; aria-sort says
+// how the table is ordered right now, which is what a reader arriving at
+// the column asks. A column that can be sorted and is not says "none",
+// which is not the same statement as a column that cannot be sorted and
+// carries no attribute at all.
+check("the sorted column, the sortable one and the plain one say three different things",
+  [
+    sorted.row.children[0].getAttribute("aria-sort"),
+    sorted.row.children[1].getAttribute("aria-sort"),
+    sorted.row.children[2].getAttribute("aria-sort"),
+  ],
+  ["descending", "none", null]);
+
+check("a field column the listing is sorted by says ascending",
+  fieldHeader("field:level").row.children[2].getAttribute("aria-sort"),
+  "ascending");
+
+// The list itself, which is where the roles above become legal: a row
+// role outside a table is worse than no role at all.
+const list = doc.createElement("ul");
+list.className = "catalogue wide";
+const shell = doc.createElement("main");
+shell.append(list);
+markTables({ querySelectorAll: (selector) => (selector === "ul.catalogue" ? [list] : []) });
+check("the catalogue itself is the table", list.getAttribute("role"), "table");
 
 if (failures > 0) {
   console.log(failures + " failed");

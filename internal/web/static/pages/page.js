@@ -22,6 +22,7 @@
 
 import { fetchGames, fetchMe, goToLogin, rememberGame, renderHeader } from "../app.js";
 import { client } from "../client.js";
+import { markTables } from "../rows.js";
 
 // The route prefix of one game, and the segments under it. They are
 // constants rather than spellings at each call site because
@@ -207,6 +208,11 @@ export function routeURL(slug, key) {
 // the game's *stored* one and never the URL's own casing.
 export async function openGame(options = {}) {
   const doc = options.document || globalThis.document;
+  // Every catalogue on this page is a table, said once here rather than
+  // beside each list: rows.js gives every row and every cell its ARIA
+  // role, and a row role outside a table is worse than none. See
+  // rows.js markTables.
+  markTables(doc);
   const url = options.location || globalThis.window.location;
   const slug = slugOf(url.pathname);
   // Both answers before the header, because the bar carries both: the
@@ -425,7 +431,7 @@ export function setBreadcrumb(doc, trail) {
 // own — and app.js is the module this one imports from, so importing it
 // back would close a cycle. A vocabulary two modules share belongs to
 // neither.
-export { countLabel, row } from "../rows.js";
+export { countLabel, markTable, markTables, row } from "../rows.js";
 
 // fill replaces a list's rows and shows its empty state when there are
 // none. replaceChildren, never innerHTML, so a re-render can neither

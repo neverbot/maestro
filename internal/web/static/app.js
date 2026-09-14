@@ -10,7 +10,7 @@
 // navigation for a pure convenience, and a remembered value can go stale
 // the moment the user loses access to that game or it is deleted, with no
 // natural place server-side to notice either has happened.
-import { countLabel, row } from "./rows.js";
+import { countLabel, markTables, row } from "./rows.js";
 
 const LAST_GAME_KEY = "maestro:lastGame";
 
@@ -684,6 +684,11 @@ export function goToLogin() {
 // that, rather than the URL, keeps this one file shared by both pages
 // without either needing to know which page loaded it.
 const gamesList = document.getElementById("games");
+// The picker's own catalogue is a table for the reason every other one
+// is: rows.js gives each row and cell an ARIA role, and those roles need
+// a table above them. pages/page.js does this for every screen inside a
+// game; this file is the one page that never opens one.
+markTables(document);
 const statusEl = document.getElementById("status");
 const emptyState = document.getElementById("empty-state");
 // The create-game form's own disclosure. It ships hidden and is revealed

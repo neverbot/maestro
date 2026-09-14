@@ -1,3 +1,43 @@
+/* The two vendored faces. Provenance, bytes and licence for each are in
+   static/vendor/manifest.json, and internal/web/static_vendor_test.go
+   walks both directions.
+
+   **`font-display: swap` on every face, and that is what the budget
+   argument rests on.** A swapped font does not gate the first paint:
+   the page draws immediately in the fallback and re-flows when the file
+   arrives. That is why the vendored budget is split in two —
+   `renderBlockingBudget` for what a browser must have before it can
+   draw, and `fontBudget` for what arrives after — and why that test
+   also asserts every face here declares `swap`. A face that blocked
+   would be spending the wrong budget.
+
+   Literata is one variable file across both axes it uses: `opsz` so the
+   same face holds at 15px of body prose and at 28px of page title, and
+   `wght` so 400 and 600 come from one download rather than two. */
+@font-face {
+  font-family: Literata;
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/static/vendor/fonts/literata-var-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/vendor/fonts/fira-sans-400-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/static/vendor/fonts/fira-sans-600-latin.woff2") format("woff2");
+}
+
 /* The token layer of the interface design (spec §2.3, §2.5).
  *
  * One rule holds this file together, and it is mechanical rather than
@@ -172,8 +212,29 @@
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
   --dur-state: 120ms;
 
-  --serif: ui-serif, Georgia, "Times New Roman", serif;
-  --sans: system-ui, sans-serif;
+  /* **The two voices, and they are shipped rather than hoped for.**
+     docs/design.md calls the split the system; the specific faces were
+     the drawing board's choice and, until this change, the product
+     served whatever the machine happened to have. That was not a
+     neutral substitution: `ui-serif` is New York on macOS and Georgia
+     on Windows — both warm text faces — and on a Linux desktop with no
+     `ui-serif` it falls through to whatever the fontconfig default is,
+     which is where a designer reading four thousand words of lore got
+     the worst of the three. The face a game's words are set in should
+     not depend on whose laptop is open.
+
+     Each stack keeps its system fallbacks after the vendored name, so
+     the product is legible while the font loads, on a machine that
+     blocks font loading, and for every character the latin subsets do
+     not carry — a Cyrillic zone name renders in the reader's own serif
+     rather than in tofu. */
+  --serif: Literata, ui-serif, Georgia, "Times New Roman", serif;
+  --sans: "Fira Sans", system-ui, sans-serif;
+  /* **Mono stays the system's**, and that is a decision rather than an
+     omission: monospace is the Copyable role — keys, slugs, JSON
+     pointers — which is machine text, where a face differing per
+     platform costs a reader nothing. Fira Mono would have been 10.7 KB
+     for a difference nobody reads. */
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   font-family: var(--sans);
@@ -1289,14 +1350,25 @@ ul.games a { color: inherit; }
    mandatory: a section heading 0.7px larger than the rows under it, and
    greyer. A flat scale is the fault the whole design pass exists to fix,
    and it was still here. */
+/* **The Headline role speaks the tool's voice**, and that is the one
+   place the Two Voices Rule and the hierarchy table disagreed. The rule
+   is an ownership test — "if it would survive the game shipping, it is
+   serif" — and "Attached to", "History", "Loops", "Out of reach" would
+   not survive it: they are Maestro's furniture. The table sent them to
+   the serif anyway, and the prose page is where that was visible: a
+   document's own title, its own headings and the tool's three section
+   headings, all serif 600 within a pixel of each other, with no way to
+   tell whose words were whose.
+   The page title stays serif (the Display role): it names the thing
+   being looked at, which is almost always the game's own word. */
 h2 {
-  font-family: var(--serif);
-  font-size: 1.4rem;
-  line-height: 1.25;
+  font-family: var(--sans);
+  font-size: 1.25rem;
+  line-height: 1.3;
   margin: var(--s6) 0 var(--s3);
   color: var(--ink);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 
 /* The game home page's two catalogues: one row per declared type, with
@@ -1321,7 +1393,32 @@ ul.catalogue {
      content cells and the count. A row with less to say leaves a track
      empty, and an empty `auto` track collapses to nothing. */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
+  /* **The name track is capped, and the slack falls to the right as bare
+     paper.** It was `1fr`, which is the best thing in this product at
+     500px and the worst at 1440: the name took every spare pixel and
+     parked its own key 1135px away, so pairing a row with the handle it
+     is addressed by meant crossing the window. A capped track keeps the
+     name, the key, the declared fields and the count inside one eye
+     span at any width, and the row still spans the full list — the
+     hover target and the rule under it are unchanged, which is what
+     makes this different from capping the list itself.
+     `fit-content(44rem)` and not a flat cap: the track hugs the longest
+     name in the *list* — one grid, so every row shares the measurement —
+     and stops at 44rem when some game writes a sixty-seven character
+     quest name. A flat cap parked the key at 704px whatever the names
+     were, which is the same defect at half the distance. */
+  /* Seven tracks, and the seventh is the answer to where the leftover
+     width goes. An `auto` track stretches under the default
+     justification, so capping the name alone only moved the problem —
+     the five tracks after it shared the slack and put a one-character
+     `tier` five hundred pixels from the key. `justify-content: start`
+     fixes the columns and breaks the row: the rule under each row then
+     stops where the content does, leaving an empty bordered box across
+     the rest of the list. A spacer track takes the slack instead, so
+     every column is the width of what is in it, the row still spans the
+     list, and the remainder is bare paper. Rows append six cells; the
+     seventh track is never filled by anything. */
+  grid-template-columns: fit-content(44rem) auto auto auto auto auto minmax(0, 1fr);
   gap: 0;
   min-width: 0;
   background: var(--paper);
@@ -1574,7 +1671,16 @@ ul.catalogue a:hover { text-decoration: underline; text-underline-offset: 2px; }
   line-height: 1.6;
   max-width: var(--measure);
 }
-.prose h1, .prose h2, .prose h3 { color: var(--ink); font-weight: 600; }
+/* **The document's own headings stay the game's.** They are inside
+   `.prose`, which sets the serif, but a bare `h2` rule wins over an
+   inherited family however low its specificity — so without this line
+   the change above would have put a game's own chapter headings in the
+   tool's voice, on the one screen the rule exists to protect. */
+.prose h1, .prose h2, .prose h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 600;
+}
 .prose h1 { font-size: 1.35rem; margin: 1.8rem 0 0.6rem; letter-spacing: 0; }
 .prose h2 { font-size: 1.15rem; margin: 1.6rem 0 0.5rem; letter-spacing: 0; }
 .prose h3 { font-size: 1rem; margin: 1.4rem 0 0.4rem; }

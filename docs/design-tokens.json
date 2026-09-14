@@ -255,7 +255,7 @@
       },
       "headline": {
         "displayName": "Headline",
-        "purpose": "Section headings and an entity's name in its own view. Literata."
+        "purpose": "Section headings: the tool's own words, so Fira Sans. A page title is the game's word and stays Literata."
       },
       "title": {
         "displayName": "Title",

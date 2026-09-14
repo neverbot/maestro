@@ -23,37 +23,37 @@ colors:
   data-8: "#652049"
 typography:
   display:
-    fontFamily: "ui-serif, Georgia, Times New Roman, serif"
+    fontFamily: "Literata, ui-serif, Georgia, Times New Roman, serif"
     fontSize: "1.75rem"
     fontWeight: 600
     lineHeight: 1.15
     letterSpacing: "-0.015em"
   headline:
-    fontFamily: "ui-serif, Georgia, Times New Roman, serif"
-    fontSize: "1.4rem"
+    fontFamily: "Fira Sans, system-ui, sans-serif"
+    fontSize: "1.25rem"
     fontWeight: 600
-    lineHeight: 1.25
-    letterSpacing: "-0.01em"
+    lineHeight: 1.3
+    letterSpacing: "-0.005em"
   title:
-    fontFamily: "system-ui, sans-serif"
+    fontFamily: "Fira Sans, system-ui, sans-serif"
     fontSize: "1.125rem"
     fontWeight: 600
     lineHeight: 1.35
     letterSpacing: "normal"
   body:
-    fontFamily: "system-ui, sans-serif"
+    fontFamily: "Fira Sans, system-ui, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
   prose:
-    fontFamily: "ui-serif, Georgia, Times New Roman, serif"
+    fontFamily: "Literata, ui-serif, Georgia, Times New Roman, serif"
     fontSize: "0.95rem"
     fontWeight: 400
     lineHeight: 1.6
     letterSpacing: "normal"
   label:
-    fontFamily: "system-ui, sans-serif"
+    fontFamily: "Fira Sans, system-ui, sans-serif"
     fontSize: "0.75rem"
     fontWeight: 600
     lineHeight: 1.2
@@ -306,32 +306,57 @@ panels are sheets on top of it.
 
 ## 3. Typography
 
-**Serif (the game's voice):** `ui-serif, Georgia, "Times New Roman", serif`
-**Sans (the tool's voice):** `system-ui, sans-serif`
+**Serif (the game's voice):** `Literata, ui-serif, Georgia, "Times New Roman", serif`
+**Sans (the tool's voice):** `"Fira Sans", system-ui, sans-serif`
 **Mono (anything copyable):** `ui-monospace, SFMono-Regular, Menlo, monospace`
 
-**Nothing is downloaded.** The product ships no web font. Literata and
-Fira Sans were the drawing board's choice and are named here as the
-intent, not as what renders: a self-hosted pair costs 159 KB of latin
-subsets against a payload budget of 150 KB, and the CSP that admits no
-third-party origin rules out a font CDN besides. What renders is the
-reader's own system faces, which on macOS are New York and SF Pro.
+**Two faces are downloaded; the third is the machine's.** Literata
+(variable, latin) and Fira Sans at 400 and 600 are vendored under
+`internal/web/static/vendor/fonts/` and served from this instance, which
+is what the CSP allows and a font CDN is not. 121 KB in three files.
 
-**Character:** What survives the substitution is the *split*, and the
-split is the system: a serif for what belongs to the game, a sans for
-what belongs to Maestro. Every platform's system serif is a text face
-built for long reading and every platform's system sans is drawn for
-small sizes on screen, so the contrast between the two voices holds
-wherever the product is opened. The specific warmth of Literata does
-not, and a future decision to raise the payload budget by those 9 KB
-would change the faces without changing a single rule below.
+**Why they are worth downloading, since the split survived without
+them.** A serif for the game and a sans for the tool holds on system
+faces too — and it holds *differently on every machine*. `ui-serif` is
+New York on macOS and Georgia on Windows, both text faces built for long
+reading, and on a Linux desktop without `ui-serif` it falls through to
+whatever fontconfig answers with, which is usually neither. A designer
+reading four thousand words of lore got a materially different product
+depending on whose laptop was open, and the face a game's words are set
+in is not a thing this product should leave to chance.
+
+**Mono stays the system's**, and that is a decision rather than an
+omission. Monospace is the Copyable role — keys, slugs, JSON pointers —
+which is machine text, and a face that differs per platform costs a
+reader nothing there. Fira Mono would have been 10.7 KB for a
+difference nobody reads.
+
+**What it costs, and what the budget now means.** Every face is declared
+`font-display: swap`, so none of them gates the first paint: the page
+draws in the fallback and re-flows when the file lands. The vendored
+budget is therefore two budgets — `renderBlockingBudget` (150 KB, the
+original figure and the original argument, spending 77 KB on JS) and
+`fontBudget` (128 KB, spending 121 KB) — and
+`TestEveryVendoredFontIsSwapped` is what stops the second from being a
+loophole: a face without `swap` blocks the paint and belongs in the
+first.
+
+The latin subsets are deliberate. A game writing outside latin renders
+in the reader's own faces, which is the right answer: a missing glyph
+should fall back, not become tofu.
 
 ### Hierarchy
 
 - **Display** (serif 600, 1.75rem, 1.15): the page title, once per
   screen. The name of the thing being looked at.
-- **Headline** (serif 600, 1.4rem, 1.25): section headings and the
-  name of an entity in its own detail view.
+- **Headline** (sans 600, 1.25rem, 1.3): section headings — "Attached
+  to", "History", "Out of reach". **They are the tool's words**, and the
+  Two Voices Rule below is an ownership test rather than a scale: this
+  role was serif until a reader met a document's own title, its own
+  chapter headings and three of Maestro's section headings on one screen,
+  all serif 600 within a pixel of each other, with nothing saying whose
+  words were whose. The page title stays serif because it names the thing
+  being looked at, which is almost always the game's own word.
 - **Title** (sans 600, 1.125rem, 1.35): panel headings and group
   titles inside a list.
 - **Body** (sans 400, 0.875rem, 1.5): everything the tool says.
@@ -352,8 +377,14 @@ one exists to fix.
 
 **The Two Voices Rule.** The tool speaks sans, the game speaks serif. A
 quest title, a place name, an entity name and every line of game prose
-are serif. A column header, a button, a filter and a count are
-sans. If it would survive the game shipping, it is serif.
+are serif. A column header, a button, a filter, a count **and a section
+heading** are sans. If it would survive the game shipping, it is serif.
+
+The one place the test needs saying out loud: a *page title* is serif
+because it is the name of the thing on the page, and a *section heading*
+is sans because it is Maestro's furniture around that thing. On the
+prose screen those two sit four lines apart, which is where the rule was
+first visibly broken.
 
 **The No Uppercase Rule.** Labels are sentence case with light tracking.
 All-caps labels are the admin-panel tell, and they cost legibility at

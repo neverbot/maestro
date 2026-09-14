@@ -36,6 +36,42 @@
       "license": "MIT",
       "license_path": "licenses/graphlib.txt",
       "license_url": "https://unpkg.com/@dagrejs/graphlib@4.0.5/LICENSE"
+    },
+    {
+      "path": "fonts/fira-sans-400-latin.woff2",
+      "package": "Fira Sans",
+      "version": "v18 (Google Fonts build)",
+      "url": "https://fonts.gstatic.com/s/firasans/v18/va9E4kDNxMZdWfMOD5Vvl4jLazX3dA.woff2",
+      "url_note": "The latin subset Google Fonts serves for `Fira Sans:wght@400`. The css2 stylesheet has to be fetched with a browser user agent or it answers with the TTF fallback; the woff2 URL it names is immutable at this version.",
+      "sha256": "7b8f0fbf813f59df6e7df17410a84850c3e690f98c90b9273371ef83796f8bc5",
+      "bytes": 17464,
+      "license": "OFL-1.1",
+      "license_path": "licenses/fira-sans.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/firasans/OFL.txt"
+    },
+    {
+      "path": "fonts/fira-sans-600-latin.woff2",
+      "package": "Fira Sans",
+      "version": "v18 (Google Fonts build)",
+      "url": "https://fonts.gstatic.com/s/firasans/v18/va9B4kDNxMZdWfMOD5VnSKzeRhf6Xl7Glw.woff2",
+      "url_note": "The 600 of the same family. 400 and 600 are the only weights this design system names for the tool's voice, so 500 is not vendored.",
+      "sha256": "f3cc7b2756c566cf8172bfd269d805c4a1eb953f6b6ce8bf2b2ddf49c5422189",
+      "bytes": 17680,
+      "license": "OFL-1.1",
+      "license_path": "licenses/fira-sans.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/firasans/OFL.txt"
+    },
+    {
+      "path": "fonts/literata-var-latin.woff2",
+      "package": "Literata",
+      "version": "v40 (Google Fonts build)",
+      "url": "https://fonts.gstatic.com/s/literata/v40/or3PQ6P12-iJxAIgLa78DkTtAoDhk0oVpaK3YLanFLHpPf2TbLi4J_HWTEKVt8k.woff2",
+      "url_note": "The variable latin subset, opsz 7..72 and wght 400..600 in one file. A variable font is vendored rather than two static weights because the two together are larger than the variable one and cover less: the optical size axis is what makes this face hold at 15px body and at 28px display.",
+      "sha256": "33b49c485e21a38bbfe68de764cc5b329b82c74e6ae4dc0cd9ace5b349da25fe",
+      "bytes": 85780,
+      "license": "OFL-1.1",
+      "license_path": "licenses/literata.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/literata/OFL.txt"
     }
   ]
 }

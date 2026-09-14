@@ -54,16 +54,41 @@ const (
 	manifestPath = vendorRoot + "/manifest.json"
 	licensesDir  = "licenses"
 
-	// vendoredPayloadBudget is the ceiling on everything this front end
-	// makes a browser download before it can draw anything: 150KB, the
-	// figure the interface plan commits to.
+	// **Two budgets, because there are two questions.** There was one —
+	// 150KB over everything vendored, described as "everything this
+	// front end makes a browser download before it can draw anything" —
+	// and the day the two typefaces were vendored that description
+	// stopped being true of half of it. A font declared
+	// `font-display: swap` is downloaded *after* the page has drawn: the
+	// browser paints in the fallback and re-flows when it arrives.
+	// Counting it against a first-paint budget would have meant either
+	// giving up the design system's central rule or quietly redefining
+	// what the number measures, and both are worse than splitting it.
 	//
-	// It lives here rather than in manifest.json on purpose. A budget a
-	// contributor can raise by editing the same file it is checked
-	// against is not a budget; raising this one is a diff to a test,
-	// which is a conversation.
-	vendoredPayloadBudget = 150 * 1024
+	// So: what a browser must have before it can draw keeps the original
+	// figure and the original argument, and what arrives afterwards has
+	// its own. TestEveryVendoredFontIsSwapped is what stops the second
+	// from being a loophole — a face without `swap` blocks the paint and
+	// is spending the wrong budget.
+	//
+	// Both live here rather than in manifest.json for the reason the
+	// first one did: a budget a contributor can raise by editing the
+	// same file it is checked against is not a budget; raising one of
+	// these is a diff to a test, which is a conversation.
+	renderBlockingBudget = 150 * 1024
+
+	// fontBudget is the latin subsets of the two voices: Literata
+	// variable for the game's words and Fira Sans at 400 and 600 for the
+	// tool's. 128KB is what those three files cost plus room for a
+	// weight, and not a byte for a third family — Fira Mono was
+	// deliberately not vendored, because monospace is the Copyable role
+	// and machine text does not care whose mono it is.
+	fontBudget = 128 * 1024
 )
+
+// fontsPrefix is the one path convention these budgets rest on: a
+// vendored font lives under it and nothing else does.
+const fontsPrefix = "fonts/"
 
 // vendoredFile is one entry of internal/web/static/vendor/manifest.json.
 // The fields this test does not read (`url_note`) are deliberately
@@ -212,27 +237,102 @@ func TestNoVendoredFileIsUnlisted(t *testing.T) {
 func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
 	manifest := readVendorManifest(t)
 
-	var total int64
+	totals := map[string]int64{}
+	budgets := map[string]int64{"render": renderBlockingBudget, "fonts": fontBudget}
 	lines := make([]string, 0, len(manifest.Files))
 	for _, entry := range manifest.Files {
 		info, err := os.Stat(filepath.Join(vendorRoot, filepath.FromSlash(entry.Path)))
 		if err != nil {
 			t.Fatalf("stat %s: %v", entry.Path, err)
 		}
-		total += info.Size()
-		lines = append(lines, fmt.Sprintf("  %-20s %7d B  %s %s", entry.Path, info.Size(), entry.Package, entry.Version))
+		kind := "render"
+		if strings.HasPrefix(entry.Path, fontsPrefix) {
+			kind = "fonts"
+		}
+		totals[kind] += info.Size()
+		lines = append(lines, fmt.Sprintf("  %-34s %7d B  %-6s %s %s",
+			entry.Path, info.Size(), kind, entry.Package, entry.Version))
 	}
 
 	sort.Strings(lines)
-	t.Logf("vendored payload: %d B of a %d B budget (%.1f%% used, %d B spare)\n%s",
-		total, vendoredPayloadBudget,
-		100*float64(total)/float64(vendoredPayloadBudget),
-		vendoredPayloadBudget-total,
-		strings.Join(lines, "\n"))
+	for _, kind := range []string{"render", "fonts"} {
+		t.Logf("%s: %d B of a %d B budget (%.1f%% used, %d B spare)",
+			kind, totals[kind], budgets[kind],
+			100*float64(totals[kind])/float64(budgets[kind]),
+			budgets[kind]-totals[kind])
+	}
+	t.Log("\n" + strings.Join(lines, "\n"))
 
-	if total > vendoredPayloadBudget {
-		t.Fatalf("the vendored payload is %d B, over the %d B budget by %d B",
-			total, vendoredPayloadBudget, total-vendoredPayloadBudget)
+	for _, kind := range []string{"render", "fonts"} {
+		if totals[kind] > budgets[kind] {
+			t.Fatalf("the vendored %s payload is %d B, over the %d B budget by %d B",
+				kind, totals[kind], budgets[kind], totals[kind]-budgets[kind])
+		}
+	}
+	// A budget nothing spends is a budget nobody is keeping: if the
+	// fonts ever leave the tree, this test should stop claiming to
+	// guard them.
+	if totals["fonts"] == 0 {
+		t.Fatal("no vendored font is under " + fontsPrefix + ", so the font budget guards nothing")
+	}
+}
+
+// TestEveryVendoredFontIsSwapped is the condition the split above rests
+// on, and without it the second budget is a loophole.
+//
+// A font counted against `fontBudget` is counted there because it
+// arrives *after* the first paint. That is true of a face declared
+// `font-display: swap` and false of one that is not: the default
+// (`auto`, in practice `block` for about three seconds) makes the
+// browser hold the text back until the file lands, which is exactly the
+// thing `renderBlockingBudget` exists to bound.
+//
+// It also asserts the other direction — every face in the stylesheet
+// points at a file the manifest knows — because a `@font-face` reaching
+// a URL this repository does not vendor is either a 404 or, worse, a
+// third-party origin the CSP would refuse in silence.
+func TestEveryVendoredFontIsSwapped(t *testing.T) {
+	sheet, err := os.ReadFile(filepath.Join("static", "styles.css"))
+	if err != nil {
+		t.Fatalf("read styles.css: %v", err)
+	}
+
+	faces := regexp.MustCompile(`(?s)@font-face\s*\{(.*?)\}`).FindAllStringSubmatch(string(sheet), -1)
+	declared := map[string]bool{}
+	for _, face := range faces {
+		body := face[1]
+		src := regexp.MustCompile(`url\("([^"]+)"\)`).FindStringSubmatch(body)
+		if src == nil {
+			t.Errorf("a @font-face names no url:\n%s", body)
+			continue
+		}
+		if !strings.Contains(body, "font-display: swap") {
+			t.Errorf("@font-face for %s does not declare `font-display: swap`, so it blocks the "+
+				"first paint and is spending the wrong budget", src[1])
+		}
+		declared[strings.TrimPrefix(src[1], "/static/vendor/")] = true
+	}
+
+	manifest := readVendorManifest(t)
+	vendored := map[string]bool{}
+	for _, entry := range manifest.Files {
+		if !strings.HasPrefix(entry.Path, fontsPrefix) {
+			continue
+		}
+		vendored[entry.Path] = true
+		if !declared[entry.Path] {
+			t.Errorf("%s is vendored and no @font-face in styles.css declares it: a font nothing "+
+				"points at is bytes in a public repository for nobody", entry.Path)
+		}
+	}
+	for path := range declared {
+		if !vendored[path] {
+			t.Errorf("styles.css declares a face at %s, which the manifest does not vendor: a "+
+				"@font-face this repository does not ship is a 404 or a third-party origin", path)
+		}
+	}
+	if len(vendored) == 0 {
+		t.Fatal("no vendored font at all, so this guard holds nothing")
 	}
 }
 

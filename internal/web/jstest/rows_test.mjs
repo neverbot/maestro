@@ -56,8 +56,49 @@ function header(sorted) {
   return { row, buttons, asked };
 }
 
+// --- A declared field's own heading -----------------------------------
+//
+// The catalogue's field columns are orderable too: the server orders by
+// the stored jsonb value, so a number sorts as a number. A cell heading
+// that names an order is a control; one that names none stays a label,
+// which is what every other listing in the product passes.
+function fieldHeader(sorted) {
+  const asked = [];
+  const row = headerRow(doc, {
+    label: "Quest",
+    key: "key",
+    cells: [{ text: "Level", numeric: true, order: "field:level" }, { text: "Reward" }],
+    sort: { label: "name", key: "key" },
+    sorted,
+    onSort: (next) => asked.push(next),
+  });
+  const buttons = [];
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (child.tagName === "button") buttons.push(child);
+      walk(child);
+    }
+  };
+  walk(row);
+  return { row, buttons, asked };
+}
+
+const withField = fieldHeader("name");
+check("a field column with an order carries a button and one without does not",
+  withField.buttons.map((b) => b.textContent), ["Quest \u2191", "key", "Level"]);
+
+withField.buttons[2].click();
+check("pressing a field column asks for that field", withField.asked, ["field:level"]);
+
+const byField = fieldHeader("field:level");
+check("the field column says it is the sorted one",
+  [byField.buttons[0].textContent, byField.buttons[2].textContent],
+  ["Quest", "Level \u2191"]);
+byField.buttons[2].click();
+check("pressing it again reverses it", byField.asked, ["-field:level"]);
+
 const fresh = header("name");
-check("the two orderable columns carry a button and the field column does not",
+check("a header whose field columns name no order carries two buttons",
   fresh.buttons.length, 2);
 
 check("the sorted column says which way it is sorted, in words and with a mark",

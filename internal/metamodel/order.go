@@ -2,6 +2,7 @@ package metamodel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -21,15 +22,23 @@ import (
 // otherwise be — an `order` and a `direction` that can disagree, and a
 // cursor that then has to carry both.
 //
-// **There is no order by a declared field here, and that absence is the
-// open half of this feature.** A catalogue column holding `level` sorts
-// numerically only if the ordering knows the field's declared type, and
-// jsonb ordering by a typed field is a query per type, not a fourth
-// constant. What ships here is the three columns every entity has.
+// The three columns every entity has, plus a fourth form: `field:<key>`
+// orders by one declared field, and `-field:<key>` reverses it.
+//
+// **A field order is offered only inside one entity type**, and asking
+// for one without a type filter is refused rather than answered. A field
+// belongs to a type's schema: across a game, `level` is several
+// different fields that happen to share a name, and ordering a mixed
+// listing by one of them would be a sentence with no meaning. It also
+// has no index and cannot have one — see the SQL — so keeping it inside
+// a type is what keeps its cost bounded by the type rather than by the
+// game.
 const (
 	OrderByName    = "name"
 	OrderByKey     = "key"
 	OrderByUpdated = "updated"
+	// OrderByFieldPrefix leads a field order: "field:level".
+	OrderByFieldPrefix = "field:"
 )
 
 // entityOrders is the parse table and the error message's own source, so
@@ -37,21 +46,32 @@ const (
 // cannot drift apart.
 var entityOrders = []string{OrderByName, OrderByKey, OrderByUpdated}
 
-// entityOrder is a parsed order: which column, and which way.
+// entityOrder is a parsed order: which column, which way, and — for a
+// field order — which field.
 type entityOrder struct {
 	By         string
+	Field      string
 	Descending bool
 }
+
+// byField reports whether this is an order by a declared field, which is
+// the one shape that needs a type, a schema check and a statement of its
+// own.
+func (o entityOrder) byField() bool { return o.Field != "" }
 
 // String is the canonical spelling, which is what the cursor's
 // fingerprint is taken over. It is derived rather than the caller's own
 // text so that a listing and the cursor it issued agree on the order
 // even if a caller re-spells it.
 func (o entityOrder) String() string {
-	if o.Descending {
-		return "-" + o.By
+	spelling := o.By
+	if o.byField() {
+		spelling = OrderByFieldPrefix + o.Field
 	}
-	return o.By
+	if o.Descending {
+		return "-" + spelling
+	}
+	return spelling
 }
 
 // parseEntityOrder reads the caller's spelling.
@@ -66,6 +86,18 @@ func parseEntityOrder(spelling string) (entityOrder, error) {
 		return entityOrder{By: OrderByName}, nil
 	}
 	order := entityOrder{By: strings.TrimPrefix(spelling, "-"), Descending: strings.HasPrefix(spelling, "-")}
+	if after, found := strings.CutPrefix(order.By, OrderByFieldPrefix); found {
+		// The field key is bounded here, by the same rule a key is
+		// checked against before it is ever a row: it reaches SQL as a
+		// jsonb path and an invalid UTF-8 byte in it would surface as
+		// SQLSTATE 22021 over a value the caller supplied.
+		if problems := rowKeyProblems("order", after); len(problems) > 0 {
+			return entityOrder{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
+		}
+		order.By = OrderByFieldPrefix
+		order.Field = after
+		return order, nil
+	}
 	for _, known := range entityOrders {
 		if order.By == known {
 			return order, nil
@@ -73,9 +105,11 @@ func parseEntityOrder(spelling string) (entityOrder, error) {
 	}
 	return entityOrder{}, &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
 		Path: "order",
-		Message: fmt.Sprintf("must be one of %s, each optionally with a leading %q for the "+
-			"reverse (%q), or omitted for %s",
-			strings.Join(quoted(entityOrders), ", "), "-", "-"+OrderByUpdated, OrderByName),
+		Message: fmt.Sprintf("must be one of %s, or %q naming a field declared by the type "+
+			"this listing is filtered to; each optionally with a leading %q for the reverse "+
+			"(%q), or omitted for %s",
+			strings.Join(quoted(entityOrders), ", "), OrderByFieldPrefix+"<key>", "-",
+			"-"+OrderByUpdated, OrderByName),
 	}}}
 }
 
@@ -92,6 +126,13 @@ func quoted(values []string) []string {
 // the same column, because a keyset whose position comes from one column
 // and whose comparison is made on another pages nowhere.
 func (o entityOrder) sortValue(row dbq.Entity) string {
+	if o.byField() {
+		// The jsonb value as it is stored, or the empty string for a row
+		// that has no such field — which is the signal the two keyset
+		// arms in the SQL are chosen by. No jsonb value serialises to an
+		// empty string, so absent and present cannot be confused.
+		return fieldValueText(row.Fields, o.Field)
+	}
 	switch o.By {
 	case OrderByKey:
 		return row.Key
@@ -119,6 +160,21 @@ func (o entityOrder) sortValue(row dbq.Entity) string {
 // every caller that never asks for an order gets.
 func (s *Service) listEntitiesPage(ctx context.Context, o entityOrder, base listingParams, after cursor) ([]dbq.Entity, error) {
 	switch {
+	case o.byField():
+		params := dbq.ListEntitiesPageByFieldParams{
+			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
+			Prefix: base.Prefix, Field: o.Field, Limit: base.Limit,
+		}
+		if after.ID != uuid.Nil {
+			params.AfterID = &after.ID
+			if after.Sort != "" {
+				params.AfterValue = []byte(after.Sort)
+			}
+		}
+		if !o.Descending {
+			return s.q.ListEntitiesPageByField(ctx, params)
+		}
+		return s.q.ListEntitiesPageByFieldDesc(ctx, dbq.ListEntitiesPageByFieldDescParams(params))
 	case o.By == OrderByKey && !o.Descending:
 		params := dbq.ListEntitiesPageByKeyParams{
 			ProjectID: base.ProjectID, EntityTypeID: base.EntityTypeID, Invalid: base.Invalid,
@@ -216,4 +272,23 @@ func sortTime(after cursor) (pgtype.Timestamptz, error) {
 		return pgtype.Timestamptz{}, malformedCursor("it carries no time")
 	}
 	return pgtype.Timestamptz{Time: at, Valid: true}, nil
+}
+
+// fieldValueText is the stored jsonb of one field, as text, or "" when
+// the row does not carry that field at all.
+//
+// It reads the row's own bytes rather than decoding into a map and
+// re-encoding: what the cursor must carry is the value Postgres will
+// compare against, and a round trip through Go's JSON would renormalise
+// a number and put the position beside the row rather than on it.
+func fieldValueText(raw []byte, key string) string {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return ""
+	}
+	value, ok := fields[key]
+	if !ok {
+		return ""
+	}
+	return string(value)
 }

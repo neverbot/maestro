@@ -293,6 +293,7 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	// TestATypeKeyFilterIsBoundedBeforePostgresSeesIt pins it.
 	var typeID *uuid.UUID
 	typePart := ""
+	var typeSchema []byte
 	if f.TypeKey != "" {
 		if problems := rowKeyProblems("type_key", f.TypeKey); len(problems) > 0 {
 			return EntityPage{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
@@ -303,11 +304,23 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 		}
 		typeID = &typ.ID
 		typePart = typ.ID.String()
+		typeSchema = typ.FieldSchema
 	}
 
 	order, err := parseEntityOrder(f.Order)
 	if err != nil {
 		return EntityPage{}, err
+	}
+	// **A field order is checked against the schema, not answered from
+	// the rows.** An undeclared key is present in no row, so the listing
+	// would come back in id order with every row's position absent —
+	// sorted, plausible, and about nothing. The same rule the rest of
+	// this package follows for a mistyped type key: a caller who wrote
+	// `levl` hears about `levl`.
+	if order.byField() {
+		if err := checkFieldOrder(order.Field, f.TypeKey, typeSchema); err != nil {
+			return EntityPage{}, err
+		}
 	}
 
 	if f.RelatedTo != nil {
@@ -481,6 +494,32 @@ const (
 	// re-read intact but is not findable; see Search.
 	MaxIndexedText = searchTextLimit
 )
+
+// checkFieldOrder refuses the two ways an order by a declared field can
+// be asked for and not answerable: without a type to declare it, and
+// naming a field that type does not have.
+func checkFieldOrder(field, typeKey string, schema []byte) error {
+	if typeKey == "" {
+		return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
+			Path: "order",
+			Message: "ordering by a field needs a type_key: a field belongs to one type's schema, " +
+				"and the same name in two types is two different fields",
+		}}}
+	}
+	parsed, err := ParseSchema(schema)
+	if err != nil {
+		return fmt.Errorf("read the type's schema: %w", err)
+	}
+	for _, declared := range parsed {
+		if declared.Key == field {
+			return nil
+		}
+	}
+	return &ValidationError{Code: codeInvalidInput, Fields: []FieldError{{
+		Path:    "order",
+		Message: fmt.Sprintf("type %q declares no field %q", typeKey, field),
+	}}}
+}
 
 // listingError keeps a refusal a refusal. The order dispatch reads a
 // recency cursor's position back before the statement runs, so the one

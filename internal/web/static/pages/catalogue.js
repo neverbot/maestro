@@ -189,12 +189,14 @@ export async function cataloguePage(opened) {
       headerRow(doc, {
         label: type.result.label || type.result.key,
         key: "key",
-        cells: columns.map((field) => ({ text: field.label || field.key, numeric: field.type === "number" })),
-        // The two columns the server has an order for. A declared field
-        // is not among them yet — ordering by one means ordering inside
-        // jsonb by the field's declared type, which is a statement per
-        // type and not a fourth constant — so those headings stay plain
-        // rather than offering a control the listing would refuse.
+        cells: columns.map((field) => ({
+          text: field.label || field.key,
+          numeric: field.type === "number",
+          // Every declared column is orderable: the server orders by the
+          // stored jsonb value, so a number sorts as a number and a row
+          // with no value for that field sorts last either way.
+          order: "field:" + field.key,
+        })),
         sort: { label: "name", key: "key" },
         sorted: order,
         onSort: (next) => {

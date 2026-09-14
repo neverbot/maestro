@@ -978,6 +978,77 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 ORDER BY updated_at DESC, id DESC
 LIMIT sqlc.arg('limit')::int;
 
+-- name: ListEntitiesPageByField :many
+-- One page of a game's entities ordered by **one declared field**.
+--
+-- **It orders by `fields -> key`, the jsonb value, and not by a cast of
+-- `fields ->> key`.** Three things follow from that, and each one was a
+-- reason to choose it:
+--
+--   - A number sorts numerically. jsonb's own comparison orders numbers
+--     as numbers, so `level` 9 comes before 10 without this statement
+--     knowing that `level` was declared a number — the declared type
+--     stays a question for the schema and the column's alignment, not
+--     for the SQL.
+--   - **It cannot throw.** `(fields ->> 'level')::numeric` raises 22P02
+--     on a row whose value is not a number, and rows like that exist by
+--     construction: a schema edit flags them invalid and leaves them in
+--     the table. A cast would turn a listing of a type with one bad row
+--     into an internal_error.
+--   - Mixed values order by jsonb's type order (object, array, boolean,
+--     number, string, null) rather than arbitrarily. That is a rule a
+--     reader can be told; "whatever Postgres did" is not.
+--
+-- **A row that has no such field sorts last in both directions**, which
+-- is why the keyset has two arms rather than one. Absent is not a value
+-- and has no place among the values; putting it at the end of both
+-- orders is the only arrangement in which "the rows after this position"
+-- means the same thing going each way. The cursor carries the empty
+-- string for a row whose value was absent — no jsonb value serialises to
+-- an empty string, so the two cannot be confused — and that is the arm
+-- the CASE selects.
+--
+-- **There is no index for this and there will not be one**, because the
+-- field is a parameter: an expression index exists per field, and a game
+-- declares its own. So this order reads the type's rows and sorts them,
+-- once per page. It is bounded by the type rather than by the game, and
+-- it is the reason a field order is offered only with a type filter.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR CASE WHEN sqlc.narg('after_value')::jsonb IS NULL
+               THEN fields -> sqlc.arg('field')::text IS NULL AND id > sqlc.narg('after_id')::uuid
+               ELSE fields -> sqlc.arg('field')::text IS NULL
+                    OR (fields -> sqlc.arg('field')::text, id)
+                       > (sqlc.narg('after_value')::jsonb, sqlc.narg('after_id')::uuid)
+          END)
+ORDER BY fields -> sqlc.arg('field')::text ASC NULLS LAST, id ASC
+LIMIT sqlc.arg('limit')::int;
+
+-- name: ListEntitiesPageByFieldDesc :many
+-- The reverse of ListEntitiesPageByField; see it for the whole
+-- argument. Absent still sorts last: reversing the order of the
+-- values does not make "no answer" the biggest answer.
+SELECT * FROM entities
+WHERE project_id = sqlc.arg('project_id')::uuid
+  AND (sqlc.narg('entity_type_id')::uuid IS NULL OR entity_type_id = sqlc.narg('entity_type_id')::uuid)
+  AND (sqlc.narg('invalid')::boolean IS NULL OR invalid = sqlc.narg('invalid')::boolean)
+  AND (sqlc.narg('prefix')::text IS NULL
+       OR starts_with(lower(name), lower(sqlc.narg('prefix')::text)))
+  AND (sqlc.narg('after_id')::uuid IS NULL
+       OR CASE WHEN sqlc.narg('after_value')::jsonb IS NULL
+               THEN fields -> sqlc.arg('field')::text IS NULL AND id < sqlc.narg('after_id')::uuid
+               ELSE fields -> sqlc.arg('field')::text IS NULL
+                    OR (fields -> sqlc.arg('field')::text, id)
+                       < (sqlc.narg('after_value')::jsonb, sqlc.narg('after_id')::uuid)
+          END)
+ORDER BY fields -> sqlc.arg('field')::text DESC NULLS LAST, id DESC
+LIMIT sqlc.arg('limit')::int;
+
 -- name: ListEntitiesRelatedTo :many
 -- One page of the entities one hop from an anchor, along one relation
 -- type, in one direction.

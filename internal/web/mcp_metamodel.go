@@ -287,11 +287,13 @@ type EntitiesListInput struct {
 	// listing is ordered by name, so a prefix is a contiguous stretch of
 	// that order.
 	Prefix string `json:"prefix,omitempty"`
-	// Order is which way the page is read: "name" (the default), "key"
-	// or "updated", each with a leading "-" for the reverse, so
-	// "-updated" is what changed most recently. An unrecognised order is
-	// invalid_input at path `order` naming every spelling there is,
-	// rather than a listing quietly ordered by name.
+	// Order is which way the page is read: "name" (the default), "key",
+	// "updated", or "field:<key>" for a field the type declares, each
+	// with a leading "-" for the reverse — so "-updated" is what changed
+	// most recently. An unrecognised order is invalid_input at path
+	// `order` naming every spelling there is, rather than a listing
+	// quietly ordered by name; a field order needs type_key, and a field
+	// the type does not declare is refused by name.
 	//
 	// It is part of what a cursor belongs to: a position in one order
 	// means nothing in another, and a cursor carried across is refused.
@@ -2023,10 +2025,13 @@ func (s *Server) addMetamodelTools(srv *mcp.Server, deps MCPDeps) {
 				"stretch of the listing's own default order, which is by name, so it pages "+
 				"exactly like an unfiltered listing does. order reads the page another way: "+
 				"\"name\" (the default), \"key\" or \"updated\", each with a leading \"-\" for the "+
-				"reverse, so \"-updated\" is what changed most recently and \"-name\" is Z to A. "+
-				"An unrecognised order is refused at path `order` rather than silently "+
-				"ignored, and an order cannot be combined with related_to, which is read in "+
-				"name order. Pass the previous answer's "+
+				"reverse, so \"-updated\" is what changed most recently and \"-name\" is Z to A; "+
+				"or \"field:<key>\" to order by a field the type declares, which needs type_key "+
+				"and sorts a number as a number and a row that has no value for that field "+
+				"last in both directions. "+
+				"An unrecognised order, or a field the type does not declare, is refused at "+
+				"path `order` rather than silently ignored, and an order cannot be combined "+
+				"with related_to, which is read in name order. Pass the previous answer's "+
 				"next_cursor to get the next page; a cursor belongs to the game and the "+
 				"filter and order it was issued for and is refused against any other. limit defaults "+
 				"to %d and is capped at %d — asking for more gets the cap, and asking for "+

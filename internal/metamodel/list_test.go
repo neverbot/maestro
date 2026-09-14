@@ -1748,3 +1748,204 @@ func TestTheRecencyOrderPagesThroughRowsWrittenTogether(t *testing.T) {
 		t.Fatalf("walked %d rows, want 10: %v", len(seen), seen)
 	}
 }
+
+// --- Order by a declared field ----------------------------------------
+//
+// The half of the catalogue's complaint that needed the schema: a column
+// holding `level` sorted as text puts 10 before 9, which is a wrong
+// answer that looks like a right one. The SQL orders by `fields -> key`
+// — jsonb's own comparison — so a number sorts as a number without the
+// statement being told which fields are numbers.
+
+func TestAFieldOrderSortsNumbersAsNumbers(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	// 9 and 10 are the whole point: as text, "10" < "9".
+	seedQuests(t, svc, project, 12)
+
+	page, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Order: "field:min_level", Limit: 20})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	got := keysOf(page)
+	if len(got) != 12 {
+		t.Fatalf("got %d rows, want 12", len(got))
+	}
+	// seedQuests writes min_level = index + 1, so the field order and
+	// the key order agree — which is what makes this an assertion about
+	// numbers rather than about text: sorted as text, quest-08 (9) would
+	// land last, after quest-11 (12).
+	want := make([]string, 0, 12)
+	for i := range 12 {
+		want = append(want, fmt.Sprintf("quest-%02d", i))
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("field order ran %v, want %v", got, want)
+	}
+
+	reversed, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Order: "-field:min_level", Limit: 20})
+	if err != nil {
+		t.Fatalf("list reversed: %v", err)
+	}
+	back := keysOf(reversed)
+	for i, key := range got {
+		if back[len(back)-1-i] != key {
+			t.Fatalf("-field:min_level %v is not the reverse of field:min_level %v", back, got)
+		}
+	}
+}
+
+// **A row without the field sorts last in both directions, and pages.**
+// Absent is not a value and has no place among the values; the keyset
+// has a second arm for exactly those rows, and a listing that walked the
+// values and then stopped would lose every row that has no answer.
+func TestARowWithNoValueForTheFieldIsStillPagedThrough(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	// Six rows carrying `summary` and four not. `summary` is optional in
+	// the seeded schema, so a row without one is an ordinary row rather
+	// than a broken one — which is the case this test is about: absent
+	// is a legitimate state of a declared field, not a defect.
+	for i := range 6 {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest",
+			Key:     fmt.Sprintf("told-%02d", i),
+			Name:    fmt.Sprintf("Told %02d", i),
+			Fields:  map[string]any{"min_level": float64(i + 1), "summary": fmt.Sprintf("s%02d", i)},
+		}); err != nil {
+			t.Fatalf("seed told %d: %v", i, err)
+		}
+	}
+	for i := range 4 {
+		if _, err := svc.UpsertEntity(ctx, project, metamodel.EntityInput{
+			TypeKey: "quest",
+			Key:     fmt.Sprintf("silent-%02d", i),
+			Name:    fmt.Sprintf("Silent %02d", i),
+			Fields:  map[string]any{"min_level": float64(i + 1)},
+		}); err != nil {
+			t.Fatalf("seed silent %d: %v", i, err)
+		}
+	}
+
+	for _, order := range []string{"field:summary", "-field:summary"} {
+		var seen []string
+		filter := metamodel.EntityFilter{TypeKey: "quest", Order: order, Limit: 3}
+		for page := 1; ; page++ {
+			if page > 10 {
+				t.Fatalf("order %q: paging did not end", order)
+			}
+			got, err := svc.ListEntities(ctx, project, filter)
+			if err != nil {
+				t.Fatalf("order %q page %d: %v", order, page, err)
+			}
+			seen = append(seen, keysOf(got)...)
+			if got.NextCursor == "" {
+				break
+			}
+			filter.Cursor = got.NextCursor
+		}
+		if len(seen) != 10 {
+			t.Errorf("order %q walked %d rows, want 10: %v", order, len(seen), seen)
+		}
+		unique := map[string]bool{}
+		for _, key := range seen {
+			if unique[key] {
+				t.Errorf("order %q returned %s twice", order, key)
+			}
+			unique[key] = true
+		}
+		// Last in both directions, not first in one of them.
+		for _, key := range seen[len(seen)-4:] {
+			if !strings.HasPrefix(key, "silent-") {
+				t.Errorf("order %q put a row with a value last: %v", order, seen)
+				break
+			}
+		}
+	}
+}
+
+// A field nobody declared is present in no row, so a listing ordered by
+// one would come back in id order with every position absent: sorted,
+// plausible, and about nothing. It is refused, naming the field, the way
+// a mistyped type key is.
+func TestAnOrderByAnUndeclaredFieldIsRefused(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 2)
+
+	_, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Order: "field:levl", Limit: 10})
+	var invalid *metamodel.ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("got %v, want a validation error", err)
+	}
+	if len(invalid.Fields) != 1 || invalid.Fields[0].Path != "order" {
+		t.Fatalf("refused at %+v, want one problem at path order", invalid.Fields)
+	}
+	if !strings.Contains(invalid.Fields[0].Message, "levl") {
+		t.Errorf("the refusal does not name the field: %s", invalid.Fields[0].Message)
+	}
+
+	// And without a type there is no schema to check it against: the
+	// same name in two types is two different fields.
+	_, err = svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{Order: "field:min_level", Limit: 10})
+	if !errors.As(err, &invalid) {
+		t.Fatalf("got %v, want a validation error", err)
+	}
+	if invalid.Fields[0].Path != "order" || !strings.Contains(invalid.Fields[0].Message, "type_key") {
+		t.Fatalf("refused with %+v, want it to ask for a type_key", invalid.Fields)
+	}
+}
+
+// A cursor from a field order belongs to that field, not to "a field
+// order": two fields are two listings, and a position in one of them
+// means nothing in the other.
+func TestACursorBelongsToTheFieldItWasIssuedFor(t *testing.T) {
+	pool := testutil.NewPool(t)
+	svc := metamodel.New(pool, nil)
+	ctx := context.Background()
+	project := newProject(t, pool)
+	seedQuestType(t, svc, project)
+	seedQuests(t, svc, project, 6)
+
+	first, err := svc.ListEntities(ctx, project,
+		metamodel.EntityFilter{TypeKey: "quest", Order: "field:min_level", Limit: 3})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if first.NextCursor == "" {
+		t.Fatal("a full page issued no cursor")
+	}
+	if _, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		TypeKey: "quest", Order: "-field:min_level", Limit: 3, Cursor: first.NextCursor,
+	}); err == nil {
+		t.Error("a cursor from the ascending field order paged the descending one")
+	}
+	if _, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		TypeKey: "quest", Order: "name", Limit: 3, Cursor: first.NextCursor,
+	}); err == nil {
+		t.Error("a cursor from a field order paged the name order")
+	}
+	// **Two fields are two listings**, and this is the arm the direction
+	// and the column cannot cover: same shape, same direction, a
+	// different field. A fingerprint that recorded only "a field order"
+	// would accept this and page the summary listing from a position in
+	// the level one.
+	if _, err := svc.ListEntities(ctx, project, metamodel.EntityFilter{
+		TypeKey: "quest", Order: "field:summary", Limit: 3, Cursor: first.NextCursor,
+	}); err == nil {
+		t.Error("a cursor from the min_level order paged the summary one")
+	}
+}

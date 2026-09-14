@@ -142,7 +142,12 @@ export function headerRow(doc, spec) {
     const head = doc.createElement("span");
     head.className = "catalogue-cell";
     if (heads[i] && heads[i].numeric) head.classList.add("numeric");
-    head.textContent = heads[i] ? heads[i].text ?? heads[i] : "";
+    // A cell heading naming an order is a control like the two named
+    // ones; a cell that names none stays a label. Which columns can be
+    // ordered is the caller's knowledge, not this module's.
+    const text = heads[i] ? heads[i].text ?? heads[i] : "";
+    const order = heads[i] && typeof heads[i] === "object" ? heads[i].order : "";
+    head.append(headContent(doc, text, order, spec));
     item.append(head);
   }
   // The count track, empty. It exists so the header spans the same six
@@ -166,9 +171,17 @@ export const SORT_MARKS = { asc: "\u2191", desc: "\u2193" };
 function headCell(doc, text, className, order, spec) {
   const cell = doc.createElement("span");
   if (className !== "") cell.className = className;
+  cell.append(headContent(doc, text, order, spec));
+  return cell;
+}
+
+// headContent is the heading itself: a text node's worth of words, or
+// the button that reorders the listing by this column.
+function headContent(doc, text, order, spec) {
   if (!order) {
-    cell.textContent = text;
-    return cell;
+    const plain = doc.createElement("span");
+    plain.textContent = text;
+    return plain;
   }
   const sorted = typeof spec.sorted === "string" ? spec.sorted : "";
   const active = sorted === order || sorted === "-" + order;
@@ -192,6 +205,5 @@ function headCell(doc, text, className, order, spec) {
   button.addEventListener("click", () => {
     if (typeof spec.onSort === "function") spec.onSort(next);
   });
-  cell.append(button);
-  return cell;
+  return button;
 }

@@ -24,10 +24,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"html"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -71,6 +73,123 @@ type page struct {
 	Title string
 	// Body is the rendered HTML of the page's own content.
 	Body string
+	// Blurb is the page's own first sentence, quoted rather than
+	// written: the index of the bundle is a list of names without it,
+	// and a list of names does not say which page to open.
+	Blurb string
+	// Wide drops the reading measure for a page whose content is not
+	// prose. Exactly one page is: the design system is a specimen sheet,
+	// and a colour grid squeezed into a paragraph's width is a specimen
+	// of nothing. It keeps the header, the sheet and the rail.
+	Wide bool
+	// Stylesheets are the extra sheets this page needs, relative to the
+	// site root. Only the design system has one: it is a specimen sheet
+	// and its own rules are its content.
+	Stylesheets []string
+	// Sections are the page's own h2 headings, in order, for the rail.
+	// A page whose headings a reader cannot see from the top is a page
+	// they have to scroll to survey, which is what 58 tools under 11
+	// headings with no index was.
+	Sections []section
+}
+
+// section is one h2 of a page: the text a reader sees and the id an
+// anchor lands on.
+type section struct {
+	ID   string
+	Text string
+}
+
+// headingRE is an h2 of a rendered page. The generator owns both ends of
+// this: goldmark writes the tag and this reads it back, so a heading
+// with inline markup in it (a <code> span, an emphasis) is matched and
+// its text is taken with the tags stripped.
+var headingRE = regexp.MustCompile(`<h2>(.*?)</h2>`)
+
+// tagRE strips inline markup out of a heading before it becomes an id.
+var tagRE = regexp.MustCompile(`<[^>]+>`)
+
+// nonWord is every run of characters that is not a word in a slug.
+var nonWord = regexp.MustCompile(`[^a-z0-9]+`)
+
+// anchor gives every h2 an id and returns the list, so the rail can
+// carry the page's own contents and a reader can link a section.
+func anchor(body string) (string, []section) {
+	var out []section
+	taken := map[string]bool{}
+	rendered := headingRE.ReplaceAllStringFunc(body, func(match string) string {
+		inner := headingRE.FindStringSubmatch(match)[1]
+		text := strings.TrimSpace(html.UnescapeString(tagRE.ReplaceAllString(inner, "")))
+		id := strings.Trim(nonWord.ReplaceAllString(strings.ToLower(text), "-"), "-")
+		if id == "" {
+			return match
+		}
+		// Two sections with one name would give two elements one id, and
+		// an anchor that lands on whichever the browser saw first.
+		for n := 2; taken[id]; n++ {
+			id = fmt.Sprintf("%s-%d", strings.Trim(nonWord.ReplaceAllString(strings.ToLower(text), "-"), "-"), n)
+		}
+		taken[id] = true
+		out = append(out, section{ID: id, Text: text})
+		return `<h2 id="` + id + `">` + inner + `</h2>`
+	})
+	return rendered, out
+}
+
+// withoutFrontmatter drops a bundle page's YAML header.
+//
+// **It was being published as a heading.** `skill.md` opens with
+// `---\nname: maestro\ndescription: ...\n---`, and markdown reads a line
+// of dashes under text as a setext heading: the skill page's first
+// section heading, on the published site, was the words "name: maestro"
+// followed by the whole description as a paragraph. The frontmatter is
+// for the agent's client, which reads it off the file; a person reading
+// the page is being shown the envelope.
+func withoutFrontmatter(body string) string {
+	if !strings.HasPrefix(body, "---\n") {
+		return body
+	}
+	rest := body[len("---\n"):]
+	end := strings.Index(rest, "\n---\n")
+	if end < 0 {
+		return body
+	}
+	return strings.TrimLeft(rest[end+len("\n---\n"):], "\n")
+}
+
+// blurbOf is a page's own first sentence, taken from its markdown: the
+// frontmatter, the generator's comment line and the h1 are skipped, and
+// what is left is the first paragraph, cut at its first full stop.
+//
+// **It is quoted and not written.** A description of a page written
+// beside the page is the second description this whole generator exists
+// to refuse; the page's own opening sentence is the page saying what it
+// is.
+func blurbOf(body string) string {
+	lines := strings.Split(body, "\n")
+	i := 0
+	if i < len(lines) && strings.TrimSpace(lines[i]) == "---" {
+		for i++; i < len(lines) && strings.TrimSpace(lines[i]) != "---"; i++ {
+		}
+		i++
+	}
+	var paragraph []string
+	for ; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "<!--") {
+			if len(paragraph) > 0 {
+				break
+			}
+			continue
+		}
+		paragraph = append(paragraph, line)
+	}
+	text := strings.ReplaceAll(strings.Join(paragraph, " "), "**", "")
+	text = strings.ReplaceAll(text, "`", "")
+	if cut := strings.Index(text, ". "); cut >= 0 {
+		text = text[:cut+1]
+	}
+	return text
 }
 
 // fontFiles are the faces the site sets its two voices in: the same
@@ -126,19 +245,12 @@ func build(root, out string) error {
 		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			return fmt.Errorf("make %s: %w", filepath.Dir(full), err)
 		}
-		if err := os.WriteFile(full, []byte(shell(p, depthOf(p.Path))), 0o600); err != nil {
+		if err := os.WriteFile(full, []byte(shell(p, depthOf(p.Path), pages)), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", full, err)
 		}
 	}
-	// The design system is already a generated page and is copied whole:
-	// rendering it again from its own sources here would be a second
-	// generator for one artefact.
-	//nolint:gosec // A developer's own -root and -o flags: this command reads this repository and writes a directory the person running it named, and there is no untrusted input anywhere in it.
-	if body, err := os.ReadFile(filepath.Join(root, "docs", "design-system.html")); err == nil {
-		//nolint:gosec // The output directory is the caller's own -o flag.
-		if err := os.WriteFile(filepath.Join(out, "design-system.html"), body, 0o600); err != nil {
-			return fmt.Errorf("copy the design system: %w", err)
-		}
+	if err := copyFile(filepath.Join(root, "docs", "design-system.css"), filepath.Join(out, "design-system.css")); err != nil {
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(out, "style.css"), []byte(siteCSS), 0o600); err != nil {
 		return fmt.Errorf("write the stylesheet: %w", err)
@@ -170,7 +282,8 @@ func collect(root string) ([]page, error) {
 	if err != nil {
 		return nil, err
 	}
-	pages = append(pages, page{Path: "index.html", Title: "", Body: home + agentsIndex()})
+	home, homeSections := anchor(scrollers(stripRemoteImages(home)) + agentsPointer())
+	pages = append(pages, page{Path: "index.html", Title: "", Body: home, Sections: homeSections})
 
 	// The licence, because the readme links to it and a link that
 	// downloads a file instead of opening a page is a broken link with
@@ -189,14 +302,78 @@ func collect(root string) ([]page, error) {
 	if err != nil {
 		return nil, err
 	}
-	pages = append(pages, page{Path: "license.html", Title: "License", Body: termsBody})
+	termsBody, termsSections := anchor(scrollers(termsBody))
+	pages = append(pages, page{Path: "license.html", Title: "License", Body: termsBody, Sections: termsSections})
+
+	system, err := designSystemPage(root)
+	if err != nil {
+		return nil, err
+	}
+	pages = append(pages, system)
 
 	bundle, err := bundlePages()
 	if err != nil {
 		return nil, err
 	}
+	pages = append(pages, agentsIndexPage(bundle))
 	pages = append(pages, bundle...)
+	pages = append(pages, notFoundPage())
 	return pages, nil
+}
+
+// The two markers docs/design-system.mjs writes around the part of its
+// page that is content rather than chrome. They are a contract between
+// the two generators and a build that cannot find them fails: the design
+// system was copied whole once, which is how the site came to have one
+// page with its own header, its own wordmark, twice everything else's
+// width and no link back to anywhere.
+const (
+	systemBodyStart = "<!-- site:body -->"
+	systemBodyEnd   = "<!-- /site:body -->"
+)
+
+// designSystemPage is the generated design system, as one more page of
+// this site. Its body is its own — it is a specimen sheet and it should
+// look like one — and its frame is the site's, stated once in shell.
+func designSystemPage(root string) (page, error) {
+	//nolint:gosec // -root is the caller's own flag; this reads this repository.
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "design-system.html"))
+	if err != nil {
+		return page{}, fmt.Errorf("read the generated design system: %w", err)
+	}
+	src := string(raw)
+	from := strings.Index(src, systemBodyStart)
+	to := strings.Index(src, systemBodyEnd)
+	if from < 0 || to < from {
+		return page{}, fmt.Errorf(
+			"docs/design-system.html carries no %s ... %s markers: docs/design-system.mjs writes them "+
+				"and this generator reads between them, so the page can wear the site's own frame "+
+				"instead of being copied whole with a second one",
+			systemBodyStart, systemBodyEnd)
+	}
+	body, sections := anchor(src[from+len(systemBodyStart) : to])
+	return page{
+		Path:        "design-system.html",
+		Title:       "Design system",
+		Wide:        true,
+		Body:        body,
+		Sections:    sections,
+		Stylesheets: []string{"design-system.css"},
+	}, nil
+}
+
+// copyFile puts one generated file beside the pages that ask for it.
+func copyFile(from, to string) error {
+	//nolint:gosec // Both paths are built from the caller's own flags.
+	body, err := os.ReadFile(from)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", from, err)
+	}
+	//nolint:gosec // The output directory is the caller's own -o flag.
+	if err := os.WriteFile(to, body, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", to, err)
+	}
+	return nil
 }
 
 // bundlePages renders the skill bundle: the pages an agent is handed,
@@ -224,38 +401,153 @@ func bundlePages() ([]page, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", name, err)
 		}
-		rendered, err := markdown.RenderDoc(rewriteLinks(string(body)))
+		rendered, err := markdown.RenderDoc(rewriteLinks(withoutFrontmatter(string(body))))
 		if err != nil {
 			return nil, err
 		}
+		rendered, sections := anchor(scrollers(stripRemoteImages(rendered)))
 		pages = append(pages, page{
-			Path:  path.Join("agents", strings.TrimSuffix(name, ".md")+".html"),
-			Title: titleOf(string(body), name),
-			Body:  rendered,
+			Path:     path.Join("agents", strings.TrimSuffix(name, ".md")+".html"),
+			Title:    titleOf(string(body), name),
+			Body:     rendered,
+			Blurb:    blurbOf(string(body)),
+			Sections: sections,
 		})
 	}
 	return pages, nil
 }
 
-// agentsIndex is the one piece of navigation the site adds: the bundle's
-// pages, linked from the home page. It is built from what was rendered
-// rather than written out, so a page added to the bundle appears here
-// without anybody remembering to add it.
-func agentsIndex() string {
-	pages, err := bundlePages()
-	if err != nil {
-		return ""
+// --- The bundle, as a destination ------------------------------------
+
+// AGENTS_INDEX is where the header's "For agents" link goes.
+//
+// **It was an anchor, and the anchor was the problem.** The link pointed
+// at `index.html#for-agents`: an h2 at 5,951 pixels down a 6,621-pixel
+// page, so a reader who clicked it landed with the whole navigation
+// scrolled off the top, looking at nineteen bullets sorted by
+// repository path — `agents/genres/...` first and `skill`, the bundle's
+// own entry point, last. A label that promises a destination gets a
+// destination.
+const agentsIndexPath = "agents/index.html"
+
+// groupLabels name the bundle's four directories in the reader's words.
+// The directory is the grouping the bundle already has; this only says
+// it out loud, in the order a person reads them rather than the order
+// the filesystem sorts them.
+var groupOrder = []string{"", "reference", "modelling", "recipes", "genres"}
+
+var groupLabels = map[string]string{
+	"":          "Start here",
+	"reference": "Reference",
+	"modelling": "Modelling",
+	"recipes":   "Recipes",
+	"genres":    "Worked examples",
+}
+
+// groupOf is the directory a bundle page sits in, under agents/. A page
+// that is not in the bundle is in no group, and says so with a value no
+// directory can have: the first version returned "" for both "the
+// bundle's root" and "not the bundle", which put the licence, the design
+// system and the refusal page in the rail's "Start here".
+const notInBundle = "-"
+
+func groupOf(p page) string {
+	if !strings.HasPrefix(p.Path, "agents/") {
+		return notInBundle
 	}
+	rest := strings.TrimPrefix(p.Path, "agents/")
+	if dir := path.Dir(rest); dir != "." {
+		return dir
+	}
+	return ""
+}
+
+// grouped splits the bundle into the four groups, in reading order.
+func grouped(bundle []page) [][]page {
+	out := make([][]page, 0, len(groupOrder))
+	for _, key := range groupOrder {
+		var group []page
+		for _, p := range bundle {
+			if groupOf(p) == key && p.Path != agentsIndexPath {
+				group = append(group, p)
+			}
+		}
+		if len(group) > 0 {
+			out = append(out, group)
+		}
+	}
+	return out
+}
+
+// agentsIndexPage is the page the header's second link opens: every page
+// of the bundle, in its own groups, each with its own first sentence.
+func agentsIndexPage(bundle []page) page {
 	var out strings.Builder
-	out.WriteString("\n<h2 id=\"for-agents\">What an agent is told</h2>\n")
+	out.WriteString("<h1>What an agent is told</h1>\n")
 	out.WriteString("<p>These are the pages this instance serves to an agent, published so a " +
 		"person can read what their agent was handed. They are the bundle itself, not a " +
-		"description of it.</p>\n<ul>\n")
-	for _, p := range pages {
-		out.WriteString("<li><a href=\"" + p.Path + "\">" + escape(p.Title) + "</a></li>\n")
+		"description of it: the same files, rendered.</p>\n")
+	out.WriteString(`<div class="index">` + "\n")
+	for _, group := range grouped(bundle) {
+		out.WriteString("<section>\n<h3>" + escape(groupLabels[groupOf(group[0])]) + "</h3>\n<ul>\n")
+		for _, p := range group {
+			href := strings.TrimPrefix(p.Path, "agents/")
+			out.WriteString(`<li><a href="` + href + `"><b>` + escape(p.Title) + "</b></a>")
+			if p.Blurb != "" {
+				out.WriteString("<span>" + escape(p.Blurb) + "</span>")
+			}
+			out.WriteString("</li>\n")
+		}
+		out.WriteString("</ul>\n</section>\n")
 	}
-	out.WriteString("</ul>\n")
-	return out.String()
+	out.WriteString("</div>\n")
+	return page{Path: agentsIndexPath, Title: "What an agent is told", Body: out.String()}
+}
+
+// agentsPointer is what the home page keeps where the list used to be: a
+// sentence and the way in. The `for-agents` id stays, because the link
+// that pointed at it is in a published readme and in this product's own
+// onboarding, and an id removed is a link broken.
+func agentsPointer() string {
+	return "\n<h2 id=\"for-agents\">What an agent is told</h2>\n" +
+		"<p>This instance serves its agents a skill bundle: how to declare a game's own " +
+		"vocabulary, how to fill it, and a worked example per genre. It is published here, so a " +
+		"person can read what their agent was handed. " +
+		"<a href=\"" + agentsIndexPath + "\">Read the bundle</a>.</p>\n"
+}
+
+// notFoundPage is the third negative state, on the one surface that can
+// reach it. GitHub Pages serves /404.html for a path it does not have,
+// and without this the reader leaves the design entirely at the exact
+// moment they most need a way back.
+func notFoundPage() page {
+	return page{
+		Path:  "404.html",
+		Title: "Nothing here",
+		Body: "<h1>There is nothing at this address</h1>\n" +
+			"<p>This site has no page at the address you asked for. It may have been a typo, or a " +
+			"link to a page that has since been renamed.</p>\n" +
+			"<p><a href=\"index.html\">Back to the readme</a></p>\n",
+	}
+}
+
+// stripRemoteImages removes every image the site would fetch from
+// another origin.
+//
+// The readme carries two shields.io badges, which on this site are the
+// only chromatic pixels above the fold — a saturated blue and an orange
+// that belong to neither of this palette's two chromatic exemptions —
+// and they are GitHub's chrome verbatim, which docs/product.md names as
+// an anti-reference. They are also two requests to a third-party origin
+// from a product whose own CSP forbids exactly that: the design-system
+// page's stylesheet comment records making this mistake once already.
+//
+// They stay in readme.md, where they are read on GitHub and are the
+// right furniture. They do not come here.
+var remoteImageRE = regexp.MustCompile(`<img[^>]+src="https?://[^"]*"[^>]*>`)
+
+func stripRemoteImages(body string) string {
+	return remoteImageRE.ReplaceAllString(body, "")
 }
 
 // titleOf is a page's first heading, or its path when it has none.
@@ -268,11 +560,31 @@ func titleOf(body, fallback string) string {
 	return fallback
 }
 
+// selfNamingLink is a markdown link whose label is the file it points
+// at: `[license.md](license.md)`.
+var selfNamingLink = regexp.MustCompile(`\[([^\]]+)\.md\]\(([^)]+)\.md\)`)
+
 // rewriteLinks points a markdown link at a neighbouring `.md` file at
 // the page this generator wrote for it. A link that still said `.md`
 // would download a file instead of opening a page.
+//
+// **The label is rewritten too when the label *is* the filename.** The
+// home page read "MIT. See license.md." over a link to `license.html`:
+// the href was right and the words named a file this site does not
+// serve. Only a label that is exactly its own target is touched; a
+// sentence that happens to mention a filename is prose and stays as it
+// was written.
 func rewriteLinks(body string) string {
+	body = selfNamingLink.ReplaceAllString(body, "[$1]($2.html)")
 	return strings.ReplaceAll(body, ".md)", ".html)")
+}
+
+// scrollers put every table in its own horizontal scroller, which is the
+// frame's rule for wide content: a table scrolls inside its container
+// and never wraps its rows into two lines.
+func scrollers(body string) string {
+	body = strings.ReplaceAll(body, "<table>", `<div class="scroller"><table>`)
+	return strings.ReplaceAll(body, "</table>", "</table></div>")
 }
 
 // depthOf is how many directories deep a page sits, so its links to the
@@ -283,7 +595,69 @@ func depthOf(p string) int {
 	return strings.Count(p, "/")
 }
 
-func shell(p page, depth int) string {
+// railFor is the navigation beside the content: where this page sits in
+// the site, what else sits beside it, and what is on it.
+//
+// The frame gives the rail 280px, sticky under the header, folding
+// beneath the content below 1100px. What it carries here is what is true
+// of the whole site — its pages — plus this page's own headings, which
+// is the difference between surveying 58 tools and scrubbing 3,848
+// pixels for them.
+func railFor(p page, bundle []page, up string) string {
+	var out strings.Builder
+	out.WriteString(`<nav class="rail" aria-label="Site">` + "\n")
+
+	out.WriteString("<section>\n<h2>Maestro</h2>\n<ul>\n")
+	for _, entry := range []struct{ href, label string }{
+		{"index.html", "Readme"},
+		{agentsIndexPath, "What an agent is told"},
+		{"design-system.html", "Design system"},
+		{"license.html", "License"},
+	} {
+		out.WriteString(railLink(up+entry.href, entry.label, p.Path == entry.href))
+	}
+	out.WriteString("</ul>\n</section>\n")
+
+	// Inside the bundle, the pages beside this one. A reader in the
+	// middle of `reference/queries` wants the rest of the reference, not
+	// the whole bundle.
+	if strings.HasPrefix(p.Path, "agents/") && p.Path != agentsIndexPath {
+		key := groupOf(p)
+		for _, group := range grouped(bundle) {
+			if groupOf(group[0]) != key {
+				continue
+			}
+			out.WriteString("<section>\n<h2>" + escape(groupLabels[key]) + "</h2>\n<ul>\n")
+			for _, sibling := range group {
+				out.WriteString(railLink(up+sibling.Path, sibling.Title, sibling.Path == p.Path))
+			}
+			out.WriteString("</ul>\n</section>\n")
+		}
+	}
+
+	// Two headings are a page's shape already visible from the top; the
+	// list earns its space from three.
+	if len(p.Sections) >= 3 {
+		out.WriteString("<section>\n<h2>On this page</h2>\n<ul>\n")
+		for _, s := range p.Sections {
+			out.WriteString(railLink("#"+s.ID, s.Text, false))
+		}
+		out.WriteString("</ul>\n</section>\n")
+	}
+
+	out.WriteString("</nav>\n")
+	return out.String()
+}
+
+func railLink(href, label string, current bool) string {
+	mark := ""
+	if current {
+		mark = ` aria-current="page"`
+	}
+	return `<li><a href="` + href + `"` + mark + ">" + escape(label) + "</a></li>\n"
+}
+
+func shell(p page, depth int, bundle []page) string {
 	up := strings.Repeat("../", depth)
 	var out strings.Builder
 	out.WriteString("<!doctype html>\n<html lang=\"en\">\n<meta charset=\"utf-8\">\n")
@@ -296,14 +670,34 @@ func shell(p page, depth int) string {
 	}
 	out.WriteString("<title>" + title + "</title>\n")
 	out.WriteString("<link rel=\"stylesheet\" href=\"" + up + "style.css\">\n")
-	out.WriteString("<header><a class=\"brand\" href=\"" + up + "index.html\">Maestro</a>")
-	out.WriteString("<a href=\"" + up + "index.html#for-agents\">For agents</a>")
-	out.WriteString("<a href=\"" + up + "design-system.html\">Design system</a>")
-	out.WriteString("<a href=\"https://github.com/neverbot/maestro\">Source</a></header>\n")
-	out.WriteString("<main>\n")
+	for _, sheet := range p.Stylesheets {
+		out.WriteString("<link rel=\"stylesheet\" href=\"" + up + sheet + "\">\n")
+	}
+	out.WriteString("<a class=\"skip\" href=\"#content\">Skip to the content</a>\n")
+	out.WriteString("<header><div class=\"bar\">")
+	out.WriteString("<a class=\"brand\" href=\"" + up + "index.html\">Maestro</a>")
+	out.WriteString(headerLink(up+agentsIndexPath, "For agents", strings.HasPrefix(p.Path, "agents/")))
+	out.WriteString(headerLink(up+"design-system.html", "Design system", p.Path == "design-system.html"))
+	out.WriteString("<a href=\"https://github.com/neverbot/maestro\">Source</a>")
+	out.WriteString("</div></header>\n")
+	frame := "page"
+	if p.Wide {
+		frame = "page wide"
+	}
+	out.WriteString("<div class=\"" + frame + "\">\n<main id=\"content\">\n")
 	out.WriteString(p.Body)
 	out.WriteString("\n</main>\n")
+	out.WriteString(railFor(p, bundle, up))
+	out.WriteString("</div>\n")
 	return out.String()
+}
+
+func headerLink(href, label string, current bool) string {
+	mark := ""
+	if current {
+		mark = ` aria-current="page"`
+	}
+	return `<a href="` + href + `"` + mark + ">" + escape(label) + "</a>"
 }
 
 func escape(text string) string {

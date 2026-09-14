@@ -36,8 +36,8 @@ import { headerRow, row } from "../rows.js";
 // at once, and so the vocabulary test has one place to look.
 
 export const NOTE_ON_DEMAND =
-  "Each of these walks the game when you ask it to. Nothing below has been checked yet.";
-export const NOTE_CHECKED = "Each of these walks the game when you ask it to.";
+  "The three checks below walk the game when you ask them to. Nothing below has been checked yet.";
+export const NOTE_CHECKED = "The three checks below walk the game when you ask them to.";
 
 export const CYCLES_CLEAN = "Nothing depends on itself.";
 export const CONTAINMENT_CLEAN = "Nothing contains itself.";
@@ -101,24 +101,34 @@ export const REASON_DEPTH = "depth_limited";
 // alone" over one with three outgoing. A verdict that contradicts the
 // control directly above it is worse than no verdict: a reader goes
 // looking for an edge that is already there.
+// verb agrees with the count, which `countLabel` cannot do for the
+// caller: it gets the noun right ("1 entity") and then every one of
+// these sentences went on to say "are". A game with exactly one isolated
+// entity — which is the ordinary case, because a designer fixes them as
+// they appear — read "1 entity are connected to nothing."
+export function verb(n, singular, plural) {
+  return n === 1 ? singular : plural;
+}
+
 export const ORPHAN_MODES = [
   {
     mode: "isolated",
     label: "Connected to nothing",
     clean: "Everything is connected to something.",
-    found: (n) => countLabel(n, "entity", "entities") + " are connected to nothing.",
+    found: (n) => countLabel(n, "entity", "entities") + verb(n, " is", " are") + " connected to nothing.",
   },
   {
     mode: "sink",
     label: "Nothing leads out of it",
     clean: "Everything leads somewhere.",
-    found: (n) => countLabel(n, "entity", "entities") + " lead nowhere.",
+    found: (n) => countLabel(n, "entity", "entities") + verb(n, " leads", " lead") + " nowhere.",
   },
   {
     mode: "source",
     label: "Nothing leads into it",
     clean: "Everything has a way in.",
-    found: (n) => countLabel(n, "entity", "entities") + " have nothing leading to them.",
+    found: (n) => countLabel(n, "entity", "entities")
+      + verb(n, " has nothing leading to it.", " have nothing leading to them."),
   },
 ];
 
@@ -135,6 +145,43 @@ export const UNDECLARED_BODY =
 
 export const RUN_LABEL = "Check";
 export const RUNNING_LABEL = "Checking…";
+
+// routesVerdict is what the Routes section says about a game, in one
+// sentence: how many claims there are, and how many of them are about a
+// game that has since moved.
+//
+// **Stale is the number worth leading with.** A route nobody has checked
+// is a claim nobody has tested; a route that was checked and has gone
+// stale is a claim the game itself has contradicted, and it is the only
+// one of the three states that asks the reader to do something.
+export function routesVerdict(rows) {
+  const routes = Array.isArray(rows) ? rows : [];
+  if (routes.length === 0) return ROUTES_NONE;
+  const stale = routes.filter((route) => route.status === "stale").length;
+  const unchecked = routes.filter((route) => route.status === "unchecked").length;
+  const parts = [countLabel(routes.length, "route", "routes") + verb(routes.length, " is", " are") + " written"];
+  if (stale > 0) parts.push(stale + verb(stale, " is", " are") + " about a game that has since moved");
+  if (unchecked > 0) parts.push(unchecked + verb(unchecked, " has", " have") + " never been checked");
+  return parts.join("; ") + ".";
+}
+
+export const ROUTES_NONE = "No routes are written yet. An agent writes one; nothing on this page does.";
+
+// paintRoutes fills the Routes section from the listing the server
+// already has.
+async function paintRoutes(doc, opened) {
+  const verdictEl = el(doc, "routes-verdict");
+  const errorEl = el(doc, "routes-error");
+  const answer = await opened.client.listRoutes({});
+  if (!answer.ok) {
+    if (errorEl) {
+      errorEl.textContent = answer.error.message;
+      errorEl.hidden = false;
+    }
+    return;
+  }
+  say(verdictEl, routesVerdict(answer.result.items ?? answer.result.routes ?? []));
+}
 
 // --- The page --------------------------------------------------------
 
@@ -203,6 +250,23 @@ export function walkedLine(result) {
   }
   if (parts.length === 0) return "";
   return "This run " + parts.join(", ") + ".";
+}
+
+// perTypeLine is where the unreachable answer stops being one number.
+//
+// The engine has always sent a per-type breakdown and no screen drew it,
+// so a designer was told "4 entities cannot be reached" over a game
+// where every one of them is a quest and every zone is fine — which is
+// the difference between a modelling mistake and a missing edge. Only
+// the types with something unreachable are named: a list that also said
+// "zone: 0" would bury the answer in the types that are healthy.
+export function perTypeLine(result) {
+  const rows = Array.isArray(result && result.per_type) ? result.per_type : [];
+  const hit = rows
+    .filter((row) => row && Number.isFinite(row.unreachable) && row.unreachable > 0)
+    .map((row) => String(row.entity_type ?? "") + ": " + row.unreachable);
+  if (hit.length === 0) return "";
+  return "Out of reach by type — " + hit.join(", ") + ".";
 }
 
 // gateLine is the other half of the negative half: which relation types
@@ -463,7 +527,10 @@ function report(doc, slug, name, run, paint, onDone) {
     if (error) error.hidden = true;
     if (typeof onDone === "function") onDone();
     paint(answer.result, { verdict, body, walked });
-    const lines = [walkedLine(answer.result), gateLine(answer.result)].filter((line) => line !== "");
+    // The per-type breakdown goes **first**, because it is about the
+    // answer and the other two are about the walk that produced it.
+    const lines = [perTypeLine(answer.result), walkedLine(answer.result), gateLine(answer.result)]
+      .filter((line) => line !== "");
     say(walked, lines.join(" "));
   }
 
@@ -501,6 +568,12 @@ export async function analysisPage(opened) {
   // its own screens rather than a section here.
   const routesLink = el(doc, "routes-link");
   if (routesLink) routesLink.href = routesURL(opened.slug);
+  // **The one section that answers without being asked.** The other
+  // three walk the game and are run on demand for that reason; this one
+  // is a listing the server already has, so a page that made a designer
+  // press a button to find out whether any route has gone stale would be
+  // charging them for nothing.
+  void paintRoutes(doc, opened);
 
   // **No read-only notice here.** This page has three buttons on it, and
   // the notice is a claim about a screen: one that outlives the

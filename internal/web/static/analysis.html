@@ -36,10 +36,23 @@
 
 <p class="muted" id="analysis-note"></p>
 
-<!-- The fourth analysis. A route has stored state and a lifecycle —
-     written, checked, gone stale, re-checked — so it has a list and a
-     detail of its own rather than a section that could not hold either. -->
-<p><a id="routes-link" href="/">Routes: saved claims about a path, and whether they still hold</a></p>
+<!-- **The fourth analysis is a section, not a footnote.** A route has
+     stored state and a lifecycle — written, checked, gone stale,
+     re-checked — so its list and its detail live on their own screens;
+     what belongs here is the same thing the other three sections carry:
+     how many there are and what they currently say. It was a 400px
+     underlined sentence above the first heading, which made the one
+     analysis a designer can act on the weakest thing on the page. -->
+<section class="report" id="report-routes" aria-labelledby="routes-heading">
+  <div class="report-head">
+    <h2 id="routes-heading">Routes</h2>
+    <a class="btn ghost" id="routes-link" href="/">Open the routes</a>
+  </div>
+  <p class="verdict" id="routes-verdict"></p>
+  <p class="muted" id="routes-note">A route is a claim that a path through this game can be walked,
+    written by an agent and checked on demand.</p>
+  <p class="error" id="routes-error" hidden></p>
+</section>
 
 <!-- **Three sections, each run on demand.** These are POSTs and two of
      them walk a whole game; a page that fired all three on every visit

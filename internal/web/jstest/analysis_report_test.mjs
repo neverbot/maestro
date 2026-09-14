@@ -27,8 +27,18 @@ globalThis.document = {
   createElement: () => ({ append() {}, setAttribute() {}, addEventListener() {}, classList: { add() {} } }),
 };
 
-const { cyclesVerdict, walkedLine, gateLine, adviceForDesigner, CYCLES_CLEAN, CONTAINMENT_CLEAN } =
-  await import("../static/pages/analysis.js");
+const {
+  cyclesVerdict,
+  walkedLine,
+  gateLine,
+  adviceForDesigner,
+  ORPHAN_MODES,
+  perTypeLine,
+  routesVerdict,
+  ROUTES_NONE,
+  CYCLES_CLEAN,
+  CONTAINMENT_CLEAN,
+} = await import("../static/pages/analysis.js");
 
 let failures = 0;
 function check(what, got, want) {
@@ -39,6 +49,56 @@ function check(what, got, want) {
   failures += 1;
   console.log("FAIL " + what + "\n  got  " + JSON.stringify(got) + "\n  want " + JSON.stringify(want));
 }
+
+// **The verb agrees with the count.** `countLabel` gets the noun right
+// ("1 entity") and every one of these sentences then went on to say
+// "are": a game with exactly one isolated entity — the ordinary case,
+// because a designer fixes them as they appear — read "1 entity are
+// connected to nothing." Seen on a seeded game built to make these
+// findings render at all.
+check("one isolated entity", ORPHAN_MODES[0].found(1), "1 entity is connected to nothing.");
+check("several", ORPHAN_MODES[0].found(4), "4 entities are connected to nothing.");
+check("one that leads nowhere", ORPHAN_MODES[1].found(1), "1 entity leads nowhere.");
+check("several that lead nowhere", ORPHAN_MODES[1].found(3), "3 entities lead nowhere.");
+check("one with no way in", ORPHAN_MODES[2].found(1), "1 entity has nothing leading to it.");
+check("several with no way in", ORPHAN_MODES[2].found(2), "2 entities have nothing leading to them.");
+
+// **The per-type breakdown has been on the wire the whole time and on
+// no screen.** "4 entities cannot be reached" over a game where every
+// one of them is a quest and every zone is fine is the difference
+// between a modelling mistake and a missing edge.
+check("only the types with something out of reach are named",
+  perTypeLine({ per_type: [
+    { entity_type: "quest", reachable: 3, unreachable: 4 },
+    { entity_type: "zone", reachable: 1, unreachable: 0 },
+  ] }),
+  "Out of reach by type — quest: 4.");
+check("two types that both have something",
+  perTypeLine({ per_type: [
+    { entity_type: "quest", reachable: 3, unreachable: 4 },
+    { entity_type: "zone", reachable: 1, unreachable: 2 },
+  ] }),
+  "Out of reach by type — quest: 4, zone: 2.");
+// A clean game says nothing rather than listing every healthy type with
+// a zero beside it.
+check("a game with nothing out of reach says nothing",
+  perTypeLine({ per_type: [{ entity_type: "quest", reachable: 3, unreachable: 0 }] }),
+  "");
+check("and a result with no breakdown at all says nothing", perTypeLine({}), "");
+
+// **Routes are a section now, not a footnote**, and what it says is the
+// one thing the listing already knows: how many claims there are and
+// how many the game has since contradicted.
+check("no routes", routesVerdict([]), ROUTES_NONE);
+check("one route, checked and holding",
+  routesVerdict([{ status: "holds" }]),
+  "1 route is written.");
+check("stale is the number worth leading with",
+  routesVerdict([{ status: "holds" }, { status: "stale" }, { status: "unchecked" }]),
+  "3 routes are written; 1 is about a game that has since moved; 1 has never been checked.");
+check("and two of each agree in the plural",
+  routesVerdict([{ status: "stale" }, { status: "stale" }, { status: "unchecked" }, { status: "unchecked" }]),
+  "4 routes are written; 2 are about a game that has since moved; 2 have never been checked.");
 
 // **A report that finds something still has a verdict.** The verdict was
 // built by pushing a sentence for each half that came back clean, so a

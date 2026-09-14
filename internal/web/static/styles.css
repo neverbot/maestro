@@ -1657,6 +1657,14 @@ ul.history li:last-child { border-bottom: 0; }
 }
 
 .report-head h2 { margin: 0; }
+
+/* **The control belongs beside the question, not at the far edge of the
+   window.** `margin-left: auto` put the Check button at x=1347 against a
+   heading at x=24 on a wide screen: a control a reader has to cross the
+   page to find, for a question they have just read. Capping the head at
+   the prose measure keeps the two together at any width, and the button
+   still sits to the right of the heading. */
+.report-head { max-width: var(--measure); }
 .report-head .btn { margin-left: auto; }
 .report-head .tools { margin-bottom: 0; }
 

@@ -681,6 +681,23 @@ check("theCatalogueTellsTheReaderAboutTheColumnsItHid", async () => {
   );
 });
 
+// **A thousand rows at fifty a press is eighteen presses.** The pages
+// grow instead: small first, because most visits end on the first page,
+// then bigger for a reader who has said they are reading the whole
+// thing. Four presses walk a thousand rows.
+check("thePagesGrowSoAThousandRowsIsFourPressesNotEighteen", async () => {
+  const { nextPageSize, PAGE_SIZES } = await load("catalogue");
+  assertEqual(nextPageSize(0), 50, "the first page is small");
+  assertEqual(nextPageSize(50), 200, "the second is bigger");
+  assertEqual(nextPageSize(250), 500, "and the rest are the server's own cap");
+  assertEqual(nextPageSize(750), 500, "which is where it stops");
+  assertEqual(
+    PAGE_SIZES[0] + PAGE_SIZES[1] + PAGE_SIZES[2],
+    750,
+    "three presses reach 750 of a thousand, so the fourth finishes it",
+  );
+});
+
 // **Three of eight fields, said out loud.** The catalogue draws at most
 // three of a type's declared fields — a lane of ten columns is a
 // spreadsheet — and it used to say nothing about the rest, so a type

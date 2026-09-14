@@ -52,6 +52,31 @@ export const CATALOGUE_NOTE =
 // second call for one sentence is the wrong trade, so the sentence says
 // what is true for everybody and stops.
 
+// **The pages get bigger as a reader keeps going.** A thousand rows at
+// fifty a press is eighteen presses, each after scrolling to a button
+// that has moved further down the page — measured on the seeded
+// thousand-creature type, and the reason this is not just a number.
+//
+// The first page stays small because most visits end there: a designer
+// opening a type to check one row should not wait for five hundred. Past
+// that, somebody pressing "show more" has said they are reading the
+// whole thing, and the cheapest thing this product can do for them is
+// stop asking. 50, then 200, then 500 — the server's own cap
+// (metamodel.MaxEntityPage) — walks a thousand rows in four presses.
+//
+// It is not infinite scroll, and that is a decision rather than an
+// omission: this product's readers "read more than they click"
+// (docs/product.md), a list that loads under the scroll takes the page
+// footer away from them, and a keyboard or a screen reader has nothing
+// to activate.
+export const PAGE_SIZES = [50, 200, 500];
+
+export function nextPageSize(fetched) {
+  if (fetched < PAGE_SIZES[0]) return PAGE_SIZES[0];
+  if (fetched < PAGE_SIZES[0] + PAGE_SIZES[1]) return PAGE_SIZES[1];
+  return PAGE_SIZES[2];
+}
+
 // How many matches a search asks for at a time. It is a page size now
 // and not a cap: the search pages, so this is how much arrives per
 // press of the same button the listing uses, and no sentence has to
@@ -351,7 +376,7 @@ export async function cataloguePage(opened) {
 
   async function page() {
     if (moreEl) moreEl.disabled = true;
-    const request = { typeKey, verbose: true, prefix, invalid: onlyInvalid, order };
+    const request = { typeKey, verbose: true, prefix, invalid: onlyInvalid, order, limit: nextPageSize(rendered) };
     if (cursor !== null) request.cursor = cursor;
     const answer = await opened.client.listEntities(request);
     if (!answer.ok) {
@@ -421,7 +446,7 @@ export async function cataloguePage(opened) {
       moreEl.hidden = cursor === null || rendered === 0;
       // It says how many it will fetch. "Show more" makes a reader guess
       // whether pressing it costs them a second or a minute.
-      moreEl.textContent = "Show 50 more";
+      moreEl.textContent = "Show " + nextPageSize(rendered) + " more";
       moreEl.disabled = false;
     }
   }

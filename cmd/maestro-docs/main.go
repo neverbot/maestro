@@ -73,6 +73,46 @@ type page struct {
 	Body string
 }
 
+// fontFiles are the faces the site sets its two voices in: the same
+// files the product serves, copied rather than re-fetched.
+//
+// **A documentation site that names a typeface it does not carry is the
+// same defect as a design document that names one the product does not
+// serve**, which is what the typography section of docs/design.md said
+// about itself until the fonts were vendored. The design system page in
+// particular renders specimens of both voices; without these it renders
+// them in whatever the reader's machine has, under a heading that says
+// which face it is.
+var fontFiles = []string{
+	"literata-var-latin.woff2",
+	"fira-sans-400-latin.woff2",
+	"fira-sans-600-latin.woff2",
+}
+
+// copyFonts puts them beside the stylesheet that asks for them.
+func copyFonts(root, out string) error {
+	dir := filepath.Join(out, "fonts")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("make %s: %w", dir, err)
+	}
+	for _, name := range fontFiles {
+		//nolint:gosec // Both paths are the caller's own flags; see the copy above.
+		body, err := os.ReadFile(filepath.Join(root, "internal", "web", "static", "vendor", "fonts", name))
+		if err != nil {
+			return fmt.Errorf("read the vendored %s: %w", name, err)
+		}
+		// gosec reads `name` as tainted because it comes from a package
+		// variable; it is one of three constants in `fontFiles` above,
+		// and the destination is the caller's own -o flag, exactly as
+		// every other write in this file.
+		//nolint:gosec // G703: the names are this file's own constants, not input.
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func build(root, out string) error {
 	pages, err := collect(root)
 	if err != nil {
@@ -102,6 +142,9 @@ func build(root, out string) error {
 	}
 	if err := os.WriteFile(filepath.Join(out, "style.css"), []byte(siteCSS), 0o600); err != nil {
 		return fmt.Errorf("write the stylesheet: %w", err)
+	}
+	if err := copyFonts(root, out); err != nil {
+		return err
 	}
 	// GitHub Pages runs Jekyll over an artefact unless told not to, and
 	// Jekyll drops every directory beginning with an underscore. Nothing

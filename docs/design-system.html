@@ -4,9 +4,23 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Design System: Maestro</title>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600&family=Fira+Mono&family=Literata:opsz,wght@7..72,400;7..72,500;7..72,600&display=swap" rel="stylesheet">
 <style>
+/* **The faces this product actually serves, from this repository.** This
+   page fetched them from a font CDN, which is the one thing the
+   product's own CSP forbids — a page documenting a design system should
+   not reach an origin the system it documents refuses — and it asked for
+   two faces that are not vendored at all (Fira Mono, and the 500 of Fira
+   Sans). The paths are relative to the published site, where
+   cmd/maestro-docs copies the same three files the server serves; opened
+   straight out of docs/ the page falls back to the reader's own serif
+   and sans, which is what every one of these specimens looked like
+   before the fonts were vendored. */
+@font-face { font-family: Literata; font-style: normal; font-weight: 400 600; font-display: swap;
+  src: url("fonts/literata-var-latin.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("fonts/fira-sans-400-latin.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("fonts/fira-sans-600-latin.woff2") format("woff2"); }
 :root {
   --paper: #f7f3e9;
   --ground: #efe9dc;

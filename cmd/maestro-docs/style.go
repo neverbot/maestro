@@ -11,6 +11,35 @@ package main
 // are the part that matters, and `docs/design-system.html` — published
 // beside this — is where they are stated normatively.
 const siteCSS = `
+/* The two voices, from the same files the product serves — see
+   copyFonts. Every face swaps rather than blocks: the site draws in the
+   reader's own faces and re-flows, which keeps a documentation page
+   readable on a slow connection and is the same rule the product's own
+   payload budget rests on. */
+@font-face {
+  font-family: Literata;
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("fonts/literata-var-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/fira-sans-400-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Fira Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/fira-sans-600-latin.woff2") format("woff2");
+}
+
 :root {
   color-scheme: light dark;
   --paper: #f7f3e9;
@@ -19,8 +48,8 @@ const siteCSS = `
   --muted: #6e625a;
   --line: #d8d2c7;
   --accent: #9c470d;
-  --serif: ui-serif, Georgia, "Times New Roman", serif;
-  --sans: system-ui, sans-serif;
+  --serif: Literata, ui-serif, Georgia, "Times New Roman", serif;
+  --sans: "Fira Sans", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 

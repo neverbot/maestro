@@ -64,6 +64,9 @@ func checkLinks(out string) ([]string, error) {
 				continue
 			}
 			resolved := filepath.Join(from, filepath.FromSlash(clean))
+			//nolint:gosec // A path this command wrote, joined to a link
+			// in a page this command rendered: the whole input is the
+			// site it just built.
 			if _, err := os.Stat(resolved); err != nil {
 				rel, _ := filepath.Rel(out, page)
 				broken = append(broken, path.Join(filepath.ToSlash(rel))+" → "+target)

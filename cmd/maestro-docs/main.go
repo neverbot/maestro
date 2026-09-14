@@ -93,7 +93,9 @@ func build(root, out string) error {
 	// The design system is already a generated page and is copied whole:
 	// rendering it again from its own sources here would be a second
 	// generator for one artefact.
+	//nolint:gosec // A developer's own -root and -o flags: this command reads this repository and writes a directory the person running it named, and there is no untrusted input anywhere in it.
 	if body, err := os.ReadFile(filepath.Join(root, "docs", "design-system.html")); err == nil {
+		//nolint:gosec // The output directory is the caller's own -o flag.
 		if err := os.WriteFile(filepath.Join(out, "design-system.html"), body, 0o600); err != nil {
 			return fmt.Errorf("copy the design system: %w", err)
 		}
@@ -116,6 +118,7 @@ func build(root, out string) error {
 func collect(root string) ([]page, error) {
 	var pages []page
 
+	//nolint:gosec // -root is the caller's own flag; this reads this repository.
 	readme, err := os.ReadFile(filepath.Join(root, "readme.md"))
 	if err != nil {
 		return nil, fmt.Errorf("read readme.md: %w", err)
@@ -134,6 +137,7 @@ func collect(root string) ([]page, error) {
 	// spelling of the noun is a *racing* concept in this product's own
 	// genre templates, and `TestNoGenreVocabularyInServerCode` — rightly
 	// — refuses a genre word in a server identifier. It caught this one.
+	//nolint:gosec // -root is the caller's own flag; this reads this repository.
 	terms, err := os.ReadFile(filepath.Join(root, "license.md"))
 	if err != nil {
 		return nil, fmt.Errorf("read license.md: %w", err)

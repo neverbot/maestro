@@ -627,6 +627,15 @@ export function barFor(declarations, values, options = {}) {
       const marked = unbound.get(decl.key) || null;
       return {
         key: decl.key,
+        // **The label is the key, read out.** The query language has no
+        // name for a parameter — a declaration is a key, a type and a
+        // default — so the bar labelled its controls `class_key`, which
+        // is an identifier a designer never chose shown at the size of a
+        // question. Adding a name to the language is the other answer
+        // and is a change to a stored document, so the frame does what
+        // this product already does for a relation type: the words for a
+        // reader, the key in mono beside them.
+        label: deslug(decl.key),
         type: text(decl.type) || "text",
         options: Array.isArray(decl.options) ? decl.options.slice() : null,
         value: Object.prototype.hasOwnProperty.call(bound, decl.key) ? bound[decl.key] : null,
@@ -636,6 +645,18 @@ export function barFor(declarations, values, options = {}) {
       };
     });
   return { present: controls.length > 0, controls };
+}
+
+// deslug turns `class_key` into "Class key": the key's own words, in
+// sentence case, because that is what the agent that wrote the query
+// actually called it and this is the closest a reader gets to being told
+// what to type. It is never a translation — a key of `k` stays "K",
+// which is honest about how little the query said.
+export function deslug(key) {
+  const words = String(key ?? "").split(/[_\-.]+/).filter((word) => word !== "");
+  if (words.length === 0) return String(key ?? "");
+  const said = words.join(" ");
+  return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
 // legendModel is the colour key: the rows a renderer's `legend` already

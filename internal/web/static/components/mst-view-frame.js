@@ -115,6 +115,13 @@ export class MstViewFrame extends LitElement {
       font-size: 0.8em;
       color: var(--muted);
     }
+    /* The key beside the words it is the identifier for: the Copyable Is
+       Mono Rule, in the one place a person has to type a value *for* a
+       key an agent chose. */
+    .control label code {
+      font-family: var(--mono);
+      margin-left: 0.4rem;
+    }
     .control.marked label {
       color: var(--danger);
     }
@@ -300,6 +307,12 @@ export class MstViewFrame extends LitElement {
     `;
   }
 
+  // What an empty parameter box means, said in the box. A view whose
+  // parameter is unbound runs on nothing, and the control said so only
+  // by being empty — which is what an *optional* field looks like
+  // everywhere else in this product.
+  static PLACEHOLDER = "nothing yet";
+
   parameterBar(bar) {
     if (!bar || !bar.present) return nothing;
     return html`
@@ -307,7 +320,12 @@ export class MstViewFrame extends LitElement {
         ${bar.controls.map(
           (control) => html`
             <div class=${control.marked ? "control marked" : "control"}>
-              <label for=${"p-" + control.key}>${control.key}</label>
+              <!-- The words, then the key in mono: the same pairing a
+                   relation type gets, and for the same reason — a person
+                   reads one and types the other. -->
+              <label for=${"p-" + control.key}
+                >${control.label ?? control.key}<code>${control.key}</code></label
+              >
               ${control.options
                 ? html`<select id=${"p-" + control.key} .value=${control.value ?? ""}>
                     ${control.options.map((option) => html`<option value=${option}>${option}</option>`)}
@@ -316,6 +334,7 @@ export class MstViewFrame extends LitElement {
                     id=${"p-" + control.key}
                     type=${control.type === "number" ? "number" : "text"}
                     .value=${control.value ?? ""}
+                    placeholder=${control.bound ? "" : MstViewFrame.PLACEHOLDER}
                   />`}
               ${control.marked ? html`<span class="message">${control.message}</span>` : nothing}
             </div>

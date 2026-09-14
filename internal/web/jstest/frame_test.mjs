@@ -370,6 +370,29 @@ check("anUnboundParameterHighlightsItsControl", () => {
   assertDeepEqual(frame.actions, [], "and offering no run-anyway, because a value is one field away");
 });
 
+// **A parameter is labelled with words, not with its key.** The bar
+// labelled its controls `class_key`: an identifier the designer never
+// chose, at the size of a question. The language has no name for a
+// parameter — a declaration is a key, a type and a default — so the
+// frame does what this product already does for a relation type: the
+// words for a reader, the key in mono beside them, and no change to a
+// stored document.
+check("aParameterIsLabelledWithWordsAndCarriesItsKey", async () => {
+  const { deslug } = await import("../static/render/scene.js");
+  assertEqual(deslug("class_key"), "Class key", "the key, read out");
+  assertEqual(deslug("minLevel"), "MinLevel", "a key that is already one word is left alone");
+  assertEqual(deslug("who"), "Who", "and a one-word key is still sentence case");
+  // Never a translation: a key that says almost nothing produces a label
+  // that says almost nothing, which is honest about the query.
+  assertEqual(deslug("k"), "K", "a key of one letter");
+  assertEqual(deslug(""), "", "and no key at all is no label");
+
+  const frame = frameFor({ view, error: unboundRefusal, declarations, params: {} });
+  const control = frame.bar.controls.find((c) => c.key === "class");
+  assertEqual(control.label, "Class", "the control carries its own label");
+  assertEqual(control.key, "class", "and the key an agent wrote, unchanged");
+});
+
 // --- The empty answer ------------------------------------------------
 
 check("anEmptyAnswerIsASuccess", () => {

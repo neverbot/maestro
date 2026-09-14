@@ -70,13 +70,18 @@ func testGetenv(env map[string]string) func(string) string {
 // Selecting on both means a failed start is reported as itself, and a
 // genuinely slow start is still reported as a timeout — and the two
 // stop being indistinguishable.
+// **Only this function may fail the test, and it runs on the test's own
+// goroutine.** The poller used to call t.Fatalf from the goroutine it
+// was spawned in, which testing documents as not allowed: Goexit ends
+// the poller and the test keeps going, so a timed-out start printed
+// "server never became healthy" and then failed a second time on the
+// first request against the server that was never up. Two failures, one
+// cause, and the second one names the wrong thing — the same confusion
+// the done-channel select above was added to end.
 func waitForRunningServer(t *testing.T, base string, done chan error, deadline time.Duration) {
 	t.Helper()
-	ready := make(chan struct{})
-	go func() {
-		defer close(ready)
-		waitForHealthz(t, base, deadline)
-	}()
+	ready := make(chan error, 1)
+	go func() { ready <- waitForHealthz(base, deadline) }()
 	select {
 	case err := <-done:
 		// run() returned before the server ever answered. Whatever it
@@ -84,7 +89,10 @@ func waitForRunningServer(t *testing.T, base string, done chan error, deadline t
 		// shutdown assertion still finds a value rather than blocking.
 		done <- err
 		t.Fatalf("run() exited during startup instead of serving: %v", err)
-	case <-ready:
+	case err := <-ready:
+		if err != nil {
+			t.Fatalf("server never became healthy: %v", err)
+		}
 	}
 }
 
@@ -92,8 +100,7 @@ func waitForRunningServer(t *testing.T, base string, done chan error, deadline t
 // elapses, matching how a real caller (or an orchestrator's readiness
 // probe) would wait for a process that has just been started in the
 // background.
-func waitForHealthz(t *testing.T, base string, deadline time.Duration) {
-	t.Helper()
+func waitForHealthz(base string, deadline time.Duration) error {
 	client := &http.Client{Timeout: time.Second}
 	giveUp := time.Now().Add(deadline)
 	var lastErr error
@@ -104,7 +111,7 @@ func waitForHealthz(t *testing.T, base string, deadline time.Duration) {
 			n, _ := resp.Body.Read(body)
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK && string(body[:n]) == "ok" {
-				return
+				return nil
 			}
 			lastErr = fmt.Errorf("status %d, body %q", resp.StatusCode, string(body[:n]))
 		} else {
@@ -112,7 +119,7 @@ func waitForHealthz(t *testing.T, base string, deadline time.Duration) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("server never became healthy: %v", lastErr)
+	return lastErr
 }
 
 // startRunningServer starts run() against a fresh reserved address and
@@ -140,7 +147,16 @@ func startRunningServer(t *testing.T) (base string, cancel context.CancelFunc, d
 	go func() { done <- run(ctx, testGetenv(env)) }()
 
 	base = "http://" + addr
-	waitForRunningServer(t, base, done, 5*time.Second)
+	// **Thirty seconds, and it is not a claim about how fast this starts.**
+	// It was five, which is a speed assertion nobody meant to make: under
+	// `go test -race ./...` every package runs at once, and a start that
+	// creates a database, applies every migration and hashes the first
+	// admin's password with argon2id took longer than that on a loaded
+	// machine — reported, correctly and uselessly, as "server never
+	// became healthy". A start that is genuinely broken still fails
+	// immediately through the done channel above; this budget only has
+	// to outlast a slow one.
+	waitForRunningServer(t, base, done, 30*time.Second)
 	return base, cancel, done
 }
 

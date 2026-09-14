@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New view · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- Applies the chosen theme before the first paint. Classic and not
+     deferred on purpose: see static/theme.js. -->
+<script src="/static/theme.js"></script>
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">Composing a view is done in the browser, so this page needs JavaScript enabled.</p>
+</noscript>
+
+<main class="page">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+  <h1>New view</h1>
+  <span class="page-actions" id="page-actions"></span>
+</div>
+
+<!-- **The sentence, in clauses.** The whole decision this screen rests
+     on is that the builder is closer to the sentence a designer says out
+     loud than to the document a query is: "the quests a Mage can reach
+     between level 20 and 30, coloured by zone". pages/builder.js fills
+     this; the shell holds the hole. -->
+<div id="clauses"></div>
+<p class="error" id="builder-error" role="alert" aria-live="assertive"></p>
+
+<!-- What the builder cannot hold, said once and on screen rather than
+     discovered. A builder that covered the simple half of the language
+     and hid the other half would be worse than one that covers it and
+     says so. -->
+<p class="muted" id="builder-boundary"></p>
+
+<h2>What it will be saved as</h2>
+<form id="builder-save">
+  <label for="builder-name">Name</label>
+  <input id="builder-name" type="text" autocomplete="off" placeholder="Mage quests 20-30">
+  <label for="builder-key">Address</label>
+  <input id="builder-key" type="text" autocomplete="off" pattern="[a-z0-9]+(-[a-z0-9]+)*"
+         placeholder="mage-quests">
+  <p class="muted field-note">Lowercase letters, digits and hyphens. It is what an agent and the
+    address bar call this view.</p>
+  <button type="submit" id="builder-save-button">Save this view</button>
+  <p class="error" id="builder-save-error" role="alert" aria-live="assertive"></p>
+</form>
+
+<!-- **The document, beside the sentence, read-only.** Not because a
+     designer will read it, but because the agent they work with will,
+     and because a builder whose output is hidden is a builder nobody can
+     check. -->
+<h2>The query this writes</h2>
+<pre class="document" id="builder-document"></pre>
+
+</main>
+
+<script type="module" src="/static/pages/builder.js"></script>

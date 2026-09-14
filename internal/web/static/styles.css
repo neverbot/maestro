@@ -1044,7 +1044,21 @@ select:focus {
    same shape: a control that is 32px and 3px-rounded in a component and
    38px and 4px-rounded on the page is the drift this design pass exists
    to end, and the audit caught exactly that in reverse. */
-button {
+/* A link that is a control. The one place this product has it is the way
+   in to the query builder: it *is* a destination — it has an address a
+   person can bookmark and come back to — and it is also the primary
+   action of the screen it sits on. `a.button` keeps the anchor's
+   semantics (a middle click opens it in a tab, which a button cannot)
+   and the button's look, which is what the Ink Button rule spends on
+   "the one thing to do here". */
+a.button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+button,
+a.button {
   height: var(--control-h);
   padding: 0 13px;
   border: 1px solid var(--ink);
@@ -2056,6 +2070,52 @@ dl.fields dd.field-value {
 .field-edit-form textarea { width: 100%; }
 
 dl.fields dd.field-value .error:empty { display: none; }
+
+/* **The sentence, in clauses.** Each line reads as words with controls
+   between them, so it is a row that wraps rather than a form: the
+   baseline is shared across the words and the controls, which is what
+   keeps "Start from every [Quest]" reading as one line rather than as a
+   label above a field. */
+.clause {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s2) 0;
+}
+
+/* The two ways the sentence grows, set apart from it: they are about the
+   stack rather than in it. */
+.clause-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin: var(--s3) 0 var(--s5);
+}
+
+/* A diagnostic about one clause, on the clause. It takes the whole width
+   so it sits under the line it is about rather than beside the control
+   that happened to be last. */
+.clause-note {
+  flex-basis: 100%;
+}
+
+.clause-note:empty { display: none; }
+
+/* The document beside the sentence: read-only, monospace, and scrolling
+   in its own box rather than pushing the page wide. */
+pre.document {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s3);
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre;
+}
 
 .field-type {
   font-family: var(--mono);

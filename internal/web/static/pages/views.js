@@ -23,6 +23,8 @@ import {
   row,
   say,
   setBreadcrumb,
+  ROLE_VIEWER,
+  builderURL,
   setReadOnly,
   viewURL,
 } from "./page.js";
@@ -49,7 +51,20 @@ export async function viewsPage(opened) {
   // called "Views".
   doc.title = opened.game.name + " \u00b7 Views \u00b7 Maestro";
   const role = await opened.client.summary();
-  if (role.ok) setReadOnly(doc, role.result.role, "writes these views");
+  // **The way in to the builder, where the read-only notice used to be
+  // the whole of what this screen could say.** A viewer still gets the
+  // notice: the server would refuse the save, and a control that cannot
+  // succeed is worse than a sentence saying so.
+  const actions = doc.getElementById("page-actions");
+  if (role.ok && role.result.role !== ROLE_VIEWER && actions) {
+    const compose = doc.createElement("a");
+    compose.className = "button";
+    compose.href = builderURL(opened.slug);
+    compose.textContent = "New view";
+    actions.replaceChildren(compose);
+  } else if (role.ok) {
+    setReadOnly(doc, role.result.role, "writes these views");
+  }
 
   let cursor = null;
   let rendered = 0;

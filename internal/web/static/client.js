@@ -635,6 +635,44 @@ export function client({
     return counted(() => send(base + "/views", body));
   }
 
+  // validateView asks the server whether a document is storable, and is
+  // what the builder calls on every change.
+  //
+  // **It is a question and not a save.** The answer is `{valid, refs,
+  // limits}` when the document parses and resolves, and a refusal
+  // carries the JSON pointer of the thing that is wrong — which is the
+  // whole reason the builder keeps the map from each control to the
+  // pointer it wrote, so a diagnostic lands under the clause that
+  // produced it rather than in a box at the bottom of a page.
+  async function validateView(query, options) {
+    const opts = options && typeof options === "object" ? options : {};
+    const body = { query };
+    if (opts.renderer) body.renderer = String(opts.renderer);
+    if (opts.rendererParams) body.renderer_params = opts.rendererParams;
+    if (opts.params) body.params = opts.params;
+    return send(base + "/views/validate", body);
+  }
+
+  // createView writes a **new** view, which is what the builder makes.
+  //
+  // It carries `expected_version: 0` — internal/views' own
+  // createExpectedVersion, "this view must not exist yet" — so a builder
+  // that lands on a key somebody else already used is refused rather
+  // than overwriting a view nobody asked it to touch. That is the same
+  // claim saveViewAs makes and for the same reason.
+  async function createView(view) {
+    const from = view && typeof view === "object" ? view : {};
+    return counted(() => send(base + "/views", {
+      key: String(from.key || ""),
+      name: String(from.name || ""),
+      query: from.query,
+      renderer: String(from.renderer || ""),
+      renderer_params: from.rendererParams || {},
+      description: typeof from.description === "string" ? from.description : "",
+      expected_version: CREATE_EXPECTED_VERSION,
+    }));
+  }
+
   // renderers is the server's own renderer catalogue: the names, each
   // renderer's knobs, each knob's kind and, for an enum, the spellings
   // the server admits.
@@ -1114,6 +1152,8 @@ export function client({
     getEntity,
     renameEntity,
     writeEntity,
+    validateView,
+    createView,
     listRelations,
     listEntityDocs,
     connect,

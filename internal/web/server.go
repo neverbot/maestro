@@ -614,6 +614,10 @@ var shellRoutes = []struct {
 	{pattern: "GET /g/{slug}", file: "game.html", byHand: true},
 	{pattern: "GET /g/{slug}/doc", file: "document.html", byHand: true},
 	{pattern: "GET /g/{slug}/views", file: "views.html"},
+	// The query builder. `/views/new` and not `/build`: it is the one
+	// thing a person can do in the Views destination that they could not
+	// do before, and an address says where you are.
+	{pattern: "GET /g/{slug}/views/new", file: "builder.html"},
 	{pattern: "GET /g/{slug}/v/{key}", file: "view.html"},
 	{pattern: "GET /g/{slug}/types", file: "types.html"},
 	{pattern: "GET /g/{slug}/t/{typeKey}", file: "type.html"},

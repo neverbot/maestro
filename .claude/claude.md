@@ -261,7 +261,7 @@ vet, lint, `sqlc diff`, the skill-bundle guards and
 | Metamodel | The four primitives, field schemas, validation, search, bulk writes, repair, rename |
 | Markdown | Versioned prose, diffs, moves, attachments to entities |
 | Views | Query language, saved views, staleness, positions, background images |
-| Interface | Six renderers drawing, its own visual identity, a text twin |
+| Interface | Six renderers drawing, its own visual identity, a text twin, a query builder, and three writes a person can make |
 | Analysis | Cycles, unreachable content, orphans, routes with a verdict |
 | Skills | The agent bundle, three genres, served over a signed URL |
 
@@ -278,10 +278,15 @@ tokens and the control styles.
 
 Say these plainly rather than letting someone discover them:
 
-- **A human alone cannot compose a view.** There is no query builder —
-  the query language was written for agents, and building one is its
-  own sub-project. A person can copy an existing view and change how it
-  is drawn, and nothing more.
+- **The query builder covers the half of the language a sentence can
+  hold.** `from`, one `where` per selector, a linear `traverse`, and the
+  drawing. A question with two branches, a depth range or a parameter is
+  written as a document by an agent, and the screen says so once, under
+  the clause stack, rather than leaving it to be discovered. The builder
+  **generates and never edits**: it opens a stored document only when
+  that document round-trips through it byte for byte, so a language
+  addition it has not learned closes the door instead of silently
+  dropping a clause.
 - **No published image and no backups.**
 - **One process only.** Events fan out from an in-memory hub, not
   Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so

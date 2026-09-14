@@ -150,6 +150,13 @@ export function viewsURL(slug) {
 // a link: client.js's writeParams is what spells them, so a link built
 // here and a URL a designer edited in the address bar mean the same
 // thing.
+// builderURL is the query builder, which is the one thing a person can
+// now do in this destination that the product's own documentation said
+// they could not.
+export function builderURL(slug) {
+  return viewsURL(slug) + "/new";
+}
+
 export function viewURL(slug, key, query) {
   const suffix = typeof query === "string" && query !== "" ? "?" + query : "";
   return gameURL(slug) + SEGMENT_VIEW + encodeURIComponent(String(key)) + suffix;

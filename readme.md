@@ -231,10 +231,14 @@ the `.sql` files.
 
 Said plainly, rather than left to be discovered:
 
-- **A person cannot compose a view from nothing.** The query language
-  was written for agents to write; the interface can copy a view and
-  change how it is drawn, and that is all. A query builder is its own
-  piece of work.
+- **The query builder holds the half of the language a sentence can
+  hold.** Start from a kind of thing, narrow it, follow one chain of
+  connections, and say how to draw it. A question with two branches, a
+  depth range or a parameter is written as a document, which is what an
+  agent is for — and the screen says so under the clause stack rather
+  than leaving it to be found out. The builder also never edits a stored
+  query: it opens one only if that document round-trips through it
+  unchanged.
 - **One process only.** Events fan out from an in-memory hub rather than
   Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so a
   second replica has its own subscribers and its own budgets. A client

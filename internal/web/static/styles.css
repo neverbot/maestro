@@ -2110,6 +2110,12 @@ dl.fields dd.field-value .error:empty { display: none; }
 
 .clause-note:empty { display: none; }
 
+/* The two boxes in a clause are sized to what goes in them: a value and
+   a number of steps, not a name. `size` gets most of the way there and
+   this stops the browser's own minimum from making a depth box as wide
+   as a sentence. */
+.clause input[type="number"] { max-width: 6rem; }
+
 /* The document beside the sentence: read-only, monospace, and scrolling
    in its own box rather than pushing the page wide. */
 pre.document {

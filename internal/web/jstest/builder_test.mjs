@@ -194,6 +194,39 @@ check("a typed value is a number when it is one",
   [numberOrText("20"), numberOrText("Elwynn"), numberOrText(""), numberOrText("20 quests"), numberOrText("007")],
   [20, "Elwynn", "", "20 quests", "007"]);
 
+// --- Where a diagnostic is put ----------------------------------------
+//
+// **`markClause` walks the clause lines and nothing else.** The row of
+// "and then follow…" buttons is a child of the same root, and a version
+// that walked every child cleared that row's last child: the second add
+// button rendered as a 28px empty box every time a diagnostic was
+// placed. Found on screen with five clauses.
+{
+  const doc = dom.document;
+  const root = doc.createElement("div");
+  const clause = doc.createElement("div");
+  clause.setAttribute("data-clause", "c1");
+  const controls = doc.createElement("span");
+  const note = doc.createElement("span");
+  clause.append(controls, note);
+  const adders = doc.createElement("div");
+  const second = doc.createElement("button");
+  second.textContent = "and then follow…";
+  adders.append(doc.createElement("button"), second);
+  root.append(clause, adders);
+  doc.getElementById = (id) => (id === "clauses" ? root : null);
+
+  const { markClause } = await import("../static/pages/builder.js");
+  markClause(doc, "c1", "level is not a number.");
+  check("the diagnostic lands on the clause", note.textContent, "level is not a number.");
+  check("and the row of add buttons keeps its words", second.textContent, "and then follow…");
+
+  markClause(doc, "", "");
+  check("and a clean run clears the clause", note.textContent, "");
+  check("without clearing anything else", second.textContent, "and then follow…");
+  doc.getElementById = () => null;
+}
+
 if (failures > 0) {
   console.log(failures + " failed");
   process.exit(1);

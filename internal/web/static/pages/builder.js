@@ -249,7 +249,19 @@ export async function builderPage(opened) {
     const problem = built.problems[0] ?? null;
     state.reason = problem ? problem.message : state.reason;
     if (problem) state.valid = false;
-    say(errorEl, problem ? problem.message : "");
+    // **The builder's own problems land where the server's do**: on the
+    // clause. `compose` names the clause each problem came from, so a
+    // Follow line with no connection says so on that line — and the page
+    // keeps the line at the bottom for the one problem that belongs to
+    // no clause at all ("a query starts from something", which is about
+    // a stack with no Start line in it).
+    if (problem && problem.clause !== "") {
+      markClause(doc, problem.clause, problem.message);
+      say(errorEl, "");
+    } else {
+      markClause(doc, "", "");
+      say(errorEl, problem ? problem.message : "");
+    }
     settleSave();
   };
 
@@ -347,10 +359,17 @@ export function markClause(doc, clauseId, message) {
   const root = doc.getElementById("clauses");
   if (!root) return;
   for (const line of root.children) {
+    // **Only a clause line**, which is why the attribute is the test and
+    // not the position. The row of "and then follow…" buttons is a child
+    // of this root too, and walking every child cleared the *last*
+    // child's text: the second add button rendered as a 28px empty box,
+    // every time a diagnostic was placed. Seen on screen with five
+    // clauses.
+    const at = line.getAttribute ? line.getAttribute("data-clause") : null;
+    if (at === null) continue;
     const note = line.children[line.children.length - 1];
     if (!note) continue;
-    const mine = line.getAttribute("data-clause") === clauseId && clauseId !== "";
-    note.textContent = mine ? message : "";
+    note.textContent = at === clauseId && clauseId !== "" ? message : "";
   }
 }
 
@@ -464,6 +483,11 @@ function lineFor(doc, clause, state, deps) {
       const value = doc.createElement("input");
       value.type = "text";
       value.value = clause.value ?? "";
+      // Sized to what goes in it, and told what that is. A 200px box
+      // with nothing in it reading "level is [        ]" is a control
+      // that has not said what it wants.
+      value.size = 12;
+      value.placeholder = "a value";
       value.setAttribute("aria-label", "the value to compare against");
       value.addEventListener("input", () => {
         clause.value = numberOrText(value.value);
@@ -497,6 +521,8 @@ function lineFor(doc, clause, state, deps) {
     const depth = doc.createElement("input");
     depth.type = "number";
     depth.min = "1";
+    // One digit, usually. It was as wide as a name.
+    depth.size = 3;
     depth.value = Number.isFinite(clause.depth) ? String(clause.depth) : "1";
     depth.setAttribute("aria-label", "how many steps to follow");
     depth.addEventListener("input", () => {

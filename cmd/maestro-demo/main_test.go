@@ -94,6 +94,37 @@ func TestTheDemoSeedsTheCasesTheScreensNeed(t *testing.T) {
 	}
 }
 
+// **A failed seed leaves nothing behind.** Each domain service opens its
+// own transaction, so a run that stops halfway would otherwise leave a
+// game holding some of a demo under the slug the next run wants — which
+// is exactly what the first run of this tool did, and what made an
+// images list read "No images yet" on a game whose seeder uploads one.
+func TestAFailedSeedRemovesTheGameItStarted(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ctx := context.Background()
+	owner := seedUser(t, pool)
+
+	// A relation type declaring an endpoint type nobody declared is
+	// refused by the metamodel, which is the cheapest way to make the
+	// run fail *after* the game exists.
+	if _, err := pool.Exec(ctx, `ALTER TABLE entity_types ADD CONSTRAINT demo_break CHECK (key <> 'zone')`); err != nil {
+		t.Fatalf("arrange the failure: %v", err)
+	}
+
+	if _, err := seed(ctx, pool, owner, "demo"); err == nil {
+		t.Fatal("the seed succeeded against a schema that refuses one of its own types")
+	}
+
+	var games int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM projects WHERE slug = 'demo'`).Scan(&games); err != nil {
+		t.Fatalf("count the games: %v", err)
+	}
+	if games != 0 {
+		t.Errorf("a failed seed left %d game(s) behind: the next run would meet a half-demo "+
+			"under the slug it wants", games)
+	}
+}
+
 // seedUser writes the account the demo game belongs to. The demo
 // resolves its owner by email, so this only has to exist.
 func seedUser(t *testing.T, pool *pgxpool.Pool) string {

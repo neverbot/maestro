@@ -86,7 +86,7 @@ func run(ctx context.Context) error {
 	// this product goes through. gosec sees a flag reaching a log line
 	// and is right about the general shape; %q is what makes the value
 	// unambiguous once it is known to be a slug.
-	log.Printf("open /g/%q", game) //nolint:gosec // G706: the slug is the stored one, validated by projects.Create.
+	log.Printf("open /g/%s", game) //nolint:gosec // G706: the slug is the stored one, validated by projects.Create — see the comment above.
 	return nil
 }
 
@@ -115,24 +115,45 @@ func seed(ctx context.Context, pool *pgxpool.Pool, owner, slug string) (string, 
 	}
 	log.Printf("game %s (%s)", game.Slug, game.ID)
 
-	meta := metamodel.New(pool, nil)
-	actor := metamodel.Actor{UserID: &ownerID}
-	if err := writeVocabulary(ctx, meta, game.ID, actor); err != nil {
-		return "", err
-	}
-	if err := writeContent(ctx, meta, game.ID, actor); err != nil {
-		return "", err
-	}
-	if err := writeProse(ctx, markdown.New(pool, nil), game.ID, ownerID); err != nil {
-		return "", err
-	}
-	if err := writeViews(ctx, views.New(pool, nil), game.ID, ownerID); err != nil {
-		return "", err
-	}
-	if err := writeImage(ctx, views.New(pool, nil), game.ID, ownerID); err != nil {
+	// **All of it or none of it.** Each domain service opens its own
+	// transaction, so there is no one transaction to wrap this in — and
+	// the first run of this tool proved what that costs: the prose write
+	// was refused, the run stopped, and what was left behind was a game
+	// holding vocabulary and content and nothing else, under the slug a
+	// re-run wanted. The half-game then looked like a demo and read as a
+	// product with an empty images list.
+	//
+	// So a failure takes the game with it. Best effort, and said out loud
+	// when even that fails, because the alternative is a person deleting
+	// a half-seeded game by hand without being told there is one.
+	if err := fill(ctx, pool, game.ID, ownerID); err != nil {
+		if undo := who.Delete(ctx, game.ID); undo != nil {
+			return "", fmt.Errorf("%w (and the half-written game %s could not be removed: %v)",
+				err, game.ID, undo)
+		}
 		return "", err
 	}
 	return game.Slug, nil
+}
+
+// fill writes everything after the game itself, so seed above has one
+// place to undo from.
+func fill(ctx context.Context, pool *pgxpool.Pool, game, ownerID uuid.UUID) error {
+	meta := metamodel.New(pool, nil)
+	actor := metamodel.Actor{UserID: &ownerID}
+	if err := writeVocabulary(ctx, meta, game, actor); err != nil {
+		return err
+	}
+	if err := writeContent(ctx, meta, game, actor); err != nil {
+		return err
+	}
+	if err := writeProse(ctx, markdown.New(pool, nil), game, ownerID); err != nil {
+		return err
+	}
+	if err := writeViews(ctx, views.New(pool, nil), game, ownerID); err != nil {
+		return err
+	}
+	return writeImage(ctx, views.New(pool, nil), game, ownerID)
 }
 
 // userIDByEmail resolves the account the game will belong to.
@@ -436,10 +457,22 @@ func writeViews(ctx context.Context, saved *views.Service, game uuid.UUID, owner
 // rectangle is enough for a list that shows a thumbnail, a size and a
 // filename.
 func writeImage(ctx context.Context, saved *views.Service, game uuid.UUID, owner uuid.UUID) error {
+	// Bands rather than a flat fill: a thumbnail of one colour is
+	// indistinguishable from a thumbnail that failed to load, which is
+	// the wrong thing to teach on the one screen this image exists to
+	// make visible. Two tones of the product's own ground, so the demo
+	// still looks like a map somebody has not drawn yet rather than like
+	// a test pattern.
 	canvas := image.NewRGBA(image.Rect(0, 0, 800, 600))
-	for x := 0; x < 800; x++ {
-		for y := 0; y < 600; y++ {
-			canvas.Set(x, y, color.RGBA{R: 0xEF, G: 0xE9, B: 0xDC, A: 0xFF})
+	light := color.RGBA{R: 0xEF, G: 0xE9, B: 0xDC, A: 0xFF}
+	dark := color.RGBA{R: 0xD8, G: 0xD2, B: 0xC7, A: 0xFF}
+	for x := range 800 {
+		for y := range 600 {
+			paint := light
+			if (x/100+y/100)%2 == 0 {
+				paint = dark
+			}
+			canvas.Set(x, y, paint)
 		}
 	}
 	var body bytes.Buffer

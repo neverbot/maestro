@@ -256,6 +256,25 @@ export function createDocument() {
       return walk(this);
     }
 
+    // querySelectorAll, in the same deliberately tiny dialect
+    // querySelector speaks: `.class`, and nothing else. A picker's
+    // harness asks for every option in a menu, which is one class.
+    querySelectorAll(selector) {
+      if (typeof selector !== "string" || !selector.startsWith(".")) {
+        throw new Error(`stub: querySelectorAll understands ".class" only, not ${selector}`);
+      }
+      const wanted = selector.slice(1);
+      const found = [];
+      const walk = (node) => {
+        for (const child of node.childNodes) {
+          if ((child.attributes.get("class") ?? "").split(" ").includes(wanted)) found.push(child);
+          walk(child);
+        }
+      };
+      walk(this);
+      return found;
+    }
+
     get innerHTML() {
       throw new Error("stub: innerHTML parses markup, and nothing in this front end may read or write it");
     }

@@ -46,6 +46,18 @@ export const NONE_LABEL = "no choice";
 // so a caller reads `key` and never parses a label back into one.
 export const CHOOSE_EVENT = "mst-choose";
 
+// SEARCH_DELAY_MS is how long a searching picker waits after a
+// keystroke before it asks the server. A keystroke is not a question,
+// which is the rule the catalogue's own search box already follows; the
+// number is the same one, so the two controls feel like one product.
+export const SEARCH_DELAY_MS = 200;
+
+// SEARCHING_LABEL and NO_MATCH are what a searching picker says while it
+// has no answer and when the answer is empty. Neither is a blank menu: a
+// list with nothing in it and no words reads as a control that broke.
+export const SEARCHING_LABEL = "looking…";
+export const SEARCH_HINT = "type to search";
+
 // FILTER_FROM is how many options a picker has to hold before it grows a
 // filter box. Below it the list is the filter: a filter over four
 // relation types is a control asking a person to type what they can
@@ -186,8 +198,23 @@ export class MstPicker extends HTMLElement {
     this.doc = init.document || this.ownerDocument || globalThis.document;
     this.options = Array.isArray(init.options) ? init.options : [];
     this.chosen = init.chosen ?? null;
+    this.chosenOption = null;
     this.placeholder = init.placeholder || "Choose";
     this.query = "";
+    // **A searching picker asks the server instead of filtering what it
+    // holds.** A game with a thousand entities cannot be a list, and
+    // this product already serves the answer: `GET /search` indexes a
+    // row's key alongside its name, so the handle a designer meets in
+    // every error message is the one that works here. A picker with no
+    // source is the list it was given, unchanged — the whole vocabulary
+    // half of this control is untouched by any of it.
+    this.source = typeof init.source === "function" ? init.source : null;
+    this.searching = false;
+    this.timer = null;
+    // Injected so a harness drives the debounce in test time rather than
+    // in real time, the way client.js takes its timers.
+    this.setTimer = init.setTimer || ((fn, ms) => globalThis.setTimeout(fn, ms));
+    this.clearTimer = init.clearTimer || ((id) => globalThis.clearTimeout(id));
     const shadow = this.attachShadow({ mode: "open" });
     adoptControlStyles(shadow);
     adoptPickerStyles(shadow);
@@ -202,8 +229,15 @@ export class MstPicker extends HTMLElement {
   // current choice only if it is still on offer.
   setOptions(options) {
     this.options = Array.isArray(options) ? options : [];
-    if (this.chosen !== null && !this.options.some((option) => option.key === this.chosen)) {
+    // A vocabulary picker drops a choice its new list no longer offers —
+    // the type changed and its fields with it, and a `color_by` naming a
+    // field that is gone is worse than none. A **searching** picker does
+    // not: its list is one answer to one question, and the entity
+    // somebody already chose is not un-chosen by typing another word.
+    if (this.source === null && this.chosen !== null
+      && !this.options.some((option) => option.key === this.chosen)) {
       this.chosen = null;
+      this.chosenOption = null;
     }
     this.draw();
     return this.options;
@@ -215,6 +249,10 @@ export class MstPicker extends HTMLElement {
     const option = this.options.find((candidate) => candidate.key === key) ?? null;
     if (option === null) return null;
     this.chosen = option.key;
+    // Held, because a searching picker's list is replaced on the next
+    // keystroke: the control has to be able to say what was chosen after
+    // the answer it was chosen from is gone.
+    this.chosenOption = option;
     this.root.open = false;
     this.query = "";
     this.draw();
@@ -226,10 +264,55 @@ export class MstPicker extends HTMLElement {
     return option;
   }
 
+  // ask is the debounced call to the source, and it is the only place a
+  // searching picker fetches.
+  //
+  // **The answer that comes back is used only if it is still the answer
+  // to the question on screen.** A person typing "gno" then "gnoll"
+  // starts two calls, and the slower one landing last would fill the
+  // menu with matches for a word they have already finished typing.
+  ask() {
+    if (this.timer !== null) this.clearTimer(this.timer);
+    const asked = this.query;
+    this.timer = this.setTimer(async () => {
+      this.timer = null;
+      this.searching = true;
+      this.draw();
+      let found = [];
+      try {
+        found = await this.source(asked);
+      } catch {
+        // A source that threw is an empty answer with a sentence, not a
+        // crash inside a menu: the caller's own error surface is where a
+        // failed fetch belongs.
+        found = [];
+      }
+      if (asked !== this.query) return;
+      this.searching = false;
+      this.options = Array.isArray(found) ? found : [];
+      this.draw();
+    }, SEARCH_DELAY_MS);
+  }
+
+  // emptyWords is the sentence under a menu with nothing in it, and
+  // there are four of them because there are four ways to have nothing:
+  // still looking, nothing typed yet, a search that found none, and a
+  // vocabulary that is empty.
+  emptyWords() {
+    if (this.searching) return SEARCHING_LABEL;
+    if (this.source !== null) {
+      return this.query.trim() === "" ? SEARCH_HINT : "nothing matches “" + this.query.trim() + "”";
+    }
+    return this.options.length === 0
+      ? EMPTY_LABEL
+      : "nothing matches “" + this.query.trim() + "”";
+  }
+
   // label is what the control says when closed: the chosen option's own
   // words, or the caller's placeholder.
   label() {
-    const option = this.options.find((candidate) => candidate.key === this.chosen);
+    const option = this.options.find((candidate) => candidate.key === this.chosen)
+      ?? (this.chosenOption && this.chosenOption.key === this.chosen ? this.chosenOption : null);
     return option ? option.label : this.placeholder;
   }
 
@@ -242,7 +325,9 @@ export class MstPicker extends HTMLElement {
     const menu = doc.createElement("div");
     menu.setAttribute("class", CLASS_MENU);
 
-    if (this.options.length >= FILTER_FROM) {
+    // A searching picker always has the box, whatever it is holding: it
+    // is the only way to reach what it does not hold yet.
+    if (this.source !== null || this.options.length >= FILTER_FROM) {
       const filter = doc.createElement("input");
       filter.setAttribute("type", "search");
       filter.setAttribute("class", CLASS_FILTER);
@@ -250,6 +335,7 @@ export class MstPicker extends HTMLElement {
       filter.value = this.query;
       filter.addEventListener("input", () => {
         this.query = filter.value;
+        if (this.source !== null) this.ask();
         this.draw();
         // The box keeps the focus and the caret: redrawing under
         // somebody's hands and taking their cursor with it is the kind
@@ -265,16 +351,21 @@ export class MstPicker extends HTMLElement {
       menu.appendChild(filter);
     }
 
-    const showing = this.options.filter((option) => matches(option, this.query));
+    // **A searching picker does not filter what it was given**: the
+    // server already answered the question, and filtering the answer
+    // again would hide rows that matched on something the client cannot
+    // see — a row found by a word in one of its fields, which is exactly
+    // what this product's search is for.
+    const showing = this.source !== null
+      ? this.options
+      : this.options.filter((option) => matches(option, this.query));
     if (showing.length === 0) {
       const empty = doc.createElement("p");
       empty.setAttribute("class", CLASS_EMPTY);
       // Two different absences, two different sentences: a game with no
       // relation types has nothing to offer, and a filter that matched
       // none of them is the reader's own doing.
-      empty.textContent = this.options.length === 0
-        ? EMPTY_LABEL
-        : "nothing matches “" + this.query.trim() + "”";
+      empty.textContent = this.emptyWords();
       menu.appendChild(empty);
     }
     for (const option of showing) {

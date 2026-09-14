@@ -12,6 +12,7 @@ import {
   analysisURL,
   countLabel,
   entityURL,
+  fillState,
   gameURL,
   openGame,
   routesURL,
@@ -23,6 +24,10 @@ import {
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
 import { STATUS_WORDS } from "./routes.js";
+
+// The empty state, in the page rather than in the shell.
+export const NO_STEPS_HEADING = "No steps";
+export const NO_STEPS_SENTENCE = "This route asserts nothing yet.";
 
 // The four a step can come back as, in the reader's words. `ok` is not
 // "true": a verdict is a sentence about the design, not a boolean.
@@ -123,6 +128,11 @@ export function paintVerdict(doc, slug, route) {
 // position is the first column, because the order is what makes this a
 // claim rather than a set.
 export function paintSteps(doc, slug, route) {
+  fillState(doc, "route-steps-empty", {
+    heading: NO_STEPS_HEADING,
+    sentence: NO_STEPS_SENTENCE,
+  });
+
   const listEl = doc.getElementById("route-steps");
   const emptyEl = doc.getElementById("route-steps-empty");
   const steps = Array.isArray(route.steps) ? route.steps : [];

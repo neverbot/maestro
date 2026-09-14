@@ -60,7 +60,6 @@ function fakeElement(tag = "div") {
   const el = {
     tagName: tag,
     className: "",
-    textContent: "",
     href: "",
     open: false,
     hidden: false,
@@ -90,6 +89,22 @@ function fakeElement(tag = "div") {
       return null;
     },
   };
+  // **Setting `textContent` clears the children and reading it walks
+  // them**, as the real DOM does. Without the getter an assertion about
+  // what a built state says reads the empty string off the element the
+  // state was put into, and passes whether or not anything was built.
+  el._text = "";
+  Object.defineProperty(el, "textContent", {
+    enumerable: true,
+    get() {
+      if (this._text !== "") return this._text;
+      return this.children.map((child) => child.textContent ?? "").join("");
+    },
+    set(value) {
+      this._text = String(value);
+      this.children = [];
+    },
+  });
   return el;
 }
 
@@ -204,13 +219,11 @@ const HOME_IDS = [
   "views-more",
   "types",
   "types-empty",
-  "types-empty-action",
   "relation-types",
   "relation-types-empty",
   "docs",
   "doc-kinds",
   "docs-empty",
-  "docs-empty-action",
   "docs-error",
   "docs-more",
 ];
@@ -340,6 +353,25 @@ check("theGamesPageOffersASecondGame", async () => {
     dom.elements["new-game"].hidden,
     false,
     "an account that already has a game is still not offered a second one",
+  );
+});
+
+// The first thing a brand-new account sees is the shared negative state,
+// built by app.js rather than written into index.html. The markup used to
+// carry the heading and the sentence; a hole with nothing in it is only
+// right if something fills it, and nothing here had ever proved that.
+check("aBrandNewAccountIsToldWhatAGameIs", async () => {
+  const dom = mount({ ids: PICKER_IDS, pathname: "/games", games: [] });
+  const app = await load("../static/app.js");
+  const state = dom.elements["empty-state"];
+  assertEqual(state.hidden, false, "an account with no games was shown no empty state");
+  assert(
+    state.textContent.includes(app.NO_GAMES_HEADING),
+    `the empty state does not carry its heading: ${JSON.stringify(state.textContent)}`,
+  );
+  assert(
+    state.textContent.includes(app.NO_GAMES_SENTENCE),
+    `the empty state does not carry its sentence: ${JSON.stringify(state.textContent)}`,
   );
 });
 

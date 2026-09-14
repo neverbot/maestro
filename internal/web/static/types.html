@@ -43,17 +43,15 @@
 
 <h2>Entity types</h2>
 <ul class="catalogue" id="types"></ul>
-<div class="state" id="types-empty" hidden>
-  <b>No types yet</b>
-  <span>This game has no entity types yet. A game declares its own — Quest, Zone and Class for one game, Driver, Car and Circuit for another. <span id="types-empty-action"></span></span>
-</div>
+<!-- The hole a negative state is built into. The words live in
+     pages/types.js, because the second half of this one depends on who
+     is reading and because eight shells carrying eight copies of one
+     shape is the shared class without the shared component. -->
+<div id="types-empty" hidden></div>
 
 <h2>Relation types</h2>
 <ul class="catalogue" id="relation-types"></ul>
-<div class="state" id="relation-types-empty" hidden>
-  <b>No connections yet</b>
-  <span>No relation types yet. A relation type is a kind of edge between entities — takes_place_in, requires, unlocks — and is declared the same way an entity type is.</span>
-</div>
+<div id="relation-types-empty" hidden></div>
 <p class="error" id="catalogue-error" hidden></p>
 
 </main>

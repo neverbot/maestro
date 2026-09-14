@@ -147,7 +147,7 @@ func TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp(t *testing.T) {
 	}
 	shell := string(body)
 	source := homeScriptSource(t)
-	for _, id := range []string{"docs", "docs-empty", "docs-empty-action", "docs-error", "docs-more"} {
+	for _, id := range []string{"docs", "docs-empty", "docs-error", "docs-more"} {
 		if !strings.Contains(shell, `id="`+id+`"`) {
 			t.Errorf("game.html does not declare #%s", id)
 		}

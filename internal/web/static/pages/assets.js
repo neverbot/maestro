@@ -15,6 +15,7 @@ import {
   destinations,
   emptyOrRows,
   expired,
+  fillState,
   gameURL,
   openGame,
   say,
@@ -24,6 +25,13 @@ import {
 import { isDrawableHref } from "../render/scene.js";
 import { headerRow, nextCursorOf, row } from "../rows.js";
 import { goToLogin } from "../app.js";
+
+// The empty state, in the page rather than in the shell. It names where
+// an image actually comes from, because nothing on this screen uploads
+// one.
+export const NO_IMAGES_HEADING = "No images yet";
+export const NO_IMAGES_SENTENCE =
+  "A map view is given its background from the view itself, which is where an image is uploaded.";
 
 // Where an uploaded image is served from: **the URL the server spelled**,
 // filtered through the one href rule this front end has.
@@ -58,6 +66,10 @@ export function describeAsset(asset) {
 export async function assetsPage(opened) {
   const doc = opened.document;
   const noteEl = doc.getElementById("assets-note");
+  fillState(doc, "assets-empty", {
+    heading: NO_IMAGES_HEADING,
+    sentence: NO_IMAGES_SENTENCE,
+  });
   const listEl = doc.getElementById("assets");
   const emptyEl = doc.getElementById("assets-empty");
   const errorEl = doc.getElementById("assets-error");

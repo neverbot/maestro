@@ -11,18 +11,31 @@ import {
   DESTINATION_ANALYSIS,
   analysisURL,
   countLabel,
+  fillState,
   gameURL,
   openGame,
   routeURL,
   say,
   setBreadcrumb,
   setReadOnly,
+  whoWrites,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
 
 export const NOTE_ROUTES =
   "A route is a claim that one thing can be reached from another, saved so it can be checked " +
   "again when the design moves.";
+
+// The empty state's heading, and what its sentence is about.
+//
+// **It no longer repeats the note above it.** The shell's copy of this
+// state said, word for word, the sentence #routes-note says three lines
+// higher — two paragraphs of identical prose stacked on an otherwise
+// empty screen. What the note does not say is who saves a route, which
+// is the one thing a reader looking at nothing needs, so the state says
+// that instead and the role decides how.
+export const NO_ROUTES_HEADING = "No routes yet";
+export const SAVES_ROUTES = "saves them";
 
 // The three, in the reader's words, keyed by the engine's own spellings.
 export const STATUS_WORDS = {
@@ -62,6 +75,11 @@ export async function routesPage(opened) {
 
   const summary = await opened.client.summary();
   if (summary.ok) setReadOnly(doc, summary.result.role, "writes these routes");
+
+  fillState(doc, "routes-empty", {
+    heading: NO_ROUTES_HEADING,
+    sentence: whoWrites(summary.ok ? summary.result.role : "", SAVES_ROUTES),
+  });
 
   const listEl = doc.getElementById("routes");
   const emptyEl = doc.getElementById("routes-empty");

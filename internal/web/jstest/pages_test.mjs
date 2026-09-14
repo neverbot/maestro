@@ -228,13 +228,11 @@ const SHELL_IDS = [
   "view-list-note",
   "types",
   "types-empty",
-  "types-empty-action",
   "relation-types",
   "relation-types-empty",
   "docs",
   "doc-kinds",
   "docs-empty",
-  "docs-empty-action",
   "docs-error",
   "docs-more",
   "catalogue-note",
@@ -398,13 +396,11 @@ const HOME_IDS = [
   "views-more",
   "types",
   "types-empty",
-  "types-empty-action",
   "relation-types",
   "relation-types-empty",
   "docs",
   "doc-kinds",
   "docs-empty",
-  "docs-empty-action",
   "docs-error",
   "docs-more",
 ];
@@ -521,8 +517,11 @@ check("emptyStateActionsFollowTheRole", async () => {
     });
     await load("home");
     sentences[role] = {
-      types: dom.elements["types-empty-action"].textContent,
-      docs: dom.elements["docs-empty-action"].textContent,
+      // The whole state's text: the role-dependent half is the last
+      // sentence of the sentence the state carries, and the shell no
+      // longer has a span of its own for it to be written into.
+      types: dom.elements["types-empty"].textContent,
+      docs: dom.elements["docs-empty"].textContent,
     };
     assert(!dom.elements["types-empty"].hidden, `the ${role} did not get the entity-types empty state`);
     assert(!dom.elements["docs-empty"].hidden, `the ${role} did not get the documents empty state`);

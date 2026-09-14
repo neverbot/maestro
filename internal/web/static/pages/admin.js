@@ -23,8 +23,21 @@ import {
   sendJSON,
   setFormBusy,
 } from "../app.js";
-import { STATE_REFUSED, countLabel, emptyOrRows, negativeState, say } from "./page.js";
+import {
+  STATE_REFUSED,
+  countLabel,
+  emptyOrRows,
+  fillState,
+  negativeState,
+  say,
+} from "./page.js";
 import { headerRow, row } from "../rows.js";
+
+// The empty state, in the page rather than in the shell.
+export const NO_INVITES_HEADING = "Nobody is waiting";
+export const NO_INVITES_SENTENCE =
+  "No invitation is outstanding. One appears here from the moment you create it until the " +
+  "person uses it or you revoke it.";
 
 export const REVOKE = "Revoke";
 export const REVOKE_ARMED = "Revoke — click again";
@@ -103,6 +116,10 @@ export function expiry(value) {
 
 export async function loadInvites(doc, onRevoke) {
   const noteEl = doc.getElementById("admin-note");
+  fillState(doc, "invites-empty", {
+    heading: NO_INVITES_HEADING,
+    sentence: NO_INVITES_SENTENCE,
+  });
   const listEl = doc.getElementById("invites");
   const emptyEl = doc.getElementById("invites-empty");
   const errorEl = doc.getElementById("invites-error");

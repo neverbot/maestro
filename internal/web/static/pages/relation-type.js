@@ -16,6 +16,7 @@ import {
   DESTINATION_CATALOGUE,
   countLabel,
   expired,
+  fillState,
   gameURL,
   openGame,
   say,
@@ -27,6 +28,13 @@ import {
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
 import { goToLogin } from "../app.js";
+
+// The empty state, in the page rather than in the shell. It is not an
+// omission being reported: a relation type with no fields is the ordinary
+// case, and the sentence says so.
+export const NO_FIELDS_HEADING = "No fields";
+export const NO_FIELDS_SENTENCE =
+  "A relation of this type is the connection itself, and carries no values of its own.";
 
 // ANY_TYPE is what an empty endpoint list means, and it is the one place
 // this page says something the server did not: `source_type_keys: []` is
@@ -205,6 +213,11 @@ export async function relationTypePage(opened) {
     type.source_type_keys, type.target_type_keys);
 
   say(doc.getElementById("relation-type-role"), roleSentence(type.semantic_role, type.analysis_traits));
+
+  fillState(doc, "relation-type-fields-empty", {
+    heading: NO_FIELDS_HEADING,
+    sentence: NO_FIELDS_SENTENCE,
+  });
 
   const listEl = doc.getElementById("relation-type-fields");
   const emptyEl = doc.getElementById("relation-type-fields-empty");

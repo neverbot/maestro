@@ -11,6 +11,19 @@
 // the moment the user loses access to that game or it is deleted, with no
 // natural place server-side to notice either has happened.
 import { countLabel, markTables, row } from "./rows.js";
+import { STATE_REFUSED, fillState, negativeState } from "./state.js";
+
+// The first thing a brand-new account sees, in the same shape as every
+// other negative state in the product. index.html leaves the hole; these
+// are the words.
+export const NO_GAMES_HEADING = "No games yet";
+export const NO_GAMES_SENTENCE =
+  "A game is a world you are designing: its kinds of things, how they connect, and the writing " +
+  "that describes them. Make one to begin.";
+
+// The refusal that replaces it when /api/games will not answer.
+export const GAMES_REFUSED_HEADING = "Could not list your games";
+export const TRY_AGAIN = "Try again";
 
 const LAST_GAME_KEY = "maestro:lastGame";
 
@@ -717,16 +730,14 @@ if (gamesList) {
       // the list it would have filled is not coming.
       if (statusEl) statusEl.textContent = "";
       if (emptyState) {
-        emptyState.className = "state refused";
-        emptyState.replaceChildren();
-        const heading = document.createElement("b");
-        heading.textContent = "Could not list your games";
-        const sentence = document.createElement("span");
-        sentence.textContent = result.message;
-        const again = document.createElement("a");
-        again.href = "/games";
-        again.textContent = "Try again";
-        emptyState.append(heading, sentence, again);
+        emptyState.replaceChildren(
+          negativeState(document, {
+            kind: STATE_REFUSED,
+            heading: GAMES_REFUSED_HEADING,
+            sentence: result.message,
+            action: { href: "/games", label: TRY_AGAIN },
+          }),
+        );
         emptyState.hidden = false;
       }
     }
@@ -757,6 +768,10 @@ if (gamesList) {
       // someone unstuck: creating a game (POST /api/games already exists
       // and already accepts a session caller).
       if (statusEl) statusEl.textContent = "";
+      fillState(document, "empty-state", {
+        heading: NO_GAMES_HEADING,
+        sentence: NO_GAMES_SENTENCE,
+      });
       if (emptyState) emptyState.hidden = false;
       if (newGame) {
         newGame.hidden = false;

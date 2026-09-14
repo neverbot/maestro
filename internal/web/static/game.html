@@ -65,20 +65,13 @@
          and telling a viewer to do what the server will refuse is worse
          than telling them nothing. pages/home.js fills it from the
          caller's own role, which GET /summary carries. -->
-    <div class="state" id="types-empty" hidden>
-      <b>No types yet</b>
-      <span>A game declares its own: Quest, Zone and Class for one, Driver, Car
-        and Circuit for another.</span>
-      <span id="types-empty-action"></span>
-    </div>
+    <!-- The hole; pages/home.js carries the words, including the half
+         that depends on who is reading. -->
+<div id="types-empty" hidden></div>
 
     <h3>Relation types</h3>
     <ul class="catalogue" id="relation-types"></ul>
-    <div class="state" id="relation-types-empty" hidden>
-      <b>No connections yet</b>
-      <span>A relation type is a kind of edge between entities: takes_place_in,
-        requires, unlocks.</span>
-    </div>
+    <div id="relation-types-empty" hidden></div>
   </section>
 
   <section class="lane" id="prose" aria-labelledby="lane-prose-heading">
@@ -93,12 +86,7 @@
     <!-- Same rule as the types empty state above: the second line depends
          on who is reading, and a viewer must not be told to do what the
          server will refuse. -->
-    <div class="state" id="docs-empty" hidden>
-      <b>No prose yet</b>
-      <span>A document is writing addressed by a path inside this game, such as
-        lore/duskwood, kept version by version.</span>
-      <span id="docs-empty-action"></span>
-    </div>
+    <div id="docs-empty" hidden></div>
     <p class="error" id="docs-error" hidden></p>
     <button type="button" class="link-button" id="docs-more" hidden>Show more documents</button>
   </section>

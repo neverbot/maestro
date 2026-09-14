@@ -27,7 +27,25 @@ import { nextCursorOf } from "./rows.js";
 // The chrome every other page gets. This reading view was rendering the
 // header with no destinations at all, which is one of the three
 // different chromes the 2026-09-09 audit found inside a single game.
-import { DESTINATION_PROSE, destinations, gameURL, setBreadcrumb, setReadOnly } from "./pages/page.js";
+import {
+  DESTINATION_PROSE,
+  destinations,
+  fillState,
+  gameURL,
+  setBreadcrumb,
+  setReadOnly,
+  whoWrites,
+} from "./pages/page.js";
+
+// The empty state, in the page rather than in the shell.
+//
+// **It no longer teaches an API.** The shell's copy named the MCP tool
+// (`docs.links.add`) and the game's content routes to a reader whose
+// whole reason for being here is that they do not write code, which is
+// the one thing negativeState says a negative state never does. Who does
+// it is the useful half, and it is the half this says.
+export const NOT_ATTACHED_HEADING = "Attached to nothing";
+export const ATTACHES_IT = "attaches it to one";
 // A relative specifier, not "/static/app.js": the browser resolves it
 // against this module's own URL and gets the same file either way, and
 // Node — which internal/web/jstest drives this page with — can resolve
@@ -441,7 +459,10 @@ async function renderDocument(game, docPath, gameName) {
     bodyEl.hidden = false;
   }
 
-  fillEntities(Array.isArray(doc.links) ? doc.links : []);
+  // The reader's own role, which the summary above already carries: the
+  // empty state's last sentence depends on it and a viewer must not be
+  // told to attach a document the server will refuse to attach.
+  fillEntities(Array.isArray(doc.links) ? doc.links : [], summary.ok ? summary.body.role : "");
 
   const role = await loadRole(game);
   await renderHistory(game, docPath, version, membersByID, role);
@@ -455,7 +476,11 @@ async function renderDocument(game, docPath, gameName) {
 // fillEntities renders the attachments the reading view already carried,
 // so this page does not ask /docs/links for what /docs/rendered just
 // answered with.
-function fillEntities(links) {
+function fillEntities(links, role) {
+  fillState(document, "doc-entities-empty", {
+    heading: NOT_ATTACHED_HEADING,
+    sentence: whoWrites(role, ATTACHES_IT),
+  });
   const listEl = document.getElementById("doc-entities");
   const emptyEl = document.getElementById("doc-entities-empty");
   if (!listEl) {

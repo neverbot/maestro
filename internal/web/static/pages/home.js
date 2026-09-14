@@ -32,6 +32,7 @@ import {
   emptyOrRows,
   expired,
   fill,
+  fillState,
   onboarding,
   openGame,
   row,
@@ -52,6 +53,28 @@ import { goToLogin } from "../app.js";
 // functions, because "who may do this" is one rule with two subjects.
 export const DECLARES_TYPES = "declares them";
 export const WRITES_DOCUMENTS = "writes them";
+
+// The three negative states the home's lanes can be in. They live here
+// rather than in game.html, and pages/types.js reads the first two from
+// here rather than keeping a second wording of the same state: the
+// catalogue destination shows the same two catalogues this lane does,
+// and two wordings of one state is one of them going stale.
+//
+// The first and the third end with whoWrites at the call site, because
+// their last sentence depends on who is reading and a viewer must not be
+// told to do what the server will refuse.
+export const NO_TYPES_HEADING = "No types yet";
+export const NO_TYPES_SENTENCE =
+  "A game declares its own — Quest, Zone and Class for one game, Driver, Car and Circuit for " +
+  "another.";
+export const NO_RELATION_TYPES_HEADING = "No connections yet";
+export const NO_RELATION_TYPES_SENTENCE =
+  "A relation type is a kind of edge between entities — takes_place_in, requires, unlocks — and " +
+  "is declared the same way an entity type is.";
+export const NO_PROSE_HEADING = "No prose yet";
+export const NO_PROSE_SENTENCE =
+  "A document is writing addressed by a path inside this game, such as lore/duskwood, kept " +
+  "version by version.";
 
 // describeTotals is the one line under the game's name. An empty game
 // says so in words rather than showing three zeros, which reads as a
@@ -213,7 +236,14 @@ async function catalogueLane(doc, slug, client, summaryEl) {
   const entityTypes = Array.isArray(summary.entity_types) ? summary.entity_types : [];
   const relationTypes = Array.isArray(summary.relation_types) ? summary.relation_types : [];
   say(summaryEl, describeTotals(summary.totals));
-  say(doc.getElementById("types-empty-action"), whoWrites(summary.role, DECLARES_TYPES));
+  fillState(doc, "types-empty", {
+    heading: NO_TYPES_HEADING,
+    sentence: NO_TYPES_SENTENCE + " " + whoWrites(summary.role, DECLARES_TYPES),
+  });
+  fillState(doc, "relation-types-empty", {
+    heading: NO_RELATION_TYPES_HEADING,
+    sentence: NO_RELATION_TYPES_SENTENCE,
+  });
 
   fill(
     doc.getElementById("types"),
@@ -294,7 +324,6 @@ function proseLane(doc, slug, client) {
   const errorEl = doc.getElementById("docs-error");
   const moreEl = doc.getElementById("docs-more");
   const kindsEl = doc.getElementById("doc-kinds");
-  const actionEl = doc.getElementById("docs-empty-action");
 
   let cursor = null;
   let rendered = 0;
@@ -344,7 +373,10 @@ function proseLane(doc, slug, client) {
   }
 
   async function load(role) {
-    say(actionEl, whoWrites(role, WRITES_DOCUMENTS));
+    fillState(doc, "docs-empty", {
+      heading: NO_PROSE_HEADING,
+      sentence: NO_PROSE_SENTENCE + " " + whoWrites(role, WRITES_DOCUMENTS),
+    });
     // The vocabulary first, because it describes the list below it and a
     // reader scanning down should meet it before the rows. A failed
     // request leaves the line hidden rather than showing a wrong

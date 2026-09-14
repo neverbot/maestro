@@ -22,6 +22,7 @@ import {
   fail,
   fill,
   gameURL,
+  fillState,
   openGame,
   relationTypeURL,
   row,
@@ -31,8 +32,26 @@ import {
   typeURL,
   whoWrites,
 } from "./page.js";
-import { DECLARES_TYPES, describeTotals } from "./home.js";
+import {
+  DECLARES_TYPES,
+  NO_RELATION_TYPES_HEADING,
+  NO_RELATION_TYPES_SENTENCE,
+  NO_TYPES_HEADING,
+  NO_TYPES_SENTENCE,
+  describeTotals,
+} from "./home.js";
 import { goToLogin } from "../app.js";
+
+// The two negative states this screen can be in are the home lane's own,
+// stated once in pages/home.js and re-exported here: this page and that
+// lane show the same two catalogues from the same call, so they are the
+// same state and not two states that happen to agree.
+export {
+  NO_RELATION_TYPES_HEADING,
+  NO_RELATION_TYPES_SENTENCE,
+  NO_TYPES_HEADING,
+  NO_TYPES_SENTENCE,
+} from "./home.js";
 
 export async function typesPage(opened) {
   const doc = opened.document;
@@ -65,7 +84,14 @@ export async function typesPage(opened) {
   const summary = answer.result;
   say(noteEl, describeTotals(summary.totals));
   setReadOnly(doc, summary.role, "declares the types");
-  say(doc.getElementById("types-empty-action"), whoWrites(summary.role, DECLARES_TYPES));
+  fillState(doc, "types-empty", {
+    heading: NO_TYPES_HEADING,
+    sentence: NO_TYPES_SENTENCE + " " + whoWrites(summary.role, DECLARES_TYPES),
+  });
+  fillState(doc, "relation-types-empty", {
+    heading: NO_RELATION_TYPES_HEADING,
+    sentence: NO_RELATION_TYPES_SENTENCE,
+  });
 
   fill(
     doc.getElementById("types"),

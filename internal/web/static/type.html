@@ -85,17 +85,12 @@
 <div class="scroller">
   <ul class="catalogue wide" id="entities" hidden></ul>
 </div>
-<div class="state" id="entities-empty" hidden>
-  <b>Nothing of this type yet</b>
-  <span id="entities-empty-action">An agent writes them; nothing on this page does.</span>
-</div>
+<!-- The hole; pages/catalogue.js carries the words. -->
+<div id="entities-empty" hidden></div>
 <!-- A search that found nothing is its own state, and it names what the
      type does hold: "Nothing of this type yet" under a heading saying 105
      entities is the page contradicting itself three lines apart. -->
-<div class="state" id="entities-miss" hidden>
-  <b id="entities-miss-head"></b>
-  <span id="entities-miss-body"></span>
-</div>
+<div id="entities-miss" hidden></div>
 <p class="error" id="entities-error" hidden></p>
 <button type="button" class="btn-more" id="entities-more" hidden>Show more</button>
 

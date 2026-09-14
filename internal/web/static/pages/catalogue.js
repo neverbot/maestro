@@ -23,6 +23,7 @@ import {
   emptyOrRows,
   entityURL,
   expired,
+  fillState,
   gameURL,
   negativeState,
   openGame,
@@ -52,6 +53,8 @@ export const CATALOGUE_NOTE =
 // entity the server will refuse is worse than telling them nothing. A
 // second call for one sentence is the wrong trade, so the sentence says
 // what is true for everybody and stops.
+export const NOTHING_OF_THIS_TYPE_HEADING = "Nothing of this type yet";
+export const NOTHING_OF_THIS_TYPE_SENTENCE = "An agent writes them; nothing on this page does.";
 
 // **The pages get bigger as a reader keeps going.** A thousand rows at
 // fifty a press is eighteen presses, each after scrolling to a button
@@ -110,6 +113,10 @@ export async function cataloguePage(opened) {
   const nameEl = doc.getElementById("type-name");
   const metaEl = doc.getElementById("type-meta");
   const noteEl = doc.getElementById("type-note");
+  fillState(doc, "entities-empty", {
+    heading: NOTHING_OF_THIS_TYPE_HEADING,
+    sentence: NOTHING_OF_THIS_TYPE_SENTENCE,
+  });
   const listEl = doc.getElementById("entities");
   const emptyEl = doc.getElementById("entities-empty");
   const errorEl = doc.getElementById("entities-error");
@@ -165,8 +172,10 @@ export async function cataloguePage(opened) {
       action: { href: typesURL(opened.slug), label: "This game's catalogue" },
     });
     const host = doc.getElementById("entities-empty");
-    if (host && host.parentNode) host.parentNode.replaceChild(refusal, host);
-    else say(errorEl, type.error.message);
+    if (host) {
+      host.replaceChildren(refusal);
+      host.hidden = false;
+    } else say(errorEl, type.error.message);
     return opened;
   }
   const typeName = type.result.label_plural || type.result.label || type.result.key;
@@ -286,8 +295,15 @@ export async function cataloguePage(opened) {
 
   const searchEl = doc.getElementById("entities-search");
   const missEl = doc.getElementById("entities-miss");
-  const missHeadEl = doc.getElementById("entities-miss-head");
-  const missBodyEl = doc.getElementById("entities-miss-body");
+
+  // The third negative state, built where the other two are rather than
+  // being two empty slots in the shell waiting to be written into: a
+  // hole with an id cannot drift from the shape, and a `<b>` and a
+  // `<span>` sitting in the markup can.
+  function sayMiss(heading, sentence) {
+    fillState(doc, "entities-miss", { heading, sentence });
+    if (missEl) missEl.hidden = false;
+  }
   const scopeEl = doc.getElementById("entities-scope");
 
   let cursor = null;
@@ -427,16 +443,12 @@ export async function cataloguePage(opened) {
     if (filtering() && rendered === 0) {
       listEl.hidden = true;
       if (emptyEl) emptyEl.hidden = true;
-      if (missEl) {
-        missEl.hidden = false;
-        say(missHeadEl, nothingFound());
-        say(
-          missBodyEl,
-          total === null
-            ? "This type has entities; none of them answers that."
-            : countLabel(total, "entity", "entities") + " of this type, and none of them answers that.",
-        );
-      }
+      sayMiss(
+        nothingFound(),
+        total === null
+          ? "This type has entities; none of them answers that."
+          : countLabel(total, "entity", "entities") + " of this type, and none of them answers that.",
+      );
     } else {
       if (missEl && query === "") missEl.hidden = true;
       emptyOrRows(listEl, emptyEl, rendered);
@@ -527,9 +539,8 @@ export async function cataloguePage(opened) {
       const missed = query !== "" && rendered === 0;
       missEl.hidden = !missed;
       if (missed) {
-        say(missHeadEl, "No match for \u201c" + query + "\u201d");
-        say(
-          missBodyEl,
+        sayMiss(
+          "No match for \u201c" + query + "\u201d",
           total === null
             ? "Nothing of this type matches that name or key."
             : countLabel(total, "entity", "entities") + " of this type, and none of them matches that name or key.",

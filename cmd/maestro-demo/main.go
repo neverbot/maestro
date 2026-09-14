@@ -428,16 +428,37 @@ func writeViews(ctx context.Context, saved *views.Service, game uuid.UUID, owner
 		{
 			Key: "quests", Name: "The quest chain", Renderer: "graph",
 			Description: "What has to be done before what.",
+			// **`edges` is not optional if you want lines.** A traverse
+			// walks relations; it does not draw them. The first version
+			// of this demo left it out and the view rendered ten boxes
+			// in a row with nothing between them — a quest chain with no
+			// chain, which is worse than no demo at all because it
+			// teaches that the graph renderer cannot draw edges.
 			Query: []byte(`{"v":1,"from":[{"type":"quest","as":"quest"}],` +
 				`"traverse":[{"from":"quest","via":"requires","as":"step1","direction":"out","depth":3}],` +
+				`"edges":[{"from_step":"step1"}],` +
 				`"project":{"color_by":"faction"}}`),
-			Actor: actor,
+			// **Two halves, and a view needs both.** The query's
+			// `project.color_by` decides *what value* each node carries;
+			// the renderer's `color_by` names the slot it paints from.
+			// With only the first the demo drew ten identical boxes and
+			// no legend — the colour was in the answer and nothing read
+			// it, which is the same shape of defect as a knob with no
+			// reader anywhere else in this repository.
+			RendererParams: map[string]any{"color_by": "color_by"},
+			Actor:          actor,
 		},
 		{
 			Key: "creatures", Name: "Every creature", Renderer: "table",
 			Description: "The listing that needs paging.",
-			Query:       []byte(`{"v":1,"from":[{"type":"creature"}],"project":{"color_by":"tier"}}`),
-			Actor:       actor,
+			Query:       []byte(`{"v":1,"from":[{"type":"creature"}],"project":{"fields":["tier"]}}`),
+			// **A renderer's knobs are its own.** `color_by` is the
+			// graph's; the table takes columns, sort, group_by and
+			// page_size, and the server refuses the wrong one by name —
+			// which is how this demo found out, and why the two views
+			// here are set up differently on purpose.
+			RendererParams: map[string]any{"columns": []any{"tier"}},
+			Actor:          actor,
 		},
 	}
 	for _, in := range rows {

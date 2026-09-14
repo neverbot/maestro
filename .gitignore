@@ -3,8 +3,17 @@
 *.pem
 *.key
 
-# Build artefacts and binaries
-maestro
+# Build artefacts and binaries: what `go build ./...` drops in the
+# working directory, one per cmd/.
+#
+# **Anchored, every one of them.** A bare `maestro-demo` matches a path
+# segment at any depth, so it ignores `cmd/maestro-demo/` as well as the
+# binary — which is how this line was first written, and git refused to
+# add the package it had just hidden.
+/maestro
+/maestro-demo
+/maestro-docs
+/maestro-skilldoc
 bin/
 dist/
 tmp/

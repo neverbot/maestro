@@ -149,13 +149,33 @@ export function legendFor(nodes, slot) {
   // name: the tail is the long thin part of the distribution, and
   // choosing it alphabetically would hatch a zone with forty quests in
   // it because it happens to start with a Z.
+  // **A hue is a value's own, unless another value in this picture wants
+  // it.** `hueFor` hashes a value to one of eight slots, which is what
+  // makes a zone the same colour in every view that mentions it — and
+  // two values whose hashes land on the same slot got the same colour in
+  // one picture. Seen on the demo game: `neutral` and `alliance`, two
+  // legend rows with one swatch between them, in a legend whose whole
+  // job is telling values apart.
+  //
+  // So the hash is where a value *asks* to sit, and a taken slot sends
+  // it to the next free one, in frequency order. Stability is unchanged
+  // for every value that gets its own hash, which is the common case;
+  // what it costs is that a value can change hue between two pictures
+  // that hold different sets — which is exactly when telling it from its
+  // neighbour matters more than recognising it across screens.
+  const taken = new Set();
   for (const [value, count] of ordered.slice(0, DATA_SLOTS)) {
+    let index = hueFor(value);
+    for (let step = 0; taken.has(index) && step < DATA_SLOTS; step += 1) {
+      index = (index + 1) % DATA_SLOTS;
+    }
+    taken.add(index);
     const row = {
       kind: "hue",
       value,
       label: labelFor(value),
       count,
-      index: hueFor(value),
+      index,
       members: null,
     };
     rows.push(row);

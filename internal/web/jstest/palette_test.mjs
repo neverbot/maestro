@@ -212,6 +212,37 @@ check("legendRowsAreOrderedByCountThenValue", () => {
 // fillFor is the only place a slot becomes paint. It names tokens, never
 // hex: the light and dark sets are two declarations of the same names,
 // and a mark that reached for a hex value would be right in one theme.
+// **No two rows of one legend wear the same hue.** `hueFor` hashes a
+// value to a slot so a zone is the same colour in every view that
+// mentions it, and two values whose hashes collide got one swatch
+// between them — seen on the demo game, where `neutral` and `alliance`
+// were both data-7 in a legend whose whole job is telling values apart.
+// A taken slot now sends a value to the next free one.
+check("twoValuesNeverShareAHueInOneLegend", () => {
+  // Enough values that a collision is near-certain over eight slots, and
+  // every one of them distinct.
+  const nodes = [];
+  const values = ["neutral", "alliance", "horde", "ash", "elwynn", "westfall", "duskwood", "redridge"];
+  values.forEach((value, i) => {
+    for (let n = 0; n <= i; n += 1) nodes.push({ attrs: { zone: value } });
+  });
+
+  const { rows } = legendFor(nodes, "zone");
+  const hues = rows.filter((row) => row.kind === "hue").map((row) => row.index);
+  assertEqual(hues.length, values.length, "every value took a hue row");
+  assertEqual(new Set(hues).size, hues.length, "and no two of them took the same hue");
+  for (const index of hues) {
+    assert(index >= 0 && index < 8, `hue ${index} is outside the eight slots`);
+  }
+});
+
+// A value that meets no competition still gets the hue its own hash
+// asks for, which is what keeps one zone the same colour across views.
+check("aValueKeepsItsOwnHueWhenNothingTakesIt", () => {
+  const { rows } = legendFor([{ attrs: { zone: "elwynn" } }], "zone");
+  assertEqual(rows[0].index, hueFor(JSON.stringify("elwynn")), "the hash chose it");
+});
+
 check("fillForNamesATokenAndNeverAHexValue", () => {
   const { rows } = legendFor(
     [

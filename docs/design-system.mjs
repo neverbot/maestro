@@ -171,6 +171,12 @@ const css = `
 :root {
 ${vars(false)}
 ${shadows.map((s, i) => `  --shadow-${i + 1}: ${s.value};`).join("\n")}
+  /* The three faces, as tokens, because the components below are the
+     product's own snippets and a font stack spelled out in one of them
+     is a copy that goes stale. */
+  --serif: ${fm.typography.display.fontFamily};
+  --sans: ${fm.typography.body.fontFamily};
+  --mono: ${fm.typography.mono.fontFamily};
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
 ${vars(true)}
@@ -193,9 +199,9 @@ ${vars(true)}
 .ds .row:last-child { border-bottom:0; }
 .ds .meta { display:grid; gap:.1rem; }
 .ds .meta b { font:${fm.typography.label.fontWeight} ${fm.typography.label.fontSize}/${fm.typography.label.lineHeight} ${fm.typography.label.fontFamily}; letter-spacing:${fm.typography.label.letterSpacing}; }
-.ds .meta span { color:var(--muted); font-size:.8rem; }
+.ds .meta span { color:var(--muted); font-size:${fm.typography.body.fontSize}; }
 .ds .shadows { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:1rem; }
-.ds .sh { display:grid; gap:.25rem; } .ds .sh b { font-weight:600; } .ds .sh span { color:var(--muted); font-size:.82rem; }
+.ds .sh { display:grid; gap:.25rem; } .ds .sh b { font-weight:600; } .ds .sh span { color:var(--muted); font-size:${fm.typography.body.fontSize}; }
 .ds .sh .chip { height:52px; background:var(--raised); border:1px solid var(--line); border-radius:${fm.rounded.sm}; margin-bottom:.4rem; }
 .ds .comps { display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
 .ds .comp h3 { font:${fm.typography.title.fontWeight} ${fm.typography.title.fontSize}/${fm.typography.title.lineHeight} ${fm.typography.title.fontFamily}; margin:0 0 .2rem; }

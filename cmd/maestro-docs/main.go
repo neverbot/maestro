@@ -98,6 +98,9 @@ type page struct {
 type section struct {
 	ID   string
 	Text string
+	// Identifier is set when the heading is a machine name rather than
+	// a sentence, which decides the voice it is set in.
+	Identifier bool
 }
 
 // headingRE is an h2 of a rendered page. The generator owns both ends of
@@ -109,8 +112,23 @@ var headingRE = regexp.MustCompile(`<h2>(.*?)</h2>`)
 // tagRE strips inline markup out of a heading before it becomes an id.
 var tagRE = regexp.MustCompile(`<[^>]+>`)
 
-// nonWord is every run of characters that is not a word in a slug.
-var nonWord = regexp.MustCompile(`[^a-z0-9]+`)
+// nonWord is every run of characters that is not a word in a slug. The
+// underscore survives because a heading that is a machine name is the
+// one a reader guesses the anchor of: `#relation_types` is the tool
+// domain's own spelling and `#relation-types` is this generator's.
+var nonWord = regexp.MustCompile(`[^a-z0-9_]+`)
+
+// identifierRE is a heading that is a machine identifier rather than a
+// sentence: one lowercase token, no spaces. `analysis`, `docs`,
+// `relation_types` and `entities` are the tool surface's eleven domain
+// headings and they are the names a client sends over the wire; "Running
+// it" and "Known limitations" are Maestro talking.
+//
+// **It is a shape and not a guess.** The Copyable Is Mono Rule says a
+// value a person might select and paste is monospace, and "has no spaces
+// and no capitals" is a property of the text rather than an opinion
+// about it, which is why this can be a rule at all.
+var identifierRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]*$`)
 
 // anchor gives every h2 an id and returns the list, so the rail can
 // carry the page's own contents and a reader can link a section.
@@ -130,8 +148,12 @@ func anchor(body string) (string, []section) {
 			id = fmt.Sprintf("%s-%d", strings.Trim(nonWord.ReplaceAllString(strings.ToLower(text), "-"), "-"), n)
 		}
 		taken[id] = true
-		out = append(out, section{ID: id, Text: text})
-		return `<h2 id="` + id + `">` + inner + `</h2>`
+		out = append(out, section{ID: id, Text: text, Identifier: identifierRE.MatchString(text)})
+		class := ""
+		if identifierRE.MatchString(text) {
+			class = ` class="ident"`
+		}
+		return `<h2 id="` + id + `"` + class + ">" + inner + "</h2>"
 	})
 	return rendered, out
 }
@@ -317,6 +339,8 @@ func collect(root string) ([]page, error) {
 	}
 	pages = append(pages, agentsIndexPage(bundle))
 	pages = append(pages, bundle...)
+	// Last, because it is built out of every page above it.
+	pages = append(pages, sitemapPage(pages))
 	pages = append(pages, notFoundPage())
 	return pages, nil
 }
@@ -436,6 +460,16 @@ const agentsIndexPath = "agents/index.html"
 // the filesystem sorts them.
 var groupOrder = []string{"", "reference", "modelling", "recipes", "genres"}
 
+// groupID is the anchor a group heading carries. The bundle's root
+// group has no directory, and an empty id is an anchor that goes
+// nowhere.
+func groupID(key string) string {
+	if key == "" {
+		return "start"
+	}
+	return key
+}
+
 var groupLabels = map[string]string{
 	"":          "Start here",
 	"reference": "Reference",
@@ -491,7 +525,7 @@ func agentsIndexPage(bundle []page) page {
 	for _, group := range grouped(bundle) {
 		// h2 and not h3: an h1 followed by an h3 skips a level, which is
 		// what a reader on a screen reader hears as a missing section.
-		out.WriteString("<section>\n<h2 id=\"" + groupOf(group[0]) + "\">" +
+		out.WriteString("<section>\n<h2 id=\"" + groupID(groupOf(group[0])) + "\">" +
 			escape(groupLabels[groupOf(group[0])]) + "</h2>\n<ul>\n")
 		for _, p := range group {
 			href := strings.TrimPrefix(p.Path, "agents/")
@@ -504,7 +538,20 @@ func agentsIndexPage(bundle []page) page {
 		out.WriteString("</ul>\n</section>\n")
 	}
 	out.WriteString("</div>\n")
-	return page{Path: agentsIndexPath, Title: "What an agent is told", Body: out.String()}
+	// The groups are this page's sections. They are written above with
+	// their own ids rather than passed through anchor, so they are
+	// listed here rather than discovered.
+	var sections []section
+	for _, group := range grouped(bundle) {
+		key := groupOf(group[0])
+		sections = append(sections, section{ID: groupID(key), Text: groupLabels[key]})
+	}
+	return page{
+		Path:     agentsIndexPath,
+		Title:    "What an agent is told",
+		Body:     out.String(),
+		Sections: sections,
+	}
 }
 
 // agentsPointer is what the home page keeps where the list used to be: a
@@ -519,6 +566,64 @@ func agentsPointer() string {
 		"<a href=\"" + agentsIndexPath + "\">Read the bundle</a>.</p>\n"
 }
 
+// mapPath is the one page that holds the whole site at once.
+const mapPath = "map.html"
+
+// sitemapPage is this site's answer to "where is the thing called X".
+//
+// **It is an index and not a search box, and that is design.md's own
+// argument.** The frame refuses a search field in the product's header
+// ("search belongs to the catalogue it filters, and a second one here
+// would be a control that searches nothing in particular"), and a box
+// that searched this site would need an index, a script and a payload on
+// a site that ships no JavaScript at all. One page carrying every
+// heading of every page is the same answer with none of that: the
+// browser's own find already searches a page, and here the page is the
+// site.
+//
+// Each page is a `details`, **open**, so the reader can fold away what
+// they are not reading and find-in-page still sees every word. Closed by
+// default would have been tidier and would have broken the one thing
+// this page is for.
+func sitemapPage(pages []page) page {
+	var out strings.Builder
+	out.WriteString("<h1>Everything on this site</h1>\n")
+	out.WriteString("<p>Every page, and every section of every page. There is no search box: this " +
+		"site ships no JavaScript, and your browser's own find (<kbd>Ctrl</kbd>+<kbd>F</kbd>, " +
+		"<kbd>⌘</kbd>+<kbd>F</kbd>) searches this page, which carries all of it.</p>\n")
+	out.WriteString(`<div class="map">` + "\n")
+	for _, p := range pages {
+		if p.Path == mapPath || p.Path == "404.html" {
+			continue
+		}
+		title := p.Title
+		if title == "" {
+			title = "Readme"
+		}
+		out.WriteString("<details open>\n<summary><b>" + escape(title) + "</b>")
+		if p.Blurb != "" {
+			out.WriteString("<span>" + escape(p.Blurb) + "</span>")
+		}
+		out.WriteString("</summary>\n")
+		if len(p.Sections) == 0 {
+			out.WriteString(`<ul><li><a href="` + p.Path + `">Open the page</a></li></ul>` + "\n</details>\n")
+			continue
+		}
+		out.WriteString("<ul>\n")
+		for _, sec := range p.Sections {
+			class := ""
+			if sec.Identifier {
+				class = ` class="ident"`
+			}
+			out.WriteString(`<li><a href="` + p.Path + "#" + sec.ID + `"` + class + ">" +
+				escape(sec.Text) + "</a></li>\n")
+		}
+		out.WriteString("</ul>\n</details>\n")
+	}
+	out.WriteString("</div>\n")
+	return page{Path: mapPath, Title: "Everything on this site", Body: out.String()}
+}
+
 // notFoundPage is the third negative state, on the one surface that can
 // reach it. GitHub Pages serves /404.html for a path it does not have,
 // and without this the reader leaves the design entirely at the exact
@@ -530,7 +635,8 @@ func notFoundPage() page {
 		Body: "<h1>There is nothing at this address</h1>\n" +
 			"<p>This site has no page at the address you asked for. It may have been a typo, or a " +
 			"link to a page that has since been renamed.</p>\n" +
-			"<p><a href=\"index.html\">Back to the readme</a></p>\n",
+			"<p><a href=\"" + mapPath + "\">Everything on this site</a>, or " +
+			"<a href=\"index.html\">back to the readme</a>.</p>\n",
 	}
 }
 
@@ -598,6 +704,52 @@ func depthOf(p string) int {
 	return strings.Count(p, "/")
 }
 
+// crumbsFor is the trail under the header: where this page sits, and
+// the way back up it.
+//
+// docs/design.md's frame puts one on every screen ("a 32px breadcrumb,
+// then the page head"), for the reason product.md's first principle
+// gives: a reader who cannot name the screen they are on has no map. The
+// site had none, and its deepest pages are three levels down.
+func crumbsFor(p page, bundle []page, up string) string {
+	type crumb struct{ href, label string }
+	trail := []crumb{{up + "index.html", "Maestro"}}
+
+	switch {
+	case p.Path == "index.html":
+		trail = []crumb{{"", "Maestro"}}
+	case strings.HasPrefix(p.Path, "agents/"):
+		if p.Path == agentsIndexPath {
+			trail = append(trail, crumb{"", "For agents"})
+			break
+		}
+		trail = append(trail, crumb{up + agentsIndexPath, "For agents"})
+		if label, ok := groupLabels[groupOf(p)]; ok && groupOf(p) != "" {
+			// The group is a heading on the index and not a page of its
+			// own, so the crumb points at it there rather than nowhere.
+			trail = append(trail, crumb{up + agentsIndexPath + "#" + groupID(groupOf(p)), label})
+		}
+		trail = append(trail, crumb{"", p.Title})
+	default:
+		trail = append(trail, crumb{"", p.Title})
+	}
+
+	var out strings.Builder
+	out.WriteString(`<nav class="crumbs" aria-label="Breadcrumb">`)
+	for i, c := range trail {
+		if i > 0 {
+			out.WriteString(`<span aria-hidden="true">/</span>`)
+		}
+		if c.href == "" {
+			out.WriteString(`<b aria-current="page">` + escape(c.label) + `</b>`)
+			continue
+		}
+		out.WriteString(`<a href="` + c.href + `">` + escape(c.label) + `</a>`)
+	}
+	out.WriteString("</nav>\n")
+	return out.String()
+}
+
 // railFor is the navigation beside the content: where this page sits in
 // the site, what else sits beside it, and what is on it.
 //
@@ -615,9 +767,10 @@ func railFor(p page, bundle []page, up string) string {
 		{"index.html", "Readme"},
 		{agentsIndexPath, "What an agent is told"},
 		{"design-system.html", "Design system"},
+		{mapPath, "Everything on this site"},
 		{"license.html", "License"},
 	} {
-		out.WriteString(railLink(up+entry.href, entry.label, p.Path == entry.href))
+		out.WriteString(railLink(up+entry.href, entry.label, p.Path == entry.href, false))
 	}
 	out.WriteString("</ul>\n</section>\n")
 
@@ -632,7 +785,7 @@ func railFor(p page, bundle []page, up string) string {
 			}
 			out.WriteString("<section>\n<h2>" + escape(groupLabels[key]) + "</h2>\n<ul>\n")
 			for _, sibling := range group {
-				out.WriteString(railLink(up+sibling.Path, sibling.Title, sibling.Path == p.Path))
+				out.WriteString(railLink(up+sibling.Path, sibling.Title, sibling.Path == p.Path, false))
 			}
 			out.WriteString("</ul>\n</section>\n")
 		}
@@ -643,7 +796,7 @@ func railFor(p page, bundle []page, up string) string {
 	if len(p.Sections) >= 3 {
 		out.WriteString("<section>\n<h2>On this page</h2>\n<ul>\n")
 		for _, s := range p.Sections {
-			out.WriteString(railLink("#"+s.ID, s.Text, false))
+			out.WriteString(railLink("#"+s.ID, s.Text, false, s.Identifier))
 		}
 		out.WriteString("</ul>\n</section>\n")
 	}
@@ -652,10 +805,13 @@ func railFor(p page, bundle []page, up string) string {
 	return out.String()
 }
 
-func railLink(href, label string, current bool) string {
+func railLink(href, label string, current, identifier bool) string {
 	mark := ""
 	if current {
 		mark = ` aria-current="page"`
+	}
+	if identifier {
+		mark += ` class="ident"`
 	}
 	return `<li><a href="` + href + `"` + mark + ">" + escape(label) + "</a></li>\n"
 }
@@ -688,6 +844,7 @@ func shell(p page, depth int, bundle []page) string {
 		frame = "page wide"
 	}
 	out.WriteString("<div class=\"" + frame + "\">\n<main id=\"content\">\n")
+	out.WriteString(crumbsFor(p, bundle, up))
 	out.WriteString(p.Body)
 	out.WriteString("\n</main>\n")
 	out.WriteString(railFor(p, bundle, up))

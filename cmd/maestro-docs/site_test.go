@@ -238,3 +238,91 @@ func TestTheRailsGroupsAreTheBundleAndNothingElse(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryPageSaysWhereItIs holds the breadcrumb the frame specifies
+// and the site shipped without, on pages three levels deep.
+func TestEveryPageSaysWhereItIs(t *testing.T) {
+	pages := buildSite(t)
+	for path, body := range pages {
+		if !strings.Contains(body, `<nav class="crumbs"`) {
+			t.Errorf("%s has no breadcrumb", path)
+		}
+		if !strings.Contains(body, `<b aria-current="page">`) {
+			t.Errorf("%s has a breadcrumb that does not mark the page you are on", path)
+		}
+	}
+	deep := pages["agents/reference/tools.html"]
+	for _, crumb := range []string{">Maestro<", ">For agents<", ">Reference<", ">The tool surface<"} {
+		if !strings.Contains(deep, crumb) {
+			t.Errorf("the tool surface's breadcrumb has no %s", crumb)
+		}
+	}
+	// And the trail is climbable: every crumb above the last one is a
+	// link, and each one is relative to a page two directories deep.
+	for _, link := range []string{
+		`href="../../index.html">Maestro<`,
+		`href="../../agents/index.html">For agents<`,
+		`href="../../agents/index.html#reference">Reference<`,
+	} {
+		if !strings.Contains(deep, link) {
+			t.Errorf("the tool surface's breadcrumb does not climb: no %s", link)
+		}
+	}
+}
+
+// TestTheSiteCarriesItsOwnMap is the site's answer to "where is the
+// thing called X" on a site that ships no JavaScript: one page holding
+// every page and every section, which the browser's own find searches.
+func TestTheSiteCarriesItsOwnMap(t *testing.T) {
+	pages := buildSite(t)
+	body, ok := pages[mapPath]
+	if !ok {
+		t.Fatalf("the site has no %s", mapPath)
+	}
+	for path := range pages {
+		if path == mapPath || path == "404.html" {
+			continue
+		}
+		if !strings.Contains(body, `"`+path) {
+			t.Errorf("%s is on the site and not on its map", path)
+		}
+	}
+	// Every section of the longest page is on it, by anchor.
+	for _, want := range []string{
+		"agents/reference/tools.html#analysis",
+		"agents/reference/tools.html#relation_types",
+		"index.html#known-limitations",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the map does not carry %s", want)
+		}
+	}
+	// It discloses progressively and still answers a find: a folded page
+	// whose words the browser cannot see would defeat the one thing this
+	// page is for.
+	if strings.Count(body, "<details open>") < 20 {
+		t.Errorf("the map has %d open sections: they ship open so find-in-page reads them",
+			strings.Count(body, "<details open>"))
+	}
+}
+
+// TestAMachineNameKeepsItsOwnVoice holds the Copyable Is Mono Rule on
+// the eleven headings that are wire names rather than sentences.
+func TestAMachineNameKeepsItsOwnVoice(t *testing.T) {
+	pages := buildSite(t)
+	tools := pages["agents/reference/tools.html"]
+	for _, name := range []string{"analysis", "relation_types", "entities"} {
+		if !strings.Contains(tools, `id="`+name+`" class="ident"`) {
+			t.Errorf("the heading %q is not marked as a machine name", name)
+		}
+	}
+	// And a sentence is not: the rule is a shape, so it has to refuse as
+	// well as admit.
+	home := pages["index.html"]
+	if strings.Contains(home, `id="known-limitations" class="ident"`) {
+		t.Error(`"Known limitations" is a sentence and is marked as a machine name`)
+	}
+	if !strings.Contains(siteCSS, ".ident { font-family: var(--mono)") {
+		t.Error("nothing sets the machine-name voice, so the class is a mechanism nothing reads")
+	}
+}

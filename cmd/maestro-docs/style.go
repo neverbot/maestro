@@ -178,7 +178,33 @@ main {
    blocks and the index below use the whole column. */
 main :is(p, ul, ol, blockquote) { max-width: 68ch; }
 
+/* The trail under the header, on every page: Body type, Sepia, with the
+   page you are on in ink. It is the frame's own component and the site
+   had none, on pages three levels deep. */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-height: 32px;
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.crumbs a { color: var(--muted); text-decoration: none; }
+.crumbs a:hover { color: var(--ink); text-decoration: underline; }
+.crumbs b { font-weight: 500; color: var(--ink); }
+.crumbs span { color: var(--line-strong, var(--muted)); }
+
 h1, h2, h3, h4 { line-height: 1.2; }
+
+/* A heading that is a machine name is set in the machine's face. The
+   tool surface's eleven domains are the words a client sends over the
+   wire, and they were in the tool's voice beside the sentences Maestro
+   writes. */
+.ident { font-family: var(--mono); font-size: 1.125rem; letter-spacing: 0; }
+.map .ident, .rail .ident { font-size: 0.85em; }
 
 /* A markdown rule and a section heading are the same signal. The readme
    writes both, and the two hairlines landed 30px apart. */
@@ -301,6 +327,21 @@ img { max-width: 100%; }
 .index b { font-weight: 600; }
 .index span { display: block; color: var(--muted); }
 
+/* The whole site on one page, and the one place this site discloses
+   progressively: a page folds away and find-in-page still reads it,
+   which is why every one of them ships open. */
+.map { display: grid; gap: 0.5rem; }
+.map details { border-bottom: 1px solid var(--line); padding: 0 0 0.6rem; }
+.map details:last-child { border-bottom: 0; }
+.map summary { cursor: pointer; padding: 0.4rem 0; }
+.map summary b { font-weight: 600; }
+.map summary span { display: block; color: var(--muted); font-size: 0.875rem; }
+.map ul { list-style: none; margin: 0.2rem 0 0 1.25rem; padding: 0; max-width: none;
+  columns: 2; column-gap: 2rem; }
+.map li { margin: 0 0 0.3rem; break-inside: avoid; }
+.map a { color: var(--muted); text-decoration: none; }
+.map a:hover { color: var(--ink); text-decoration: underline; }
+
 footer {
   max-width: var(--page);
   margin: 0 auto;
@@ -318,12 +359,29 @@ footer {
 
 @media (max-width: 1100px) {
   .page { grid-template-columns: minmax(0, 1fr); }
+  /* **Above the article, not under it.** Folded beneath the content the
+     rail is thirty links a reader meets after everything they came for,
+     which is the same as not being there. It goes first and lies flat:
+     the groups sit side by side and the whole thing is a band rather
+     than a column. */
   .rail {
     position: static;
+    order: -1;
     max-height: none;
-    border-top: 1px solid var(--line);
-    padding-top: 1.25rem;
+    padding: 0 0 1rem;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem 2rem;
   }
+  /* Each group on its own line, its label inline with it, so the band
+     is three rows and not three columns of stacked links. */
+  .rail { display: block; }
+  .rail section { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.9rem; }
+  .rail section + section { margin-top: 0.5rem; }
+  .rail h2 { margin: 0; }
+  .rail ul { display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; }
+  .map ul { columns: 1; }
 }
 
 @media (max-width: 780px) {

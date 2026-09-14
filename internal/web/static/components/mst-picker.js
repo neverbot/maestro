@@ -31,6 +31,12 @@ export const CLASS_FILTER = "filter";
 export const CLASS_OPTION = "option";
 export const CLASS_EMPTY = "empty";
 
+// CLASS_UNSET rides on the summary when nothing has been chosen, or when
+// what was chosen is the "no opinion" option. It is what keeps an
+// absence from reading as a value: "coloured by nothing" set like every
+// other choice on the line says a decision was made, and none was.
+export const CLASS_UNSET = "unset";
+
 // EMPTY_LABEL is what a picker with nothing to choose from says. A game
 // that declares no relation types has none to offer, and an empty menu
 // with no words in it reads as a broken control.
@@ -87,6 +93,11 @@ const PICKER_CSS = `
 .picker > summary::-webkit-details-marker { display: none; }
 .picker > summary::after { content: " \\25be"; color: var(--muted, #6e625a); }
 .picker > summary:hover { background: var(--ground, #efe9dc); }
+
+/* Nothing chosen, or the choice that means "no opinion". The words are
+   still there — the Named Absence Rule asks for a word and never a blank
+   — and the weight says they are not an answer. */
+.picker > summary.unset { color: var(--muted, #6e625a); }
 
 .menu {
   display: none;
@@ -319,7 +330,8 @@ export class MstPicker extends HTMLElement {
   draw() {
     const doc = this.doc;
     const summary = doc.createElement("summary");
-    summary.setAttribute("class", CLASS_SUMMARY);
+    summary.setAttribute("class",
+      this.chosen === null || this.chosen === "" ? CLASS_SUMMARY + " " + CLASS_UNSET : CLASS_SUMMARY);
     summary.textContent = this.label();
 
     const menu = doc.createElement("div");

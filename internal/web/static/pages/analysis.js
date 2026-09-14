@@ -132,6 +132,12 @@ export const ORPHAN_MODES = [
   },
 ];
 
+// The page head's own control, and the two words it wears while it
+// works. Named because the harness asks for them by identity rather than
+// by matching prose.
+export const CHECK_EVERYTHING = "Check everything";
+export const CHECKING_EVERYTHING = "Checking…";
+
 export const TRUNCATED_HEAD = "This answer is not complete";
 export const TRUNCATED_RESULTS = "The run stopped at its result limit, so there may be more than these.";
 export const TRUNCATED_DEPTH =
@@ -581,7 +587,7 @@ export async function analysisPage(opened) {
   // code. The screen that does carry a write a viewer will be refused is
   // the route detail, and that is where the notice went.
 
-  report(doc, opened.slug, "cycles", () => opened.client.analysisCycles({}), (result, parts) => {
+  const runCycles = report(doc, opened.slug, "cycles", () => opened.client.analysisCycles({}), (result, parts) => {
     showTruncation(doc, "cycles", result);
     const loops = Array.isArray(result.cycles) ? result.cycles : [];
     const contains = Array.isArray(result.containment_cycles) ? result.containment_cycles : [];
@@ -594,7 +600,7 @@ export async function analysisPage(opened) {
     if (contains.length > 0) parts.body.append(cycleList(doc, opened.slug, HEADING_CONTAINMENT, contains));
   }, noteDone);
 
-  report(doc, opened.slug, "unreachable", () => opened.client.analysisUnreachable({}), (result, parts) => {
+  const runUnreachable = report(doc, opened.slug, "unreachable", () => opened.client.analysisUnreachable({}), (result, parts) => {
     showTruncation(doc, "unreachable", result);
     const findings = Array.isArray(result.unreachable) ? result.unreachable : [];
     say(
@@ -712,6 +718,37 @@ export async function analysisPage(opened) {
       orphansMoreEl.disabled = true;
       runOrphans();
     });
+  }
+
+  // **One button that runs all three, and the three stay.** The reason
+  // for running on demand is server cost, and that argument does not
+  // distinguish three buttons from one — but the cost of the wrong
+  // choice is not symmetric: a section nobody pressed is silently absent
+  // from a reader's picture of their game, and "no loops were reported"
+  // and "nobody asked about loops" look identical on this page.
+  //
+  // So the three keep their buttons, for a reader who wants one answer,
+  // and the page head carries the one that asks for the whole picture.
+  // In order rather than at once: three walks of a large game in
+  // parallel is the one way this screen could make an instance feel
+  // broken.
+  const actions = doc.getElementById("page-actions");
+  if (actions) {
+    const all = doc.createElement("button");
+    all.type = "button";
+    all.textContent = CHECK_EVERYTHING;
+    all.addEventListener("click", async () => {
+      all.disabled = true;
+      all.textContent = CHECKING_EVERYTHING;
+      orphanCursor = null;
+      orphanShown = 0;
+      await runCycles();
+      await runUnreachable();
+      await runOrphans();
+      all.disabled = false;
+      all.textContent = CHECK_EVERYTHING;
+    });
+    actions.replaceChildren(all);
   }
 
   return opened;

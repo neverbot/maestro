@@ -98,7 +98,6 @@ function fakeElement(tag = "div") {
   const el = {
     tagName: tag,
     className: "",
-    textContent: "",
     href: "",
     children: [],
     parentNode: null,
@@ -167,6 +166,23 @@ function fakeElement(tag = "div") {
       return null;
     },
   };
+  // **Setting `textContent` clears the children**, as the real DOM does.
+  // Without it a stub element kept the elements a page had just replaced
+  // with a sentence, and "no control is offered any more" passed over a
+  // control that was still in the tree — in the stub only.
+  el._text = "";
+  Object.defineProperty(el, "textContent", {
+    enumerable: true,
+    get() {
+      if (this._text !== "") return this._text;
+      return this.children.map((child) => child.textContent ?? "").join("");
+    },
+    set(value) {
+      this._text = String(value);
+      this.children = [];
+    },
+  });
+
   el._hidden = false;
   el.hiddenWrites = 0;
   Object.defineProperty(el, "hidden", {
@@ -251,6 +267,7 @@ const SHELL_IDS = [
   "view-root",
   "view-error",
   "view-narrow",
+  "view-builder",
   "entity-panel",
   // The trail that replaced four differently-worded back links. Every
   // shell inside a game declares it; the pages fill it through
@@ -1224,6 +1241,44 @@ check("theTwinsSelectionReachesTheArrangementAtItsCallSite", async () => {
 // only because the first never happened. Deleting either the
 // `applyWidth` call from `draw`/`watchWidth` or the `setDrawn` line
 // inside `applyWidth` turns this red.
+// **The builder's door exists only where the builder can hold what is
+// behind it** (builder spike §4). The check is against the stored bytes,
+// on the page, every time — and when they say more than the builder can
+// hold, the product says so in words rather than offering a control it
+// knows would drop a clause.
+check("aViewOpensInTheBuilderOnlyWhenItsQueryRoundTrips", async () => {
+  const dom = mount({ ids: ["view-builder"], pathname: "/g/azeroth/v/world", routes: [] });
+  const { sayBuilderDoor, OPEN_IN_BUILDER } = await load("view");
+  const { TOO_MUCH } = await import("../static/query/compose.js");
+  const slot = dom.elements["view-builder"];
+
+  sayBuilderDoor(globalThis.document, "azeroth", {
+    key: "quests",
+    renderer: "graph",
+    query: { v: 1, from: [{ type: "quest" }], project: { color_by: "zone" } },
+  });
+  assertEqual(slot.hidden, false, "a view the builder can hold offered no way in");
+  assertEqual(slot.children[0].textContent, OPEN_IN_BUILDER, "the way in");
+  assertEqual(
+    slot.children[0].href,
+    "/g/azeroth/views/new?from=quests",
+    "the door carries the view's key and not its document",
+  );
+
+  // A parameter is the first thing §3 says the builder does not hold.
+  sayBuilderDoor(globalThis.document, "azeroth", {
+    key: "mage-quests",
+    renderer: "graph",
+    query: { v: 1, params: [{ key: "class_key", type: "text" }], from: [{ type: "quest" }] },
+  });
+  assertEqual(slot.hidden, false, "a view the builder cannot hold said nothing at all");
+  assertEqual(slot.textContent, TOO_MUCH, "the reason, in the spike's own words");
+  assert(
+    slot.children.length === 0,
+    "a query the builder cannot hold still offered a control, which is the one thing §4 forbids",
+  );
+});
+
 check("aNarrowWindowHidesTheDrawingAndDisarmsTheKeyboard", async () => {
   const dom = mount({
     ids: ["entity-panel", "view-narrow"],

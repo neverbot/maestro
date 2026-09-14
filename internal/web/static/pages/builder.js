@@ -46,7 +46,10 @@ import {
   CLAUSE_FOLLOW,
   CLAUSE_FROM,
   CLAUSE_WHERE,
+  TOO_MUCH,
   compose,
+  decompose,
+  roundTrips,
 } from "../query/compose.js";
 import { MstPicker, CHOOSE_EVENT, optionsFrom } from "../components/mst-picker.js";
 import { entityTypeOptions, fieldOptions, relationTypeOptions } from "../components/pickers.js";
@@ -176,6 +179,37 @@ export function clauseOfPointer(pointers, pointer) {
   return best;
 }
 
+// STARTED_FROM is what the page says when it opened from a stored view,
+// and it says the whole of §4 in one line: the builder generates and
+// never edits, so saving writes a **new** view and the one it started
+// from is not touched.
+export function startedFrom(name) {
+  return "This starts from " + name + ". Saving writes a new view; " + name + " is not changed.";
+}
+
+// openedFrom turns a stored view into a clause stack, or answers null.
+//
+// **Two checks and not one.** `decompose` refuses every shape the
+// builder has no line for, and `roundTrips` refuses a document that
+// would come back different — a field the builder does not know, a
+// spelling it would rewrite. The second is the one that keeps this safe
+// as the language grows: a clause the builder has not learned closes the
+// door by itself rather than being dropped on the way through.
+export function openedFrom(row) {
+  const query = row && row.query !== undefined ? row.query : null;
+  if (query === null) return null;
+  if (!roundTrips(JSON.stringify(query))) return null;
+  const clauses = decompose(query);
+  if (clauses === null) return null;
+  // The stack the page draws carries the Draw line, which is not part of
+  // the query document at all: the renderer is the view's, not the
+  // query's, so it is read off the row and appended here.
+  const drawn = clauses.find((clause) => clause.kind === CLAUSE_DRAW)
+    ?? { kind: CLAUSE_DRAW, id: nextId() };
+  drawn.renderer = String(row.renderer ?? "");
+  return clauses.includes(drawn) ? clauses : [...clauses, drawn];
+}
+
 export async function builderPage(opened) {
   const doc = opened.document;
   const root = doc.getElementById("clauses");
@@ -215,8 +249,34 @@ export async function builderPage(opened) {
     relationTypeOptions(opened.client, { none: true, noneLabel: "any connection" }),
   ]);
 
+  // **Opened from a stored view, when that view round-trips.** The
+  // address carries the key rather than the document: a query in a query
+  // string is a document a person can edit in the URL bar, and this page
+  // is the one place in the product that must be sure what it is
+  // composing from.
+  const from = String(new URLSearchParams(opened.location.search ?? "").get("from") ?? "");
+  let opening = null;
+  if (from !== "") {
+    const source = await opened.client.readView(from);
+    if (source.ok) {
+      const clauses = openedFrom(source.result);
+      if (clauses === null) {
+        // The spike's own sentence. It is said here and not only on the
+        // view page, because a person can reach this address by hand.
+        say(errorEl, TOO_MUCH);
+      } else {
+        opening = { clauses, row: source.result };
+      }
+    } else if (expired(source)) {
+      goToLogin();
+      return opened;
+    } else {
+      say(errorEl, source.error.message);
+    }
+  }
+
   const state = {
-    stack: stackOf(),
+    stack: opening === null ? stackOf() : opening.clauses,
     pointers: new Map(),
     valid: false,
     reason: "",
@@ -315,6 +375,18 @@ export async function builderPage(opened) {
     }, 250);
   };
 
+  if (opening !== null) {
+    const name = String(opening.row.name || opening.row.key || from);
+    say(doc.getElementById("builder-boundary"), startedFrom(name) + " " + BOUNDARY);
+    if (nameEl) nameEl.value = "Copy of " + name;
+    // The address is left empty on purpose: a copy that suggested a key
+    // would be one keystroke from overwriting nothing and one from
+    // colliding with the view it came from, and the server refuses a
+    // create at a key that exists. The person names it.
+    const fromClause = state.stack.find((clause) => clause.kind === CLAUSE_FROM);
+    if (fromClause && fromClause.type) void loadFields(fromClause.type);
+  }
+
   redraw();
   validate();
   // The two boxes are part of what makes a view storable, so the button
@@ -410,6 +482,15 @@ export function addClause(state, clause) {
   if (at < 0) state.stack.push(clause);
   else state.stack.splice(at, 0, clause);
   return state.stack;
+}
+
+// quietButton is the same control with the treatment that says it is
+// not the point of the line: taking a clause back out is a repair, not
+// a step in the sentence.
+function quietButton(doc, label, onClick) {
+  const button = addButton(doc, label, onClick);
+  button.className = "quiet";
+  return button;
 }
 
 function addButton(doc, label, onClick) {
@@ -564,7 +645,7 @@ function lineFor(doc, clause, state, deps) {
   // shorter sentence, it is no sentence — and the save would be refused
   // by the server for a reason the person could not see from here.
   if (clause.kind !== CLAUSE_FROM && clause.kind !== CLAUSE_DRAW) {
-    line.append(addButton(doc, REMOVE_LABEL, () => {
+    line.append(quietButton(doc, REMOVE_LABEL, () => {
       state.stack = state.stack.filter((entry) => entry.id !== clause.id);
       deps.redraw();
       deps.validate();

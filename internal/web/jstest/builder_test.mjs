@@ -227,6 +227,70 @@ check("a typed value is a number when it is one",
   doc.getElementById = () => null;
 }
 
+// --- Opening a stored view --------------------------------------------
+//
+// §4: the builder **generates and never edits**. It opens a stored query
+// only when that document round-trips through it unchanged, and what it
+// then composes is a *new* view — so the page says so, and the save is a
+// create.
+
+{
+  const { openedFrom, startedFrom } = await import("../static/pages/builder.js");
+
+  const held = {
+    key: "quests",
+    name: "Quests by level",
+    renderer: "graph",
+    query: { v: 1, from: [{ type: "quest" }], project: { color_by: "min_level" } },
+  };
+  const stack = openedFrom(held);
+  check("a query the builder can hold comes back as its own sentence",
+    stack.map((clause) => clause.kind), [CLAUSE_FROM, CLAUSE_DRAW]);
+  check("the type it started from is chosen", stack[0].type, "quest");
+  check("the drawing carries the view's renderer, which is not in the query at all",
+    [stack[1].renderer, stack[1].colorBy], ["graph", "min_level"]);
+  // Round trip: what it re-emits is what was stored, or it would not
+  // have opened.
+  check("and re-emitting it writes the document that was stored",
+    compose(stack).document, held.query);
+
+  // The four §3 names, each refused at the door rather than opened and
+  // quietly simplified.
+  for (const [what, query] of [
+    ["a parameter", { v: 1, params: [{ key: "who", type: "text" }], from: [{ type: "quest" }] }],
+    ["a branch", {
+      v: 1,
+      from: [{ type: "quest", as: "quest" }, { type: "zone", as: "zone" }],
+      traverse: [{ from: "zone", via: "connects_to", as: "step1" }],
+    }],
+    ["an explicit node set", { v: 1, from: [{ type: "quest" }], nodes: [{ set: "quest" }] }],
+    ["a key from a later language version", { v: 1, from: [{ type: "quest" }], unknown: true }],
+    // **The case the round trip catches and the reader does not.**
+    // `decompose` accepts an empty `keys` list — it is a list of strings
+    // — and the emitter omits an empty one, so what would be re-emitted
+    // is a different document from what is stored. Without the round
+    // trip this opens, and a saved copy quietly loses a key nobody meant
+    // to drop the day the builder learns to write them.
+    ["a selector carrying an empty keys list", { v: 1, from: [{ type: "quest", keys: [] }] }],
+    ["a projection carrying an empty fields list", {
+      v: 1,
+      from: [{ type: "quest" }],
+      project: { fields: [] },
+    }],
+  ]) {
+    check(what + " does not open", openedFrom({ key: "x", renderer: "graph", query }), null);
+  }
+  check("and a row with no query at all does not open", openedFrom({ key: "x" }), null);
+
+  // The sentence that stops this from looking like an edit. The builder
+  // never modifies a stored query, so the person has to be told that the
+  // thing they opened is not the thing they will save.
+  const said = startedFrom("Quests by level");
+  check("the page says what it started from and what saving does",
+    [said.includes("starts from Quests by level"), said.includes("writes a new view"), said.includes("not changed")],
+    [true, true, true]);
+}
+
 if (failures > 0) {
   console.log(failures + " failed");
   process.exit(1);

@@ -2158,7 +2158,12 @@ dl.fields dd.field-value {
   gap: var(--s2);
 }
 
-.field-edit {
+/* The quiet control: a button that is not the point of the screen. The
+   field editor's "Edit" was the first, and the clause stack's "Remove"
+   is the second — four bordered ghost boxes down the right of a sentence
+   is a toolbar growing out of a paragraph. */
+.field-edit,
+.quiet {
   border: 0;
   background: none;
   padding: 0;
@@ -2168,7 +2173,8 @@ dl.fields dd.field-value {
   cursor: pointer;
 }
 
-.field-edit:hover { color: var(--ink); }
+.field-edit:hover,
+.quiet:hover { color: var(--ink); }
 
 /* The control, on its own line under the value: a textarea for a
    longtext is the width of the column and would otherwise push the

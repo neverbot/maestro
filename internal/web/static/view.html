@@ -60,6 +60,11 @@
      and the text twin is the whole of the view (design spec §9), and
      this is where pages/view.js says so. It carries no words of its
      own for the same reason nothing else in this shell does. -->
+<!-- Either the way into the query builder or the sentence saying why
+     there is none. pages/view.js decides from the stored document
+     itself: the builder generates and never edits, so it opens a query
+     only when that query round-trips through it unchanged. -->
+<p id="view-builder" hidden></p>
 <p class="notice" id="view-narrow" hidden></p>
 <!-- What the canvas is not showing. It is filled by pages/view.js after
      the fit, and a fitted view leaves it empty: a picture that contains

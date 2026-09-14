@@ -39,6 +39,7 @@ import {
   typeParams,
   writeParams,
 } from "../client.js";
+import { TOO_MUCH, roundTrips } from "../query/compose.js";
 import { frameFor } from "../render/scene.js";
 import { graphLayoutRequest, graphScene, RENDERER as RENDERER_GRAPH } from "../render/graph.js";
 import { layeredLayoutRequest, layeredScene, RENDERER as RENDERER_LAYERED } from "../render/layered.js";
@@ -81,6 +82,7 @@ import {
   say,
   segmentsOf,
   setBreadcrumb,
+  builderURL,
   viewsURL,
 } from "./page.js";
 import { goToLogin } from "../app.js";
@@ -447,6 +449,14 @@ export async function viewPage(opened, options = {}) {
   // puts the name of the thing being looked at.
   say(doc.getElementById("view-title"), viewName);
 
+  // **The builder's door, and it only exists when the builder can hold
+  // what is behind it.** §4 of the builder spike: the builder generates
+  // and never edits, so it opens a stored query only if that document
+  // round-trips through it unchanged — and when it does not, the product
+  // says so in words rather than offering a control that would drop a
+  // clause. The check is against the stored bytes, here, every time.
+  sayBuilderDoor(doc, opened.slug, row.result);
+
   const surface = mount(doc, rootEl, opened.slug, key, row.result, client, options);
   surface.role = summary.ok ? String(summary.result.role ?? "") : "";
   // Before the first run, so a narrow window never draws a picture it is
@@ -457,6 +467,41 @@ export async function viewPage(opened, options = {}) {
   client.connect((verdict) => surface.receive(verdict));
   return surface;
 }
+
+// sayBuilderDoor puts either the way into the builder or the reason
+// there is none in the line under the view's own name.
+//
+// Never a control that refuses: a person who presses "Open in the
+// builder" and is told no has been offered something the product knew it
+// could not do. Either the link is there, or the sentence is.
+export function sayBuilderDoor(doc, slug, row) {
+  const el = doc.getElementById("view-builder");
+  if (!el) return null;
+  const query = row && row.query !== undefined ? row.query : null;
+  if (query === null) {
+    el.hidden = true;
+    return null;
+  }
+  if (!roundTrips(JSON.stringify(query))) {
+    el.textContent = TOO_MUCH;
+    el.className = "muted";
+    el.hidden = false;
+    return null;
+  }
+  const link = doc.createElement("a");
+  link.className = "quiet";
+  link.href = builderURL(slug) + "?from=" + encodeURIComponent(String(row.key ?? ""));
+  link.textContent = OPEN_IN_BUILDER;
+  el.replaceChildren(link);
+  el.hidden = false;
+  el.className = "";
+  return link;
+}
+
+// OPEN_IN_BUILDER says what it opens and, by being a link rather than a
+// button, says it is a place: the builder has an address, and a middle
+// click belongs to the reader.
+export const OPEN_IN_BUILDER = "Open in the builder";
 
 // mount builds the frame, the canvas, the table painter and the ground
 // panel, and returns the one object every wired event calls into.

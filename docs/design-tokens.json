@@ -485,7 +485,7 @@
       },
       {
         "name": "The Warm Shadow Rule",
-        "body": "Every shadow is rgba(94, 72, 55, ...), the paper's own brown. Pure black is forbidden everywhere.",
+        "body": "On the light ground every shadow is rgba(94, 72, 55, ...), the paper's own brown, and pure black is forbidden. On the dark ground it inverts: a warm shadow on a near-black desk is a rust halo rather than depth, so the dark set's three are black at .4, .45 and .5. The rule said \"forbidden everywhere\" for a whole build while the product and this page both did the opposite.",
         "section": "elevation"
       },
       {
@@ -512,7 +512,7 @@
     "dos": [
       "Do set every game-owned word in Literata and every tool-owned word in Fira Sans.",
       "Do keep rows at 36px and lists dense.",
-      "Do tint every shadow with rgba(94, 72, 55, ...).",
+      "Do tint every shadow on the light ground with rgba(94, 72, 55, ...), and let the dark ground use black.",
       "Do name absences in words: 'no zone', 'never reviewed', 'no requirement'.",
       "Do state read-only where the missing action would be.",
       "Do mark the current item with weight and aria-current.",

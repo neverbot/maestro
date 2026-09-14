@@ -60,6 +60,7 @@ const siteCSS = `
   --ink: #2c221b;
   --muted: #6e625a;
   --line: #d8d2c7;
+  --line-strong: #8e8279;
   --focus: #9c470d;
   --shadow-1: 0 1px 2px rgba(94, 72, 55, 0.12);
   --serif: Literata, ui-serif, Georgia, "Times New Roman", serif;
@@ -83,6 +84,7 @@ const siteCSS = `
     --ink: #e7e2d9;
     --muted: #9a9289;
     --line: #36312a;
+    --line-strong: #81776d;
     --focus: #d78958;
     /* A warm shadow on a warm ground is depth; the same shadow on a
        near-black ground is a glow, which is the tell this palette is
@@ -157,10 +159,15 @@ header a[aria-current] { font-weight: 600; text-decoration: underline; text-unde
      column is the measure plus its own padding, the rail sits beside
      it, and the pair is centred on the desk. */
   grid-template-columns: minmax(0, 46rem) var(--rail);
+  grid-template-rows: auto 1fr;
   justify-content: center;
-  gap: var(--gutter);
+  gap: 0 var(--gutter);
   align-items: start;
 }
+
+.page > .crumbs { grid-column: 1; grid-row: 1; }
+.page > main { grid-column: 1; grid-row: 2; }
+.page > .rail { grid-column: 2; grid-row: 1 / span 2; }
 
 /* The content is on the paper and the paper is on the desk. It was the
    other way round: the bar and the code blocks were the only things
@@ -195,7 +202,7 @@ main :is(p, ul, ol, blockquote) { max-width: 68ch; }
 .crumbs a { color: var(--muted); text-decoration: none; }
 .crumbs a:hover { color: var(--ink); text-decoration: underline; }
 .crumbs b { font-weight: 500; color: var(--ink); }
-.crumbs span { color: var(--line-strong, var(--muted)); }
+.crumbs span { color: var(--line-strong); }
 
 h1, h2, h3, h4 { line-height: 1.2; }
 
@@ -236,7 +243,9 @@ h3 { font: 600 1.125rem/1.35 var(--sans); margin: 1.75rem 0 0.5rem; }
 h4 { font: 600 1rem/1.35 var(--sans); margin: 1.25rem 0 0.4rem; }
 
 /* Anchors land below the sticky bar rather than under it. */
-:is(h1, h2, h3, h4)[id] { scroll-margin-top: calc(var(--bar) + 1rem); }
+/* Anything with an id, not only a heading: a table or a figure that
+   gains one lands under the bar otherwise. */
+[id] { scroll-margin-top: calc(var(--bar) + 1rem); }
 
 a { color: var(--ink); text-underline-offset: 2px; }
 
@@ -302,6 +311,20 @@ img { max-width: 100%; }
 }
 
 .rail section + section { margin-top: 1.5rem; }
+.rail summary { cursor: pointer; }
+.rail summary h2 { display: inline; }
+.rail summary span { font-variant-numeric: tabular-nums; }
+
+/* Above the fold of the frame's own breakpoint there is a column for
+   them, so the two folded groups are always open and their summaries
+   are furniture nobody needs. Both spellings: the display rule is the
+   classic implementation, the details-content rule is the one browsers
+   moved to. */
+@media (min-width: 1101px) {
+  .rail details > summary { display: none; }
+  .rail details > :not(summary) { display: block !important; }
+  .rail details::details-content { content-visibility: visible !important; block-size: auto !important; }
+}
 
 .rail ul { list-style: none; margin: 0; padding: 0; max-width: none; }
 
@@ -339,8 +362,14 @@ img { max-width: 100%; }
 .map ul { list-style: none; margin: 0.2rem 0 0 1.25rem; padding: 0; max-width: none;
   columns: 2; column-gap: 2rem; }
 .map li { margin: 0 0 0.3rem; break-inside: avoid; }
-.map a { color: var(--muted); text-decoration: none; }
-.map a:hover { color: var(--ink); text-decoration: underline; }
+/* **Ink, not muted.** On the one page whose whole job is being clicked
+   through, 146 links in the secondary tone with no underline are
+   controls that do not look like controls. The rail keeps the muted
+   treatment because it is furniture beside the content; here the links
+   are the content. */
+.map a { color: var(--ink); text-decoration: none; }
+.map a:hover { text-decoration: underline; }
+.map summary a { text-decoration: underline; text-decoration-color: var(--line-strong); }
 
 footer {
   max-width: var(--page);
@@ -358,7 +387,13 @@ footer {
 .page.wide main { background: none; border: 0; box-shadow: none; padding: 0; }
 
 @media (max-width: 1100px) {
-  .page { grid-template-columns: minmax(0, 1fr); }
+  /* .page.wide outranked this by one class and the design-system page
+     kept its two columns on a phone: 619px of scrollWidth in a 500px
+     window, the swatches clipped off the right edge — the one page on
+     the site that scrolled sideways, publishing the rule that forbids
+     it. */
+  .page, .page.wide { grid-template-columns: minmax(0, 1fr); }
+  .page > .crumbs, .page > main, .page > .rail { grid-column: 1; grid-row: auto; }
   /* **Above the article, not under it.** Folded beneath the content the
      rail is thirty links a reader meets after everything they came for,
      which is the same as not being there. It goes first and lies flat:

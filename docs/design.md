@@ -424,7 +424,16 @@ this palette is built to avoid.
 ### Named Rules
 
 **The Warm Shadow Rule.** Every shadow is `rgba(94, 72, 55, …)`, the
-paper's own brown. `rgba(0, 0, 0, …)` is forbidden everywhere.
+paper's own brown. `rgba(0, 0, 0, …)` is forbidden **on the light
+ground**.
+
+**On the dark ground it inverts, and the rule said otherwise for a whole
+build.** A warm brown shadow under a panel on a near-black desk is not
+depth, it is a rust halo — the glow this palette exists to avoid, drawn
+by the rule meant to prevent it. The dark set's three shadows are
+`rgba(0, 0, 0, .4 / .45 / .5)`, which is what the product ships and what
+the documentation site ships; this paragraph is here because both of
+them contradicted this document until somebody measured it.
 
 **The Earned Elevation Rule.** A shadow answers a question about
 stacking, never about importance. If nothing is underneath it, it is

@@ -600,13 +600,19 @@ func sitemapPage(pages []page) page {
 		if title == "" {
 			title = "Readme"
 		}
-		out.WriteString("<details open>\n<summary><b>" + escape(title) + "</b>")
+		// **The title is a link and not only a toggle.** It was a bare
+		// `<b>`, so twenty-two of the twenty-three entries could not be
+		// opened at all and the twenty-third had a synthetic "Open the
+		// page" child doing it in a different shape — two implementations
+		// of one thing, which design.md asks to be reported as a defect.
+		out.WriteString("<details open>\n<summary><b><a href=\"" + p.Path + "\">" +
+			escape(title) + "</a></b>")
 		if p.Blurb != "" {
 			out.WriteString("<span>" + escape(p.Blurb) + "</span>")
 		}
 		out.WriteString("</summary>\n")
 		if len(p.Sections) == 0 {
-			out.WriteString(`<ul><li><a href="` + p.Path + `">Open the page</a></li></ul>` + "\n</details>\n")
+			out.WriteString("</details>\n")
 			continue
 		}
 		out.WriteString("<ul>\n")
@@ -635,8 +641,10 @@ func notFoundPage() page {
 		Body: "<h1>There is nothing at this address</h1>\n" +
 			"<p>This site has no page at the address you asked for. It may have been a typo, or a " +
 			"link to a page that has since been renamed.</p>\n" +
-			"<p><a href=\"" + mapPath + "\">Everything on this site</a>, or " +
-			"<a href=\"index.html\">back to the readme</a>.</p>\n",
+			// One action, which is what the negative-state component
+			// specifies: the map is the page that can answer "then where
+			// is it", and the rail beside this one already goes home.
+			"<p><a href=\"" + mapPath + "\">Everything on this site</a></p>\n",
 	}
 }
 
@@ -655,8 +663,21 @@ func notFoundPage() page {
 // right furniture. They do not come here.
 var remoteImageRE = regexp.MustCompile(`<img[^>]+src="https?://[^"]*"[^>]*>`)
 
+// altRE is the words the image was carrying.
+var altRE = regexp.MustCompile(`alt="([^"]*)"`)
+
+// **What it leaves behind is the alt text, not a hole.** Removing the
+// element outright left `<p><a href="license.html"></a></p>` on the home
+// page — a link with no accessible name at all — and dropped "Status:
+// early development", which is a fact about this product and not
+// decoration. The badge's own alt text is the sentence it was drawing.
 func stripRemoteImages(body string) string {
-	return remoteImageRE.ReplaceAllString(body, "")
+	return remoteImageRE.ReplaceAllStringFunc(body, func(tag string) string {
+		if alt := altRE.FindStringSubmatch(tag); alt != nil && alt[1] != "" {
+			return escape(html.UnescapeString(alt[1]))
+		}
+		return ""
+	})
 }
 
 // titleOf is a page's first heading, or its path when it has none.
@@ -717,7 +738,10 @@ func crumbsFor(p page, bundle []page, up string) string {
 
 	switch {
 	case p.Path == "index.html":
-		trail = []crumb{{"", "Maestro"}}
+		// **The site root is not inside anything, and a trail of one
+		// crumb is not a trail.** It printed "Maestro" 32px above an h1
+		// reading "Maestro", under a wordmark reading "Maestro".
+		return ""
 	case strings.HasPrefix(p.Path, "agents/"):
 		if p.Path == agentsIndexPath {
 			trail = append(trail, crumb{"", "For agents"})
@@ -762,10 +786,12 @@ func railFor(p page, bundle []page, up string) string {
 	var out strings.Builder
 	out.WriteString(`<nav class="rail" aria-label="Site">` + "\n")
 
-	out.WriteString("<section>\n<h2>Maestro</h2>\n<ul>\n")
+	out.WriteString(`<section class="site">` + "\n<h2>Maestro</h2>\n<ul>\n")
 	for _, entry := range []struct{ href, label string }{
 		{"index.html", "Readme"},
-		{agentsIndexPath, "What an agent is told"},
+		// The same words the header uses. One destination answering to
+		// two names in the same chrome is the reader doing the joining.
+		{agentsIndexPath, "For agents"},
 		{"design-system.html", "Design system"},
 		{mapPath, "Everything on this site"},
 		{"license.html", "License"},
@@ -783,26 +809,46 @@ func railFor(p page, bundle []page, up string) string {
 			if groupOf(group[0]) != key {
 				continue
 			}
-			out.WriteString("<section>\n<h2>" + escape(groupLabels[key]) + "</h2>\n<ul>\n")
+			var links strings.Builder
 			for _, sibling := range group {
-				out.WriteString(railLink(up+sibling.Path, sibling.Title, sibling.Path == p.Path, false))
+				links.WriteString(railLink(up+sibling.Path, sibling.Title, sibling.Path == p.Path, false))
 			}
-			out.WriteString("</ul>\n</section>\n")
+			out.WriteString(railSection(groupLabels[key], len(group), links.String()))
 		}
 	}
 
 	// Two headings are a page's shape already visible from the top; the
 	// list earns its space from three.
 	if len(p.Sections) >= 3 {
-		out.WriteString("<section>\n<h2>On this page</h2>\n<ul>\n")
+		var links strings.Builder
 		for _, s := range p.Sections {
-			out.WriteString(railLink("#"+s.ID, s.Text, false, s.Identifier))
+			links.WriteString(railLink("#"+s.ID, s.Text, false, s.Identifier))
 		}
-		out.WriteString("</ul>\n</section>\n")
+		out.WriteString(railSection("On this page", len(p.Sections), links.String()))
 	}
 
 	out.WriteString("</nav>\n")
 	return out.String()
+}
+
+// railSection is one group of the rail, and it is a `details` for the
+// sake of the narrow screen.
+//
+// **Below 1100px the rail is a band above the article**, because folded
+// beneath it the rail is thirty links a reader meets after everything
+// they came for. The band was 262px of a 900px screen on the tool
+// surface — content buried under chrome, which is product.md's
+// ad-choked-wiki anti-reference arriving through the door marked "do not
+// hide the navigation". Both positions were wrong.
+//
+// So the two heavy groups ship **closed** and the stylesheet forces them
+// open above 1100px, where there is a column to put them in. The site
+// group stays a flat band: five links, always visible, which is the
+// Never Hidden Rule's actual requirement.
+func railSection(label string, count int, links string) string {
+	return "<section>\n<details>\n<summary><h2>" + escape(label) +
+		" <span>" + fmt.Sprint(count) + "</span></h2></summary>\n<ul>\n" +
+		links + "</ul>\n</details>\n</section>\n"
 }
 
 func railLink(href, label string, current, identifier bool) string {
@@ -828,6 +874,12 @@ func shell(p page, depth int, bundle []page) string {
 		title = escape(p.Title) + " · Maestro"
 	}
 	out.WriteString("<title>" + title + "</title>\n")
+	// The sentence a link preview shows, quoted from the page rather than
+	// written for it. A page with no first sentence of its own gets none
+	// rather than a manufactured one.
+	if p.Blurb != "" {
+		out.WriteString(`<meta name="description" content="` + escape(p.Blurb) + "\">\n")
+	}
 	out.WriteString("<link rel=\"stylesheet\" href=\"" + up + "style.css\">\n")
 	for _, sheet := range p.Stylesheets {
 		out.WriteString("<link rel=\"stylesheet\" href=\"" + up + sheet + "\">\n")
@@ -843,12 +895,22 @@ func shell(p page, depth int, bundle []page) string {
 	if p.Wide {
 		frame = "page wide"
 	}
-	out.WriteString("<div class=\"" + frame + "\">\n<main id=\"content\">\n")
+	out.WriteString("<div class=\"" + frame + "\">\n")
+	// The crumb is page furniture under the header, not part of the
+	// sheet: inside <main> it was the first thing "Skip to the content"
+	// landed on, and it sat inside the content landmark instead of
+	// beside it.
 	out.WriteString(crumbsFor(p, bundle, up))
+	out.WriteString("<main id=\"content\">\n")
 	out.WriteString(p.Body)
 	out.WriteString("\n</main>\n")
 	out.WriteString(railFor(p, bundle, up))
 	out.WriteString("</div>\n")
+	// The foot. The stylesheet had rules for one and no page emitted it,
+	// which is a mechanism nothing reads; and a documentation site that
+	// says nowhere what it was built from is one a reader cannot date.
+	out.WriteString(`<footer>Built from <a href="https://github.com/neverbot/maestro">this repository</a>` +
+		` by <code>cmd/maestro-docs</code>. <a href="` + up + `license.html">MIT</a>.</footer>` + "\n")
 	return out.String()
 }
 

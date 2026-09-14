@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -244,6 +245,16 @@ func TestTheRailsGroupsAreTheBundleAndNothingElse(t *testing.T) {
 func TestEveryPageSaysWhereItIs(t *testing.T) {
 	pages := buildSite(t)
 	for path, body := range pages {
+		// The home page is the exception and it is the only one: the
+		// site root is not inside anything, and a trail of one crumb
+		// printed "Maestro" above an h1 reading "Maestro" under a
+		// wordmark reading "Maestro".
+		if path == "index.html" {
+			if strings.Contains(body, `<nav class="crumbs"`) {
+				t.Error("the home page carries a breadcrumb of one crumb")
+			}
+			continue
+		}
 		if !strings.Contains(body, `<nav class="crumbs"`) {
 			t.Errorf("%s has no breadcrumb", path)
 		}
@@ -297,6 +308,14 @@ func TestTheSiteCarriesItsOwnMap(t *testing.T) {
 			t.Errorf("the map does not carry %s", want)
 		}
 	}
+	// Every entry opens the page it names, and none of them does it in
+	// a second shape.
+	if strings.Contains(body, "Open the page") {
+		t.Error("the map still special-cases a page with no sections with its own link shape")
+	}
+	if !strings.Contains(body, `<summary><b><a href="index.html">Readme</a></b>`) {
+		t.Error("a page's title on the map is not a link to it")
+	}
 	// It discloses progressively and still answers a find: a folded page
 	// whose words the browser cannot see would defeat the one thing this
 	// page is for.
@@ -324,5 +343,45 @@ func TestAMachineNameKeepsItsOwnVoice(t *testing.T) {
 	}
 	if !strings.Contains(siteCSS, ".ident { font-family: var(--mono)") {
 		t.Error("nothing sets the machine-name voice, so the class is a mechanism nothing reads")
+	}
+}
+
+// TestNothingOnTheSiteScrollsSideways is the specificity bug that
+// shipped: `.page.wide` is two classes and the responsive override was
+// one, so the design-system page kept its two columns on a phone.
+func TestNothingOnTheSiteScrollsSideways(t *testing.T) {
+	if !strings.Contains(siteCSS, ".page, .page.wide { grid-template-columns: minmax(0, 1fr); }") {
+		t.Error("the narrow layout does not name .page.wide, so the one page that opts out of the " +
+			"reading measure also opts out of folding its rail")
+	}
+}
+
+// TestTheStylesheetHasNoDeadOrMissingTokens holds two halves of the same
+// rule: a token nothing declares and a rule nothing renders are both
+// "a mechanism nothing reads".
+func TestTheStylesheetHasNoDeadOrMissingTokens(t *testing.T) {
+	used := regexp.MustCompile(`var\(\s*(--[a-z0-9-]+)`).FindAllStringSubmatch(siteCSS, -1)
+	for _, m := range used {
+		if !strings.Contains(siteCSS, m[1]+":") {
+			t.Errorf("%s is read and never declared, so every rule that uses it silently does nothing", m[1])
+		}
+	}
+	// And every element the stylesheet dresses is an element some page
+	// emits. `footer` was styled for a foot no page had.
+	pages := buildSite(t)
+	for _, tag := range []string{"footer", "main", "summary"} {
+		if !strings.Contains(siteCSS, tag+" ") && !strings.Contains(siteCSS, tag+" {") {
+			continue
+		}
+		found := false
+		for _, body := range pages {
+			if strings.Contains(body, "<"+tag) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("the stylesheet dresses <%s> and no page emits one", tag)
+		}
 	}
 }

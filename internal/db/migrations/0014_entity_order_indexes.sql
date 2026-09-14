@@ -8,13 +8,51 @@
 -- that one sort key into three, and the two new ones would otherwise
 -- have exactly the defect 0005 measured and fixed.
 --
--- **These two were not re-measured**, and this comment says so rather
--- than repeating 0005's numbers as if they had been taken again: the
--- argument for them is that they are the same shape as the index whose
--- effect was measured — the listing's whole sort key, led by the column
--- the listing is filtered on — and not a second measurement. A game
--- large enough to measure on is a fixture this repository does not have
--- standing; 0005's was built for that migration and not kept.
+-- **Measured, on 0005's own fixture rebuilt for this.** The first
+-- version of this comment said these two had not been measured and
+-- argued from their shape instead; that is an argument and not a number,
+-- so the fixture was built again. 50,000 entities across 20 games, one
+-- game of 2,500 paged to its end 50 rows at a time, on this project's
+-- throwaway Postgres:
+--
+--   key order
+--     with:    Index Scan on entities_key_order_idx with the cursor's
+--              (key, id) folded into the Index Cond, 50 rows read; 24
+--              shared buffers a page, 50 pages in 7-39 ms.
+--     without: Bitmap Index Scan on entities_listing_idx over the whole
+--              game, 2,500 rows to the heap, then a top-N sort; 992
+--              buffers a page, 50 pages in 145-238 ms.
+--
+--   updated_at order
+--     with:    Index Scan on entities_updated_order_idx, 50 rows read;
+--              23 buffers a page, 50 pages in 10-14 ms.
+--     without: the same bitmap-and-sort shape; 992 buffers a page, 50
+--              pages in 99-114 ms.
+--
+-- That is 0005's result again, on 0005's shape, and the ranges are two
+-- runs of each rather than a single figure: the first run of a walk
+-- reads cold and the numbers below 10 ms are a warm cache, which is why
+-- the buffer counts matter more than the milliseconds. 24 against 992 is
+-- the whole difference, and it is the one that does not shrink as the
+-- game grows.
+--
+-- **The field orders have no index and this migration does not give them
+-- one.** `ORDER BY fields -> 'tier'` on the same fixture is the bitmap
+-- scan and the top-N sort, 992 buffers a page, 50 pages in 326 ms — the
+-- slowest of the three and the shape 0005 exists to avoid. It stays that
+-- way on purpose: the sort key is a *declared field*, so an index for it
+-- is one index per field per game, which a migration cannot write and an
+-- expression index cannot cover. A catalogue sorted by a column of its
+-- own data reads its type and sorts it, and that is the bound.
+--
+-- **What they cost.** 5,016 kB each over those 50,000 rows, about 103
+-- bytes a row, against the 93 bytes 0005's entities_listing_idx costs on
+-- the same table. On writes, measured the way 0005 measured its own: 2,000
+-- single-row inserts in 215 ms against 172 ms without the two, and 2,000
+-- single-row updates of `name` in 135-174 ms against 114-117 ms. Both
+-- are real and both are below what a content editor can see; the update
+-- figure is the one to watch, because `updated_at` moves on every write
+-- and that index is therefore maintained on every one of them.
 --
 -- **Both are ascending-only b-trees and both directions use them.**
 -- Postgres reads a b-tree backwards for a sort whose columns are all
@@ -31,11 +69,9 @@
 -- order, and a keyset that sorts by one while seeking in the other skips
 -- rows at a page boundary and says nothing.
 --
--- **What they cost is a write cost, and the second one is paid by every
--- write.** `key` is immutable once the row exists, so that index is
--- maintained on insert alone; `updated_at` moves on every write, so that
--- one is maintained on every content edit, which makes it the more
--- expensive of the two.
+-- `key` is immutable once the row exists, so that index is maintained on
+-- insert alone; `updated_at` moves on every write, which makes it the
+-- more expensive of the two.
 -- +goose Up
 CREATE INDEX entities_key_order_idx ON entities (project_id, key, id);
 CREATE INDEX entities_updated_order_idx ON entities (project_id, updated_at, id);

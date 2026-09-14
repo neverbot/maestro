@@ -778,16 +778,28 @@ export function client({
   // (.superpowers/specs/2026-09-11-writing-in-the-interface-design.md):
   // it never retries, and it never merges on the caller's behalf.
   async function renameEntity(entity, name) {
+    return writeEntity(entity, { name });
+  }
+
+  // writeEntity is the one write behind both of the page's edits: a name,
+  // a field value, or — when the two are ever changed together — both.
+  //
+  // **An upsert replaces the row**, so every part the caller is not
+  // changing goes back exactly as it was read. That is why this takes
+  // the entity the page is holding and a patch, rather than a bag of
+  // fields: an item carrying only a name empties every field the entity
+  // has, which is the shape of mistake a "just send what changed" API
+  // invites on a route that does not have one.
+  async function writeEntity(entity, changes) {
+    const patch = changes && typeof changes === "object" ? changes : {};
     return send(base + "/entities", {
       items: [{
         type_key: entity.type_key,
         key: entity.key,
-        name,
-        // The fields go back **unchanged and in full**: an upsert
-        // replaces the row, so an item carrying only a name would empty
-        // every field the entity has. The page holds them because it
-        // read them to draw them.
-        fields: entity.fields && typeof entity.fields === "object" ? entity.fields : {},
+        name: typeof patch.name === "string" ? patch.name : String(entity.name ?? ""),
+        fields: patch.fields && typeof patch.fields === "object"
+          ? patch.fields
+          : (entity.fields && typeof entity.fields === "object" ? entity.fields : {}),
         expected_version: entity.version,
       }],
     });
@@ -1101,6 +1113,7 @@ export function client({
     checkRoute,
     getEntity,
     renameEntity,
+    writeEntity,
     listRelations,
     listEntityDocs,
     connect,

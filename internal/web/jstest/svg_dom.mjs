@@ -58,6 +58,9 @@ export function createDocument() {
       this.parentNode = null;
       this.ownText = "";
       this.listeners = {};
+      // `dataset`, because a control that goes busy stashes its idle
+      // label there while a write is in flight (app.js setFormBusy).
+      this.dataset = {};
     }
 
     setAttribute(name, value) {
@@ -125,6 +128,22 @@ export function createDocument() {
       return this.childNodes.slice();
     }
 
+    // `form.elements`, which `setFormBusy` walks to disable a form while
+    // a write is in flight. A form in this front end is built from
+    // elements rather than parsed, so this is what a real one would
+    // hold: every control under it, however deep.
+    get elements() {
+      const found = [];
+      const walk = (node) => {
+        for (const child of node.childNodes) {
+          if (["input", "select", "textarea", "button"].includes(child.tagName)) found.push(child);
+          walk(child);
+        }
+      };
+      walk(this);
+      return found;
+    }
+
     // append takes several children where appendChild takes one. Both
     // exist because both are used, and a stub with only one of them
     // pushes its own shape into the product's code.
@@ -178,12 +197,21 @@ export function createDocument() {
     // dispatch runs what a real click would run, and nothing else: no
     // bubbling, no default action, no ordering rules. A harness that
     // needs those needs a browser.
-    dispatch(kind, event = {}) {
-      for (const handler of this.listeners[kind] ?? []) handler({ target: this, ...event });
+    // **It awaits.** A page's own handlers are async — a write goes out
+    // and the screen is settled when it comes back — and a dispatch that
+    // did not await them handed the harness a page mid-flight: the
+    // assertion ran before the client had been called at all. Returning
+    // the promise costs a synchronous caller nothing, because a
+    // synchronous handler resolves before the caller's next line either
+    // way.
+    async dispatch(kind, event = {}) {
+      for (const handler of this.listeners[kind] ?? []) {
+        await handler({ target: this, ...event });
+      }
     }
 
     click() {
-      this.dispatch("click");
+      return this.dispatch("click");
     }
 
     replaceChildren(...kids) {
@@ -197,8 +225,24 @@ export function createDocument() {
     // silently fails to match is a component that looks wired and is
     // not.
     querySelector(selector) {
+      // The second shape this front end asks for, and the only one that
+      // is not a class: `setFormBusy` finds a form's submit button by
+      // `button[type=submit]`. It is spelled out rather than parsed,
+      // because a stub with a selector engine is a second, worse browser
+      // and every escaping question becomes a question about the stub.
+      if (selector === "button[type=submit]") {
+        const walk = (node) => {
+          for (const child of node.childNodes) {
+            if (child.tagName === "button" && child.type === "submit") return child;
+            const deeper = walk(child);
+            if (deeper) return deeper;
+          }
+          return null;
+        };
+        return walk(this);
+      }
       if (typeof selector !== "string" || !selector.startsWith(".")) {
-        throw new Error(`stub: querySelector understands ".class" only, not ${selector}`);
+        throw new Error(`stub: querySelector understands ".class" and "button[type=submit]" only, not ${selector}`);
       }
       const wanted = selector.slice(1);
       const walk = (node) => {

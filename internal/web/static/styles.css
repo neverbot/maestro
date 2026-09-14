@@ -2015,6 +2015,48 @@ dl.fields dd.absent {
 dl.fields dt.undeclared {
   color: var(--danger);
 }
+/* **The value, then the way to change it.** The edit control sits beside
+   the value it changes and is deliberately quiet: five bordered buttons
+   down a reading surface is a form pretending to be a page. It stays
+   visible rather than appearing on hover — an affordance that only
+   exists under a pointer is one a touch screen and a keyboard never
+   meet — and it is the ghost button's vocabulary at label size, which is
+   what this system already spends on "a control that is not the point of
+   the screen". */
+dl.fields dd.field-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+}
+
+.field-edit {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: 600 0.75rem/1 var(--sans);
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.field-edit:hover { color: var(--ink); }
+
+/* The control, on its own line under the value: a textarea for a
+   longtext is the width of the column and would otherwise push the
+   type's name off the row. */
+.field-edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  flex-basis: 100%;
+}
+
+.field-edit-form textarea { width: 100%; }
+
+dl.fields dd.field-value .error:empty { display: none; }
+
 .field-type {
   font-family: var(--mono);
   font-size: 0.8em;

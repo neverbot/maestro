@@ -108,7 +108,7 @@ func seedRacingGame(t *testing.T) *seeded {
 	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -133,7 +133,7 @@ func seedRacingGame(t *testing.T) *seeded {
 		caller:   caller,
 		game:     game.ID,
 		gameSlug: game.Slug,
-		cookie:   loginAs(t, srv, "designer@studio.com"),
+		cookie:   loginAs(t, srv, "designer@example.test"),
 		typeIDs:  map[string]uuid.UUID{},
 	}
 

@@ -16,11 +16,11 @@ import (
 func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@studio.com", DisplayName: "Colleague", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@example.test", DisplayName: "Colleague", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"colleague@studio.com","is_admin":true}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"colleague@example.test","is_admin":true}`))
 	req.AddCookie(adminCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -32,8 +32,8 @@ func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
 
 	// The promotion is real, not just a 200: the new admin can now reach
 	// the admin-only invite surface.
-	colleagueCookie := loginAs(t, srv, "colleague@studio.com")
-	inviteReq := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"third@studio.com"}`))
+	colleagueCookie := loginAs(t, srv, "colleague@example.test")
+	inviteReq := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"third@example.test"}`))
 	inviteReq.AddCookie(colleagueCookie)
 	inviteReq.Header.Set("Content-Type", "application/json")
 	inviteRec := httptest.NewRecorder()
@@ -47,15 +47,15 @@ func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
 func TestNonAdminCannotPromoteAnyone(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "plain@studio.com", DisplayName: "Plain", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "plain@example.test", DisplayName: "Plain", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser plain: %v", err)
 	}
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "target@studio.com", DisplayName: "Target", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "target@example.test", DisplayName: "Target", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser target: %v", err)
 	}
-	cookie := loginAs(t, srv, "plain@studio.com")
+	cookie := loginAs(t, srv, "plain@example.test")
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"target@studio.com","is_admin":true}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"target@example.test","is_admin":true}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -70,7 +70,7 @@ func TestNonAdminCannotPromoteAnyone(t *testing.T) {
 func TestTokenCallerCannotSetAdmin(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create project: %v", err)
@@ -80,7 +80,7 @@ func TestTokenCallerCannotSetAdmin(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"owner@studio.com","is_admin":true}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"owner@example.test","is_admin":true}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -96,7 +96,7 @@ func TestTokenCallerCannotSetAdmin(t *testing.T) {
 func TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse(t *testing.T) {
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@studio.com","is_admin":false}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@example.test","is_admin":false}`))
 	req.AddCookie(adminCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -123,7 +123,7 @@ func TestLastAdminCannotDemoteThemselves(t *testing.T) {
 		t.Fatalf("/api/me = %d, want 200", meRec.Code)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@studio.com","is_admin":false}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@example.test","is_admin":false}`))
 	req.AddCookie(adminCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -148,7 +148,7 @@ func TestLastAdminCannotDemoteThemselves(t *testing.T) {
 func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
-	colleague, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@studio.com", DisplayName: "Colleague", Password: "password12345"})
+	colleague, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@example.test", DisplayName: "Colleague", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 		t.Fatalf("SetAdmin: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"colleague@studio.com","is_admin":false}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"colleague@example.test","is_admin":false}`))
 	req.AddCookie(adminCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -167,8 +167,8 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 	}
 
 	// And the demoted colleague can no longer reach the admin surface.
-	colleagueCookie := loginAs(t, srv, "colleague@studio.com")
-	inviteReq := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"third@studio.com"}`))
+	colleagueCookie := loginAs(t, srv, "colleague@example.test")
+	inviteReq := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"third@example.test"}`))
 	inviteReq.AddCookie(colleagueCookie)
 	inviteReq.Header.Set("Content-Type", "application/json")
 	inviteRec := httptest.NewRecorder()
@@ -181,7 +181,7 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"nobody@studio.com","is_admin":true}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"nobody@example.test","is_admin":true}`))
 	req.AddCookie(adminCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -199,11 +199,11 @@ func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
 func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "target@studio.com", DisplayName: "Target", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "target@example.test", DisplayName: "Target", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"target@studio.com"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"target@example.test"}`))
 	req.AddCookie(adminCookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -216,7 +216,7 @@ func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
 	// And the target's admin status is untouched — still not an admin,
 	// not silently demoted (it never had the flag to begin with, but the
 	// point is the request must not have been treated as is_admin:false).
-	targetCookie := loginAs(t, srv, "target@studio.com")
+	targetCookie := loginAs(t, srv, "target@example.test")
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	meReq.AddCookie(targetCookie)
 	meRec := httptest.NewRecorder()

@@ -43,7 +43,7 @@ func newRESTFixture(t *testing.T) restFixture {
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -65,7 +65,7 @@ func newRESTFixture(t *testing.T) restFixture {
 	return restFixture{
 		srv: srv, ids: ids, proj: projSvc, mm: mm, md: md,
 		game: game.ID, gameSlug: game.Slug, ownerID: owner.ID,
-		cookie: loginAs(t, srv, "owner@studio.com"),
+		cookie: loginAs(t, srv, "owner@example.test"),
 		agent:  agent,
 	}
 }
@@ -197,11 +197,11 @@ func questType(t *testing.T, f restFixture) {
 func TestRESTTypesRequireMembership(t *testing.T) {
 	f := newRESTFixture(t)
 	if _, err := f.ids.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345",
+		Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	stranger := loginAs(t, f.srv, "stranger@studio.com")
+	stranger := loginAs(t, f.srv, "stranger@example.test")
 
 	// A stranger is told the game is not available to them, in the same
 	// words a game that does not exist gets: a game is addressed by its
@@ -539,7 +539,7 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 	questType(t, f)
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -547,7 +547,7 @@ func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	cookie := loginAs(t, f.srv, "viewer@studio.com")
+	cookie := loginAs(t, f.srv, "viewer@example.test")
 
 	// A viewer still reads: the refusal below has to be about writing,
 	// not about being shut out of the game.
@@ -778,7 +778,7 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 	questType(t, f)
 
 	outsider, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "outsider@studio.com", DisplayName: "Outsider", Password: "password12345",
+		Email: "outsider@example.test", DisplayName: "Outsider", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -787,7 +787,7 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, f.srv, "outsider@studio.com")
+	cookie := loginAs(t, f.srv, "outsider@example.test")
 
 	// Their own game answers, and holds none of this game's types.
 	own := f.call(t, cookie, http.MethodGet, "/api/games/"+theirs.Slug+"/types", nil)
@@ -1429,7 +1429,7 @@ func TestTheSummaryNamesTheCallersRole(t *testing.T) {
 	}
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "onlooker@studio.com", DisplayName: "Onlooker", Password: "password12345",
+		Email: "onlooker@example.test", DisplayName: "Onlooker", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -1437,7 +1437,7 @@ func TestTheSummaryNamesTheCallersRole(t *testing.T) {
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	rec := f.call(t, loginAs(t, f.srv, "onlooker@studio.com"), http.MethodGet, f.path("/summary"), nil)
+	rec := f.call(t, loginAs(t, f.srv, "onlooker@example.test"), http.MethodGet, f.path("/summary"), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("viewer summary = %d: %s", rec.Code, rec.Body.String())
 	}

@@ -20,7 +20,7 @@ func TestSessionLifecycle(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "designer@studio.com",
+		Email:       "designer@example.test",
 		DisplayName: "Designer",
 		Password:    "password12345",
 	})
@@ -76,7 +76,7 @@ func TestIssueSessionSetsExpiryFromConfig(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "ttl@studio.com",
+		Email:       "ttl@example.test",
 		DisplayName: "TTL",
 		Password:    "password12345",
 	})
@@ -119,7 +119,7 @@ func TestIssueSessionProducesDistinctTokens(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "distinct@studio.com",
+		Email:       "distinct@example.test",
 		DisplayName: "Distinct",
 		Password:    "password12345",
 	})
@@ -159,7 +159,7 @@ func TestChangePasswordRevokesEverySessionOfTheAccount(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "multi@studio.com",
+		Email:       "multi@example.test",
 		DisplayName: "Multi",
 		Password:    "password12345",
 	})
@@ -197,13 +197,13 @@ func TestChangePasswordLeavesOtherUsersSessionsAlone(t *testing.T) {
 	ctx := context.Background()
 
 	userA, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "a@studio.com", DisplayName: "A", Password: "password12345",
+		Email: "a@example.test", DisplayName: "A", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser A: %v", err)
 	}
 	userB, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "b@studio.com", DisplayName: "B", Password: "password12345",
+		Email: "b@example.test", DisplayName: "B", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser B: %v", err)
@@ -242,7 +242,7 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "extend@studio.com",
+		Email:       "extend@example.test",
 		DisplayName: "Extend",
 		Password:    "password12345",
 	})
@@ -321,7 +321,7 @@ func TestConcurrentRenewalsProduceExactlyOneWrite(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "concurrent@studio.com",
+		Email:       "concurrent@example.test",
 		DisplayName: "Concurrent",
 		Password:    "password12345",
 	})
@@ -372,7 +372,7 @@ func TestChangePasswordRotatesHashAndRevokesSessions(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "rotate@studio.com",
+		Email:       "rotate@example.test",
 		DisplayName: "Rotate",
 		Password:    "password12345",
 	})
@@ -389,10 +389,10 @@ func TestChangePasswordRotatesHashAndRevokesSessions(t *testing.T) {
 		t.Fatalf("ChangePassword: %v", err)
 	}
 
-	if _, err := svc.Authenticate(ctx, "rotate@studio.com", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
+	if _, err := svc.Authenticate(ctx, "rotate@example.test", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("old password should no longer authenticate, err = %v", err)
 	}
-	if _, err := svc.Authenticate(ctx, "rotate@studio.com", "newpassword12345"); err != nil {
+	if _, err := svc.Authenticate(ctx, "rotate@example.test", "newpassword12345"); err != nil {
 		t.Fatalf("new password should authenticate: %v", err)
 	}
 	if _, _, err := svc.UserForSession(ctx, token); !errors.Is(err, identity.ErrNoSession) {
@@ -406,7 +406,7 @@ func TestChangePasswordRejectsWeakPassword(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "weak@studio.com",
+		Email:       "weak@example.test",
 		DisplayName: "Weak",
 		Password:    "password12345",
 	})
@@ -425,7 +425,7 @@ func TestChangeOwnPasswordSucceedsAndRevokesSessions(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "self-rotate@studio.com",
+		Email:       "self-rotate@example.test",
 		DisplayName: "Self Rotate",
 		Password:    "password12345",
 	})
@@ -441,7 +441,7 @@ func TestChangeOwnPasswordSucceedsAndRevokesSessions(t *testing.T) {
 		t.Fatalf("ChangeOwnPassword: %v", err)
 	}
 
-	if _, err := svc.Authenticate(ctx, "self-rotate@studio.com", "newpassword12345"); err != nil {
+	if _, err := svc.Authenticate(ctx, "self-rotate@example.test", "newpassword12345"); err != nil {
 		t.Fatalf("new password should authenticate: %v", err)
 	}
 	if _, _, err := svc.UserForSession(ctx, token); !errors.Is(err, identity.ErrNoSession) {
@@ -460,7 +460,7 @@ func TestChangeOwnPasswordRejectsWrongCurrentPassword(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "stolen-session@studio.com",
+		Email:       "stolen-session@example.test",
 		DisplayName: "Stolen Session",
 		Password:    "password12345",
 	})
@@ -478,7 +478,7 @@ func TestChangeOwnPasswordRejectsWrongCurrentPassword(t *testing.T) {
 
 	// The password must be unchanged and the session must still be live —
 	// a rejected attempt must have no side effect at all.
-	if _, err := svc.Authenticate(ctx, "stolen-session@studio.com", "password12345"); err != nil {
+	if _, err := svc.Authenticate(ctx, "stolen-session@example.test", "password12345"); err != nil {
 		t.Fatalf("original password should still authenticate: %v", err)
 	}
 	if _, _, err := svc.UserForSession(ctx, token); err != nil {
@@ -492,7 +492,7 @@ func TestChangeOwnPasswordRejectsWeakNewPassword(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "weak-new@studio.com",
+		Email:       "weak-new@example.test",
 		DisplayName: "Weak New",
 		Password:    "password12345",
 	})
@@ -515,7 +515,7 @@ func TestChangeOwnPasswordRejectsSamePassword(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "same-password@studio.com",
+		Email:       "same-password@example.test",
 		DisplayName: "Same Password",
 		Password:    "password12345",
 	})
@@ -543,7 +543,7 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "stale@studio.com",
+		Email:       "stale@example.test",
 		DisplayName: "Stale",
 		Password:    "password12345",
 	})
@@ -603,7 +603,7 @@ func TestDeletingUserCascadesSessions(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "cascade@studio.com",
+		Email:       "cascade@example.test",
 		DisplayName: "Cascade",
 		Password:    "password12345",
 	})

@@ -17,7 +17,7 @@ func TestMCPWhoamiReportsTheTokenProject(t *testing.T) {
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestMCPGamesGetRefusesAnotherProject(t *testing.T) {
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer2@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer2@example.test", DisplayName: "Designer", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestMCPGamesGetRefusesAnotherProjectForAdmins(t *testing.T) {
 	// unset so unrelated tests don't get a surprise admin row.
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "boss@studio.com"
+	cfg.FirstAdminEmail = "boss@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	ids := identity.New(pool, cfg)
 	projSvc := projects.New(pool)
@@ -128,7 +128,7 @@ func TestMCPGamesListReturnsExactlyTheTokensOneGame(t *testing.T) {
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer3@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer3@example.test", DisplayName: "Designer", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestMCPGamesGetReturnsTheCallersOwnGame(t *testing.T) {
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer4@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer4@example.test", DisplayName: "Designer", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestMCPGamesGetReportsNotFoundForAMissingProject(t *testing.T) {
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer5@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer5@example.test", DisplayName: "Designer", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestCallerForTokenRejectsARevokedToken(t *testing.T) {
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer6@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer6@example.test", DisplayName: "Designer", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

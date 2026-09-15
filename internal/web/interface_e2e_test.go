@@ -768,7 +768,7 @@ func newInterfaceWorld(t *testing.T) *interfaceWorld {
 		SSEMaxLifetime: time.Minute, SSEHeartbeatInterval: time.Minute,
 	})
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -792,7 +792,7 @@ func newInterfaceWorld(t *testing.T) *interfaceWorld {
 		ts:   httptest.NewServer(srv),
 		deps: web.MCPDeps{Identity: ids, Projects: projSvc, Metamodel: mm, Views: vs, Markdown: md},
 		hub:  hub, agent: agent, game: game.ID, slug: game.Slug, token: secret,
-		human: loginAs(t, srv, "designer@studio.com"),
+		human: loginAs(t, srv, "designer@example.test"),
 	}
 	t.Cleanup(w.ts.Close)
 	w.seed(t)

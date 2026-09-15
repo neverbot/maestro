@@ -61,7 +61,7 @@ func main() {
 func run(ctx context.Context) error {
 	url := flag.String("database-url", os.Getenv("DATABASE_URL"),
 		"the instance's database; DATABASE_URL by default")
-	owner := flag.String("owner", "admin@example.com",
+	owner := flag.String("owner", "admin@example.test",
 		"the email of the account the demo game belongs to")
 	slug := flag.String("slug", "demo", "the game's address")
 	flag.Parse()

@@ -178,14 +178,14 @@ func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
 func TestLoadParsesDomainsAndMode(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":          "postgres://localhost/maestro",
-		"ALLOWED_EMAIL_DOMAINS": "Studio.com, example.org ",
+		"ALLOWED_EMAIL_DOMAINS": "Example.test, example.org ",
 		"REGISTRATION_MODE":     "domain_open",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := []string{"studio.com", "example.org"}
+	want := []string{"example.test", "example.org"}
 	if len(cfg.AllowedEmailDomains) != len(want) {
 		t.Fatalf("domains = %v, want %v", cfg.AllowedEmailDomains, want)
 	}
@@ -222,7 +222,7 @@ func TestLoadRejectsDomainOpenWithoutDomains(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidDomainEntry(t *testing.T) {
-	cases := []string{"@studio.com", "https://studio.com", "stu dio.com"}
+	cases := []string{"@example.test", "https://example.test", "stu dio.com"}
 	for _, entry := range cases {
 		env := map[string]string{
 			"DATABASE_URL":          "postgres://localhost/maestro",
@@ -255,13 +255,13 @@ func TestEmailAllowed(t *testing.T) {
 		t.Error("an address without @ must never be allowed, even unrestricted")
 	}
 
-	restricted := Config{AllowedEmailDomains: []string{"studio.com"}}
+	restricted := Config{AllowedEmailDomains: []string{"example.test"}}
 	cases := map[string]bool{
-		"designer@studio.com":  true,
-		"designer@STUDIO.com":  true,
-		"designer@other.com":   false,
-		"not-an-email":         false,
-		"designer@studio.com ": true,
+		"designer@example.test":  true,
+		"designer@EXAMPLE.test":  true,
+		"designer@other.com":     false,
+		"not-an-email":           false,
+		"designer@example.test ": true,
 	}
 	for email, want := range cases {
 		if got := restricted.EmailAllowed(email); got != want {
@@ -269,8 +269,8 @@ func TestEmailAllowed(t *testing.T) {
 		}
 	}
 
-	mixedCase := Config{AllowedEmailDomains: []string{"Studio.com"}}
-	if !mixedCase.EmailAllowed("designer@studio.com") {
+	mixedCase := Config{AllowedEmailDomains: []string{"Example.test"}}
+	if !mixedCase.EmailAllowed("designer@example.test") {
 		t.Error("EmailAllowed must compare case-insensitively even against a mixed-case literal")
 	}
 }

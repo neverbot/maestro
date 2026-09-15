@@ -123,15 +123,15 @@ func TestEventsStreamRequiresMembership(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345"}); err != nil {
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "stranger@studio.com")
+	cookie := loginAs(t, srv, "stranger@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/events", nil)
 	req.AddCookie(cookie)
@@ -157,7 +157,7 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -166,7 +166,7 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -232,12 +232,12 @@ func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -285,12 +285,12 @@ func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, 100*time.Millisecond, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -337,7 +337,7 @@ func TestEventsStreamClosesOnTokenRevokedMidStream(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, 20*time.Millisecond)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -397,8 +397,8 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, 20*time.Millisecond)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@studio.com", DisplayName: "Member", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@example.test", DisplayName: "Member", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -406,7 +406,7 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 	if _, err := projSvc.SetRole(ctx, member.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	cookie := loginAs(t, srv, "member@studio.com")
+	cookie := loginAs(t, srv, "member@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -474,7 +474,7 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -545,12 +545,12 @@ func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -603,12 +603,12 @@ func TestEventsStreamClosesOnServerClose(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

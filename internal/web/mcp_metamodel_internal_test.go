@@ -70,7 +70,7 @@ func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
 
 	ctx := context.Background()
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "convention@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "convention@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

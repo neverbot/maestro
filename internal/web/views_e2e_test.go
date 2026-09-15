@@ -205,7 +205,7 @@ func newE2EWorld(t *testing.T) *e2eWorld {
 		Metamodel: mm, Views: vs,
 	})
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

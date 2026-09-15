@@ -137,7 +137,7 @@ func startRunningServer(t *testing.T) (base string, cancel context.CancelFunc, d
 	env := map[string]string{
 		"DATABASE_URL":         dbURL,
 		"MAESTRO_ADDR":         addr,
-		"FIRST_ADMIN_EMAIL":    "admin@studio.com",
+		"FIRST_ADMIN_EMAIL":    "admin@example.test",
 		"FIRST_ADMIN_PASSWORD": "password12345",
 		"REGISTRATION_MODE":    "invite_only",
 	}
@@ -165,7 +165,7 @@ func startRunningServer(t *testing.T) (base string, cancel context.CancelFunc, d
 func loginAdmin(t *testing.T, base string) *http.Cookie {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{
-		"email":    "admin@studio.com",
+		"email":    "admin@example.test",
 		"password": "password12345",
 	})
 	if err != nil {
@@ -340,7 +340,7 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 	// delay below to this run's own conditions instead.
 	warmupStart := time.Now()
 	warmupBody, err := json.Marshal(map[string]string{
-		"email":    "admin@studio.com",
+		"email":    "admin@example.test",
 		"password": "password12345",
 	})
 	if err != nil {
@@ -380,7 +380,7 @@ func TestGracefulShutdownDrainsSSEAndInFlightRequests(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			body, err := json.Marshal(map[string]string{
-				"email":    "admin@studio.com",
+				"email":    "admin@example.test",
 				"password": "password12345",
 			})
 			if err != nil {
@@ -482,7 +482,7 @@ func TestStartPruneLoopSweepsImmediatelyAtStartup(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "prune-target@studio.com",
+		Email:       "prune-target@example.test",
 		DisplayName: "Prune Target",
 		Password:    "password12345",
 	})

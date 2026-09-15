@@ -56,12 +56,12 @@ func TestAGameDeletionDeadlockedByAContentWriteIsRetryable(t *testing.T) {
 	pool.Reset()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)

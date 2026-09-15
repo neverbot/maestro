@@ -227,7 +227,7 @@ func Load(getenv func(string) string) (Config, error) {
 
 // EmailAllowed reports whether an address may register on this instance.
 // Matching is exact against AllowedEmailDomains: an address such as
-// user@mail.studio.com does not match an allow-listed "studio.com".
+// user@mail.example.test does not match an allow-listed "example.test".
 func (c Config) EmailAllowed(email string) bool {
 	email = strings.TrimSpace(email)
 	at := strings.LastIndex(email, "@")

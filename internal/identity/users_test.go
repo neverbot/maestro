@@ -33,21 +33,21 @@ func TestCreateUserAndAuthenticate(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email:       "Designer@Studio.com",
+		Email:       "Designer@Example.test",
 		DisplayName: "Designer",
 		Password:    "hunter2hunter2",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	if user.Email != "designer@studio.com" {
+	if user.Email != "designer@example.test" {
 		t.Fatalf("Email = %q, want it lower-cased", user.Email)
 	}
 	if user.IsAdmin {
 		t.Fatal("CreateUser must never create an admin")
 	}
 
-	got, err := svc.Authenticate(ctx, "designer@studio.com", "hunter2hunter2")
+	got, err := svc.Authenticate(ctx, "designer@example.test", "hunter2hunter2")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -55,10 +55,10 @@ func TestCreateUserAndAuthenticate(t *testing.T) {
 		t.Fatalf("Authenticate returned a different user")
 	}
 
-	if _, err := svc.Authenticate(ctx, "designer@studio.com", "wrong"); !errors.Is(err, identity.ErrInvalidCredentials) {
+	if _, err := svc.Authenticate(ctx, "designer@example.test", "wrong"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
 	}
-	if _, err := svc.Authenticate(ctx, "nobody@studio.com", "hunter2hunter2"); !errors.Is(err, identity.ErrInvalidCredentials) {
+	if _, err := svc.Authenticate(ctx, "nobody@example.test", "hunter2hunter2"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("unknown email must fail with ErrInvalidCredentials, got %v", err)
 	}
 }
@@ -68,10 +68,10 @@ func TestCreateUserRejectsDuplicateEmail(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	if _, err := svc.CreateUser(ctx, identity.CreateUserRequest{Email: "dup@studio.com", DisplayName: "One", Password: "password12345"}); err != nil {
+	if _, err := svc.CreateUser(ctx, identity.CreateUserRequest{Email: "dup@example.test", DisplayName: "One", Password: "password12345"}); err != nil {
 		t.Fatalf("first CreateUser: %v", err)
 	}
-	_, err := svc.CreateUser(ctx, identity.CreateUserRequest{Email: "DUP@studio.com", DisplayName: "Two", Password: "password12345"})
+	_, err := svc.CreateUser(ctx, identity.CreateUserRequest{Email: "DUP@example.test", DisplayName: "Two", Password: "password12345"})
 	if !errors.Is(err, identity.ErrEmailTaken) {
 		t.Fatalf("err = %v, want ErrEmailTaken", err)
 	}
@@ -80,7 +80,7 @@ func TestCreateUserRejectsDuplicateEmail(t *testing.T) {
 func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.AllowedEmailDomains = []string{"studio.com"}
+	cfg.AllowedEmailDomains = []string{"example.test"}
 	svc := identity.New(pool, cfg)
 
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
@@ -96,7 +96,7 @@ func TestCreateUserRejectsShortPassword(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "short@studio.com", DisplayName: "Short", Password: "tooshort",
+		Email: "short@example.test", DisplayName: "Short", Password: "tooshort",
 	})
 	if !errors.Is(err, identity.ErrPasswordInvalid) {
 		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
@@ -112,7 +112,7 @@ func TestCreateUserCountsRunesNotBytes(t *testing.T) {
 	// rejects it as too short.
 	tooShort := "密码密码密码密码"
 	if _, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "runes-short@studio.com", DisplayName: "Runes", Password: tooShort,
+		Email: "runes-short@example.test", DisplayName: "Runes", Password: tooShort,
 	}); !errors.Is(err, identity.ErrPasswordInvalid) {
 		t.Fatalf("8-rune password: err = %v, want ErrPasswordInvalid (rune count, not byte count, must gate this)", err)
 	}
@@ -121,7 +121,7 @@ func TestCreateUserCountsRunesNotBytes(t *testing.T) {
 	// count clears the minimum even though the byte count is well above 12.
 	longEnough := "密码密码密码密码密码密码"
 	if _, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "runes-ok@studio.com", DisplayName: "Runes", Password: longEnough,
+		Email: "runes-ok@example.test", DisplayName: "Runes", Password: longEnough,
 	}); err != nil {
 		t.Fatalf("12-rune multi-byte password should be accepted: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestCreateUserRejectsOverlongPassword(t *testing.T) {
 		huge[i] = 'a'
 	}
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "huge@studio.com", DisplayName: "Huge", Password: string(huge),
+		Email: "huge@example.test", DisplayName: "Huge", Password: string(huge),
 	})
 	if !errors.Is(err, identity.ErrPasswordInvalid) {
 		t.Fatalf("err = %v, want ErrPasswordInvalid", err)
@@ -163,7 +163,7 @@ func TestCreateUserRejectsEmptyDisplayName(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "noname@studio.com", DisplayName: "   ", Password: "password12345",
+		Email: "noname@example.test", DisplayName: "   ", Password: "password12345",
 	})
 	if !errors.Is(err, identity.ErrDisplayNameInvalid) {
 		t.Fatalf("err = %v, want ErrDisplayNameInvalid", err)
@@ -179,7 +179,7 @@ func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
 		huge[i] = 'a'
 	}
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "hugename@studio.com", DisplayName: string(huge), Password: "password12345",
+		Email: "hugename@example.test", DisplayName: string(huge), Password: "password12345",
 	})
 	if !errors.Is(err, identity.ErrDisplayNameInvalid) {
 		t.Fatalf("err = %v, want ErrDisplayNameInvalid", err)
@@ -189,7 +189,7 @@ func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
 func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "boss@studio.com"
+	cfg.FirstAdminEmail = "boss@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -197,7 +197,7 @@ func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "boss@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "boss@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
 func TestBootstrapFirstAdminNamesTheEnvVarOnFailure(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "boss@studio.com"
+	cfg.FirstAdminEmail = "boss@example.test"
 	cfg.FirstAdminPassword = "short"
 	svc := identity.New(pool, cfg)
 

@@ -73,7 +73,7 @@ func newViewsRESTFixture(t *testing.T) viewsRESTFixture {
 	})
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -90,7 +90,7 @@ func newViewsRESTFixture(t *testing.T) viewsRESTFixture {
 		srv: srv, ids: ids, proj: projSvc, views: vs, meta: mm,
 		game: game.ID, gameSlug: game.Slug, other: other.ID, otherSlug: other.Slug,
 		ownerID: owner.ID, hub: hub,
-		cookie: loginAs(t, srv, "owner@studio.com"),
+		cookie: loginAs(t, srv, "owner@example.test"),
 	}
 	f.seed(t)
 	return f
@@ -370,7 +370,7 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 	f := newViewsRESTFixture(t)
 	ctx := context.Background()
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -383,7 +383,7 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed a view: %v", err)
 	}
-	cookie := loginAs(t, f.srv, "viewer@studio.com")
+	cookie := loginAs(t, f.srv, "viewer@example.test")
 
 	if rec := f.call(t, cookie, http.MethodGet, f.path("/views"), nil); rec.Code != http.StatusOK {
 		t.Fatalf("a viewer listing views = %d: %s", rec.Code, rec.Body.String())
@@ -421,7 +421,7 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 	ctx := context.Background()
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -435,7 +435,7 @@ func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	viewerCookie := loginAs(t, f.srv, "viewer@studio.com")
+	viewerCookie := loginAs(t, f.srv, "viewer@example.test")
 
 	ts := httptest.NewServer(f.srv)
 	// t.Cleanup rather than defer, and registered *before* the streams

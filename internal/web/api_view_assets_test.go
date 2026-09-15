@@ -64,7 +64,7 @@ func newAssetFixture(t *testing.T) assetFixture {
 	})
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -80,7 +80,7 @@ func newAssetFixture(t *testing.T) assetFixture {
 	return assetFixture{
 		srv: srv, ids: ids, proj: projSvc,
 		game: game.ID, gameSlug: game.Slug, other: other.ID, otherSlug: other.Slug,
-		ownerID: owner.ID, cookie: loginAs(t, srv, "owner@studio.com"),
+		ownerID: owner.ID, cookie: loginAs(t, srv, "owner@example.test"),
 	}
 }
 
@@ -318,7 +318,7 @@ func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
 	asset := f.upload(t, f.gameSlug, "azeroth.png", "image/png", testPNG(t, 20, 10))
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -326,7 +326,7 @@ func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	cookie := loginAs(t, f.srv, "viewer@studio.com")
+	cookie := loginAs(t, f.srv, "viewer@example.test")
 
 	if rec := f.send(t, cookie, http.MethodGet, asset.URL, "", nil); rec.Code !=
 		http.StatusOK {
@@ -389,7 +389,7 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/games/"+f.gameSlug+"/view-assets", nil)
-	req.AddCookie(loginAs(t, bare, "owner@studio.com"))
+	req.AddCookie(loginAs(t, bare, "owner@example.test"))
 	rec := httptest.NewRecorder()
 	bare.ServeHTTP(rec, req)
 	assertError(t, rec, http.StatusNotFound, "not_found", "")

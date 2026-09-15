@@ -90,8 +90,8 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@studio.com", DisplayName: "Member", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@example.test", DisplayName: "Member", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -100,8 +100,8 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
-	viewerCookie := loginAs(t, srv, "member@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
+	viewerCookie := loginAs(t, srv, "member@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -140,8 +140,8 @@ func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@studio.com", DisplayName: "Member", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	member, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "member@example.test", DisplayName: "Member", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -150,8 +150,8 @@ func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
-	memberCookie := loginAs(t, srv, "member@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
+	memberCookie := loginAs(t, srv, "member@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -190,12 +190,12 @@ func TestDeleteGamePublishesGameDeleted(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -234,8 +234,8 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -244,8 +244,8 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
-	viewerCookie := loginAs(t, srv, "viewer@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
+	viewerCookie := loginAs(t, srv, "viewer@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -296,7 +296,7 @@ func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -305,7 +305,7 @@ func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -343,8 +343,8 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -353,8 +353,8 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
-	editorCookie := loginAs(t, srv, "editor@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
+	editorCookie := loginAs(t, srv, "editor@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -363,7 +363,7 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	editorReader := openStream(t, ts, project.Slug, editorCookie.Value)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
-		strings.NewReader(`{"email":"new@studio.com","role":"viewer"}`))
+		strings.NewReader(`{"email":"new@example.test","role":"viewer"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 	if kind != "invite.created" {
 		t.Fatalf("owner Kind = %q, want invite.created", kind)
 	}
-	if !strings.Contains(data, "new@studio.com") {
+	if !strings.Contains(data, "new@example.test") {
 		t.Fatalf("data = %q, want it to name the invited email", data)
 	}
 
@@ -416,8 +416,8 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@studio.com", DisplayName: "Other", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@example.test", DisplayName: "Other", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -429,7 +429,7 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -503,12 +503,12 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -516,7 +516,7 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 	ownerReader := openStream(t, ts, project.Slug, ownerCookie.Value)
 
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/games/"+project.Slug+"/invites",
-		strings.NewReader(`{"email":"third@studio.com","role":"viewer"}`))
+		strings.NewReader(`{"email":"third@example.test","role":"viewer"}`))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
@@ -579,12 +579,12 @@ func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testi
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	t.Cleanup(func() { ts.Close() })
@@ -617,7 +617,7 @@ func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testi
 		t.Fatalf("Kind = %q, want invite.created", kind)
 	}
 
-	registerBody := `{"email":"newbie@studio.com","display_name":"Newbie","password":"password12345","invite_token":"` + created.Token + `"}`
+	registerBody := `{"email":"newbie@example.test","display_name":"Newbie","password":"password12345","invite_token":"` + created.Token + `"}`
 	regReq, err := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/register", strings.NewReader(registerBody))
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)

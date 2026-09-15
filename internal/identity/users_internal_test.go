@@ -29,7 +29,7 @@ func internalTestConfig() config.Config {
 func TestBootstrapFirstAdminConcurrentBootIsSafe(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := internalTestConfig()
-	cfg.FirstAdminEmail = "race@studio.com"
+	cfg.FirstAdminEmail = "race@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := New(pool, cfg)
 	ctx := context.Background()
@@ -67,7 +67,7 @@ func TestBootstrapFirstAdminConcurrentBootIsSafe(t *testing.T) {
 	}
 
 	var count int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM users WHERE lower(email) = lower($1)", "race@studio.com").Scan(&count); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM users WHERE lower(email) = lower($1)", "race@example.test").Scan(&count); err != nil {
 		t.Fatalf("count users: %v", err)
 	}
 	if count != 1 {
@@ -82,7 +82,7 @@ func TestWithTxCommitsOnSuccess(t *testing.T) {
 
 	err := svc.withTx(ctx, func(q *dbq.Queries) error {
 		_, err := q.CreateUser(ctx, dbq.CreateUserParams{
-			Email:        "tx-commit@studio.com",
+			Email:        "tx-commit@example.test",
 			DisplayName:  "Tx",
 			PasswordHash: "irrelevant-for-this-test",
 			IsAdmin:      false,
@@ -110,7 +110,7 @@ func TestWithTxRollsBackOnError(t *testing.T) {
 
 	err := svc.withTx(ctx, func(q *dbq.Queries) error {
 		if _, err := q.CreateUser(ctx, dbq.CreateUserParams{
-			Email:        "tx-rollback@studio.com",
+			Email:        "tx-rollback@example.test",
 			DisplayName:  "Tx",
 			PasswordHash: "irrelevant-for-this-test",
 			IsAdmin:      false,

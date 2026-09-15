@@ -23,7 +23,7 @@ func TestSetAdminPromotesANonAdmin(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "promote-me@studio.com", DisplayName: "Promote Me", Password: "password12345",
+		Email: "promote-me@example.test", DisplayName: "Promote Me", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -51,7 +51,7 @@ func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
 	ctx := context.Background()
 
 	admin1, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "admin1@studio.com", DisplayName: "Admin One", Password: "password12345",
+		Email: "admin1@example.test", DisplayName: "Admin One", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser admin1: %v", err)
@@ -60,7 +60,7 @@ func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
 		t.Fatalf("SetAdmin admin1: %v", err)
 	}
 	admin2, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "admin2@studio.com", DisplayName: "Admin Two", Password: "password12345",
+		Email: "admin2@example.test", DisplayName: "Admin Two", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser admin2: %v", err)
@@ -95,7 +95,7 @@ func TestSetAdminRefusesToDemoteTheLastAdmin(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "only-admin@studio.com", DisplayName: "Only Admin", Password: "password12345",
+		Email: "only-admin@example.test", DisplayName: "Only Admin", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -127,7 +127,7 @@ func TestSetAdminDemotingANonAdminIsANoOp(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "never-admin@studio.com", DisplayName: "Never Admin", Password: "password12345",
+		Email: "never-admin@example.test", DisplayName: "Never Admin", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -183,7 +183,7 @@ func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 	// admin per round: exactly two admins exist, instance-wide, at the
 	// start of every round's race.
 	firstAdmin, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "race-seed@studio.com", DisplayName: "Race Seed", Password: "password12345",
+		Email: "race-seed@example.test", DisplayName: "Race Seed", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser seed admin: %v", err)
@@ -196,7 +196,7 @@ func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 	const rounds = 25
 	for round := 0; round < rounds; round++ {
 		challenger, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-			Email:       fmt.Sprintf("race-challenger-%d@studio.com", round),
+			Email:       fmt.Sprintf("race-challenger-%d@example.test", round),
 			DisplayName: "Race Challenger", Password: "password12345",
 		})
 		if err != nil {
@@ -254,7 +254,7 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "byemail@studio.com", DisplayName: "By Email", Password: "password12345",
+		Email: "byemail@example.test", DisplayName: "By Email", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -263,7 +263,7 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 	// Mixed case and surrounding whitespace, to pin the same
 	// normalization every other email-keyed lookup in this package
 	// applies.
-	if err := svc.SetAdminByEmail(ctx, "  ByEmail@Studio.com  ", true); err != nil {
+	if err := svc.SetAdminByEmail(ctx, "  ByEmail@Example.test  ", true); err != nil {
 		t.Fatalf("SetAdminByEmail(true): %v", err)
 	}
 	got, err := svc.UserByID(ctx, user.ID)
@@ -275,7 +275,7 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 	}
 
 	second, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "second-admin@studio.com", DisplayName: "Second", Password: "password12345",
+		Email: "second-admin@example.test", DisplayName: "Second", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser second: %v", err)
@@ -284,7 +284,7 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 		t.Fatalf("SetAdmin second: %v", err)
 	}
 
-	if err := svc.SetAdminByEmail(ctx, "byemail@studio.com", false); err != nil {
+	if err := svc.SetAdminByEmail(ctx, "byemail@example.test", false); err != nil {
 		t.Fatalf("SetAdminByEmail(false): %v", err)
 	}
 	got, err = svc.UserByID(ctx, user.ID)
@@ -301,7 +301,7 @@ func TestSetAdminByEmailUnknownEmailReturnsErrUserNotFound(t *testing.T) {
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
 
-	if err := svc.SetAdminByEmail(ctx, "nobody@studio.com", true); !errors.Is(err, identity.ErrUserNotFound) {
+	if err := svc.SetAdminByEmail(ctx, "nobody@example.test", true); !errors.Is(err, identity.ErrUserNotFound) {
 		t.Fatalf("err = %v, want ErrUserNotFound", err)
 	}
 }
@@ -312,7 +312,7 @@ func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "only-by-email@studio.com", DisplayName: "Only", Password: "password12345",
+		Email: "only-by-email@example.test", DisplayName: "Only", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -321,7 +321,7 @@ func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
 		t.Fatalf("SetAdmin(true): %v", err)
 	}
 
-	if err := svc.SetAdminByEmail(ctx, "only-by-email@studio.com", false); !errors.Is(err, identity.ErrLastAdmin) {
+	if err := svc.SetAdminByEmail(ctx, "only-by-email@example.test", false); !errors.Is(err, identity.ErrLastAdmin) {
 		t.Fatalf("err = %v, want ErrLastAdmin", err)
 	}
 }
@@ -335,7 +335,7 @@ func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
 func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -343,7 +343,7 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	// by ErrLastAdmin — this test is about the boot-time recovery path,
 	// not the demotion guard.
 	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "other@studio.com", DisplayName: "Other", Password: "password12345",
+		Email: "other@example.test", DisplayName: "Other", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser other: %v", err)
@@ -389,7 +389,7 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 	}
 	// The password must be untouched — re-promotion only ever sets the
 	// flag.
-	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); err != nil {
+	if _, err := svc.Authenticate(ctx, "admin@example.test", "password12345"); err != nil {
 		t.Fatalf("configured admin's original password should still authenticate: %v", err)
 	}
 }
@@ -407,7 +407,7 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatch(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -415,7 +415,7 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -440,10 +440,10 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 		t.Fatalf("second BootstrapFirstAdmin: %v", err)
 	}
 
-	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); err != nil {
+	if _, err := svc.Authenticate(ctx, "admin@example.test", "password12345"); err != nil {
 		t.Fatalf("configured password should authenticate again after recovery: %v", err)
 	}
-	if _, err := svc.Authenticate(ctx, "admin@studio.com", "a-rotated-password"); !errors.Is(err, identity.ErrInvalidCredentials) {
+	if _, err := svc.Authenticate(ctx, "admin@example.test", "a-rotated-password"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("rotated password should no longer authenticate, err = %v", err)
 	}
 	if _, _, err := svc.UserForSession(ctx, token); !errors.Is(err, identity.ErrNoSession) {
@@ -460,7 +460,7 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -468,7 +468,7 @@ func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testin
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -499,13 +499,13 @@ func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testin
 func TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "nobody-yet@studio.com"
+	cfg.FirstAdminEmail = "nobody-yet@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
 
 	if _, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "someone@studio.com", DisplayName: "Someone", Password: "password12345",
+		Email: "someone@example.test", DisplayName: "Someone", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance(t *testing
 		t.Fatalf("BootstrapFirstAdmin: %v", err)
 	}
 
-	if _, err := svc.Authenticate(ctx, "nobody-yet@studio.com", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
+	if _, err := svc.Authenticate(ctx, "nobody-yet@example.test", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("BootstrapFirstAdmin must not create an account on a non-empty instance, err = %v", err)
 	}
 }
@@ -525,7 +525,7 @@ func TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance(t *testing
 func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -537,7 +537,7 @@ func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *tes
 		t.Fatalf("second BootstrapFirstAdmin: %v", err)
 	}
 
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *tes
 func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -564,7 +564,7 @@ func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testin
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -581,10 +581,10 @@ func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testin
 		t.Fatalf("second BootstrapFirstAdmin: %v", err)
 	}
 
-	if _, err := svc.Authenticate(ctx, "admin@studio.com", "a-rotated-password"); err != nil {
+	if _, err := svc.Authenticate(ctx, "admin@example.test", "a-rotated-password"); err != nil {
 		t.Fatalf("a deliberately rotated password must survive an ordinary restart: %v", err)
 	}
-	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
+	if _, err := svc.Authenticate(ctx, "admin@example.test", "password12345"); !errors.Is(err, identity.ErrInvalidCredentials) {
 		t.Fatalf("the configured password must stay inert without the opt-in, err = %v", err)
 	}
 	if _, _, err := svc.UserForSession(ctx, token); err != nil {
@@ -599,7 +599,7 @@ func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testin
 func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -607,12 +607,12 @@ func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
 	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "other@studio.com", DisplayName: "Other", Password: "password12345",
+		Email: "other@example.test", DisplayName: "Other", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser other: %v", err)
@@ -647,7 +647,7 @@ func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
 func TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -661,7 +661,7 @@ func TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn(t *testing.T) {
 	if err := identity.New(pool, shortCfg).BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("a short FIRST_ADMIN_PASSWORD must not abort start-up without the opt-in: %v", err)
 	}
-	if _, err := svc.Authenticate(ctx, "admin@studio.com", "password12345"); err != nil {
+	if _, err := svc.Authenticate(ctx, "admin@example.test", "password12345"); err != nil {
 		t.Fatalf("the existing password must be untouched: %v", err)
 	}
 }
@@ -673,7 +673,7 @@ func TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn(t *testing.T) {
 func TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -704,7 +704,7 @@ func TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn(t *testing.T) {
 func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	svc := identity.New(pool, cfg)
 	ctx := context.Background()
@@ -712,7 +712,7 @@ func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
 	if err := svc.BootstrapFirstAdmin(ctx); err != nil {
 		t.Fatalf("first BootstrapFirstAdmin: %v", err)
 	}
-	admin, err := svc.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := svc.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
 	}
 	// Demote too, so this one boot exercises both log lines.
 	other, err := svc.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "other@studio.com", DisplayName: "Other", Password: "password12345",
+		Email: "other@example.test", DisplayName: "Other", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser other: %v", err)

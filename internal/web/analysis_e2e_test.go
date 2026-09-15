@@ -79,13 +79,13 @@ func newTwoGames(t *testing.T) *twoGames {
 		Metamodel: mm, Analysis: an, Hub: hub,
 	})
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	admin, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "admin@studio.com", DisplayName: "Admin", Password: "password12345",
+		Email: "admin@example.test", DisplayName: "Admin", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser admin: %v", err)

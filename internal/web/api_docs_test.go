@@ -546,7 +546,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 	writeDocREST(t, f, "lore/duskwood", "# Duskwood\n", 0)
 
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -554,7 +554,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 	if _, err := f.proj.SetRole(ctx, viewer.ID, f.game, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	cookie := loginAs(t, f.srv, "viewer@studio.com")
+	cookie := loginAs(t, f.srv, "viewer@example.test")
 
 	// Every read on this surface, including the two rendered views: a
 	// viewer's browser renders a quest's script, which is the premise
@@ -763,7 +763,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -782,7 +782,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -950,7 +950,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -965,7 +965,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -1111,7 +1111,7 @@ func TestAProseRouteOnAnInstanceWithoutTheServiceIsRefused(t *testing.T) {
 	})
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -1120,7 +1120,7 @@ func TestAProseRouteOnAnInstanceWithoutTheServiceIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create game: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+game.Slug+"/docs", nil)
 	req.AddCookie(cookie)

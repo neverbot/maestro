@@ -23,7 +23,7 @@ func TestAPITokenResolvesToItsProject(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{
@@ -74,7 +74,7 @@ func TestCreateAPITokenGeneratesUniqueTokens(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 
 	first, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "one"})
@@ -96,7 +96,7 @@ func TestCreateAPITokenRejectsInvalidLabel(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 
 	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: ""}); !errors.Is(err, identity.ErrTokenRequestInvalid) {
@@ -115,7 +115,7 @@ func TestRevokeAPITokenIsScopedToItsOwnProject(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	mine, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	theirs, _ := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
 
@@ -146,7 +146,7 @@ func TestListAPITokensIsScopedToOneProjectAndOmitsTheHash(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	mine, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	theirs, _ := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
 
@@ -191,7 +191,7 @@ func TestResolveAPITokenThrottlesLastUsedAtWrites(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -285,7 +285,7 @@ func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -342,7 +342,7 @@ func TestRevokedTokenIsIndistinguishableFromUnknown(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -372,7 +372,7 @@ func TestResolveAPITokenReturnsTheCorrectProjectAmongMany(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	azeroth, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	leMans, _ := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID)
 
@@ -408,7 +408,7 @@ func TestRevokeUnknownAPITokenIsANoOp(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: uuid.New()}); err != nil {
@@ -422,7 +422,7 @@ func TestRevokeAlreadyRevokedAPITokenIsANoOp(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	_, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -452,7 +452,7 @@ func TestResolveAPITokenRejectsTamperedTokenWithoutTouchingTheDatabase(t *testin
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -484,7 +484,7 @@ func TestCheckAPITokenNeverTouchesLastUsedAt(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -540,7 +540,7 @@ func TestCountAPITokensForProjectIncludesRevoked(t *testing.T) {
 	projSvc := projects.New(pool)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	otherProject, _ := projSvc.Create(ctx, "outland", "Outland", user.ID)
 

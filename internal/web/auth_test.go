@@ -88,7 +88,7 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, tok, _ := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 
@@ -151,7 +151,7 @@ func TestRevokedTokenIsUnauthorized(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, row, _ := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err := ids.RevokeAPIToken(ctx, identity.RevokeAPITokenRequest{ProjectID: project.ID, TokenID: row.ID}); err != nil {
@@ -178,8 +178,8 @@ func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	agent, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "agent@studio.com", DisplayName: "Agent", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	agent, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "agent@example.test", DisplayName: "Agent", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, agent.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -207,7 +207,7 @@ func TestSessionCookieIdentifiesCaller(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
@@ -241,7 +241,7 @@ func TestExpiredSessionCookieIsUnauthorized(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
@@ -271,7 +271,7 @@ func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
@@ -320,7 +320,7 @@ func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
@@ -376,7 +376,7 @@ func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projects.New(pool)})
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
@@ -421,7 +421,7 @@ func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, originalExpiry, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)
@@ -453,7 +453,7 @@ func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
 func TestAdminTokenReturnsProjectAndIsAdmin(t *testing.T) {
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
-	cfg.FirstAdminEmail = "admin@studio.com"
+	cfg.FirstAdminEmail = "admin@example.test"
 	cfg.FirstAdminPassword = "password12345"
 	ids := identity.New(pool, cfg)
 	projSvc := projects.New(pool)
@@ -512,8 +512,8 @@ func TestBearerTakesPrecedenceOverCookieForADifferentUser(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	tokenUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "token-user@studio.com", DisplayName: "Token User", Password: "password12345"})
-	cookieUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cookie-user@studio.com", DisplayName: "Cookie User", Password: "password12345"})
+	tokenUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "token-user@example.test", DisplayName: "Token User", Password: "password12345"})
+	cookieUser, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cookie-user@example.test", DisplayName: "Cookie User", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", tokenUser.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: tokenUser.ID, Label: "agent"})
 	if err != nil {
@@ -561,7 +561,7 @@ func TestDatabaseErrorDuringBearerAuthenticationIsInternalError(t *testing.T) {
 	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projSvc})
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: user.ID, Label: "agent"})
 	if err != nil {
@@ -586,7 +586,7 @@ func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
 	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: projects.New(pool)})
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"})
 	token, _, err := ids.IssueSession(ctx, user.ID)
 	if err != nil {
 		t.Fatalf("IssueSession: %v", err)

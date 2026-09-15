@@ -19,12 +19,12 @@ import (
 func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
-	cookieHere := loginAs(t, srv, "designer@studio.com")
-	cookieElsewhere := loginAs(t, srv, "designer@studio.com")
+	cookieHere := loginAs(t, srv, "designer@example.test")
+	cookieElsewhere := loginAs(t, srv, "designer@example.test")
 
 	body := strings.NewReader(`{"current_password":"password12345","new_password":"newpassword12345"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/me/password", body)
@@ -70,14 +70,14 @@ func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *
 	}
 
 	// The new password authenticates a fresh login; the old one no longer does.
-	oldReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@studio.com","password":"password12345"}`))
+	oldReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@example.test","password":"password12345"}`))
 	oldReq.Header.Set("Content-Type", "application/json")
 	oldRec := httptest.NewRecorder()
 	srv.ServeHTTP(oldRec, oldReq)
 	if oldRec.Code != http.StatusUnauthorized {
 		t.Fatalf("login with old password = %d, want 401", oldRec.Code)
 	}
-	newReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@studio.com","password":"newpassword12345"}`))
+	newReq := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"designer@example.test","password":"newpassword12345"}`))
 	newReq.Header.Set("Content-Type", "application/json")
 	newRec := httptest.NewRecorder()
 	srv.ServeHTTP(newRec, newReq)
@@ -92,10 +92,10 @@ func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *
 func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stolen@studio.com", DisplayName: "Stolen", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stolen@example.test", DisplayName: "Stolen", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "stolen@studio.com")
+	cookie := loginAs(t, srv, "stolen@example.test")
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/me/password", strings.NewReader(`{"current_password":"totally-wrong","new_password":"newpassword12345"}`))
 	req.AddCookie(cookie)
@@ -121,10 +121,10 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 func TestChangePasswordRejectsSamePassword(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "sameone@studio.com", DisplayName: "Same One", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "sameone@example.test", DisplayName: "Same One", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "sameone@studio.com")
+	cookie := loginAs(t, srv, "sameone@example.test")
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/me/password", strings.NewReader(`{"current_password":"password12345","new_password":"password12345"}`))
 	req.AddCookie(cookie)
@@ -140,10 +140,10 @@ func TestChangePasswordRejectsSamePassword(t *testing.T) {
 func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "weak@studio.com", DisplayName: "Weak", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "weak@example.test", DisplayName: "Weak", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "weak@studio.com")
+	cookie := loginAs(t, srv, "weak@example.test")
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/me/password", strings.NewReader(`{"current_password":"password12345","new_password":"short"}`))
 	req.AddCookie(cookie)
@@ -163,7 +163,7 @@ func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
 func TestChangePasswordRejectsTokenCaller(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create project: %v", err)
@@ -190,14 +190,14 @@ func TestChangePasswordRejectsTokenCaller(t *testing.T) {
 func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "victim@studio.com", DisplayName: "Victim", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "victim@example.test", DisplayName: "Victim", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser victim: %v", err)
 	}
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@studio.com", DisplayName: "Other", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@example.test", DisplayName: "Other", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser other: %v", err)
 	}
-	victimCookie := loginAs(t, srv, "victim@studio.com")
-	otherCookie := loginAs(t, srv, "other@studio.com")
+	victimCookie := loginAs(t, srv, "victim@example.test")
+	otherCookie := loginAs(t, srv, "other@example.test")
 
 	var last *httptest.ResponseRecorder
 	for i := 0; i < 10; i++ {
@@ -245,10 +245,10 @@ func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
 func TestChangePasswordSucceedsWithCorrectPasswordEvenAfterWrongGuessBudgetExhausted(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	// Exhaust the wrong-guess budget (10/min) exactly the way a session
 	// thief with no knowledge of the password would.
@@ -281,10 +281,10 @@ func TestChangePasswordSucceedsWithCorrectPasswordEvenAfterWrongGuessBudgetExhau
 func TestChangePasswordFloodLimiterBoundsRepeatedAttemptsRegardlessOfCorrectness(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "flooded@studio.com", DisplayName: "Flooded", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "flooded@example.test", DisplayName: "Flooded", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "flooded@studio.com")
+	cookie := loginAs(t, srv, "flooded@example.test")
 
 	// 61 attempts, all with a wrong password (so none of them succeed
 	// and stop being retryable) — the 61st must be refused by the flood

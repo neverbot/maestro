@@ -160,7 +160,7 @@ need `FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` set:
 So a recovery is one deliberate boot:
 
 ```bash
-FIRST_ADMIN_EMAIL=admin@studio.com \
+FIRST_ADMIN_EMAIL=admin@example.test \
 FIRST_ADMIN_PASSWORD=the-new-password \
 FIRST_ADMIN_PASSWORD_RESET=true \
   docker compose up -d

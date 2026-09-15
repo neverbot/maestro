@@ -53,7 +53,7 @@ func TestMCPEndToEndOverHTTP(t *testing.T) {
 	defer httpSrv.Close()
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "agent-owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "agent-owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestMCPGamesGetAcceptsAMatchingGameConfirmation(t *testing.T) {
 	defer httpSrv.Close()
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "confirm-owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "confirm-owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestMCPInputValidationFailuresAreProseNotACode(t *testing.T) {
 	defer httpSrv.Close()
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "malformed-owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "malformed-owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestMCPRejectsARevokedTokenOverHTTP(t *testing.T) {
 	defer httpSrv.Close()
 	ctx := context.Background()
 
-	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "revoked-owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "revoked-owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

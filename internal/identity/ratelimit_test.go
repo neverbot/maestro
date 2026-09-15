@@ -10,23 +10,23 @@ import (
 func TestLimiterBlocksAfterMaxAttempts(t *testing.T) {
 	l := NewLimiter(3, time.Minute)
 	for i := 0; i < 3; i++ {
-		if !l.Allowed("designer@studio.com") {
+		if !l.Allowed("designer@example.test") {
 			t.Fatalf("attempt %d was blocked too early", i+1)
 		}
-		l.Record("designer@studio.com")
+		l.Record("designer@example.test")
 	}
-	if l.Allowed("designer@studio.com") {
+	if l.Allowed("designer@example.test") {
 		t.Fatal("the fourth attempt should have been blocked")
 	}
-	if !l.Allowed("someone-else@studio.com") {
+	if !l.Allowed("someone-else@example.test") {
 		t.Fatal("a different key must not be affected")
 	}
 }
 
 func TestLimiterNormalizesKeyCasingAndWhitespace(t *testing.T) {
 	l := NewLimiter(1, time.Minute)
-	l.Record("Bob@Studio.com")
-	if l.Allowed(" bob@studio.com ") {
+	l.Record("Bob@Example.test")
+	if l.Allowed(" bob@example.test ") {
 		t.Fatal("a differently-cased, differently-spaced key must share the same budget")
 	}
 }

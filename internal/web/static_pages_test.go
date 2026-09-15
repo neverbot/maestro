@@ -187,12 +187,12 @@ func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "picker@studio.com", DisplayName: "Picker", Password: "password12345",
+		Email: "picker@example.test", DisplayName: "Picker", Password: "password12345",
 	})
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "picker@studio.com")
+	cookie := loginAs(t, srv, "picker@example.test")
 
 	// The control: "/" is still the shortcut it was, for the same caller
 	// in the same request. If this stopped redirecting, the assertion

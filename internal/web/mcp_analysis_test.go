@@ -69,7 +69,7 @@ func newAnalysisWorld(t *testing.T) *analysisWorld {
 		Metamodel: mm, Analysis: an, Hub: hub,
 	})
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "designer@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "designer@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -83,7 +83,7 @@ func newAnalysisWorld(t *testing.T) *analysisWorld {
 		t.Fatalf("Create the second game: %v", err)
 	}
 	viewer, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345",
+		Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser viewer: %v", err)
@@ -720,7 +720,7 @@ func TestAViewerCanRunAnAnalysisAndCannotUpsertARoute(t *testing.T) {
 	}
 
 	// REST, with a session: the write is refused, and so is the read.
-	cookie := loginAs(t, w.srv, "viewer@studio.com")
+	cookie := loginAs(t, w.srv, "viewer@example.test")
 	// The control: a viewer reads the game, so the two refusals below are
 	// about the method rather than about being shut out of the game.
 	if code, _ := w.callAs(t, cookie, http.MethodGet, "/api/games/azeroth/routes", ""); code != http.StatusOK {

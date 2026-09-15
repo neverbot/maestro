@@ -131,7 +131,7 @@ dev:
 	@# name. Pruned by the label the Dockerfile sets, so this touches
 	@# Maestro's leftovers and no other project's.
 	@docker image prune -f --filter label=org.opencontainers.image.title=maestro >/dev/null 2>&1 || true
-	@echo "Maestro on http://localhost:$${MAESTRO_HOST_PORT:-8090} (admin@example.com / change-me-please)"
+	@echo "Maestro on http://localhost:$${MAESTRO_HOST_PORT:-8090} (admin@example.test / change-me-please)"
 
 dev-down:
 	docker compose down

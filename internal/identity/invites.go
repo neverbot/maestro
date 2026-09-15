@@ -477,7 +477,7 @@ func (s *Service) lookupLiveInviteForRedemption(ctx context.Context, token strin
 //
 // A *bound* invite's email is checked against existingUserID's own
 // stored email, not against anything the request supplied: an invite
-// naming "designer@studio.com" still only grants membership to the
+// naming "designer@example.test" still only grants membership to the
 // account that email belongs to, whether that account is being created
 // fresh (RedeemInvite) or already exists and is simply logged in
 // (here) — the binding means the same thing either way. An *unbound*

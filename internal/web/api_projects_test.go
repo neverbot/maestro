@@ -43,15 +43,15 @@ func TestListGamesOnlyShowsMemberships(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	insider, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "in@studio.com", DisplayName: "In", Password: "password12345"})
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "out@studio.com", DisplayName: "Out", Password: "password12345"}); err != nil {
+	insider, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "in@example.test", DisplayName: "In", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "out@example.test", DisplayName: "Out", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", insider.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	for email, want := range map[string]int{"in@studio.com": 1, "out@studio.com": 0} {
+	for email, want := range map[string]int{"in@example.test": 1, "out@example.test": 0} {
 		cookie := loginAs(t, srv, email)
 		req := httptest.NewRequest(http.MethodGet, "/api/games", nil)
 		req.AddCookie(cookie)
@@ -80,7 +80,7 @@ func TestListGamesRejectsTokenCaller(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
@@ -101,7 +101,7 @@ func TestCreateGameRejectsTokenCaller(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
@@ -123,8 +123,8 @@ func TestCreateGameRejectsTokenCaller(t *testing.T) {
 func TestCreateGameRejectsInvalidSlugAsBadRequest(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	cookie := loginAs(t, srv, "owner@studio.com")
+	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	body := strings.NewReader(`{"slug":"Not A Slug!","name":"Whatever"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/games", body)
@@ -142,11 +142,11 @@ func TestRootRedirectsToTheOnlyGame(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "solo@studio.com", DisplayName: "Solo", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "solo@example.test", DisplayName: "Solo", Password: "password12345"})
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "solo@studio.com")
+	cookie := loginAs(t, srv, "solo@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -176,14 +176,14 @@ func TestRootShowsPickerWithTwoGames(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "two@studio.com", DisplayName: "Two", Password: "password12345"})
+	user, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "two@example.test", DisplayName: "Two", Password: "password12345"})
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", user.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if _, err := projSvc.Create(ctx, "le-mans", "Le Mans", user.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "two@studio.com")
+	cookie := loginAs(t, srv, "two@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -201,8 +201,8 @@ func TestRootShowsPickerWithNoGames(t *testing.T) {
 	// games[0] with no elements.
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "fresh@studio.com", DisplayName: "Fresh", Password: "password12345"})
-	cookie := loginAs(t, srv, "fresh@studio.com")
+	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "fresh@example.test", DisplayName: "Fresh", Password: "password12345"})
+	cookie := loginAs(t, srv, "fresh@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -232,13 +232,13 @@ func TestTokenCreationRequiresMembership(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345"}); err != nil {
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 
-	cookie := loginAs(t, srv, "stranger@studio.com")
+	cookie := loginAs(t, srv, "stranger@example.test")
 	body := strings.NewReader(`{"label":"sneaky"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", body)
 	req.AddCookie(cookie)
@@ -258,9 +258,9 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	body := strings.NewReader(`{"label":"seed agent"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", body)
@@ -325,14 +325,14 @@ func TestViewerCannotCreateToken(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	cookie := loginAs(t, srv, "viewer@studio.com")
+	cookie := loginAs(t, srv, "viewer@example.test")
 	body := strings.NewReader(`{"label":"sneaky"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", body)
 	req.AddCookie(cookie)
@@ -357,13 +357,13 @@ func TestViewerCanRevokeToken(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"agent"}`))
 	createReq.AddCookie(ownerCookie)
@@ -381,7 +381,7 @@ func TestViewerCanRevokeToken(t *testing.T) {
 		t.Fatalf("decode create: %v", err)
 	}
 
-	viewerCookie := loginAs(t, srv, "viewer@studio.com")
+	viewerCookie := loginAs(t, srv, "viewer@example.test")
 	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/tokens/"+created.ID, nil)
 	revokeReq.AddCookie(viewerCookie)
 	revokeRec := httptest.NewRecorder()
@@ -409,14 +409,14 @@ func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	azeroth, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	leMans, _ := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
 	foreignToken, foreignRow, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: leMans.ID, UserID: owner.ID, Label: "other game's agent"})
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	for name, tokenID := range map[string]string{"unknown": uuid.NewString(), "foreign": foreignRow.ID.String()} {
 		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.Slug+"/tokens/"+tokenID, nil)
@@ -442,7 +442,7 @@ func TestTokenEndpointsRejectTokenCaller(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
@@ -463,13 +463,13 @@ func TestListMembersRequiresMembership(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345"}); err != nil {
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 
-	cookie := loginAs(t, srv, "stranger@studio.com")
+	cookie := loginAs(t, srv, "stranger@example.test")
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
@@ -487,9 +487,9 @@ func TestListMembersNeverLeaksEmail(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
 	req.AddCookie(cookie)
@@ -499,7 +499,7 @@ func TestListMembersNeverLeaksEmail(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "owner@studio.com") {
+	if strings.Contains(rec.Body.String(), "owner@example.test") {
 		t.Fatal("the member listing leaked an email address")
 	}
 }
@@ -508,9 +508,9 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
-	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@studio.com", DisplayName: "Other", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
+	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@example.test", DisplayName: "Other", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -520,7 +520,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	}
 
 	// An editor may not promote or demote anyone, including themselves.
-	editorCookie := loginAs(t, srv, "editor@studio.com")
+	editorCookie := loginAs(t, srv, "editor@example.test")
 	body := strings.NewReader(`{"role":"owner"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+other.ID.String(), body)
 	req.AddCookie(editorCookie)
@@ -532,7 +532,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	}
 
 	// The owner may.
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 	body = strings.NewReader(`{"role":"viewer"}`)
 	req = httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+editor.ID.String(), body)
 	req.AddCookie(ownerCookie)
@@ -553,8 +553,8 @@ func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -563,7 +563,7 @@ func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 	body := strings.NewReader(`{"role":"viewer"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+editor.ID.String(), body)
 	req.AddCookie(cookie)
@@ -589,9 +589,9 @@ func TestChangeRoleOnSoleOwnerReportsLastOwner(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	body := strings.NewReader(`{"role":"viewer"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+project.Slug+"/members/"+owner.ID.String(), body)
@@ -618,8 +618,8 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -628,7 +628,7 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	// A non-owner member may remove themselves. The response is 200 with
 	// the (here, empty) list of tokens the removal revoked, not a bare
 	// 204 — see handleRemoveMember's own doc comment.
-	viewerCookie := loginAs(t, srv, "viewer@studio.com")
+	viewerCookie := loginAs(t, srv, "viewer@example.test")
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+viewer.ID.String(), nil)
 	req.AddCookie(viewerCookie)
 	rec := httptest.NewRecorder()
@@ -647,7 +647,7 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 	}
 
 	// The sole remaining owner may not remove themselves.
-	ownerCookie := loginAs(t, srv, "owner@studio.com")
+	ownerCookie := loginAs(t, srv, "owner@example.test")
 	req = httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+owner.ID.String(), nil)
 	req.AddCookie(ownerCookie)
 	rec = httptest.NewRecorder()
@@ -674,8 +674,8 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -687,7 +687,7 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
 
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+editor.ID.String(), nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
@@ -717,9 +717,9 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
-	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@studio.com", DisplayName: "Viewer", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
+	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -728,7 +728,7 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 		t.Fatalf("SetRole: %v", err)
 	}
 
-	editorCookie := loginAs(t, srv, "editor@studio.com")
+	editorCookie := loginAs(t, srv, "editor@example.test")
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/members/"+viewer.ID.String(), nil)
 	req.AddCookie(editorCookie)
 	rec := httptest.NewRecorder()
@@ -743,7 +743,7 @@ func TestTokenCallerCannotManageMembers(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
@@ -784,7 +784,7 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 	projSvc := projects.New(pool)
 
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -799,7 +799,7 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 	brokenProjSvc := projects.New(projPool)
 
 	srv := web.NewServer(web.Options{Version: "test", Config: cfg, Identity: ids, Projects: brokenProjSvc})
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	projPool.Close()
 
@@ -822,9 +822,9 @@ func TestOwnerCanDeleteGame(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
@@ -849,9 +849,9 @@ func TestDeleteGameRequiresMatchingConfirmSlug(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	cases := []struct {
 		name string
@@ -886,13 +886,13 @@ func TestNonOwnerCannotDeleteGame(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	cookie := loginAs(t, srv, "editor@studio.com")
+	cookie := loginAs(t, srv, "editor@example.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	req.AddCookie(cookie)
@@ -916,7 +916,7 @@ func TestTokenCallerCannotDeleteGame(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
@@ -944,10 +944,10 @@ func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "stranger@studio.com")
+	cookie := loginAs(t, srv, "stranger@example.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug, nil)
 	req.AddCookie(cookie)
@@ -1001,13 +1001,13 @@ func TestDeletingGameRevokesItsTokens(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	req.AddCookie(cookie)
@@ -1042,9 +1042,9 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	first := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"?confirm=azeroth", nil)
 	first.AddCookie(cookie)

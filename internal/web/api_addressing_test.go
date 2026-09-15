@@ -27,7 +27,7 @@ func TestAGameIsAddressedByItsSlugAndNotByItsID(t *testing.T) {
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -36,7 +36,7 @@ func TestAGameIsAddressedByItsSlugAndNotByItsID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	rec := sessionGet(t, srv, cookie, "/api/games/"+game.Slug+"/members")
 	if rec.Code != http.StatusOK {
@@ -68,7 +68,7 @@ func TestTheSlugAddressFoldsCase(t *testing.T) {
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -76,7 +76,7 @@ func TestTheSlugAddressFoldsCase(t *testing.T) {
 	if _, err := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	for _, ref := range []string{"azeroth", "Azeroth", "AZEROTH"} {
 		rec := sessionGet(t, srv, cookie, "/api/games/"+ref+"/members")
@@ -101,7 +101,7 @@ func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
 	ctx := context.Background()
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -110,11 +110,11 @@ func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "stranger@studio.com", DisplayName: "Stranger", Password: "password12345",
+		Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "stranger@studio.com")
+	cookie := loginAs(t, srv, "stranger@example.test")
 
 	answers := map[string]string{}
 	for _, ref := range []string{"azeroth", "there-is-no-such-game"} {
@@ -214,11 +214,11 @@ func TestAGameCreatedByNameIsImmediatelyReachableByThatName(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	create := jsonRequest(http.MethodPost, "/api/games", `{"slug":"le-mans","name":"Le Mans"}`)
 	create.AddCookie(cookie)

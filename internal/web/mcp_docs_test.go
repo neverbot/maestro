@@ -675,7 +675,7 @@ func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 
 	ctx := context.Background()
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "no-prose@studio.com", DisplayName: "Designer", Password: "password12345",
+		Email: "no-prose@example.test", DisplayName: "Designer", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

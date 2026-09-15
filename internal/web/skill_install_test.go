@@ -293,7 +293,7 @@ func TestWhoamiReportsTheVersionSkillInstallServes(t *testing.T) {
 	ctx := context.Background()
 
 	user, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "handshake@studio.com", DisplayName: "Owner", Password: "password12345"})
+		Email: "handshake@example.test", DisplayName: "Owner", Password: "password12345"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}

@@ -20,13 +20,13 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "designer@studio.com", DisplayName: "A Designer", Password: "password12345",
+		Email: "designer@example.test", DisplayName: "A Designer", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 
 	req := jsonRequest(http.MethodPost, "/api/auth/login",
-		`{"email":"designer@studio.com","password":"password12345"}`)
+		`{"email":"designer@example.test","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -61,7 +61,7 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil {
 		t.Fatalf("decoding /api/me: %v", err)
 	}
-	if me.Email != "designer@studio.com" {
+	if me.Email != "designer@example.test" {
 		t.Errorf("email = %q, want the address they signed in with", me.Email)
 	}
 	if me.DisplayName != "A Designer" {
@@ -98,7 +98,7 @@ func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -152,7 +152,7 @@ func TestMeTellsATokenCallerNothingAboutThePerson(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345",
+		Email: "owner@example.test", DisplayName: "Owner", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)

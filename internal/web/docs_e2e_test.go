@@ -152,7 +152,7 @@ func newProseWorld(t *testing.T) *proseWorld {
 	srv, ids, projSvc, mm, md := newMetamodelTestServer(t)
 
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "lead@studio.com", DisplayName: "Lead", Password: "password12345",
+		Email: "lead@example.test", DisplayName: "Lead", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -163,7 +163,7 @@ func newProseWorld(t *testing.T) *proseWorld {
 	// an owner would pass requireEditor for a reason that says nothing
 	// about an editor.
 	designer, err := ids.CreateUser(ctx, identity.CreateUserRequest{
-		Email: "ana@studio.com", DisplayName: "Ana", Password: "password12345",
+		Email: "ana@example.test", DisplayName: "Ana", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("CreateUser designer: %v", err)
@@ -208,7 +208,7 @@ func newProseWorld(t *testing.T) *proseWorld {
 		gameSlug: game.Slug,
 		other:    other.ID,
 		token:    agentSecret,
-		cookie:   loginAs(t, srv, "ana@studio.com"),
+		cookie:   loginAs(t, srv, "ana@example.test"),
 		typeID:   map[string]uuid.UUID{},
 	}
 	w.seedEntities(t)

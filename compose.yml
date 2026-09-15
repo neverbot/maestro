@@ -7,7 +7,15 @@ services:
     image: maestro:dev
     environment:
       DATABASE_URL: postgres://maestro:maestro@db:5432/maestro?sslmode=disable
-      FIRST_ADMIN_EMAIL: admin@example.com
+      # **`.test`, not `.com`.** RFC 6761 reserves `.test` for exactly
+      # this: it can never be registered and never resolves, so a seeded
+      # address here cannot be somebody's real mailbox and a credential
+      # scanner reading a public repository cannot mistake this pair for
+      # one. The address here was at a domain that exists, and a scanner
+      # reading this public repository reported it and the line below as
+      # a company email and its password. Both were placeholders; a
+      # reader could not tell.
+      FIRST_ADMIN_EMAIL: admin@example.test
       FIRST_ADMIN_PASSWORD: change-me-please
       # Seeds the admin account on an empty database. On a non-empty
       # one, every restart also re-promotes this account to admin if it

@@ -31,7 +31,7 @@ func testConfig() config.Config {
 // accident every other test also happens to share.
 func newUser(t *testing.T, ids *identity.Service, email string) identity.User {
 	t.Helper()
-	return newUserNamed(t, ids, email, strings.TrimSuffix(email, "@studio.com"))
+	return newUserNamed(t, ids, email, strings.TrimSuffix(email, "@example.test"))
 }
 
 func newUserNamed(t *testing.T, ids *identity.Service, email, displayName string) identity.User {
@@ -51,7 +51,7 @@ func TestCreateProjectMakesCreatorOwner(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "designer@studio.com")
+	user := newUser(t, ids, "designer@example.test")
 
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", user.ID)
 	if err != nil {
@@ -86,8 +86,8 @@ func TestListForUserOnlyReturnsMemberships(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	insider := newUser(t, ids, "in@studio.com")
-	outsider := newUser(t, ids, "out@studio.com")
+	insider := newUser(t, ids, "in@example.test")
+	outsider := newUser(t, ids, "out@example.test")
 
 	if _, err := svc.Create(ctx, "azeroth", "Azeroth", insider.ID); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -121,7 +121,7 @@ func TestListForUserOrderingIsStableOnTies(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "orderer@studio.com")
+	user := newUser(t, ids, "orderer@example.test")
 	if _, err := svc.Create(ctx, "untitled-1", "Untitled", user.ID); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -158,8 +158,8 @@ func TestRoleOfNonMember(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner@studio.com")
-	stranger := newUser(t, ids, "stranger@studio.com")
+	owner := newUser(t, ids, "owner@example.test")
+	stranger := newUser(t, ids, "stranger@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -182,7 +182,7 @@ func TestRoleOfUnknownProjectAlsoErrNotAMember(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	stranger := newUser(t, ids, "stranger2@studio.com")
+	stranger := newUser(t, ids, "stranger2@example.test")
 
 	if _, err := svc.RoleOf(ctx, stranger.ID, uuid.New()); !errors.Is(err, projects.ErrNotAMember) {
 		t.Fatalf("err = %v, want ErrNotAMember", err)
@@ -195,7 +195,7 @@ func TestDuplicateSlugRejected(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "designer2@studio.com")
+	user := newUser(t, ids, "designer2@example.test")
 	if _, err := svc.Create(ctx, "azeroth", "Azeroth", user.ID); err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestSlugIsNormalisedToLowerCase(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "designer3@studio.com")
+	user := newUser(t, ids, "designer3@example.test")
 	project, err := svc.Create(ctx, "Azeroth", "Azeroth", user.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -226,7 +226,7 @@ func TestSlugShapeIsValidated(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "designer4@studio.com")
+	user := newUser(t, ids, "designer4@example.test")
 
 	cases := []string{
 		"",                                     // empty
@@ -256,7 +256,7 @@ func TestCreateRejectsInvalidName(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "name-check@studio.com")
+	user := newUser(t, ids, "name-check@example.test")
 
 	cases := []struct {
 		slug string
@@ -280,8 +280,8 @@ func TestListMembersReturnsRolesForEveryMember(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner3@studio.com")
-	editor := newUser(t, ids, "editor@studio.com")
+	owner := newUser(t, ids, "owner3@example.test")
+	editor := newUser(t, ids, "editor@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -321,9 +321,9 @@ func TestListMembersOrderingIsStableOnTies(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "tie-owner@studio.com")
-	twinA := newUserNamed(t, ids, "tie-a@studio.com", "Twin")
-	twinB := newUserNamed(t, ids, "tie-b@studio.com", "Twin")
+	owner := newUser(t, ids, "tie-owner@example.test")
+	twinA := newUserNamed(t, ids, "tie-a@example.test", "Twin")
+	twinB := newUserNamed(t, ids, "tie-b@example.test", "Twin")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -375,8 +375,8 @@ func TestSetRoleCanPromoteAnotherMemberToOwner(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner4@studio.com")
-	viewer := newUser(t, ids, "viewer@studio.com")
+	owner := newUser(t, ids, "owner4@example.test")
+	viewer := newUser(t, ids, "viewer@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -414,8 +414,8 @@ func TestSetRoleHasNoAuthorizationCheck(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "noauth-owner@studio.com")
-	stranger := newUser(t, ids, "noauth-stranger@studio.com")
+	owner := newUser(t, ids, "noauth-owner@example.test")
+	stranger := newUser(t, ids, "noauth-stranger@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -439,8 +439,8 @@ func TestSetRoleRejectsInvalidRole(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner5@studio.com")
-	other := newUser(t, ids, "other@studio.com")
+	owner := newUser(t, ids, "owner5@example.test")
+	other := newUser(t, ids, "other@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -457,7 +457,7 @@ func TestSetRoleCannotDemoteSoleOwner(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner6@studio.com")
+	owner := newUser(t, ids, "owner6@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -483,7 +483,7 @@ func TestSetRoleUnknownProjectReturnsErrProjectNotFound(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	user := newUser(t, ids, "fk-project@studio.com")
+	user := newUser(t, ids, "fk-project@example.test")
 	if _, err := svc.SetRole(ctx, user.ID, uuid.New(), "editor"); !errors.Is(err, projects.ErrProjectNotFound) {
 		t.Fatalf("err = %v, want ErrProjectNotFound", err)
 	}
@@ -495,7 +495,7 @@ func TestSetRoleUnknownUserReturnsErrMemberNotFound(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "fk-user-owner@studio.com")
+	owner := newUser(t, ids, "fk-user-owner@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -512,7 +512,7 @@ func TestRemoveMemberCannotRemoveSoleOwner(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner7@studio.com")
+	owner := newUser(t, ids, "owner7@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -537,8 +537,8 @@ func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner8@studio.com")
-	second := newUser(t, ids, "second@studio.com")
+	owner := newUser(t, ids, "owner8@example.test")
+	second := newUser(t, ids, "second@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -561,8 +561,8 @@ func TestRemoveMemberOfNonMemberIsNoop(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner9@studio.com")
-	stranger := newUser(t, ids, "stranger3@studio.com")
+	owner := newUser(t, ids, "owner9@example.test")
+	stranger := newUser(t, ids, "stranger3@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -588,8 +588,8 @@ func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner10@studio.com")
-	member := newUser(t, ids, "member1@studio.com")
+	owner := newUser(t, ids, "owner10@example.test")
+	member := newUser(t, ids, "member1@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -627,8 +627,8 @@ func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner11@studio.com")
-	member := newUser(t, ids, "member2@studio.com")
+	owner := newUser(t, ids, "owner11@example.test")
+	member := newUser(t, ids, "member2@example.test")
 	azeroth, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create (azeroth): %v", err)
@@ -665,7 +665,7 @@ func TestByIDRoundTrips(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner10@studio.com")
+	owner := newUser(t, ids, "owner10@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -717,8 +717,8 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 		svc := projects.New(pool)
 		ctx := context.Background()
 
-		ownerA := newUser(t, ids, fmt.Sprintf("race-a-%d@studio.com", run))
-		ownerB := newUser(t, ids, fmt.Sprintf("race-b-%d@studio.com", run))
+		ownerA := newUser(t, ids, fmt.Sprintf("race-a-%d@example.test", run))
+		ownerB := newUser(t, ids, fmt.Sprintf("race-b-%d@example.test", run))
 		project, err := svc.Create(ctx, fmt.Sprintf("race-%d", run), "Race", ownerA.ID)
 		if err != nil {
 			t.Fatalf("run %d: Create: %v", run, err)
@@ -779,8 +779,8 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 		svc := projects.New(pool)
 		ctx := context.Background()
 
-		ownerA := newUser(t, ids, fmt.Sprintf("mixed-race-a-%d@studio.com", run))
-		ownerB := newUser(t, ids, fmt.Sprintf("mixed-race-b-%d@studio.com", run))
+		ownerA := newUser(t, ids, fmt.Sprintf("mixed-race-a-%d@example.test", run))
+		ownerB := newUser(t, ids, fmt.Sprintf("mixed-race-b-%d@example.test", run))
 		project, err := svc.Create(ctx, fmt.Sprintf("mixed-race-%d", run), "Mixed Race", ownerA.ID)
 		if err != nil {
 			t.Fatalf("run %d: Create: %v", run, err)
@@ -837,8 +837,8 @@ func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) 
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "demote-owner@studio.com")
-	member := newUser(t, ids, "demote-member@studio.com")
+	owner := newUser(t, ids, "demote-owner@example.test")
+	member := newUser(t, ids, "demote-member@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -893,7 +893,7 @@ func TestDeletingSoleOwnerUserIsBlockedByDatabase(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "cascade-owner@studio.com")
+	owner := newUser(t, ids, "cascade-owner@example.test")
 	project, err := svc.Create(ctx, "cascade-azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -922,8 +922,8 @@ func TestDeletingNonSoleOwnerUserSucceeds(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	ownerA := newUser(t, ids, "cascade-a@studio.com")
-	ownerB := newUser(t, ids, "cascade-b@studio.com")
+	ownerA := newUser(t, ids, "cascade-a@example.test")
+	ownerB := newUser(t, ids, "cascade-b@example.test")
 	project, err := svc.Create(ctx, "cascade-two-owners", "Two Owners", ownerA.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -952,7 +952,7 @@ func TestDeletingProjectCascadesDespiteTrigger(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "cascade-project-owner@studio.com")
+	owner := newUser(t, ids, "cascade-project-owner@example.test")
 	project, err := svc.Create(ctx, "cascade-doomed", "Doomed", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -979,7 +979,7 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "roles-owner@studio.com")
+	owner := newUser(t, ids, "roles-owner@example.test")
 	project, err := svc.Create(ctx, "roles-check", "Roles Check", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -987,7 +987,7 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 
 	q := dbq.New(pool)
 	for i, r := range roles.All() {
-		member := newUser(t, ids, fmt.Sprintf("roles-member-%d@studio.com", i))
+		member := newUser(t, ids, fmt.Sprintf("roles-member-%d@example.test", i))
 		if err := q.UpsertMembership(ctx, dbq.UpsertMembershipParams{
 			UserID: member.ID, ProjectID: project.ID, Role: string(r),
 		}); err != nil {
@@ -995,7 +995,7 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 		}
 	}
 
-	bogus := newUser(t, ids, "roles-bogus@studio.com")
+	bogus := newUser(t, ids, "roles-bogus@example.test")
 	if err := q.UpsertMembership(ctx, dbq.UpsertMembershipParams{
 		UserID: bogus.ID, ProjectID: project.ID, Role: "superadmin",
 	}); err == nil {
@@ -1022,7 +1022,7 @@ func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner@studio.com")
+	owner := newUser(t, ids, "owner@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1056,7 +1056,7 @@ func TestDeleteProjectTwiceIsIdempotent(t *testing.T) {
 	svc := projects.New(pool)
 	ctx := context.Background()
 
-	owner := newUser(t, ids, "owner@studio.com")
+	owner := newUser(t, ids, "owner@example.test")
 	project, err := svc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if err != nil {
 		t.Fatalf("Create: %v", err)

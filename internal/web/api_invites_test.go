@@ -24,7 +24,7 @@ import (
 func loginAsAdmin(t *testing.T, adjust func(*config.Config)) (*web.Server, *identity.Service, *projects.Service, *http.Cookie) {
 	t.Helper()
 	srv, ids, projSvc := newTestServerWithConfig(t, func(cfg *config.Config) {
-		cfg.FirstAdminEmail = "admin@studio.com"
+		cfg.FirstAdminEmail = "admin@example.test"
 		cfg.FirstAdminPassword = "password12345"
 		if adjust != nil {
 			adjust(cfg)
@@ -33,7 +33,7 @@ func loginAsAdmin(t *testing.T, adjust func(*config.Config)) (*web.Server, *iden
 	if err := ids.BootstrapFirstAdmin(context.Background()); err != nil {
 		t.Fatalf("BootstrapFirstAdmin: %v", err)
 	}
-	return srv, ids, projSvc, loginAs(t, srv, "admin@studio.com")
+	return srv, ids, projSvc, loginAs(t, srv, "admin@example.test")
 }
 
 // TestAdminCanCreateAccountOnlyInvite is this task's own acceptance test:
@@ -43,7 +43,7 @@ func loginAsAdmin(t *testing.T, adjust func(*config.Config)) (*web.Server, *iden
 func TestAdminCanCreateAccountOnlyInvite(t *testing.T) {
 	srv, _, _, cookie := loginAsAdmin(t, nil)
 
-	body := strings.NewReader(`{"email":"newcomer@studio.com"}`)
+	body := strings.NewReader(`{"email":"newcomer@example.test"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/invites", body)
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
@@ -79,7 +79,7 @@ func TestAdminCanCreateAccountOnlyInvite(t *testing.T) {
 
 	// The link actually redeems, end to end, exactly the way an admin
 	// pasting redeem_path after their instance's own address would use it.
-	registerBody := strings.NewReader(`{"email":"newcomer@studio.com","display_name":"Newcomer","password":"password12345","invite_token":"` + created.Token + `"}`)
+	registerBody := strings.NewReader(`{"email":"newcomer@example.test","display_name":"Newcomer","password":"password12345","invite_token":"` + created.Token + `"}`)
 	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", registerBody)
 	registerReq.Header.Set("Content-Type", "application/json")
 	registerRec := httptest.NewRecorder()
@@ -91,7 +91,7 @@ func TestAdminCanCreateAccountOnlyInvite(t *testing.T) {
 	// The redeemed user has no game membership at all — an account-only
 	// invite only ever grants an account, matching the spec's "registering
 	// grants no access to any game by itself".
-	newcomerCookie := loginAs(t, srv, "newcomer@studio.com")
+	newcomerCookie := loginAs(t, srv, "newcomer@example.test")
 	gamesReq := httptest.NewRequest(http.MethodGet, "/api/games", nil)
 	gamesReq.AddCookie(newcomerCookie)
 	gamesRec := httptest.NewRecorder()
@@ -113,12 +113,12 @@ func TestAdminCanCreateAccountOnlyInvite(t *testing.T) {
 func TestNonAdminCannotCreateAccountOnlyInvite(t *testing.T) {
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"}); err != nil {
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"x@studio.com"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"x@example.test"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -136,7 +136,7 @@ func TestNonAdminCannotCreateAccountOnlyInvite(t *testing.T) {
 func TestTokenCallerCannotManageInstanceInvites(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	token, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "agent"})
 	if err != nil {
@@ -165,11 +165,11 @@ func TestTokenCallerCannotManageInstanceInvites(t *testing.T) {
 func TestInstanceInviteListingExcludesProjectBound(t *testing.T) {
 	srv, ids, projSvc, cookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
-	admin, err := ids.Authenticate(ctx, "admin@studio.com", "password12345")
+	admin, err := ids.Authenticate(ctx, "admin@example.test", "password12345")
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", other.ID)
 	_, boundInvite, err := ids.CreateInvite(ctx, identity.InviteRequest{ProjectID: &project.ID, Role: "editor", CreatedBy: &other.ID})
 	if err != nil {
@@ -177,7 +177,7 @@ func TestInstanceInviteListingExcludesProjectBound(t *testing.T) {
 	}
 	_ = admin
 
-	req := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"visible@studio.com"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/invites", strings.NewReader(`{"email":"visible@example.test"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -230,7 +230,7 @@ func TestInstanceInviteListingExcludesProjectBound(t *testing.T) {
 func TestRevokeInstanceInviteIgnoresProjectBound(t *testing.T) {
 	srv, ids, projSvc, cookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
-	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", other.ID)
 	token, boundInvite, err := ids.CreateInvite(ctx, identity.InviteRequest{ProjectID: &project.ID, Role: "editor", CreatedBy: &other.ID})
 	if err != nil {
@@ -247,7 +247,7 @@ func TestRevokeInstanceInviteIgnoresProjectBound(t *testing.T) {
 
 	// Still live.
 	if _, err := ids.RedeemInvite(ctx, token, identity.CreateUserRequest{
-		Email: "still.live@studio.com", DisplayName: "Still Live", Password: "password12345",
+		Email: "still.live@example.test", DisplayName: "Still Live", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("RedeemInvite after no-op instance revoke: %v", err)
 	}
@@ -259,11 +259,11 @@ func TestRevokeInstanceInviteIgnoresProjectBound(t *testing.T) {
 func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"designer@studio.com","role":"editor"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"designer@example.test","role":"editor"}`))
 	createReq.AddCookie(cookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -316,7 +316,7 @@ func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 	}
 
 	// Redeeming it actually grants the named role.
-	registerBody := strings.NewReader(`{"email":"designer@studio.com","display_name":"Designer","password":"password12345","invite_token":"` + created.Token + `"}`)
+	registerBody := strings.NewReader(`{"email":"designer@example.test","display_name":"Designer","password":"password12345","invite_token":"` + created.Token + `"}`)
 	registerReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", registerBody)
 	registerReq.Header.Set("Content-Type", "application/json")
 	registerRec := httptest.NewRecorder()
@@ -324,7 +324,7 @@ func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 	if registerRec.Code != http.StatusCreated {
 		t.Fatalf("register with invite: status = %d, want 201: %s", registerRec.Code, registerRec.Body.String())
 	}
-	designerCookie := loginAs(t, srv, "designer@studio.com")
+	designerCookie := loginAs(t, srv, "designer@example.test")
 	gamesReq := httptest.NewRequest(http.MethodGet, "/api/games", nil)
 	gamesReq.AddCookie(designerCookie)
 	gamesRec := httptest.NewRecorder()
@@ -351,8 +351,8 @@ func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@studio.com", DisplayName: "Editor", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
 		t.Fatalf("SetRole: %v", err)
@@ -362,7 +362,7 @@ func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	cookie := loginAs(t, srv, "editor@studio.com")
+	cookie := loginAs(t, srv, "editor@example.test")
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"role":"viewer"}`))
 	createReq.AddCookie(cookie)
@@ -396,11 +396,11 @@ func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 func TestOwnerCanInviteAsOwner(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"cofounder@studio.com","role":"owner"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"cofounder@example.test","role":"owner"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -429,16 +429,16 @@ func TestOwnerCanInviteAsOwner(t *testing.T) {
 func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	founder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "founder@studio.com", DisplayName: "Founder", Password: "password12345"})
-	cofounder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cofounder@studio.com", DisplayName: "Cofounder", Password: "password12345"})
+	founder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "founder@example.test", DisplayName: "Founder", Password: "password12345"})
+	cofounder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "cofounder@example.test", DisplayName: "Cofounder", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", founder.ID)
 	if _, err := projSvc.SetRole(ctx, cofounder.ID, project.ID, "owner"); err != nil {
 		t.Fatalf("SetRole: %v", err)
 	}
-	founderCookie := loginAs(t, srv, "founder@studio.com")
-	cofounderCookie := loginAs(t, srv, "cofounder@studio.com")
+	founderCookie := loginAs(t, srv, "founder@example.test")
+	cofounderCookie := loginAs(t, srv, "cofounder@example.test")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"third@studio.com","role":"owner"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"email":"third@example.test","role":"owner"}`))
 	createReq.AddCookie(founderCookie)
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
@@ -537,7 +537,7 @@ func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	azeroth, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
 	leMans, _ := projSvc.Create(ctx, "le-mans", "Le Mans", owner.ID)
 	ownerID := owner.ID
@@ -545,7 +545,7 @@ func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	for name, inviteID := range map[string]string{"unknown": uuid.NewString(), "foreign": foreignInvite.ID.String()} {
 		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+azeroth.Slug+"/invites/"+inviteID, nil)
@@ -559,7 +559,7 @@ func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 
 	// The foreign invite must still be live.
 	if _, err := ids.RedeemInvite(ctx, foreignToken, identity.CreateUserRequest{
-		Email: "still.live@studio.com", DisplayName: "Still Live", Password: "password12345",
+		Email: "still.live@example.test", DisplayName: "Still Live", Password: "password12345",
 	}); err != nil {
 		t.Fatalf("RedeemInvite after no-op cross-game revoke: %v", err)
 	}
@@ -576,8 +576,8 @@ func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
-	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "outsider@studio.com", DisplayName: "Outsider", Password: "password12345"}); err != nil {
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "outsider@example.test", DisplayName: "Outsider", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
@@ -586,7 +586,7 @@ func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
-	cookie := loginAs(t, srv, "outsider@studio.com")
+	cookie := loginAs(t, srv, "outsider@example.test")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/invites", nil)
 	listReq.AddCookie(cookie)
@@ -623,9 +623,9 @@ func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
 func TestProjectInviteCreationRejectsInvalidRole(t *testing.T) {
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
-	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@studio.com", DisplayName: "Owner", Password: "password12345"})
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	cookie := loginAs(t, srv, "owner@studio.com")
+	cookie := loginAs(t, srv, "owner@example.test")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/invites", strings.NewReader(`{"role":"superadmin"}`))
 	req.AddCookie(cookie)

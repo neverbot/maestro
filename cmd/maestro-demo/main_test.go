@@ -129,7 +129,7 @@ func TestAFailedSeedRemovesTheGameItStarted(t *testing.T) {
 // resolves its owner by email, so this only has to exist.
 func seedUser(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
-	const email = "demo-owner@example.com"
+	const email = "demo-owner@example.test"
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO users (email, password_hash, display_name) VALUES ($1, 'x', 'Demo owner')`, email)
 	if err != nil {

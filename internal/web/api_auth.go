@@ -394,7 +394,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Normalized the same way Authenticate normalizes its own lookup
-	// (lower-case, trim), so "Bob@x.com", "bob@x.com" and " bob@x.com "
+	// (lower-case, trim), so "Bob@x.test", "bob@x.test" and " bob@x.test "
 	// share one rate-limit budget instead of three (Task 6, Correction 9).
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	if email == "" {

@@ -178,14 +178,14 @@ func TestLoadRejectsInviteTTLAboveMax(t *testing.T) {
 func TestLoadParsesDomainsAndMode(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL":          "postgres://localhost/maestro",
-		"ALLOWED_EMAIL_DOMAINS": "Example.test, example.org ",
+		"ALLOWED_EMAIL_DOMAINS": "Example.test, partner.test ",
 		"REGISTRATION_MODE":     "domain_open",
 	}
 	cfg, err := Load(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := []string{"example.test", "example.org"}
+	want := []string{"example.test", "partner.test"}
 	if len(cfg.AllowedEmailDomains) != len(want) {
 		t.Fatalf("domains = %v, want %v", cfg.AllowedEmailDomains, want)
 	}
@@ -248,7 +248,7 @@ func TestLoadRejectsInvalidAddr(t *testing.T) {
 
 func TestEmailAllowed(t *testing.T) {
 	unrestricted := Config{}
-	if !unrestricted.EmailAllowed("anyone@anywhere.net") {
+	if !unrestricted.EmailAllowed("anyone@anywhere.test") {
 		t.Error("empty domain list must allow everything")
 	}
 	if unrestricted.EmailAllowed("not-an-email") {
@@ -259,7 +259,7 @@ func TestEmailAllowed(t *testing.T) {
 	cases := map[string]bool{
 		"designer@example.test":  true,
 		"designer@EXAMPLE.test":  true,
-		"designer@other.com":     false,
+		"designer@other.test":    false,
 		"not-an-email":           false,
 		"designer@example.test ": true,
 	}

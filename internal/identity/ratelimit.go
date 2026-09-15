@@ -28,7 +28,7 @@ const sweepEvery = 1024
 //
 // A key is lower-cased and trimmed of surrounding whitespace before it is
 // recorded or checked, so a caller does not have to pre-normalize an email
-// address itself: "Bob@x.com", "bob@x.com" and " bob@x.com " share one
+// address itself: "Bob@x.test", "bob@x.test" and " bob@x.test " share one
 // budget. This must match whatever normalization the downstream lookup
 // applies — Authenticate lower-cases and trims the email it looks up, so
 // keying the login limiter on the raw, unnormalized address would still be

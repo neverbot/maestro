@@ -428,7 +428,7 @@ func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
 	// the earlier version of these tests never actually exercised this),
 	// an address outside it must be refused, not silently admitted.
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@outside.com","display_name":"New","password":"password12345"}`)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@outside.test","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -715,7 +715,7 @@ func TestRegisterWithOffDomainUnboundInviteIsForbidden(t *testing.T) {
 		t.Fatalf("CreateInvite: %v", err)
 	}
 
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.com","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.test","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -750,7 +750,7 @@ func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
 
 	permissiveCfg := testConfig()
 	creator := identity.New(pool, permissiveCfg)
-	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@outside.com"})
+	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@outside.test"})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
 		Projects: projSvc,
 	})
 
-	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.com","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
+	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"contractor@outside.test","display_name":"Contractor","password":"password12345","invite_token":"`+token+`"}`)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
@@ -968,7 +968,7 @@ func TestLoginRejectsNonJSONContentType(t *testing.T) {
 
 func TestLoginRejectsMissingContentType(t *testing.T) {
 	srv, _, _ := newTestServer(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"a@b.com","password":"password12345"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"a@b.test","password":"password12345"}`))
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnsupportedMediaType {

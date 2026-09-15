@@ -308,7 +308,7 @@ func TestCreateInviteRejectsDisallowedDomain(t *testing.T) {
 	cfg.AllowedEmailDomains = []string{"example.test"}
 	svc := identity.New(pool, cfg)
 
-	_, _, err := svc.CreateInvite(context.Background(), identity.InviteRequest{Email: "outsider@elsewhere.com"})
+	_, _, err := svc.CreateInvite(context.Background(), identity.InviteRequest{Email: "outsider@elsewhere.test"})
 	if !errors.Is(err, identity.ErrInviteRequestInvalid) {
 		t.Fatalf("err = %v, want ErrInviteRequestInvalid", err)
 	}
@@ -337,7 +337,7 @@ func TestRedeemUnboundInviteAppliesDomainAllowlist(t *testing.T) {
 	}
 
 	_, err = svc.RedeemInvite(context.Background(), token, identity.CreateUserRequest{
-		Email: "contractor@elsewhere.com", DisplayName: "Contractor", Password: "password12345",
+		Email: "contractor@elsewhere.test", DisplayName: "Contractor", Password: "password12345",
 	})
 	if !errors.Is(err, identity.ErrEmailNotAllowed) {
 		t.Fatalf("err = %v, want ErrEmailNotAllowed", err)
@@ -366,7 +366,7 @@ func TestRedeemBoundInviteAllowsOffDomainEmail(t *testing.T) {
 	pool := testutil.NewPool(t)
 	creator := identity.New(pool, testConfig())
 
-	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@elsewhere.com"})
+	token, _, err := creator.CreateInvite(context.Background(), identity.InviteRequest{Email: "contractor@elsewhere.test"})
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}
@@ -376,13 +376,13 @@ func TestRedeemBoundInviteAllowsOffDomainEmail(t *testing.T) {
 	redeemer := identity.New(pool, strictCfg)
 
 	user, err := redeemer.RedeemInvite(context.Background(), token, identity.CreateUserRequest{
-		Email: "contractor@elsewhere.com", DisplayName: "Contractor", Password: "password12345",
+		Email: "contractor@elsewhere.test", DisplayName: "Contractor", Password: "password12345",
 	})
 	if err != nil {
 		t.Fatalf("RedeemInvite: %v (a bound invite must not re-apply ALLOWED_EMAIL_DOMAINS at redemption)", err)
 	}
-	if user.Email != "contractor@elsewhere.com" {
-		t.Fatalf("Email = %q, want contractor@elsewhere.com", user.Email)
+	if user.Email != "contractor@elsewhere.test" {
+		t.Fatalf("Email = %q, want contractor@elsewhere.test", user.Email)
 	}
 }
 

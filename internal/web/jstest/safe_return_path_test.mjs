@@ -52,7 +52,7 @@ function fakeElement(overrides = {}) {
 async function runCase(returnValue, wantPathname) {
   let submitHandler = null;
   const loginFormEl = {
-    _values: { email: "designer@example.com", password: "correcthorsebatterystaple12" },
+    _values: { email: "designer@example.test", password: "correcthorsebatterystaple12" },
     elements: [],
     addEventListener(type, handler) {
       if (type === "submit") submitHandler = handler;

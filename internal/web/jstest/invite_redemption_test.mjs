@@ -21,7 +21,7 @@
 // too, skipping cleanly if `node` is not on PATH.
 
 const TOKEN = "test-invite-token-abc123";
-const EMAIL = "designer@example.com";
+const EMAIL = "designer@example.test";
 const DISPLAY_NAME = "Designer";
 const PASSWORD = "correcthorsebatterystaple12";
 

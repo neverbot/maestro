@@ -84,7 +84,7 @@ func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
 	svc := identity.New(pool, cfg)
 
 	_, err := svc.CreateUser(context.Background(), identity.CreateUserRequest{
-		Email: "outsider@elsewhere.com", DisplayName: "Outsider", Password: "password12345",
+		Email: "outsider@elsewhere.test", DisplayName: "Outsider", Password: "password12345",
 	})
 	if !errors.Is(err, identity.ErrEmailNotAllowed) {
 		t.Fatalf("err = %v, want ErrEmailNotAllowed", err)

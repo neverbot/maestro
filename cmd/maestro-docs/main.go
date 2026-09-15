@@ -22,6 +22,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"html"
@@ -77,11 +78,15 @@ type page struct {
 	// written: the index of the bundle is a list of names without it,
 	// and a list of names does not say which page to open.
 	Blurb string
-	// Wide drops the reading measure for a page whose content is not
-	// prose. Exactly one page is: the design system is a specimen sheet,
-	// and a colour grid squeezed into a paragraph's width is a specimen
-	// of nothing. It keeps the header, the sheet and the rail.
+	// Wide drops the reading measure for a page whose content is not all
+	// prose: the design system is a specimen sheet, and the front page
+	// carries screenshots of a product designed at 1440, which inside a
+	// paragraph's width are a picture of a picture. The paragraphs still
+	// stop at the measure; what grows is everything that is not one.
 	Wide bool
+	// Bare takes the paper sheet away, for a page whose own content is
+	// panels. Panels do not nest.
+	Bare bool
 	// Stylesheets are the extra sheets this page needs, relative to the
 	// site root. Only the design system has one: it is a specimen sheet
 	// and its own rules are its content.
@@ -274,6 +279,9 @@ func build(root, out string) error {
 	if err := copyFile(filepath.Join(root, "docs", "design-system.css"), filepath.Join(out, "design-system.css")); err != nil {
 		return err
 	}
+	if err := copyImages(root, out); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(out, "style.css"), []byte(siteCSS), 0o600); err != nil {
 		return fmt.Errorf("write the stylesheet: %w", err)
 	}
@@ -300,12 +308,30 @@ func collect(root string) ([]page, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read readme.md: %w", err)
 	}
-	home, err := markdown.RenderDoc(rewriteLinks(string(readme)))
+	running, err := markdown.RenderDoc(rewriteLinks(string(readme)))
 	if err != nil {
 		return nil, err
 	}
-	home, homeSections := anchor(scrollers(stripRemoteImages(home)) + agentsPointer())
-	pages = append(pages, page{Path: "index.html", Title: "", Body: home, Sections: homeSections})
+	running, runningSections := anchor(scrollers(stripRemoteImages(running)))
+	pages = append(pages, page{
+		Path:     "running.html",
+		Title:    "Running it",
+		Body:     running,
+		Blurb:    "Self-hosted and open source: what Maestro is, how to run it, how to configure it and how to build it.",
+		Sections: runningSections,
+	})
+	front, frontSections, frontBlurb, err := sitePage(root, "index", nil)
+	if err != nil {
+		return nil, err
+	}
+	pages = append(pages, page{
+		Path:     "index.html",
+		Title:    "",
+		Wide:     true,
+		Blurb:    frontBlurb,
+		Body:     front,
+		Sections: frontSections,
+	})
 
 	// The licence, because the readme links to it and a link that
 	// downloads a file instead of opening a page is a broken link with
@@ -337,11 +363,29 @@ func collect(root string) ([]page, error) {
 	if err != nil {
 		return nil, err
 	}
-	pages = append(pages, agentsIndexPage(bundle))
+	agents, err := agentsIndexPage(root, bundle)
+	if err != nil {
+		return nil, err
+	}
+	pages = append(pages, agents)
 	pages = append(pages, bundle...)
 	// Last, because it is built out of every page above it.
-	pages = append(pages, sitemapPage(pages))
-	pages = append(pages, notFoundPage())
+	sitemap, err := sitemapPage(root, pages)
+	if err != nil {
+		return nil, err
+	}
+	pages = append(pages, sitemap)
+
+	missing, missingSections, _, err := sitePage(root, "404", nil)
+	if err != nil {
+		return nil, err
+	}
+	pages = append(pages, page{
+		Path:     "404.html",
+		Title:    "Nothing here",
+		Body:     missing,
+		Sections: missingSections,
+	})
 	return pages, nil
 }
 
@@ -380,10 +424,37 @@ func designSystemPage(root string) (page, error) {
 		Path:        "design-system.html",
 		Title:       "Design system",
 		Wide:        true,
+		Bare:        true,
 		Body:        body,
 		Sections:    sections,
 		Stylesheets: []string{"design-system.css"},
 	}, nil
+}
+
+// copyImages publishes docs/images, which is every screenshot the site
+// shows. They are committed, and docs/images/readme.md carries the
+// recipe that made each one and a row per image: a screenshot is the one
+// thing here that goes stale without anybody editing it, and the index
+// is what turns replacing them into a checklist.
+func copyImages(root, out string) error {
+	from := filepath.Join(root, "docs", "images")
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", from, err)
+	}
+	dir := filepath.Join(out, "images")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("make %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
+			continue
+		}
+		if err := copyFile(filepath.Join(from, entry.Name()), filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // copyFile puts one generated file beside the pages that ask for it.
@@ -515,12 +586,8 @@ func grouped(bundle []page) [][]page {
 
 // agentsIndexPage is the page the header's second link opens: every page
 // of the bundle, in its own groups, each with its own first sentence.
-func agentsIndexPage(bundle []page) page {
+func agentsIndexPage(root string, bundle []page) (page, error) {
 	var out strings.Builder
-	out.WriteString("<h1>What an agent is told</h1>\n")
-	out.WriteString("<p>These are the pages this instance serves to an agent, published so a " +
-		"person can read what their agent was handed. They are the bundle itself, not a " +
-		"description of it: the same files, rendered.</p>\n")
 	out.WriteString(`<div class="index">` + "\n")
 	for _, group := range grouped(bundle) {
 		// h2 and not h3: an h1 followed by an h3 skips a level, which is
@@ -538,10 +605,12 @@ func agentsIndexPage(bundle []page) page {
 		out.WriteString("</ul>\n</section>\n")
 	}
 	out.WriteString("</div>\n")
-	// The groups are this page's sections. They are written above with
-	// their own ids rather than passed through anchor, so they are
-	// listed here rather than discovered.
-	var sections []section
+	body, sections, blurb, err := sitePage(root, "agents", map[string]string{"pages": out.String()})
+	if err != nil {
+		return page{}, err
+	}
+	// The groups are this page's own sections, written above with their
+	// own ids rather than discovered by anchor, which only sees h2s.
 	for _, group := range grouped(bundle) {
 		key := groupOf(group[0])
 		sections = append(sections, section{ID: groupID(key), Text: groupLabels[key]})
@@ -549,21 +618,114 @@ func agentsIndexPage(bundle []page) page {
 	return page{
 		Path:     agentsIndexPath,
 		Title:    "What an agent is told",
-		Body:     out.String(),
+		Body:     body,
+		Blurb:    blurb,
 		Sections: sections,
-	}
+	}, nil
 }
 
-// agentsPointer is what the home page keeps where the list used to be: a
-// sentence and the way in. The `for-agents` id stays, because the link
-// that pointed at it is in a published readme and in this product's own
-// onboarding, and an id removed is a link broken.
-func agentsPointer() string {
-	return "\n<h2 id=\"for-agents\">What an agent is told</h2>\n" +
-		"<p>This instance serves its agents a skill bundle: how to declare a game's own " +
-		"vocabulary, how to fill it, and a worked example per genre. It is published here, so a " +
-		"person can read what their agent was handed. " +
-		"<a href=\"" + agentsIndexPath + "\">Read the bundle</a>.</p>\n"
+// --- The pages this site writes for itself ---------------------------
+
+// siteDir holds one markdown file per page the site writes rather than
+// borrows.
+//
+// **The prose lives in markdown, not in this file.** The front page was
+// forty `WriteString` calls with sentences and hand-escaped HTML inside
+// them: nobody could fix a comma without recompiling, and the one thing
+// this generator is for — turning markdown into pages — was the one
+// thing the front page did not do.
+const siteDir = "docs/site"
+
+// partialRE is the one extension these pages have over markdown, and it
+// exists for the one thing markdown genuinely cannot say: **put here
+// what you worked out from the repository**. `{{pages}}` is the bundle's
+// own index, built from the files that exist; `{{map}}` is every page
+// and every heading of this site, built from the pages that were just
+// rendered. Neither can be typed by hand and stay true.
+//
+// A word in braces rather than an HTML comment, because goldmark runs
+// without `html.WithUnsafe` on purpose (see internal/markdown) and would
+// have dropped a comment before this could see it.
+var partialRE = regexp.MustCompile(`<p>\{\{([a-z]+)\}\}</p>`)
+
+// sitePage renders one of them.
+func sitePage(root, name string, parts map[string]string) (string, []section, string, error) {
+	//nolint:gosec // -root is the caller's own flag and name is this file's own constant.
+	body, err := os.ReadFile(filepath.Join(root, siteDir, name+".md"))
+	if err != nil {
+		return "", nil, "", fmt.Errorf("read %s/%s.md: %w", siteDir, name, err)
+	}
+	rendered, err := markdown.RenderDoc(string(body))
+	if err != nil {
+		return "", nil, "", err
+	}
+	rendered, missing := expand(figures(root, scrollers(rendered)), parts)
+	if missing != "" {
+		return "", nil, "", fmt.Errorf("%s/%s.md asks for {{%s}} and this generator builds no such part",
+			siteDir, name, missing)
+	}
+	rendered, sections := anchor(rendered)
+	return rendered, sections, blurbOf(string(body)), nil
+}
+
+// expand puts the generated parts where the markdown asked for them.
+func expand(body string, parts map[string]string) (string, string) {
+	var missing string
+	out := partialRE.ReplaceAllStringFunc(body, func(match string) string {
+		found := partialRE.FindStringSubmatch(match)
+		part, ok := parts[found[1]]
+		if !ok {
+			missing = found[1]
+			return match
+		}
+		return part
+	})
+	return out, missing
+}
+
+// figureRE is an image alone in a paragraph, optionally followed by an
+// emphasised paragraph.
+//
+// **That pair is this site's figure**, because markdown has no figure
+// and this renderer admits no raw HTML to write one with. One rule, said
+// here and in docs/images/readme.md: a picture on its own line is a
+// figure, and an italic line under it is its caption.
+var figureRE = regexp.MustCompile(`(?s)<p>(<img [^>]*?)\s*/?></p>\n?(?:<p><em>(.*?)</em></p>)?`)
+
+// srcRE reads the file a rendered image points at.
+var srcRE = regexp.MustCompile(`src="([^"]+)"`)
+
+func figures(root, body string) string {
+	return figureRE.ReplaceAllStringFunc(body, func(match string) string {
+		found := figureRE.FindStringSubmatch(match)
+		img := found[1]
+		// **The size comes off the file**, so a picture holds its own
+		// space before it has loaded and the page does not jump. Reading
+		// it here rather than writing it in the markdown is one fact
+		// with one source.
+		if src := srcRE.FindStringSubmatch(img); src != nil {
+			if w, h, ok := pngSize(filepath.Join(root, "docs", src[1])); ok {
+				img += fmt.Sprintf(` width="%d" height="%d"`, w, h)
+			}
+		}
+		out := "<figure>" + img + ">"
+		if found[2] != "" {
+			out += "<figcaption>" + found[2] + "</figcaption>"
+		}
+		return out + "</figure>\n"
+	})
+}
+
+// pngSize reads a PNG's dimensions out of its header: eight bytes of
+// signature, then a length and the `IHDR` tag, then width and height as
+// big-endian 32-bit integers. Twenty-four bytes, no dependency.
+func pngSize(path string) (int, int, bool) {
+	//nolint:gosec // A path built from the caller's own -root flag and a src this generator rendered.
+	body, err := os.ReadFile(path)
+	if err != nil || len(body) < 24 || string(body[12:16]) != "IHDR" {
+		return 0, 0, false
+	}
+	return int(binary.BigEndian.Uint32(body[16:20])), int(binary.BigEndian.Uint32(body[20:24])), true
 }
 
 // mapPath is the one page that holds the whole site at once.
@@ -585,12 +747,8 @@ const mapPath = "map.html"
 // they are not reading and find-in-page still sees every word. Closed by
 // default would have been tidier and would have broken the one thing
 // this page is for.
-func sitemapPage(pages []page) page {
+func sitemapPage(root string, pages []page) (page, error) {
 	var out strings.Builder
-	out.WriteString("<h1>Everything on this site</h1>\n")
-	out.WriteString("<p>Every page, and every section of every page. There is no search box: this " +
-		"site ships no JavaScript, and your browser's own find (<kbd>Ctrl</kbd>+<kbd>F</kbd>, " +
-		"<kbd>⌘</kbd>+<kbd>F</kbd>) searches this page, which carries all of it.</p>\n")
 	out.WriteString(`<div class="map">` + "\n")
 	for _, p := range pages {
 		if p.Path == mapPath || p.Path == "404.html" {
@@ -598,7 +756,7 @@ func sitemapPage(pages []page) page {
 		}
 		title := p.Title
 		if title == "" {
-			title = "Readme"
+			title = "Maestro"
 		}
 		// **The title is a link and not only a toggle.** It was a bare
 		// `<b>`, so twenty-two of the twenty-three entries could not be
@@ -627,25 +785,17 @@ func sitemapPage(pages []page) page {
 		out.WriteString("</ul>\n</details>\n")
 	}
 	out.WriteString("</div>\n")
-	return page{Path: mapPath, Title: "Everything on this site", Body: out.String()}
-}
-
-// notFoundPage is the third negative state, on the one surface that can
-// reach it. GitHub Pages serves /404.html for a path it does not have,
-// and without this the reader leaves the design entirely at the exact
-// moment they most need a way back.
-func notFoundPage() page {
-	return page{
-		Path:  "404.html",
-		Title: "Nothing here",
-		Body: "<h1>There is nothing at this address</h1>\n" +
-			"<p>This site has no page at the address you asked for. It may have been a typo, or a " +
-			"link to a page that has since been renamed.</p>\n" +
-			// One action, which is what the negative-state component
-			// specifies: the map is the page that can answer "then where
-			// is it", and the rail beside this one already goes home.
-			"<p><a href=\"" + mapPath + "\">Everything on this site</a></p>\n",
+	body, sections, blurb, err := sitePage(root, "map", map[string]string{"map": out.String()})
+	if err != nil {
+		return page{}, err
 	}
+	return page{
+		Path:     mapPath,
+		Title:    "Everything on this site",
+		Body:     body,
+		Blurb:    blurb,
+		Sections: sections,
+	}, nil
 }
 
 // stripRemoteImages removes every image the site would fetch from
@@ -788,10 +938,11 @@ func railFor(p page, bundle []page, up string) string {
 
 	out.WriteString(`<section class="site">` + "\n<h2>Maestro</h2>\n<ul>\n")
 	for _, entry := range []struct{ href, label string }{
-		{"index.html", "Readme"},
+		{"index.html", "Maestro"},
 		// The same words the header uses. One destination answering to
 		// two names in the same chrome is the reader doing the joining.
 		{agentsIndexPath, "For agents"},
+		{"running.html", "Running it"},
 		{"design-system.html", "Design system"},
 		{mapPath, "Everything on this site"},
 		{"license.html", "License"},
@@ -893,7 +1044,10 @@ func shell(p page, depth int, bundle []page) string {
 	out.WriteString("</div></header>\n")
 	frame := "page"
 	if p.Wide {
-		frame = "page wide"
+		frame += " wide"
+	}
+	if p.Bare {
+		frame += " bare"
 	}
 	out.WriteString("<div class=\"" + frame + "\">\n")
 	// The crumb is page furniture under the header, not part of the

@@ -122,13 +122,28 @@ artefacts written to disk are English regardless.
   page, prose with two versions and an image. Three defects in this
   product were found the first time a screen was rendered with data in
   it, each on a game nobody had committed.
-- **The documentation site** is built by `cmd/maestro-docs` from files
-  that are already here — the readme, the skill bundle's own pages, the
-  generated design system — and published by `.github/workflows/pages.yml`.
-  It invents no prose: a page about the product written beside the
-  product is a second description of it. `make docs-check` is in the
-  gate and fails on an internal link pointing at a page the site does not
-  have.
+- **The documentation site** is built by `cmd/maestro-docs` from the
+  files that are already here — the readme, the skill bundle's own
+  pages, the generated design system — plus the pages it writes for a
+  reader those files were not written for, and it is published by
+  `.github/workflows/pages.yml`.
+  - **It is written as we decide, and it claims nothing the product
+    does not do.** The rule here used to be "it invents no prose",
+    which kept the site honest by making it incapable of speaking: the
+    front page was a readme, and the person this product is for — a
+    game designer who does not write code — met four hundred words
+    about `docker compose` before anything about their own work. The
+    fear behind that rule was real and survives in the second half of
+    this sentence: a claim written beside the product is a claim that
+    can go false quietly, so a page may be written freely and may not
+    promise a screen, a control or a behaviour that is not there.
+  - **Screenshots are dated by their own index.** They are the one
+    thing on the site that rots without anybody editing it, so
+    `docs/images/readme.md` carries the recipe that made each one and a
+    row per image, and a test fails on an image the index does not
+    name.
+  - `make docs-check` is in the gate and fails on an internal link
+    pointing at a page the site does not have.
 
 ## The design system
 

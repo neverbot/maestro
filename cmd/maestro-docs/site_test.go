@@ -302,7 +302,7 @@ func TestTheSiteCarriesItsOwnMap(t *testing.T) {
 	for _, want := range []string{
 		"agents/reference/tools.html#analysis",
 		"agents/reference/tools.html#relation_types",
-		"index.html#known-limitations",
+		"running.html#known-limitations",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the map does not carry %s", want)
@@ -313,7 +313,7 @@ func TestTheSiteCarriesItsOwnMap(t *testing.T) {
 	if strings.Contains(body, "Open the page") {
 		t.Error("the map still special-cases a page with no sections with its own link shape")
 	}
-	if !strings.Contains(body, `<summary><b><a href="index.html">Readme</a></b>`) {
+	if !strings.Contains(body, `<summary><b><a href="index.html">Maestro</a></b>`) {
 		t.Error("a page's title on the map is not a link to it")
 	}
 	// It discloses progressively and still answers a find: a folded page
@@ -383,5 +383,178 @@ func TestTheStylesheetHasNoDeadOrMissingTokens(t *testing.T) {
 		if !found {
 			t.Errorf("the stylesheet dresses <%s> and no page emits one", tag)
 		}
+	}
+}
+
+// --- The screenshots, and the index that dates them -------------------
+
+// imageDir and imageIndex are the directory the site's screenshots live
+// in and the file that says what each one is.
+const (
+	imageDir   = "../../docs/images"
+	imageIndex = "../../docs/images/readme.md"
+)
+
+// TestEveryImageIsInTheIndex is the guard the images exist behind.
+//
+// A screenshot is the only thing on this site that goes stale without
+// anybody editing it: prose contradicting the code is caught by a guard
+// or by a reader, and a picture of a screen that has since been
+// redesigned is simply wrong and looks right. docs/images/readme.md
+// carries the recipe that made each one and a row per image, and this
+// fails in both directions — an image with no row, and a row naming an
+// image that is not there.
+func TestEveryImageIsInTheIndex(t *testing.T) {
+	entries, err := os.ReadDir(imageDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", imageDir, err)
+	}
+	index, err := os.ReadFile(imageIndex)
+	if err != nil {
+		t.Fatalf("read %s: %v", imageIndex, err)
+	}
+	listed := string(index)
+
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
+			continue
+		}
+		files = append(files, entry.Name())
+		if !strings.Contains(listed, "`"+entry.Name()+"`") {
+			t.Errorf("%s is published and has no row in docs/images/readme.md: nothing says what it "+
+				"shows, where it was taken or when it stopped being true", entry.Name())
+		}
+	}
+	if len(files) == 0 {
+		t.Fatal("no image found under docs/images: this guard is holding nothing")
+	}
+
+	// And the other direction: a row for an image somebody deleted.
+	for _, row := range regexp.MustCompile("`([\\w-]+\\.png)`").FindAllStringSubmatch(listed, -1) {
+		if _, err := os.Stat(filepath.Join(imageDir, row[1])); err != nil {
+			t.Errorf("docs/images/readme.md has a row for %s and there is no such file", row[1])
+		}
+	}
+}
+
+// TestEveryPublishedImageIsCarriedAndUsed holds the two halves that make
+// an image reach a reader: it is copied into the site, and some page
+// points at it. An image nobody shows is weight in a repository.
+func TestEveryPublishedImageIsCarriedAndUsed(t *testing.T) {
+	pages := buildSite(t)
+	entries, err := os.ReadDir(imageDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", imageDir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".png") {
+			continue
+		}
+		shown := false
+		for _, body := range pages {
+			if strings.Contains(body, "images/"+entry.Name()) {
+				shown = true
+				break
+			}
+		}
+		if !shown {
+			t.Errorf("%s is committed and no page shows it", entry.Name())
+		}
+	}
+}
+
+// TestTheFrontPageIsNotTheReadme.
+//
+// The front page was `readme.md`, whole: a game designer who does not
+// write code met the tagline, then `docker compose up`, then the
+// environment table, then how to reset an admin password. The readme is
+// still published, under its own name, because an operator needs it.
+func TestTheFrontPageIsNotTheReadme(t *testing.T) {
+	pages := buildSite(t)
+	front, ok := pages["index.html"]
+	if !ok {
+		t.Fatal("the site has no index.html")
+	}
+	for _, operator := range []string{"docker compose", "FIRST_ADMIN_PASSWORD", "TEST_DATABASE_URL"} {
+		if strings.Contains(front, operator) {
+			t.Errorf("the front page carries %q: that belongs on running.html", operator)
+		}
+	}
+	if _, ok := pages["running.html"]; !ok {
+		t.Error("the readme is not published anywhere: an operator still needs it")
+	}
+	// It shows the product rather than only describing it.
+	if !strings.Contains(front, "<figure>") {
+		t.Error("the front page shows no screenshot of the product it describes")
+	}
+}
+
+// TestEveryWrittenPageIsAMarkdownFile is the guard on where this site's
+// prose lives.
+//
+// The front page was forty `WriteString` calls with sentences and
+// hand-escaped HTML inside them, in a generator whose entire job is
+// turning markdown into pages. Nobody could fix a comma without
+// recompiling. Every page this site writes for itself is a file under
+// docs/site now, and this fails if one goes missing or if one is added
+// that nothing publishes.
+func TestEveryWrittenPageIsAMarkdownFile(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join("..", "..", siteDir))
+	if err != nil {
+		t.Fatalf("read %s: %v", siteDir, err)
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
+			names = append(names, strings.TrimSuffix(entry.Name(), ".md"))
+		}
+	}
+	if len(names) < 4 {
+		t.Fatalf("%s holds %d page(s): the front page, the bundle's index, the map and the "+
+			"refusal page are all written here", siteDir, len(names))
+	}
+
+	// Every one of them renders, and none is left asking for a part this
+	// generator does not build.
+	for _, name := range names {
+		body, _, _, err := sitePage(filepath.Join("..", ".."), name, map[string]string{
+			"pages": "<p>pages</p>", "map": "<p>map</p>",
+		})
+		if err != nil {
+			t.Errorf("%s.md: %v", name, err)
+			continue
+		}
+		if strings.Contains(body, "{{") {
+			t.Errorf("%s.md leaves an unexpanded part in its output", name)
+		}
+	}
+
+	// And nothing in the built site still carries a marker.
+	for path, body := range buildSite(t) {
+		if strings.Contains(body, "{{") {
+			t.Errorf("%s ships an unexpanded {{part}}", path)
+		}
+	}
+}
+
+// TestAPictureOnItsOwnLineIsAFigure holds the one shape markdown cannot
+// express and this site needs: a picture, its caption, and the size read
+// off the file so the page does not jump while it loads.
+func TestAPictureOnItsOwnLineIsAFigure(t *testing.T) {
+	front := buildSite(t)["index.html"]
+	if strings.Contains(front, "<p><img") {
+		t.Error("an image is still a bare paragraph: the figure transform did not run")
+	}
+	for _, want := range []string{"<figure><img ", "<figcaption>", `width="1440" height="815"`} {
+		if !strings.Contains(front, want) {
+			t.Errorf("the front page's figures carry no %s", want)
+		}
+	}
+	// The size is read and not written down: a picture of another size
+	// gets its own.
+	w, h, ok := pngSize(filepath.Join("..", "..", "docs", "images", "quest-chain.png"))
+	if !ok || w != 1440 || h != 815 {
+		t.Errorf("pngSize read %dx%d (ok=%v) from a 1440x815 screenshot", w, h, ok)
 	}
 }

@@ -289,6 +289,44 @@ th { font: 600 0.75rem/1.4 var(--sans); letter-spacing: 0.03em; color: var(--mut
 
 img { max-width: 100%; }
 
+/* The front page's opening sentence, at the size a sentence that has to
+   carry the whole page needs. */
+.lede { font-size: 1.125rem; line-height: 1.5; margin: 0 0 1.25rem; }
+
+/* A screenshot and what it is.
+   **The picture lies on the desk, not on the page.** These are pictures
+   of this product, whose own ground is paper, and a paper screenshot on
+   a paper sheet reads as the page having grown a second interface. A
+   band of desk under it says "this is a picture of a thing" the way a
+   photograph on a table does.
+   It stops at 52rem rather than filling the column: a full-width
+   screenshot is the whole first screen, and the argument on this page is
+   the sentences. */
+figure {
+  margin: 1.75rem 0;
+  max-width: 52rem;
+  padding: 0.75rem;
+  background: var(--ground);
+  border-radius: 3px;
+}
+
+figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  box-shadow: var(--shadow-1);
+  background: var(--paper);
+}
+
+figcaption {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  max-width: 68ch;
+}
+
 /* The rail carries what is true of the whole site: where you are in it,
    and where you are on this page. It is sticky under the header and it
    folds beneath the content below 1100px, which is the frame's own
@@ -379,12 +417,20 @@ footer {
   font-size: 0.875rem;
 }
 
-/* The one page whose content is not prose. Its content *is* panels, and
-   panels do not nest: a bordered paper panel inside a bordered paper
-   sheet is the defect design.md names by that word, so here the sheet
-   steps back and the panels are what sits on the desk. */
+/* A page whose content is not all prose: the paragraphs still stop at
+   the measure, and the figures and specimens use the column. */
 .page.wide { grid-template-columns: minmax(0, 1fr) var(--rail); }
-.page.wide main { background: none; border: 0; box-shadow: none; padding: 0; }
+
+/* **A rule stops where the words stop.** On a wide page the headings
+   kept the column's width while the text under them stopped at the
+   measure, so every rule overshot its own paragraph by 380px and the
+   page read as a column adrift in a sheet. The specimen sheet is
+   exempt: its headings sit over panels that really are that wide. */
+.page.wide:not(.bare) main :is(h1, h2, h3, h4) { max-width: 68ch; }
+
+/* And a page whose content *is* panels: panels do not nest, so the
+   sheet steps back and the panels are what sits on the desk. */
+.page.bare main { background: none; border: 0; box-shadow: none; padding: 0; }
 
 @media (max-width: 1100px) {
   /* .page.wide outranked this by one class and the design-system page

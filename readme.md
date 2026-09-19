@@ -181,7 +181,7 @@ standing credential for anyone who can read that environment.
 
 ## Building it
 
-Go 1.25 and a Postgres to test against. No Node, no bundler: the front
+Go 1.27 and a Postgres to test against. No Node, no bundler: the front
 end is vanilla CSS and ES modules, served from the binary.
 
 ```bash

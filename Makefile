@@ -1,6 +1,22 @@
 GO ?= go
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 
+# **One pin per tool, read here and by CI.** sqlc was `@latest` in this
+# file and `@v1.31.1` in the workflow, which means the machine and the
+# runner could disagree about the tool that decides whether the
+# generated SQL is current: `make sqlc-check` would pass on one and fail
+# on the other, over a diff neither had produced.
+#
+# golangci-lint must be a v2 release: v1 cannot read the export data of
+# a current Go and reports that as typecheck errors across packages that
+# compile and vet cleanly, which is a confusing enough failure to pin
+# against rather than leave to a lucky day.
+GOLANGCI_LINT_VERSION ?= v2.13.2
+SQLC_VERSION          ?= v1.31.1
+
+# Where `go install` drops binaries, inside CI and out.
+GOBIN ?= $(shell $(GO) env GOPATH)/bin
+
 .PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check docs docs-check demo builder dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
 
 build:
@@ -74,9 +90,21 @@ run: build
 # reports then is not "your config is old" but typecheck errors in files
 # nobody has edited — which is a confusing enough failure to be worth
 # pinning against rather than leaving to @latest and a lucky day.
+# Installs the pinned tools, and **reinstalls when what is on disk is
+# not the pin**. Checking only that a binary exists makes the pin
+# decorative: any golangci-lint already in $(GOBIN) — left by another
+# project, or by somebody's `@latest` — would win forever, and a
+# contributor would lint with a different tool than CI without ever
+# being told.
+#
+# No GOTOOLCHAIN exception here any more. It was needed while this
+# project was on Go 1.25.7 and both tools wanted 1.26; the project is on
+# 1.27 now, which is newer than either asks for.
 tools:
-	$(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
+	@$(GOBIN)/golangci-lint version 2>/dev/null | grep -qF ' $(GOLANGCI_LINT_VERSION:v%=%) ' \
+		|| $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@$(GOBIN)/sqlc version 2>/dev/null | grep -qxF '$(SQLC_VERSION)' \
+		|| $(GO) install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 
 sqlc:
 	sqlc generate

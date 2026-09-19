@@ -4,6 +4,23 @@ on:
   push:
     branches: [master]
   pull_request:
+  # So the documentation site can be republished without waiting for a
+  # commit, which is how the first run after Pages was enabled was
+  # triggered.
+  workflow_dispatch:
+
+# **One workflow, not two.** The gate and the two things a green master
+# publishes — the image a server pulls and the documentation site — were
+# a `ci` workflow and a separate `pages` one, which meant the site was
+# published by a run that had never looked at whether the tests passed.
+# Now every publish hangs off the same `check` job, and a red gate
+# publishes nothing.
+concurrency:
+  # One run per branch. A pull request cancels its own older run, since
+  # only the newest commit's answer matters; master does not, because a
+  # cancelled run there could kill a publish half way.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # **Every action here is pinned to a major that runs on Node 24.** They
 # were on the majors that ship a Node 20 entrypoint, which the runner
@@ -201,3 +218,48 @@ jobs:
           # tag, and a registry client that does not expect one reports
           # the image as a manifest list with no matching platform.
           provenance: false
+
+  # The documentation site, published from the same green master the
+  # image is. It was a workflow of its own, which meant the site went up
+  # whether or not the tests had passed; `needs: check` is the whole
+  # reason this file now has four jobs instead of two and two.
+  #
+  # It does not wait for `container`: nothing about the site depends on
+  # the image building, and making it wait would hold a docs fix behind
+  # a container smoke test it has nothing to do with.
+  publish-docs:
+    name: Publish the documentation site
+    needs: check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # One deployment at a time, and a queued one waits rather than
+    # replacing the running one: a half-published site is worse than a
+    # slightly old one. Its own group, separate from this workflow's,
+    # because it is the Pages environment that is single-flight and not
+    # the run.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+      # The same command `make docs` runs, with the link check the gate
+      # runs: a site whose internal links point at pages it does not
+      # have must not be published, which is exactly what happened to
+      # the product's onboarding link for a whole build.
+      - run: go run ./cmd/maestro-docs -o site -check
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -28,12 +28,13 @@ const root = "../.."
 // statement of what it compiles with.
 var goDirective = regexp.MustCompile(`(?m)^go (\d+\.\d+(?:\.\d+)?)`)
 
-// The three places that have to follow it, and the shape each one
-// spells the version in.
+// The two places that have to follow it, and the shape each one spells
+// the version in. `ci.yml` names it once per job that sets Go up, and
+// every one of those is checked: there were two workflows and now there
+// is one, which only moved the several-spellings problem inside a file.
 var followers = map[string]*regexp.Regexp{
-	"Dockerfile":                  regexp.MustCompile(`FROM golang:(\d+\.\d+(?:\.\d+)?)-`),
-	".github/workflows/ci.yml":    regexp.MustCompile(`go-version: "(\d+\.\d+(?:\.\d+)?)"`),
-	".github/workflows/pages.yml": regexp.MustCompile(`go-version: "(\d+\.\d+(?:\.\d+)?)"`),
+	"Dockerfile":               regexp.MustCompile(`FROM golang:(\d+\.\d+(?:\.\d+)?)-`),
+	".github/workflows/ci.yml": regexp.MustCompile(`go-version: "(\d+\.\d+(?:\.\d+)?)"`),
 }
 
 func TestEveryFileNamingTheGoVersionNamesTheSameOne(t *testing.T) {

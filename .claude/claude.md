@@ -127,8 +127,9 @@ artefacts written to disk are English regardless.
 - **The documentation site** is built by `cmd/maestro-docs` from the
   files that are already here — the readme, the skill bundle's own
   pages, the generated design system — plus the pages it writes for a
-  reader those files were not written for, and it is published by
-  `.github/workflows/pages.yml`.
+  reader those files were not written for, and it is published by the
+  `publish-docs` job of `.github/workflows/ci.yml` — the same workflow
+  as the gate, so a red gate publishes neither the site nor the image.
   - **It is written as we decide, and it claims nothing the product
     does not do.** The rule here used to be "it invents no prose",
     which kept the site honest by making it incapable of speaking: the

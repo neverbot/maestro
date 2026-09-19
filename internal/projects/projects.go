@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 	"github.com/neverbot/maestro/internal/roles"
@@ -281,15 +282,108 @@ func mapMembershipInsertError(err error) error {
 	}
 }
 
+// derivedSlugAttempts is how many addresses Create tries before giving
+// up on deriving one. Ten is far past the point where a person naming
+// their tenth identically-named game would rather type an address than
+// accept `-11`.
+const derivedSlugAttempts = 10
+
+// fallbackSlug is what a name yields when nothing in it survives being
+// turned into an address: a name written entirely in a script this
+// pattern does not admit, or one that is only punctuation. It is never
+// pretty and it is always changeable.
+const fallbackSlug = "game"
+
+// SlugFrom derives an address from a game's name.
+//
+// **A designer should not have to know what a slug is.** The create form
+// asked for one under the label "Address", next to a placeholder that
+// taught the wrong thing, and the answer was almost always the name in
+// lower case with the spaces knocked out. So the name is the input and
+// this is the rule, in one place, rather than in a browser where an
+// agent creating a game over REST would not reach it.
+//
+// Accents fold rather than vanish: `Ámbar` is `ambar` and not `mbar`,
+// which is what dropping every rune outside `[a-z0-9]` would give. The
+// decomposition is NFD and what it drops is the combining marks.
+func SlugFrom(name string) string {
+	var out strings.Builder
+	var pendingHyphen bool
+	for _, r := range norm.NFD.String(strings.ToLower(strings.TrimSpace(name))) {
+		switch {
+		case unicode.Is(unicode.Mn, r):
+			// A combining mark: the accent that NFD just separated.
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			if pendingHyphen && out.Len() > 0 {
+				out.WriteByte('-')
+			}
+			pendingHyphen = false
+			out.WriteRune(r)
+		default:
+			// Everything else is a separator, and a run of them is one
+			// hyphen. Trailing ones never get written.
+			pendingHyphen = true
+		}
+	}
+	slug := out.String()
+	if len(slug) > maxSlugRunes {
+		slug = strings.TrimRight(slug[:maxSlugRunes], "-")
+	}
+	return slug
+}
+
+// candidateSlugs are the addresses Create will try for a derived slug,
+// in order. The first is the name itself; the rest are numbered, which
+// is what a second game called the same thing gets.
+func candidateSlugs(name string) []string {
+	base := SlugFrom(name)
+	if _, err := validateSlug(base); err != nil {
+		base = fallbackSlug
+	}
+	out := make([]string, 0, derivedSlugAttempts)
+	out = append(out, base)
+	for n := 2; len(out) < derivedSlugAttempts; n++ {
+		out = append(out, fmt.Sprintf("%s-%d", base, n))
+	}
+	return out
+}
+
 // Create makes a project and its creator its owner, atomically: a failure
 // granting the membership must not leave an ownerless project behind for
 // ErrLastOwner to later refuse to ever fix.
+//
+// **An empty slug means "derive one from the name".** A caller that
+// supplies one gets exactly it, and ErrSlugTaken when it is taken: they
+// named an address and deserve to hear that the address is not free. A
+// caller that supplies none is not choosing an address at all, so a
+// collision resolves to the next free number rather than failing on a
+// word they never typed.
 func (s *Service) Create(ctx context.Context, slug, name string, creator uuid.UUID) (Project, error) {
-	slug, err := validateSlug(slug)
+	name, err := validateName(name)
 	if err != nil {
 		return Project{}, err
 	}
-	name, err = validateName(name)
+
+	if strings.TrimSpace(slug) == "" {
+		var last error
+		for _, candidate := range candidateSlugs(name) {
+			project, cerr := s.create(ctx, candidate, name, creator)
+			if cerr == nil {
+				return project, nil
+			}
+			if !errors.Is(cerr, ErrSlugTaken) {
+				return Project{}, cerr
+			}
+			last = cerr
+		}
+		return Project{}, last
+	}
+	return s.create(ctx, slug, name, creator)
+}
+
+// create is one attempt at one address. name is already validated.
+func (s *Service) create(ctx context.Context, slug, name string, creator uuid.UUID) (Project, error) {
+	slug, err := validateSlug(slug)
 	if err != nil {
 		return Project{}, err
 	}

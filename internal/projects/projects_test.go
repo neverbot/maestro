@@ -229,7 +229,9 @@ func TestSlugShapeIsValidated(t *testing.T) {
 	user := newUser(t, ids, "designer4@example.test")
 
 	cases := []string{
-		"",                                     // empty
+		// The empty string is not here any more: it is the one value
+		// Create reads as "derive an address from the name", and
+		// TestAnEmptySlugIsDerivedFromTheName holds that half.
 		"-azeroth",                             // leading hyphen
 		"azeroth-",                             // trailing hyphen
 		"az--eroth",                            // consecutive hyphens
@@ -1067,5 +1069,75 @@ func TestDeleteProjectTwiceIsIdempotent(t *testing.T) {
 	}
 	if err := svc.Delete(ctx, project.ID); err != nil {
 		t.Fatalf("second Delete on an already-deleted project: %v, want nil", err)
+	}
+}
+
+// TestSlugFromDerivesAnAddressFromAName pins the rule a designer never
+// has to learn, including the two cases that make it worth having: an
+// accent folds instead of vanishing, and a run of anything else is one
+// hyphen.
+func TestSlugFromDerivesAnAddressFromAName(t *testing.T) {
+	cases := map[string]string{
+		"Azeroth":                   "azeroth",
+		"  The Ashfall  ":           "the-ashfall",
+		"Ámbar":                     "ambar",
+		"Crónicas de Valdivia":      "cronicas-de-valdivia",
+		"Le Mans 1971":              "le-mans-1971",
+		"Rock / Paper / Scissors":   "rock-paper-scissors",
+		"¡¿Qué?!":                   "que",
+		"...":                       "",
+		"日本語":                       "",
+		strings.Repeat("Long ", 40): strings.TrimRight(strings.Repeat("long-", 13)[:64], "-"),
+	}
+	for name, want := range cases {
+		if got := projects.SlugFrom(name); got != want {
+			t.Errorf("SlugFrom(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestAnEmptySlugIsDerivedFromTheName is the other half, through the
+// service and the database: the create form has no address field any
+// more, so this is the path every game made in a browser now takes.
+func TestAnEmptySlugIsDerivedFromTheName(t *testing.T) {
+	pool := testutil.NewPool(t)
+	ids := identity.New(pool, testConfig())
+	svc := projects.New(pool)
+	ctx := context.Background()
+
+	user := newUser(t, ids, "derived@example.test")
+
+	first, err := svc.Create(ctx, "", "Crónicas de Valdivia", user.ID)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if first.Slug != "cronicas-de-valdivia" {
+		t.Errorf("slug = %q, want the name's own address", first.Slug)
+	}
+
+	// **A second game of the same name resolves rather than refusing.**
+	// The person never typed an address, so an error about one would be
+	// about a word they have not seen.
+	second, err := svc.Create(ctx, "", "Crónicas de Valdivia", user.ID)
+	if err != nil {
+		t.Fatalf("second Create: %v", err)
+	}
+	if second.Slug != "cronicas-de-valdivia-2" {
+		t.Errorf("second slug = %q, want the next free number", second.Slug)
+	}
+
+	// A caller that *did* type an address still hears that it is taken:
+	// they named it, so the refusal is about something they know.
+	if _, err := svc.Create(ctx, "cronicas-de-valdivia", "Something else", user.ID); !errors.Is(err, projects.ErrSlugTaken) {
+		t.Errorf("an explicit taken slug: err = %v, want ErrSlugTaken", err)
+	}
+
+	// And a name with no usable address in it still gets one.
+	fallback, err := svc.Create(ctx, "", "日本語", user.ID)
+	if err != nil {
+		t.Fatalf("Create with an underivable name: %v", err)
+	}
+	if fallback.Slug == "" {
+		t.Error("a name that yields no address left the game without one")
 	}
 }

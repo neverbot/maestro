@@ -17,9 +17,17 @@ import { STATE_REFUSED, fillState, negativeState } from "./state.js";
 // other negative state in the product. index.html leaves the hole; these
 // are the words.
 export const NO_GAMES_HEADING = "No games yet";
+
+// **It described the data model to somebody who came to design a game.**
+// "A game is a world you are designing: its kinds of things, how they
+// connect, and the writing that describes them" is three nouns from the
+// metamodel and no verb a designer recognises. What they want to know,
+// standing on an empty screen, is what they will be doing here.
 export const NO_GAMES_SENTENCE =
-  "A game is a world you are designing: its kinds of things, how they connect, and the writing " +
-  "that describes them. Make one to begin.";
+  "Name the game you are working on, and this becomes the place its design lives: every " +
+  "mission, place, character and unlock, what each one needs before it opens, and the lore " +
+  "that goes with them. You will be able to see it drawn, ask it what no player can reach, " +
+  "and hand the whole thing to your agents to fill in and keep straight.";
 
 // The refusal that replaces it when /api/games will not answer.
 export const GAMES_REFUSED_HEADING = "Could not list your games";
@@ -802,38 +810,19 @@ if (gamesList) {
 // "Hollow Reach" and gets "hollow-reach" without being taught what a
 // slug is; the moment they change it themselves the derivation stops,
 // because at that point they have an opinion.
-function deriveSlug(name) {
-  return name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 if (createGameForm) {
-  const nameEl = document.getElementById("create-game-name");
-  const slugEl = document.getElementById("create-game-slug");
-  if (nameEl && slugEl) {
-    let slugIsOurs = true;
-    slugEl.addEventListener("input", () => {
-      slugIsOurs = slugEl.value === "";
-    });
-    nameEl.addEventListener("input", () => {
-      if (slugIsOurs) slugEl.value = deriveSlug(nameEl.value);
-    });
-  }
-
   const errorEl = document.getElementById("create-game-error");
   createGameForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     errorEl.textContent = "";
     const data = new FormData(createGameForm);
     setFormBusy(createGameForm, true, "Creating…");
-    const result = await postJSON("/api/games", {
-      slug: data.get("slug"),
-      name: data.get("name"),
-    });
+    // **No address goes up.** The server derives one from the name, so
+    // that a game created here and a game created over REST get the same
+    // rule rather than two spellings of it, and so a second game called
+    // the same thing resolves to a free address instead of refusing on a
+    // word the person never typed.
+    const result = await postJSON("/api/games", { name: data.get("name") });
     if (result.ok && result.body && result.body.slug) {
       window.location.href = `/g/${result.body.slug}`;
       return;

@@ -84,8 +84,16 @@ game.
 
 ## Running it
 
-Requires Docker. There is no published image yet, so the compose file
-builds from this repository:
+Requires Docker. Every push to master that passes the gate publishes
+`ghcr.io/neverbot/maestro:latest`, so a server can pull it:
+
+```bash
+docker pull ghcr.io/neverbot/maestro:latest
+```
+
+Each build is also tagged by its commit, so a deployment can pin to one
+and roll back to it. The compose file in this repository builds from
+source instead, which is what you want while developing:
 
 ```bash
 docker compose up --build
@@ -261,8 +269,8 @@ Said plainly, rather than left to be discovered:
   second replica has its own subscribers and its own budgets. A client
   sees only events published while its process has been running: there
   is no durable log and no catch-up on reconnect.
-- **No published image and no backups.** Backing up an instance means
-  backing up its Postgres volume, like any other database.
+- **No backups.** Backing up an instance means backing up its Postgres
+  volume, like any other database, and nothing here does it for you.
 - **argon2id cost is fixed in code** (`Time=3`, `Memory=64MiB`,
   `Threads=2`), not configurable.
 - **Nobody has verified that the skill bundle teaches.** Its guards

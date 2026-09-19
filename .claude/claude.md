@@ -112,8 +112,10 @@ artefacts written to disk are English regardless.
 - **Agent auth:** bearer tokens, one token = one game, admins included.
 - **Deployment:** Docker Compose, a reverse proxy in front. The primary
   branch is `master`. CI builds the image, smoke-tests it against a
-  real Postgres, and publishes nothing: building from this repository
-  is the only way to run it. The binaries are `maestro`,
+  real Postgres and, when both gates pass on master, publishes it to
+  `ghcr.io/neverbot/maestro:latest` plus a commit-tagged image a
+  deployment can pin to or roll back to. Nothing is published from a
+  branch or a pull request. The binaries are `maestro`,
   `maestro-skilldoc`, `maestro-docs` and `maestro-demo` — the last is a
   development tool the image does not contain, and `make demo` writes
   the game the screens need in order to be *seen*: a prerequisite cycle,
@@ -309,7 +311,8 @@ Say these plainly rather than letting someone discover them:
   that document round-trips through it byte for byte, so a language
   addition it has not learned closes the door instead of silently
   dropping a clause.
-- **No published image and no backups.**
+- **No backups.** Backing up an instance means backing up its Postgres
+  volume, like any other database, and nothing here does it for you.
 - **One process only.** Events fan out from an in-memory hub, not
   Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so
   a second replica has its own subscribers and its own budgets.

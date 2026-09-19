@@ -5,6 +5,17 @@ on:
     branches: [master]
   pull_request:
 
+# Least privilege by default; the one job that needs more asks for it
+# itself. A workflow that declares nothing here inherits whatever the
+# repository's Actions setting happens to be, which is a permission
+# decision made somewhere nobody reading this file can see.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -100,3 +111,82 @@ jobs:
       - name: Stop the container
         if: always()
         run: docker rm -f maestro-smoke
+
+  # The image a deployment pulls.
+  #
+  # **It runs after both gates, and that ordering is the whole point.**
+  # `check` is the repository's own gate (gofmt, vet, lint, sqlc diff,
+  # the skill guards and the race-enabled test suite) and `container`
+  # proves the image it builds actually serves: builds the Dockerfile,
+  # starts it against a real Postgres and waits for /healthz. Publishing
+  # before either of them would put an image on the registry that
+  # nothing has run.
+  #
+  # Pushes to master only. A pull request goes through both gates and
+  # stops there: an image published from a branch nobody has merged is
+  # an image a server can pull by accident.
+  publish:
+    name: Publish the image
+    needs: [check, container]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The one elevation in this file, and it is scoped to this job:
+      # pushing to GitHub's container registry is a write to packages.
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history, so `git describe` can resolve a tag into
+          # the version the binary reports. A shallow clone would stamp
+          # every build with the same fallback.
+          fetch-depth: 0
+
+      - name: Resolve the version the binary will report
+        id: version
+        run: echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute the tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` is what a compose file on a server pulls, and the
+          # commit tag is what it pins to when a deployment has to be
+          # held at a known-good build or rolled back to one.
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=maestro
+            org.opencontainers.image.description=Self-hosted workspace where game designers and their AI agents design a game's content
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # No provenance attestation: it adds a second manifest to the
+          # tag, and a registry client that does not expect one reports
+          # the image as a manifest list with no matching platform.
+          provenance: false

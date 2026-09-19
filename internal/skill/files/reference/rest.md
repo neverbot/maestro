@@ -68,6 +68,7 @@ takes.
 - `GET /api/games`
 - `POST /api/games`
 - `DELETE /api/games/{game}`
+- `PATCH /api/games/{game}`
 
 ## invites
 

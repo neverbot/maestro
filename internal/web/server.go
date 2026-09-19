@@ -397,6 +397,7 @@ func NewServer(opts Options) *Server {
 	s.registerProjectRoute("GET /api/games/{game}/tokens", s.handleListTokens)
 	s.registerProjectRoute("DELETE /api/games/{game}/tokens/{token}", s.handleRevokeToken)
 	s.registerProjectRoute("GET /api/games/{game}/events", s.handleEvents)
+	s.registerProjectRoute("PATCH /api/games/{game}", s.handleUpdateGame)
 	s.registerProjectRoute("DELETE /api/games/{game}", s.handleDeleteGame)
 	s.registerProjectRoute("POST /api/games/{game}/invites", s.handleCreateProjectInvite)
 	s.registerProjectRoute("GET /api/games/{game}/invites", s.handleListProjectInvites)
@@ -628,6 +629,9 @@ var shellRoutes = []struct {
 	{pattern: "GET /g/{slug}/rt/{key}", file: "relation-type.html"},
 	{pattern: "GET /g/{slug}/e/{typeKey}/{key}", file: "entity.html"},
 	{pattern: "GET /g/{slug}/assets", file: "assets.html"},
+	// A game's own two settings, and the only screen that can change
+	// them. Owner-only, and it says what changing an address costs.
+	{pattern: "GET /g/{slug}/settings", file: "settings.html"},
 	{pattern: "GET /g/{slug}/analysis", file: "analysis.html"},
 	{pattern: "GET /g/{slug}/analysis/routes", file: "routes.html"},
 	{pattern: "GET /g/{slug}/analysis/routes/{key}", file: "route.html"},

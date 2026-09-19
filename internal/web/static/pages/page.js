@@ -39,6 +39,7 @@ export const SEGMENT_RELATION_TYPE = "/rt/";
 export const SEGMENT_DOC = "/doc";
 export const SEGMENT_ASSETS = "/assets";
 export const SEGMENT_ANALYSIS = "/analysis";
+export const SEGMENT_SETTINGS = "/settings";
 export const SEGMENT_ROUTES = "/analysis/routes";
 
 // The three destinations, in the order the home shows them and in the
@@ -210,6 +211,14 @@ export function docURL(slug, path) {
 
 export function assetsURL(slug) {
   return gameURL(slug) + SEGMENT_ASSETS;
+}
+
+// A game's own settings. Not a destination in the header strip: the
+// frame settled five destinations and this is not a sixth place to go
+// and read, it is one owner's screen reached from the game it belongs
+// to.
+export function settingsURL(slug) {
+  return gameURL(slug) + SEGMENT_SETTINGS;
 }
 
 export function analysisURL(slug) {

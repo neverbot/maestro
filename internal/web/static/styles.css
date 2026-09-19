@@ -841,7 +841,11 @@ ul.catalogue .link-button {
   background: var(--ground);
 }
 
-form { display: grid; gap: var(--s3); margin-top: var(--s5); }
+/* **A form stops at a form's width.** The page frame is 1440 wide and a
+   text input stretched across all of it is a field whose end a reader
+   has to go looking for; every form in this product asks for a name, an
+   address or a password, none of which is 1,392 pixels long. */
+form { display: grid; gap: var(--s3); margin-top: var(--s5); max-width: 34rem; }
 
 /* The Label role, which this rule invented a fourth size beside: it was
    0.85rem at weight 400, and design.md's type scale contains no such

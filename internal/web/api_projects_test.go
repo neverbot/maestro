@@ -1070,3 +1070,118 @@ func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
 		t.Fatalf("second delete status = %d, want 404 (membership already gone), body: %s", secondRec.Code, secondRec.Body.String())
 	}
 }
+
+// --- A game's own settings --------------------------------------------
+
+// getJSON reads one address as this caller. A helper here rather than in
+// each test because what these three are about is the answer, not the
+// plumbing that fetched it.
+func getJSON(t *testing.T, srv http.Handler, cookie *http.Cookie, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	return rec
+}
+
+// patchGame is the one call these three tests make.
+func patchGame(t *testing.T, srv http.Handler, cookie *http.Cookie, slug, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/api/games/"+slug, strings.NewReader(body))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestUpdateGameChangesTheNameAndTheAddress is the endpoint the settings
+// screen exists for, and the second half is the point: **the old address
+// stops resolving**. Nothing forwards it, by decision — see
+// projects.Update — so this asserts the break rather than tolerating it.
+func TestUpdateGameChangesTheNameAndTheAddress(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "the-ashfall", "The Ashfall", owner.ID)
+	cookie := loginAs(t, srv, "owner@example.test")
+
+	rec := patchGame(t, srv, cookie, project.Slug, `{"slug":"ashfall","name":"Ashfall"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var got struct{ Slug, Name string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Slug != "ashfall" || got.Name != "Ashfall" {
+		t.Errorf("answered %+v, want the new name and address", got)
+	}
+
+	// The new address answers, and the old one does not: that break is
+	// the thing the screen warns about, so it is asserted rather than
+	// tolerated. Both are checked through a project-scoped route, since
+	// this test server wires no game content.
+	if rec := patchGame(t, srv, cookie, "ashfall", `{"slug":"ashfall","name":"Ashfall"}`); rec.Code != http.StatusOK {
+		t.Errorf("the new address: status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if rec := patchGame(t, srv, cookie, "the-ashfall", `{"slug":"ashfall","name":"Ashfall"}`); rec.Code != http.StatusNotFound {
+		t.Errorf("the old address: status = %d, want 404 — nothing forwards it", rec.Code)
+	}
+}
+
+// TestUpdateGameRefusesATakenAddress: an address typed by hand is
+// refused rather than resolved to a free one, the same way Create
+// refuses one. The person named it, so the refusal is about something
+// they know.
+func TestUpdateGameRefusesATakenAddress(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "first", "First", owner.ID)
+	if _, err := projSvc.Create(ctx, "second", "Second", owner.ID); err != nil {
+		t.Fatalf("Create the second game: %v", err)
+	}
+	cookie := loginAs(t, srv, "owner@example.test")
+
+	rec := patchGame(t, srv, cookie, project.Slug, `{"slug":"second","name":"First"}`)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409", rec.Code)
+	}
+	rec = patchGame(t, srv, cookie, project.Slug, `{"slug":"Not A Slug","name":"First"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("an unusable address: status = %d, want 422", rec.Code)
+	}
+}
+
+// TestOnlyAnOwnerChangesAGamesSettings. An editor may write every piece
+// of content in the game and may not move the game itself: changing the
+// address breaks every link into it for everybody, which is the owner's
+// call in the same way deleting it is.
+func TestOnlyAnOwnerChangesAGamesSettings(t *testing.T) {
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "the-ashfall", "The Ashfall", owner.ID)
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+
+	cookie := loginAs(t, srv, "editor@example.test")
+	rec := patchGame(t, srv, cookie, project.Slug, `{"slug":"ashfall","name":"Ashfall"}`)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("an editor: status = %d, want 403", rec.Code)
+	}
+	// And the game did not move: the owner's own listing still names it
+	// at the address it had.
+	ownerCookie := loginAs(t, srv, "owner@example.test")
+	rec = getJSON(t, srv, ownerCookie, "/api/games")
+	if !strings.Contains(rec.Body.String(), `"the-ashfall"`) {
+		t.Errorf("the address changed anyway: %s", rec.Body.String())
+	}
+}

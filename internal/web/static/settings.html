@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings · Maestro</title>
+<link rel="stylesheet" href="/static/styles.css">
+<!-- Applies the chosen theme before the first paint. Classic and not
+     deferred on purpose: see static/theme.js. -->
+<script src="/static/theme.js"></script>
+<!-- The import map is what makes `import { LitElement, html } from "lit"`
+     resolve with no build step, which is the invariant this whole front
+     end rests on. It must appear before the first module script in the
+     document, and it must be the same map in every shell: a shell with a
+     stale map is a page that 404s one module and renders three quarters
+     of itself. internal/web/static_vendor_test.go holds both rules, and
+     internal/web/static/vendor/manifest.json records what each target
+     is, where it came from and what it weighs. -->
+<script type="importmap">
+{"imports": {
+  "lit": "/static/vendor/lit-core.min.js",
+  "dagre": "/static/vendor/dagre.mjs",
+  "graphlib": "/static/vendor/graphlib.mjs"
+}}
+</script>
+<noscript>
+  <p class="notice">This page needs JavaScript enabled in this browser.</p>
+</noscript>
+
+<main class="page">
+<nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+
+<div class="page-head">
+<h1>Settings</h1>
+  <span class="page-actions" id="page-actions"></span>
+</div>
+
+<!-- The two things a game has that are not its content. Owner-only: a
+     viewer or an editor reaching this address is told so rather than
+     shown a form the server will refuse. -->
+<form id="game-settings" hidden>
+  <label for="game-name">Name</label>
+  <input id="game-name" type="text" name="name" autocomplete="off" required>
+  <p class="muted field-note">What this game is called, everywhere it is named.</p>
+
+  <label for="game-slug">Address</label>
+  <input id="game-slug" type="text" name="slug" autocomplete="off"
+         pattern="[a-z0-9]+(-[a-z0-9]+)*" required>
+  <!-- **The warning sits above the button, not in a dialog after it.**
+       pages/settings.js fills it with this game's own current address,
+       so the sentence names the thing that is about to stop working. -->
+  <p class="notice" id="address-warning"></p>
+
+  <button type="submit">Save settings</button>
+  <p class="error" id="settings-error" role="alert" aria-live="assertive"></p>
+</form>
+
+<!-- The hole; pages/settings.js carries the words for a reader who may
+     not change these. -->
+<div id="settings-refused" hidden></div>
+
+</main>
+
+<script type="module" src="/static/pages/settings.js"></script>

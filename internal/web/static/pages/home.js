@@ -38,6 +38,7 @@ import {
   row,
   say,
   setReadOnly,
+  settingsURL,
   relationTypeURL,
   typeURL,
   typesURL,
@@ -177,6 +178,12 @@ export async function home(opened) {
   if (!summary.ok) return { ...opened, onEvent: null };
   await viewsLane(doc, slug, client, summary.role);
   setReadOnly(doc, summary.role, "writes this game's content");
+  // **The way into the one screen that changes a game rather than its
+  // content**, and it is here because the frame's five destinations are
+  // places to go and read: settings is one person's screen, reached
+  // from the game it belongs to. Only an owner sees it, because only an
+  // owner can save anything there.
+  offerSettings(doc, slug, summary.role);
   await prose.load(summary.role);
 
   // The stream, last: the page has just read everything, so the first
@@ -278,6 +285,21 @@ async function catalogueLane(doc, slug, client, summaryEl) {
     ),
   );
   return { role: String(summary.role ?? ""), ok: true };
+}
+
+// SETTINGS_LABEL is the link, and OWNER is the one role that gets it.
+export const SETTINGS_LABEL = "Settings";
+const OWNER = "owner";
+
+export function offerSettings(doc, slug, role) {
+  if (role !== OWNER) return null;
+  const host = doc.getElementById("page-actions");
+  if (!host) return null;
+  const link = doc.createElement("a");
+  link.href = settingsURL(slug);
+  link.textContent = SETTINGS_LABEL;
+  host.append(link);
+  return link;
 }
 
 // viewsLane lists the saved views, and answers a game that has none with

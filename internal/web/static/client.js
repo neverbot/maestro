@@ -740,6 +740,18 @@ export function client({
     return get(base + "/summary");
   }
 
+  // The game's own two settings. A PATCH, and the only write in this
+  // module that is not a POST, so it spells the verb rather than going
+  // through send.
+  async function updateGame(settings) {
+    const from = settings && typeof settings === "object" ? settings : {};
+    return request(base, {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify({ slug: String(from.slug || ""), name: String(from.name || "") }),
+    });
+  }
+
   async function listViews(options) {
     return get(paged(base + "/views", options));
   }
@@ -1134,6 +1146,7 @@ export function client({
     listAssets,
     games,
     summary,
+    updateGame,
     listViews,
     listDocs,
     docKinds,

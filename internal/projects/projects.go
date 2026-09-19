@@ -381,6 +381,47 @@ func (s *Service) Create(ctx context.Context, slug, name string, creator uuid.UU
 	return s.create(ctx, slug, name, creator)
 }
 
+// Update changes a game's two settings: its name, and the address every
+// URL into it carries.
+//
+// **The old address is not kept anywhere, and that is the decision.**
+// Storing it would mean old links keep resolving for some window nobody
+// can name, a redirect that quietly becomes wrong, and a second source
+// of truth for what a game is called. Instead the screen that offers
+// this says plainly that every existing link stops working, and only an
+// owner can reach it. Somebody who changes an address on purpose knows
+// what they are doing; somebody who does not should not be here.
+//
+// ErrSlugTaken and ErrSlugInvalid come back exactly as they do from
+// Create: an address typed by hand is refused rather than resolved,
+// because the person naming it will want to hear that it is not free.
+func (s *Service) Update(ctx context.Context, id uuid.UUID, slug, name string) (Project, error) {
+	slug, err := validateSlug(slug)
+	if err != nil {
+		return Project{}, err
+	}
+	name, err = validateName(name)
+	if err != nil {
+		return Project{}, err
+	}
+
+	row, err := s.q.UpdateProject(ctx, dbq.UpdateProjectParams{ID: id, Slug: slug, Name: name})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		// By constraint name, for the same reason Create maps it that
+		// way: this table can grow more unique indexes and a 23505 from
+		// one of those must not be reported as a taken address.
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "projects_slug_key" {
+			return Project{}, ErrSlugTaken
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Project{}, ErrProjectNotFound
+		}
+		return Project{}, fmt.Errorf("update project: %w", err)
+	}
+	return Project{ID: row.ID, Slug: row.Slug, Name: row.Name}, nil
+}
+
 // create is one attempt at one address. name is already validated.
 func (s *Service) create(ctx context.Context, slug, name string, creator uuid.UUID) (Project, error) {
 	slug, err := validateSlug(slug)

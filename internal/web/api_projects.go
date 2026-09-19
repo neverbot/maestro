@@ -558,6 +558,63 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 	}
 }
 
+// updateGameRequest is a game's two settings, both of them always sent:
+// the screen shows them together and saves them together.
+type updateGameRequest struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+// handleUpdateGame changes a game's name and address. Owner-only, like
+// deletion and for a weaker version of the same reason: it is not
+// destructive, but **every URL into this game stops resolving the moment
+// the address changes** — a colleague's bookmark, a link in a chat, a
+// view somebody pinned. Nothing here forwards the old address: see
+// projects.Update for why a redirect nobody can put an end date on was
+// the worse answer, and settings.html for the sentence that says so to
+// the person about to do it.
+//
+// A no-op save (the same name and the same address) is not special-cased.
+// It writes the same values back, answers 200 and publishes nothing new
+// that a client could not already see, which is simpler than a
+// comparison that has to decide what "the same" means for a name with
+// different whitespace.
+func (s *Server) handleUpdateGame(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
+	if !requireHumanCaller(w, caller) {
+		return
+	}
+	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may change a game's settings")
+		return
+	}
+	var req updateGameRequest
+	if !decodeJSONBody(w, r, &req) {
+		return
+	}
+
+	project, err := s.opts.Projects.Update(r.Context(), scope.ProjectID, req.Slug, req.Name)
+	switch {
+	case errors.Is(err, projects.ErrSlugTaken):
+		writeError(w, http.StatusConflict, errCodeSlugTaken, "another game already uses that address")
+	case errors.Is(err, projects.ErrSlugInvalid):
+		writeError(w, http.StatusUnprocessableEntity, errCodeSlugInvalid, "that address is not usable")
+	case errors.Is(err, projects.ErrNameInvalid):
+		writeError(w, http.StatusUnprocessableEntity, errCodeNameInvalid, "that name is not usable")
+	case errors.Is(err, projects.ErrProjectNotFound):
+		// The same race handleDeleteGame maps: requireProject resolved
+		// this game and a concurrent deletion landed before this write.
+		writeError(w, http.StatusNotFound, errCodeNotFound, "no such game")
+	case err != nil:
+		writeUnmappedError(w, r, err, "update game failed", "could not change the game's settings",
+			"project_id", scope.ProjectID)
+	default:
+		// The new address goes back so the browser can navigate to it:
+		// the page the caller is standing on is at the old one, which
+		// stopped resolving a moment ago.
+		writeJSON(w, http.StatusOK, map[string]any{"id": project.ID, "slug": project.Slug, "name": project.Name})
+	}
+}
+
 // handleDeleteGame deletes a game outright. Owner-only, like
 // handleChangeRole and unlike self-removal from handleRemoveMember:
 // deleting the game is not a member's own choice the way leaving it is,

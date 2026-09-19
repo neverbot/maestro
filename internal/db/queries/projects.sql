@@ -3,6 +3,22 @@ INSERT INTO projects (slug, name)
 VALUES (sqlc.arg('slug')::text, sqlc.arg('name')::text)
 RETURNING *;
 
+-- name: UpdateProject :one
+-- A game's own two settings: what it is called, and the address every
+-- URL to it carries. Both change together because the screen that
+-- writes them shows them together, and one statement means a save
+-- cannot land half applied.
+--
+-- The address is not preserved anywhere: an owner who changes it is
+-- told, on the screen, that every link into this game stops resolving,
+-- and there is no forwarding row here to make that half-true.
+UPDATE projects
+SET slug = sqlc.arg('slug')::text,
+    name = sqlc.arg('name')::text,
+    updated_at = now()
+WHERE id = sqlc.arg('id')::uuid
+RETURNING *;
+
 -- name: GetProjectBySlug :one
 SELECT * FROM projects WHERE lower(slug) = lower(sqlc.arg('slug')::text);
 

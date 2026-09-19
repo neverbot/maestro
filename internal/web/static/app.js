@@ -25,9 +25,9 @@ export const NO_GAMES_HEADING = "No games yet";
 // standing on an empty screen, is what they will be doing here.
 export const NO_GAMES_SENTENCE =
   "Name the game you are working on, and this becomes the place its design lives: every " +
-  "mission, place, character and unlock, what each one needs before it opens, and the lore " +
-  "that goes with them. You will be able to see it drawn, ask it what no player can reach, " +
-  "and hand the whole thing to your agents to fill in and keep straight.";
+  "mission, place and character, what a player has to do before each one is available to " +
+  "them, and the lore that goes with it. You will be able to see it drawn, ask it what no " +
+  "player can reach, and hand the whole thing to your agents to fill in and keep straight.";
 
 // The refusal that replaces it when /api/games will not answer.
 export const GAMES_REFUSED_HEADING = "Could not list your games";

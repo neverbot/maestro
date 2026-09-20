@@ -30,12 +30,32 @@
 <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
 
 <div class="page-head">
-<h1>Settings</h1>
+<h1>Game settings</h1>
   <span class="page-actions" id="page-actions"></span>
 </div>
 
+<!-- **Two tabs, because the two halves have two different gates.** The
+     game's name and address are the owner's; its tokens are any
+     member's to list and revoke and an editor's to mint. One page with
+     one gate would either lock an editor out of a credential the server
+     grants them or show an owner's form to somebody the server refuses.
+
+     They are tabs and not two sections because the reader comes here for
+     one of the two and not for both: a designer connecting an agent has
+     no business scrolling past the control that breaks every link into
+     the game. pages/settings.js moves the selection and the address's
+     #agents carries it, so a link can point at either half. -->
+<nav class="tabs" id="settings-tabs" aria-label="Settings sections">
+  <button type="button" class="tab" id="tab-game" data-panel="panel-game"
+          role="tab" aria-selected="true" aria-controls="panel-game">Game</button>
+  <button type="button" class="tab" id="tab-agents" data-panel="panel-agents"
+          role="tab" aria-selected="false" aria-controls="panel-agents">Agents</button>
+</nav>
+
+<section id="panel-game" role="tabpanel" aria-labelledby="tab-game">
+
 <!-- The two things a game has that are not its content. Owner-only: a
-     viewer or an editor reaching this address is told so rather than
+     viewer or an editor reaching this tab is told so rather than
      shown a form the server will refuse. -->
 <form id="game-settings" hidden>
   <label for="game-name">Name</label>
@@ -57,6 +77,69 @@
 <!-- The hole; pages/settings.js carries the words for a reader who may
      not change these. -->
 <div id="settings-refused" hidden></div>
+
+</section>
+
+<section id="panel-agents" role="tabpanel" aria-labelledby="tab-agents" hidden>
+
+<!-- **What this screen is for, said once.** A designer who has just
+     made a game cannot write a line of its content by hand: an agent
+     writes it, over MCP, holding a token that opens this game and no
+     other. Everything below is in service of one paste. -->
+<p class="lede" id="agents-lede">
+  Nothing on these screens writes a game's content. An agent does, over MCP, using a token that
+  opens this game and no other.
+</p>
+
+<h2>Connect an agent</h2>
+
+<!-- Minting is an editor's or the owner's; pages/settings.js hides this
+     form and fills #agents-refused for anybody else, rather than
+     offering a button the server will refuse. -->
+<form id="create-token" hidden>
+  <label for="token-label">What is this token for?</label>
+  <input id="token-label" type="text" name="label" autocomplete="off"
+         placeholder="my laptop, the CI runner, …" required>
+  <p class="muted field-note">A name for you, so you know which one to revoke later.</p>
+  <button type="submit">Create a token</button>
+  <p class="error" id="create-token-error" role="alert" aria-live="assertive"></p>
+</form>
+
+<!-- The hole for a reader who may list and revoke but not mint. -->
+<div id="agents-refused" hidden></div>
+
+<!-- **Shown once and never again.** The clear token comes back from the
+     call that mints it and from nowhere else; pages/settings.js fills
+     this and the page never reads it back from anywhere. -->
+<div id="token-issued" hidden>
+  <p class="notice" id="token-once"></p>
+
+  <label for="token-value">The token</label>
+  <div class="copyable">
+    <code id="token-value"></code>
+    <button type="button" id="copy-token">Copy</button>
+  </div>
+
+  <label for="token-snippet">In Claude Code</label>
+  <div class="copyable">
+    <code id="token-snippet"></code>
+    <button type="button" id="copy-snippet">Copy</button>
+  </div>
+
+  <!-- The same three facts apart, for a client that is not Claude Code:
+       an address, a header and a transport. -->
+  <p class="muted" id="token-elsewhere"></p>
+  <p class="muted" id="token-next"></p>
+</div>
+
+<h2>Tokens</h2>
+<div class="scroller">
+  <ul class="catalogue tokens" id="tokens" hidden></ul>
+</div>
+<div id="tokens-empty" hidden></div>
+<p class="error" id="tokens-error" hidden></p>
+
+</section>
 
 </main>
 

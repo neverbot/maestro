@@ -752,6 +752,29 @@ export function client({
     });
   }
 
+  // --- The game's tokens ----------------------------------------------
+  //
+  // Three calls this module has never carried, because until the Agents
+  // tab there was no screen to carry them for: a token was minted with
+  // `curl` or not at all. The server's gates are not repeated here — an
+  // editor or the owner may mint, any member may list or revoke — the
+  // screen reads the role it was given and this module states nothing
+  // about it, so there is one copy of that rule and it is the server's.
+  async function listTokens() {
+    return get(base + "/tokens");
+  }
+
+  // **The clear token comes back from this call and from nowhere else,
+  // ever** (api_tokens.go says so at the one line that writes it). A
+  // caller that loses it mints another; there is no second read.
+  async function createToken(label) {
+    return send(base + "/tokens", { label: String(label || "") });
+  }
+
+  async function revokeToken(id) {
+    return request(base + "/tokens/" + encodeURIComponent(String(id || "")), { method: "DELETE" });
+  }
+
   async function listViews(options) {
     return get(paged(base + "/views", options));
   }
@@ -1147,6 +1170,9 @@ export function client({
     games,
     summary,
     updateGame,
+    listTokens,
+    createToken,
+    revokeToken,
     listViews,
     listDocs,
     docKinds,

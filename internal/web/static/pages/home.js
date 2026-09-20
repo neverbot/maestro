@@ -26,6 +26,8 @@ import {
   TARGET_PROSE,
 } from "../client.js";
 import {
+  STATE_EMPTY,
+  TAB_AGENTS,
   assetsURL,
   countLabel,
   docURL,
@@ -33,6 +35,7 @@ import {
   expired,
   fill,
   fillState,
+  negativeState,
   onboarding,
   openGame,
   row,
@@ -243,6 +246,7 @@ async function catalogueLane(doc, slug, client, summaryEl) {
   const entityTypes = Array.isArray(summary.entity_types) ? summary.entity_types : [];
   const relationTypes = Array.isArray(summary.relation_types) ? summary.relation_types : [];
   say(summaryEl, describeTotals(summary.totals));
+  offerToConnectAnAgent(doc, slug, summary);
   fillState(doc, "types-empty", {
     heading: NO_TYPES_HEADING,
     sentence: NO_TYPES_SENTENCE + " " + whoWrites(summary.role, DECLARES_TYPES),
@@ -287,19 +291,27 @@ async function catalogueLane(doc, slug, client, summaryEl) {
   return { role: String(summary.role ?? ""), ok: true };
 }
 
-// SETTINGS_LABEL is the link, and OWNER is the one role that gets it.
+// SETTINGS_LABEL is the link, and every member of the game gets it.
 //
 // **"Game settings", not "Settings".** The link sits in a game's page
 // head, one word from the game's own name, and a designer reading it
 // there took it for the application's settings — the account, the
-// instance, the theme. What it opens is this game's name and address,
-// and nothing else in the product is called settings, so the word is
-// free to say which.
+// instance, the theme. What it opens is this game's own screen, and
+// nothing else in the product is called settings, so the word is free to
+// say which.
+//
+// **It was the owner's alone until that screen gained a second tab.**
+// The name and the address still are; the tokens beside them are any
+// member's to see and to revoke, and an editor's to mint. A link shown
+// only to owners would have hidden a credential an editor is allowed to
+// create, which is the server's rule contradicted by the one thing that
+// decides whether anybody ever finds it.
 export const SETTINGS_LABEL = "Game settings";
 const OWNER = "owner";
+const EDITOR = "editor";
 
 export function offerSettings(doc, slug, role) {
-  if (role !== OWNER) return null;
+  if (role === "") return null;
   const host = doc.getElementById("page-actions");
   if (!host) return null;
   const link = doc.createElement("a");
@@ -307,6 +319,58 @@ export function offerSettings(doc, slug, role) {
   link.textContent = SETTINGS_LABEL;
   host.append(link);
   return link;
+}
+
+// --- The empty game ----------------------------------------------------
+
+export const CONNECT_HEADING = "Nothing here yet, and nothing on this page will change that";
+export const CONNECT_SENTENCE =
+  "A game's content is written by agents, over MCP. Give one a token for this game and it can " +
+  "start declaring what this game is made of.";
+export const CONNECT_LABEL = "Connect an agent";
+
+// isEmptyGame reads the same totals the line under the title is built
+// from, rather than counting the lanes: a game can declare types and
+// hold no entities, and that is not an empty game — somebody has already
+// been here.
+export function isEmptyGame(summary) {
+  const totals = summary && typeof summary.totals === "object" && summary.totals !== null
+    ? summary.totals
+    : {};
+  const types = Array.isArray(summary?.entity_types) ? summary.entity_types.length : 0;
+  const relationTypes = Array.isArray(summary?.relation_types) ? summary.relation_types.length : 0;
+  return (
+    Number(totals.entities ?? 0) === 0 &&
+    Number(totals.relations ?? 0) === 0 &&
+    types === 0 &&
+    relationTypes === 0
+  );
+}
+
+// offerToConnectAnAgent is the crossing, and it is offered **only to
+// somebody who can make it**: minting is an editor's or the owner's, so
+// telling a viewer to connect an agent would be sending them to a form
+// the server refuses. A viewer of an empty game keeps the three lanes'
+// own sentences, which are true for them.
+export function offerToConnectAnAgent(doc, slug, summary) {
+  const host = doc.getElementById("connect-agent");
+  if (!host) return null;
+  const role = String(summary?.role ?? "");
+  const show = isEmptyGame(summary) && (role === OWNER || role === EDITOR);
+  if (!show) {
+    host.replaceChildren();
+    host.hidden = true;
+    return null;
+  }
+  const state = negativeState(doc, {
+    kind: STATE_EMPTY,
+    heading: CONNECT_HEADING,
+    sentence: CONNECT_SENTENCE,
+    action: { href: settingsURL(slug) + TAB_AGENTS, label: CONNECT_LABEL },
+  });
+  host.replaceChildren(state);
+  host.hidden = false;
+  return state;
 }
 
 // viewsLane lists the saved views, and answers a game that has none with

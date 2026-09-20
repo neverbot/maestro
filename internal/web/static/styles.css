@@ -867,6 +867,117 @@ ul.catalogue .link-button {
   background: var(--ground);
 }
 
+/* --- Tabs -------------------------------------------------------------
+ *
+ * **Not a forge's tab strip.** docs/product.md names GitHub's chrome as
+ * an anti-reference and the tab strip by name: the grey-blue bar, the
+ * boxed tabs, the border that wraps around the selected one. What is
+ * banned there is a look, not a control — a settings page whose halves
+ * answer to different gates is exactly what tabs are for.
+ *
+ * So these are the identity's own: the tool's voice in Label type, the
+ * current one in ink at weight 600 over a 2px rule in the accent, the
+ * rest muted. No fill, no box, no pill. The row sits on the page's own
+ * hairline, which is the same line the page head already draws.
+ */
+.tabs {
+  display: flex;
+  gap: var(--s5);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s5);
+}
+
+.tabs .tab {
+  /* A button, because it moves the selection rather than going
+     somewhere, and every button in this product is styled by an element
+     selector — so these three lines are what stop it looking like the
+     Ink Button. */
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: var(--s2) 0 var(--s3);
+  margin-bottom: -1px;
+  font: 600 0.75rem/1.2 var(--sans);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tabs .tab:hover {
+  color: var(--ink);
+  background: none;
+}
+
+.tabs .tab[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--focus);
+}
+
+/* --- A value somebody has to copy -------------------------------------
+ *
+ * The token and the command it goes into. Mono, on the raised ground, in
+ * a box that wraps rather than scrolls: a command a reader cannot see
+ * the end of is a command they cannot check before running it.
+ */
+.copyable {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  max-width: 46rem;
+}
+
+.copyable code {
+  flex: 1;
+  min-width: 0;
+  padding: var(--s3);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: 400 0.8125rem/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The token list: a label, its fingerprint, who made it, and the one
+   control. Not a catalogue — a catalogue is a table and this list
+   carries a button — so it states its own row. */
+ul.tokens {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 46rem;
+}
+
+ul.tokens .token {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto 1fr auto auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+ul.tokens .token-label {
+  font-weight: 600;
+}
+
+ul.tokens .token-hint {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+
+/* Armed, in the page's own DOM. control-styles.js already states this
+   for every button inside a shadow root and the header states it for the
+   sign-out; a revoke in an ordinary list is the third, and it says the
+   same thing in the same colour rather than inventing a fourth. */
+ul.tokens button[data-armed="true"] {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 /* **A form stops at a form's width.** The page frame is 1440 wide and a
    text input stretched across all of it is a field whose end a reader
    has to go looking for; every form in this product asks for a name, an

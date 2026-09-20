@@ -226,6 +226,15 @@ export function settingsURL(slug) {
   return gameURL(slug) + SEGMENT_SETTINGS;
 }
 
+// TAB_AGENTS is the fragment that opens the settings page's second tab.
+//
+// It lives here with the address functions rather than in the page that
+// reads it, because the module that *links* to a tab and the module that
+// *opens* one must not each carry their own spelling of it: a link into
+// a half of a screen is an address, and every other address in this
+// product is built here.
+export const TAB_AGENTS = "#agents";
+
 export function analysisURL(slug) {
   return gameURL(slug) + SEGMENT_ANALYSIS;
 }

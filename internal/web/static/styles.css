@@ -975,6 +975,52 @@ ul.catalogue .link-button {
   border-bottom-color: var(--focus);
 }
 
+/* The accounts on this instance: a name, the address that signs in, what
+   they may do, and the one control. It borrows the token list's shape
+   below rather than restating it — same tracks, same rhythm, same
+   `subgrid` — because two lists of rows with a control each should not
+   be two designs. */
+ul.people {
+  display: grid;
+  grid-template-columns: fit-content(22rem) auto 1fr auto;
+  list-style: none;
+  margin: var(--s4) 0 0;
+  padding: 0;
+  max-width: 46rem;
+}
+
+ul.people .person {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  column-gap: var(--s5);
+  min-height: calc(var(--row-h) + var(--s2));
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--line);
+}
+
+ul.people .person:last-child { border-bottom: none; }
+
+ul.people .person-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+ul.people .person-email {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+ul.people .person-standing { color: var(--muted); }
+
+ul.people .person > button { justify-self: end; }
+
 /* The token list: a label, its fingerprint, who made it, and the one
    control. Not a catalogue — a catalogue is a table and this list
    carries a button — so it states its own row.

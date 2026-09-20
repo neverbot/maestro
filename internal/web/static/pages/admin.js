@@ -32,6 +32,7 @@ import {
   say,
 } from "./page.js";
 import { headerRow, row } from "../rows.js";
+import { openDialog } from "../components/mst-dialog.js";
 
 // The empty state, in the page rather than in the shell.
 export const NO_INVITES_HEADING = "Nobody is waiting";
@@ -239,44 +240,192 @@ export function wireInviteForm(doc, reload) {
   return form;
 }
 
-export function wireAdminsForm(doc) {
-  const form = doc.getElementById("admins");
-  if (!form) return null;
-  const errorEl = doc.getElementById("admins-error");
-  const doneEl = doc.getElementById("admins-done");
-  const emailEl = doc.getElementById("admins-email");
+// --- The accounts on this instance ------------------------------------
 
+export const ADMINISTRATOR = "administrator";
+export const YOU = "you";
+export const EDIT = "Edit";
+export const NO_USERS_HEADING = "Nobody but you";
+export const NO_USERS_SENTENCE =
+  "This instance has one account, yours. An invitation above is how a second one is made.";
+export const EDIT_TITLE = "Edit this account";
+export const SAVE = "Save";
+export const CANCEL = "Cancel";
+export const LAST_ADMIN =
+  "This instance must keep at least one administrator. Make somebody else one first.";
+export const CANNOT_DEMOTE_YOURSELF =
+  "You are signed in as an administrator. Taking it away here would lock you out of this page, so " +
+  "another administrator does it for you.";
+
+// personRow is one account: who they are, how they sign in, what they
+// may do, and the way in to changing it.
+//
+// **The standing is a word and not a tick.** A checkbox in a row reads
+// as something a stray click changes; this list is read far more often
+// than it is written, so the row states the fact and the editing happens
+// where a person went to edit.
+export function personRow(doc, user, onEdit) {
+  const item = doc.createElement("li");
+  item.className = "person";
+
+  const name = doc.createElement("span");
+  name.className = "person-name";
+  name.textContent = user.display_name || "";
+  item.append(name);
+
+  const email = doc.createElement("code");
+  email.className = "person-email";
+  email.textContent = user.email || "";
+  item.append(email);
+
+  const standing = doc.createElement("span");
+  standing.className = "person-standing";
+  // Two facts, and both are worth a word: who administers the instance,
+  // and which row is the reader's own — which is the one row where a
+  // change can lock them out of the page they are standing on.
+  standing.textContent = [user.is_admin ? ADMINISTRATOR : "", user.you ? YOU : ""]
+    .filter((word) => word !== "")
+    .join(" · ");
+  item.append(standing);
+
+  const edit = doc.createElement("button");
+  edit.type = "button";
+  edit.className = "ghost";
+  edit.textContent = EDIT;
+  edit.addEventListener("click", () => onEdit(user));
+  item.append(edit);
+  return item;
+}
+
+// editAccount opens the one form that changes somebody else's account.
+//
+// **A dialog, and this is the third case the component admits.** It is
+// not a secret shown once and not a destructive question; it is a form
+// that belongs to *one row of a list* rather than to the screen. An
+// inline editor would push twenty rows down the page to change one, and
+// a screen with a form per row is a screen of forms. components/
+// mst-dialog.js's own header records the three.
+export function editAccount(doc, user, onSave) {
+  const form = doc.createElement("form");
+  form.setAttribute("id", "edit-account");
+
+  const nameLabel = doc.createElement("label");
+  nameLabel.setAttribute("for", "edit-name");
+  nameLabel.textContent = "Name";
+  const name = doc.createElement("input");
+  // `setAttribute` and not `.id = `: the property reflects to the
+  // attribute in a browser and not in this project's DOM stub, and a
+  // field the harness cannot find is a field nothing asserts about.
+  name.setAttribute("id", "edit-name");
+  name.setAttribute("type", "text");
+  name.value = user.display_name || "";
+
+  const emailLabel = doc.createElement("label");
+  emailLabel.setAttribute("for", "edit-email");
+  emailLabel.textContent = "Email";
+  const email = doc.createElement("input");
+  email.setAttribute("id", "edit-email");
+  email.setAttribute("type", "email");
+  email.value = user.email || "";
+
+  const standing = doc.createElement("label");
+  standing.className = "choice";
+  const admin = doc.createElement("input");
+  admin.setAttribute("id", "edit-admin");
+  admin.setAttribute("type", "checkbox");
+  admin.checked = user.is_admin === true;
+  // **Not your own standing, on your own screen.** Taking the flag off
+  // yourself here closes the page you are on, and the server's own
+  // last-administrator rule would not catch it while another admin
+  // exists. Somebody else does it for you.
+  if (user.you === true) admin.disabled = true;
+  standing.append(admin, doc.createTextNode(" Administers this instance"));
+
+  const note = doc.createElement("p");
+  note.className = "muted";
+  if (user.you === true) note.textContent = CANNOT_DEMOTE_YOURSELF;
+
+  const error = doc.createElement("p");
+  error.className = "error";
+  error.setAttribute("role", "alert");
+
+  const save = doc.createElement("button");
+  save.type = "submit";
+  save.textContent = SAVE;
+  // It lives in the dialog's footer, beside Cancel, and stays this
+  // form's submit: they share a shadow root, so the association holds
+  // and Enter in a field still saves.
+  save.setAttribute("form", "edit-account");
+
+  form.append(nameLabel, name, emailLabel, email, standing, note, error);
   form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (errorEl) errorEl.textContent = "";
-    if (doneEl) doneEl.hidden = true;
-    const grant = form.querySelector("input[name=is_admin]:checked");
-    const isAdmin = grant ? grant.value === "true" : true;
-    const email = emailEl ? emailEl.value : "";
-    setFormBusy(form, true, "Applying…");
-    const answer = await sendJSON("PATCH", "/api/admins", { email, is_admin: isAdmin });
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    error.textContent = "";
+    setFormBusy(form, true, "Saving…");
+    const answer = await onSave({
+      display_name: name.value,
+      email: email.value,
+      is_admin: admin.checked,
+    });
     setFormBusy(form, false);
-    if (!answer.ok) {
-      // The server says `no such user`: lower case, no stop, and no way
-      // forward. This screen knows the address that was typed and what
-      // has to happen first, so it says that instead.
-      markRefused(form, emailEl, errorEl, answer.status === 404
-        ? "Maestro has no account for " + email + ". Somebody signs in once before they can administer anything."
-        : answer.message);
+    if (answer && answer.ok === false) {
+      error.textContent = answer.status === 409 && answer.code === "last_admin"
+        ? LAST_ADMIN
+        : answer.message;
       return;
     }
-    if (doneEl) {
-      // The sentence names the person and what changed, because this
-      // screen cannot show a list that would say it instead.
-      doneEl.textContent = isAdmin
-        ? email + " administers this instance."
-        : email + " no longer administers this instance.";
-      doneEl.hidden = false;
-    }
-    form.reset();
+    const dialog = doc._mstDialog;
+    if (dialog && typeof dialog.close === "function") dialog.close();
   });
-  return form;
+
+  return openDialog(doc, { title: EDIT_TITLE, content: [form], actions: [save], dismissLabel: CANCEL });
 }
+
+export async function loadUsers(doc, cursor) {
+  const listEl = doc.getElementById("users");
+  const emptyEl = doc.getElementById("users-empty");
+  const errorEl = doc.getElementById("users-error");
+  const moreEl = doc.getElementById("users-more");
+
+  const answer = await fetchAPI("/api/users" + (cursor ? "?cursor=" + encodeURIComponent(cursor) : ""));
+  if (!answer.ok) {
+    if (answer.expired) {
+      goToLogin();
+      return null;
+    }
+    say(errorEl, answer.message);
+    if (errorEl) errorEl.hidden = false;
+    return null;
+  }
+  const users = Array.isArray(answer.body.users) ? answer.body.users : [];
+  const save = (user) => async (changes) => {
+    const result = await sendJSON("PATCH", "/api/users/" + user.id, changes);
+    if (result.ok) await loadUsers(doc);
+    return result;
+  };
+  const rows = users.map((user) => personRow(doc, user, (who) => editAccount(doc, who, save(who))));
+  if (listEl) {
+    // A cursor means "add to what is there"; no cursor means this is the
+    // first page and replaces it.
+    if (cursor) listEl.append(...rows);
+    else listEl.replaceChildren(...rows);
+    listEl.hidden = listEl.children.length === 0;
+  }
+  fillState(doc, "users-empty", { heading: NO_USERS_HEADING, sentence: NO_USERS_SENTENCE });
+  if (emptyEl) emptyEl.hidden = users.length > 0 || Boolean(cursor);
+  const next = typeof answer.body.next_cursor === "string" ? answer.body.next_cursor : "";
+  if (moreEl) {
+    moreEl.hidden = next === "";
+    moreEl.onclick = () => void loadUsers(doc, next);
+  }
+  return users;
+}
+// **The by-email form is gone, and so is the sentence that apologised
+// for it.** This screen asked for an address typed from memory because
+// the server could not list accounts; it can now, so the standing is
+// changed on the row of the person it belongs to. `PATCH /api/admins`
+// itself stays for the case that has no screen at all: an operator with
+// nothing but an address, before anybody has opened this page.
 
 if (globalThis.document && globalThis.document.getElementById("new-invite")) {
   const doc = globalThis.document;
@@ -301,7 +450,7 @@ if (globalThis.document && globalThis.document.getElementById("new-invite")) {
         await reload();
       };
       wireInviteForm(doc, reload);
-      wireAdminsForm(doc);
+      void loadUsers(doc);
       await reload();
     } else {
       // Not an admin: the forms are removed rather than disabled, and

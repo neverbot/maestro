@@ -13,6 +13,10 @@
 //     halfway down the window. The reader closing it is the point.
 //   - **a question whose answer cannot wait and cannot be undone**, with
 //     nowhere in the page to ask it.
+//   - **a form that belongs to one row of a list**, not to the screen:
+//     the administration page edits an account from its own row, and an
+//     inline editor there would push twenty rows down the page to change
+//     one, while a form per row would be a screen made of forms.
 //
 // Everything else is a screen, a panel or an armed control.
 //
@@ -219,6 +223,7 @@ export class MstDialog extends HTMLElement {
     shadow.append(backdrop, panel);
 
     this.panel = panel;
+    this.footEl = foot;
     this.titleEl = title;
     this.bodyEl = body;
     this.dismissEl = dismiss;
@@ -237,6 +242,15 @@ export class MstDialog extends HTMLElement {
     this.dismissEl.textContent = String(spec.dismissLabel ?? DISMISS_LABEL);
     const content = Array.isArray(spec.content) ? spec.content : spec.content ? [spec.content] : [];
     this.bodyEl.replaceChildren(...content);
+
+    // **A dialog's own actions sit in its footer, beside the way out.**
+    // A caller that kept its submit button inside the body put "Save" in
+    // the middle of the panel and "Cancel" in the corner, which is two
+    // decisions in two places. A submit button placed here still belongs
+    // to its form: both are in this shadow root, so `form="…"`
+    // associates them, and Enter in a field still submits.
+    const actions = Array.isArray(spec.actions) ? spec.actions : spec.actions ? [spec.actions] : [];
+    this.footEl.replaceChildren(...actions, this.dismissEl);
 
     // **The title names the dialog**, so a screen reader announces what
     // opened rather than "dialog".

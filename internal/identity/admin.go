@@ -2,12 +2,17 @@ package identity
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/neverbot/maestro/internal/db/dbq"
 )
@@ -135,3 +140,159 @@ func (s *Service) SetAdmin(ctx context.Context, targetUserID uuid.UUID, isAdmin 
 		return nil
 	})
 }
+
+// --- The instance's own accounts --------------------------------------
+
+// UserPage is one page of the accounts on this instance, plus the cursor
+// that asks for the next.
+//
+// It is `Users` and a cursor rather than a slice and a bool, because
+// every listing in this product pages the same way and a screen that had
+// to learn a second shape for one of them would be a screen with two
+// pagers in it.
+type UserPage struct {
+	Users      []User
+	NextCursor string
+}
+
+// ListUsers answers the question the administration screen could not ask
+// at all: **who is on this instance**.
+//
+// The screen used to say so in its own prose — "Maestro cannot say who
+// they are: the server has no endpoint that answers it" — and offered a
+// field to type an address into instead. Administering an instance by
+// typing a string from memory is how somebody grants the flag to an
+// address that belongs to nobody, and never finds out.
+//
+// The cursor is opaque to the caller and is the last row's ordering pair
+// (created_at, id). Both halves are needed: two accounts made in the
+// same millisecond would otherwise page over each other, one repeated
+// and one lost.
+func (s *Service) ListUsers(ctx context.Context, after string, pageSize int32) (UserPage, error) {
+	if pageSize <= 0 || pageSize > maxUserPageSize {
+		pageSize = defaultUserPageSize
+	}
+	params := dbq.ListUsersParams{PageSize: pageSize + 1}
+	if after != "" {
+		createdAt, id, err := decodeUserCursor(after)
+		if err != nil {
+			return UserPage{}, err
+		}
+		params.AfterCreatedAt = pgtype.Timestamptz{Time: createdAt, Valid: true}
+		params.AfterID = &id
+	}
+	rows, err := s.q.ListUsers(ctx, params)
+	if err != nil {
+		return UserPage{}, fmt.Errorf("list users: %w", err)
+	}
+	// One more than asked for is how a listing knows there is another
+	// page without a second count query; the extra row is dropped rather
+	// than shown.
+	page := UserPage{}
+	if len(rows) > int(pageSize) {
+		last := rows[pageSize-1]
+		page.NextCursor = encodeUserCursor(last.CreatedAt.Time, last.ID)
+		rows = rows[:pageSize]
+	}
+	page.Users = make([]User, len(rows))
+	for i, row := range rows {
+		page.Users[i] = userFrom(row)
+	}
+	return page, nil
+}
+
+// UpdateIdentityRequest is what an administrator may change about
+// somebody else's account: the address they sign in with, and the name
+// they are shown by. Not their password, which only they can set, and
+// not their standing, which is SetAdmin's.
+type UpdateIdentityRequest struct {
+	UserID      uuid.UUID
+	Email       string
+	DisplayName string
+}
+
+// UpdateIdentity changes an account's address and display name.
+//
+// **The address is how somebody signs in**, so it is validated exactly
+// as registration validates one — trimmed, lower-cased, bounded in runes
+// — and the unique index refuses a second account on it. The domain
+// allow-list is deliberately *not* consulted: it governs who may create
+// an account on this instance, and an administrator moving an existing
+// colleague to a new address is not that. `prepareUserForInvite` makes
+// the same distinction for the same reason.
+//
+// **Sessions are left alone, and that is a decision.** Changing an
+// address does not change who the person is, and signing somebody out of
+// three machines because an administrator fixed a typo in their name
+// would be a surprise with no security behind it: a stolen session is
+// revoked by the session routes, which is where that belongs.
+func (s *Service) UpdateIdentity(ctx context.Context, req UpdateIdentityRequest) (User, error) {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	displayName := strings.TrimSpace(req.DisplayName)
+	if n := utf8.RuneCountInString(email); n < minEmailRunes || n > maxEmailRunes {
+		return User{}, fmt.Errorf("%w: must be between %d and %d characters", ErrEmailInvalid, minEmailRunes, maxEmailRunes)
+	}
+	if n := utf8.RuneCountInString(displayName); n < minDisplayNameRunes || n > maxDisplayNameRunes {
+		return User{}, fmt.Errorf("%w: must be between %d and %d characters", ErrDisplayNameInvalid, minDisplayNameRunes, maxDisplayNameRunes)
+	}
+
+	row, err := s.q.UpdateUserIdentity(ctx, dbq.UpdateUserIdentityParams{
+		ID:          req.UserID,
+		Email:       email,
+		DisplayName: displayName,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, ErrUserNotFound
+		}
+		// The same named-constraint check insertUser makes, for the same
+		// reason: a 23505 from some other index must not be reported as
+		// "that address is taken".
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "users_email_key" {
+			return User{}, ErrEmailTaken
+		}
+		return User{}, fmt.Errorf("update identity: %w", err)
+	}
+	return userFrom(row), nil
+}
+
+// The page sizes this listing admits. The default is what the
+// administration screen asks for and the cap is what stops a caller
+// asking for the whole table in one answer.
+const (
+	defaultUserPageSize = 50
+	maxUserPageSize     = 200
+)
+
+// A cursor is the ordering pair, encoded so a caller cannot read
+// meaning into it and cannot construct one by hand: it is this listing's
+// own bookmark and nothing else.
+func encodeUserCursor(createdAt time.Time, id uuid.UUID) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(createdAt.UTC().Format(time.RFC3339Nano) + " " + id.String()))
+}
+
+func decodeUserCursor(cursor string) (time.Time, uuid.UUID, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrCursorInvalid
+	}
+	stamp, rest, found := strings.Cut(string(raw), " ")
+	if !found {
+		return time.Time{}, uuid.Nil, ErrCursorInvalid
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, stamp)
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrCursorInvalid
+	}
+	id, err := uuid.Parse(rest)
+	if err != nil {
+		return time.Time{}, uuid.Nil, ErrCursorInvalid
+	}
+	return createdAt, id, nil
+}
+
+// ErrCursorInvalid is a cursor this listing did not issue. It is a
+// refusal and not an empty first page: answering a made-up cursor with
+// the start of the list would page a caller in a circle for ever.
+var ErrCursorInvalid = errors.New("that cursor is not one this listing issued")

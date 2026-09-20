@@ -86,32 +86,26 @@
 
 <section class="setting">
   <div class="setting-head">
-    <h2>Administrators</h2>
-    <!-- **A write with no read.** The server names an administrator by
-         email and offers no endpoint that lists users or admins, so this
-         screen cannot say who they are today. It says that rather than
-         drawing an empty list, which would read as "nobody". -->
-    <p class="muted">Maestro cannot say who they are: the server has no endpoint that
-      answers it. What you can do is grant it or take it away, by the address the person
-      signs in with.</p>
+    <h2>Accounts</h2>
+    <!-- **This section was a write with no read**, and it said so in its
+         own prose: the server offered no endpoint that listed users, so
+         the screen had a field to type an address into and no way to
+         show whose address it was. GET /api/users answers it now. -->
+    <p class="muted">Everybody who can sign in to this instance. An account's address is
+      how they sign in and their name is what everybody else sees; both are yours to
+      correct. An administrator can do everything on this page.</p>
   </div>
   <div class="setting-body">
-<form id="admins">
-  <label for="admins-email">Email</label>
-  <input id="admins-email" type="email" name="email" placeholder="them@example.test" autocomplete="off" required>
-  <!-- Under the field it is about, above everything else. It was below
-       the radios and the button, 114px from the input it marks red. -->
-  <p class="error" id="admins-error" role="alert" aria-live="assertive"></p>
-  <fieldset class="choices">
-    <legend class="sr-only">Administrator</legend>
-    <label><input type="radio" name="is_admin" value="true" checked> Make an administrator</label>
-    <label><input type="radio" name="is_admin" value="false"> Take it away</label>
-  </fieldset>
-  <!-- Ghost, not ink: the primary on this screen is the invitation.
-       "Apply" named neither the subject nor the change. -->
-  <button type="submit" class="ghost">Change who administers</button>
-  <p class="muted" id="admins-done" hidden></p>
-</form>
+<!-- Not a `catalogue`: a catalogue is a table whose rows are links, and
+     these rows carry a control. Same reasoning as the token list, and
+     the same shape — the list owns the tracks, the rows take them. -->
+<div class="scroller">
+  <ul class="people" id="users" hidden></ul>
+</div>
+<!-- The hole; pages/admin.js carries the words. -->
+<div id="users-empty" hidden></div>
+<p class="error" id="users-error" hidden></p>
+<button type="button" class="ghost" id="users-more" hidden>Show more</button>
   </div>
 </section>
 

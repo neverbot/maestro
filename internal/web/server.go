@@ -390,6 +390,14 @@ func NewServer(opts Options) *Server {
 	s.route("DELETE /api/invites/{invite}", requireCaller(s.handleRevokeInstanceInvite))
 	s.route("PATCH /api/me/password", requireCaller(s.handleChangePassword))
 	s.route("PATCH /api/admins", requireCaller(s.handleSetAdmin))
+	// **Who is on this instance, and the one place an account is
+	// edited.** `PATCH /api/admins` stays: it is addressed by email and
+	// is what an operator reaches for with nothing but an address — the
+	// bootstrap case, before anybody has opened the screen. These two are
+	// the screen's: a listing, and one route that writes an account
+	// addressed by its id.
+	s.route("GET /api/users", requireCaller(s.handleListUsers))
+	s.route("PATCH /api/users/{user}", requireCaller(s.handleUpdateUser))
 	s.registerProjectRoute("GET /api/games/{game}/members", s.handleListMembers)
 	s.registerProjectRoute("PATCH /api/games/{game}/members/{user}", s.handleChangeRole)
 	s.registerProjectRoute("DELETE /api/games/{game}/members/{user}", s.handleRemoveMember)

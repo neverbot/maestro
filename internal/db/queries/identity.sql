@@ -31,6 +31,42 @@ SELECT count(*) FROM api_tokens WHERE project_id = sqlc.arg('project_id')::uuid;
 -- CountAPITokensForProject above, for the same reason.
 SELECT count(*) FROM invites WHERE project_id = sqlc.arg('project_id')::uuid;
 
+-- name: ListUsers :many
+-- Every account on this instance, oldest first, for the one screen that
+-- administers them.
+--
+-- **Oldest first, and not newest.** An instance's account list is read
+-- to find somebody, and the order that helps is the one that does not
+-- move: a newest-first list reshuffles the rows under a person every
+-- time anybody signs up, and the row they were about to press moves.
+--
+-- Paged like every other listing in this product: the caller passes the
+-- last id it saw and the page size it wants. The keyset is (created_at,
+-- id) because created_at alone is not unique — two accounts made in the
+-- same millisecond would page over each other, dropping one and
+-- repeating the other.
+SELECT * FROM users
+WHERE (sqlc.narg('after_created_at')::timestamptz IS NULL
+       OR (created_at, id) > (sqlc.narg('after_created_at')::timestamptz, sqlc.narg('after_id')::uuid))
+ORDER BY created_at, id
+LIMIT sqlc.arg('page_size')::int;
+
+-- name: UpdateUserIdentity :one
+-- The two things about an account that are not its password or its
+-- standing: the address it signs in with and the name it is shown by.
+--
+-- Both are written together because they are one edit on one screen, and
+-- splitting them into two statements would make a half-applied change
+-- reachable. The unique index on lower(email) is what refuses a second
+-- account on one address; this statement does not check it, it lets the
+-- database do it, so two administrators renaming two people onto one
+-- address at the same moment cannot both win.
+UPDATE users
+SET email = sqlc.arg('email')::text,
+    display_name = sqlc.arg('display_name')::text
+WHERE id = sqlc.arg('id')::uuid
+RETURNING *;
+
 -- name: UpdateUserPasswordHash :exec
 UPDATE users SET password_hash = sqlc.arg('password_hash')::text
 WHERE id = sqlc.arg('id')::uuid;

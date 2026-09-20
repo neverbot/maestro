@@ -757,6 +757,61 @@ func (q *Queries) ListOutstandingProjectInvites(ctx context.Context, projectID u
 	return items, nil
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, email, display_name, password_hash, is_admin, created_at, updated_at FROM users
+WHERE ($1::timestamptz IS NULL
+       OR (created_at, id) > ($1::timestamptz, $2::uuid))
+ORDER BY created_at, id
+LIMIT $3::int
+`
+
+type ListUsersParams struct {
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        *uuid.UUID
+	PageSize       int32
+}
+
+// Every account on this instance, oldest first, for the one screen that
+// administers them.
+//
+// **Oldest first, and not newest.** An instance's account list is read
+// to find somebody, and the order that helps is the one that does not
+// move: a newest-first list reshuffles the rows under a person every
+// time anybody signs up, and the row they were about to press moves.
+//
+// Paged like every other listing in this product: the caller passes the
+// last id it saw and the page size it wants. The keyset is (created_at,
+// id) because created_at alone is not unique — two accounts made in the
+// same millisecond would page over each other, dropping one and
+// repeating the other.
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsers, arg.AfterCreatedAt, arg.AfterID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.DisplayName,
+			&i.PasswordHash,
+			&i.IsAdmin,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markInviteRedeemed = `-- name: MarkInviteRedeemed :execrows
 UPDATE invites SET redeemed_at = now(), redeemed_by = $1::uuid
 WHERE id = $2::uuid
@@ -939,6 +994,44 @@ WHERE id = $1::uuid
 func (q *Queries) TouchAPIToken(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, touchAPIToken, id)
 	return err
+}
+
+const updateUserIdentity = `-- name: UpdateUserIdentity :one
+UPDATE users
+SET email = $1::text,
+    display_name = $2::text
+WHERE id = $3::uuid
+RETURNING id, email, display_name, password_hash, is_admin, created_at, updated_at
+`
+
+type UpdateUserIdentityParams struct {
+	Email       string
+	DisplayName string
+	ID          uuid.UUID
+}
+
+// The two things about an account that are not its password or its
+// standing: the address it signs in with and the name it is shown by.
+//
+// Both are written together because they are one edit on one screen, and
+// splitting them into two statements would make a half-applied change
+// reachable. The unique index on lower(email) is what refuses a second
+// account on one address; this statement does not check it, it lets the
+// database do it, so two administrators renaming two people onto one
+// address at the same moment cannot both win.
+func (q *Queries) UpdateUserIdentity(ctx context.Context, arg UpdateUserIdentityParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserIdentity, arg.Email, arg.DisplayName, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsAdmin,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateUserIsAdmin = `-- name: UpdateUserIsAdmin :exec

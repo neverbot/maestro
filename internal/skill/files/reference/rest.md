@@ -140,6 +140,11 @@ takes.
 - `GET /api/games/{game}/types/by-key/{key}`
 - `POST /api/games/{game}/types/rename`
 
+## users
+
+- `GET /api/users`
+- `PATCH /api/users/{user}`
+
 ## view-assets
 
 - `GET /api/games/{game}/view-assets`

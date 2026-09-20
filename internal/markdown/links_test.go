@@ -994,8 +994,8 @@ func TestLinksArea(t *testing.T) {
 
 	// TestLinksArea's "upsert document links conflict path cannot write
 	// another games link" case drives the statement directly, for the reason
-	// its twin in internal/metamodel
-	// (TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge) records.
+	// its twin in internal/metamodel (TestRelationsArea's "upsert relations
+	// conflict path cannot write another games edge" case) records.
 	//
 	// 0007_documents.sql's two composite foreign keys make a cross-game link
 	// impossible to *insert*: the row's project_id must agree with the

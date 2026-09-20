@@ -183,12 +183,12 @@ func Decode(s, fingerprint string, refuse func(message string) error) (Cursor, e
 // Fingerprint digests the resolved filter a cursor was issued under.
 //
 // **The project id must be the first part, always.** It is not enforced
-// here — there is no way to enforce it on a variadic list of strings —
-// so every caller passes it first and every listing has a test that a
-// cursor from another game is refused (the metamodel's is
-// TestACursorFromAnotherGameIsRefused, which covers each of its three
-// listings). That is the discipline the original defect was fixed with,
-// and the reason this comment is the first thing a new caller reads.
+// here — there is no way to enforce it on a variadic list of strings — so
+// every caller passes it first and every listing has a test that a cursor
+// from another game is refused (the metamodel's is TestListArea's "a cursor
+// from another game is refused" case, which covers each of its three
+// listings). That is the discipline the original defect was fixed with, and
+// the reason this comment is the first thing a new caller reads.
 //
 // The parts are joined length-prefixed, because without it a filter
 // whose parts run together spells the same string as a different filter

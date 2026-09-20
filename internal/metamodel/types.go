@@ -32,22 +32,22 @@ const noVersion int32 = -1
 // the guard is the only thing standing between the loser of that race and
 // a silent overwrite.
 //
-// **A version claim against a row that is not there is refused, not read
-// as a creation.** It used to be read as one: the locked read found
-// nothing, the call took the insert path, the guard was never evaluated,
-// and a fresh row appeared under a new id at version 1 with no error.
-// The argument for that was that nothing is overwritten and the caller
-// can tell from the returned Version of 1 — and it is wrong about what
-// is lost. What is lost is not the content, which the caller was
-// resending anyway; it is every relation, view reference, prose link and
-// endpoint rule that named the *removed* row by id, each of which now
-// names nothing while a row with the same key sits there looking fine.
-// The state is easy to reach: an update parking behind a committed
-// removal produces it, and TestAnUpdateThatLosesToACommittedRemovalIsToldTheRowIsGone
-// stages exactly that race. So a non-nil ExpectedVersion that reaches
-// the empty read is a RemovedError — a not_found saying the row was
-// removed, never a version_conflict, because there is nothing to merge
-// onto and "merge and retry" is a loop that cannot terminate.
+// **A version claim against a row that is not there is refused, not read as
+// a creation.** It used to be read as one: the locked read found nothing,
+// the call took the insert path, the guard was never evaluated, and a fresh
+// row appeared under a new id at version 1 with no error. The argument for
+// that was that nothing is overwritten and the caller can tell from the
+// returned Version of 1 — and it is wrong about what is lost. What is lost
+// is not the content, which the caller was resending anyway; it is every
+// relation, view reference, prose link and endpoint rule that named the
+// *removed* row by id, each of which now names nothing while a row with the
+// same key sits there looking fine. The state is easy to reach: an update
+// parking behind a committed removal produces it, and TestRemovedArea's "an
+// update that loses to a committed removal is told the row is gone" case
+// stages exactly that race. So a non-nil ExpectedVersion that reaches the
+// empty read is a RemovedError — a not_found saying the row was removed,
+// never a version_conflict, because there is nothing to merge onto and
+// "merge and retry" is a loop that cannot terminate.
 //
 // A nil ExpectedVersion still creates, unchanged: that caller claimed
 // nothing and gets what it asked for.
@@ -172,18 +172,16 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 		// the locked read and the guarded DO UPDATE and updated a row it
 		// never saw, under a spelling it never sent.
 		//
-		// That writer no longer reaches this statement. A version claim
-		// against a row the locked read cannot see is now refused up
-		// there (RemovedError), so the only calls that get here are the
-		// ones whose claim matched a row this transaction holds FOR
-		// UPDATE — where the returned row *is* that row, by the guard —
-		// and the ones claiming nothing, which pass noVersion and so can
-		// only ever insert their own spelling or lose to the index and
-		// land in conflictOnEntityTypeKey. Both remaining refusals are
-		// still exercised: conflictOnEntityTypeKey's respelling arm is
-		// what a creation racing another spelling meets, and
-		// TestARaceThatWouldLandUnderAnotherSpellingIsRefused stages
-		// exactly that.
+		// That writer no longer reaches this statement. A version claim against a
+		// row the locked read cannot see is now refused up there (RemovedError),
+		// so the only calls that get here are the ones whose claim matched a row
+		// this transaction holds FOR UPDATE — where the returned row *is* that
+		// row, by the guard — and the ones claiming nothing, which pass noVersion
+		// and so can only ever insert their own spelling or lose to the index and
+		// land in conflictOnEntityTypeKey. Both remaining refusals are still
+		// exercised: conflictOnEntityTypeKey's respelling arm is what a creation
+		// racing another spelling meets, and TestTypesArea's "a race that would
+		// land under another spelling is refused" case stages exactly that.
 		//
 		// Proved by mutation before it was deleted: with the version rule
 		// in place, this check no longer fires for any test in the
@@ -304,18 +302,18 @@ func (s *Service) ListEntityTypes(ctx context.Context, projectID uuid.UUID) ([]d
 //
 // **The prune alone closes the sequential path and not the concurrent
 // one**, and it takes a second mechanism to close both. `DeleteEntityType`
-// is the only path by which an entity type disappears — deleting a
-// project cascades the relation types with it — so the prune is exact for
-// every id that exists when its statement runs. It is one `UPDATE` under
-// READ COMMITTED, though, and a relation type *created* after it has run
-// and before this transaction commits is a row it never saw: the update
-// path is caught by the prune's own row lock and READ COMMITTED's
-// re-check, the creation path had no row to lock. What closes it is on
-// the other side, in `checkEndpointTypes`: the endpoint read there holds
-// a share lock on every type it names, so the `DELETE` above waits for
-// that writer and the prune below then finds its row.
-// `TestARelationTypeCreatedDuringATypeRemovalCannotKeepTheRemovedID`
-// stages the interleaving deterministically.
+// is the only path by which an entity type disappears — deleting a project
+// cascades the relation types with it — so the prune is exact for every id
+// that exists when its statement runs. It is one `UPDATE` under READ
+// COMMITTED, though, and a relation type *created* after it has run and
+// before this transaction commits is a row it never saw: the update path is
+// caught by the prune's own row lock and READ COMMITTED's re-check, the
+// creation path had no row to lock. What closes it is on the other side, in
+// `checkEndpointTypes`: the endpoint read there holds a share lock on every
+// type it names, so the `DELETE` above waits for that writer and the prune
+// below then finds its row. `TestTypesArea's "a relation type created
+// during a type removal cannot keep the removed ID" case` stages the
+// interleaving deterministically.
 //
 // **The prune is announced, not left to be inferred.** It changes rows
 // the caller never named and moves no `version`, so a subscriber holding
@@ -372,12 +370,12 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 		removedKey = typ.Key
 
 		// The count is not the only thing standing between a caller and a
-		// silently emptied type: entities.entity_type_id is ON DELETE
-		// RESTRICT, so the delete below fails on its own if any instance
-		// exists, and removing this check alone leaves
-		// TestRemoveEntityTypeRefusesWhenInUse green. What it earns is the
-		// refusal arriving as a typed ErrInUse without a transaction
-		// aborting on a raw constraint violation first.
+		// silently emptied type: entities.entity_type_id is ON DELETE RESTRICT,
+		// so the delete below fails on its own if any instance exists, and
+		// removing this check alone leaves TestTypesArea's "remove entity type
+		// refuses when in use" case green. What it earns is the refusal arriving
+		// as a typed ErrInUse without a transaction aborting on a raw constraint
+		// violation first.
 		if !cascade {
 			count, err := q.CountEntitiesOfType(ctx, dbq.CountEntitiesOfTypeParams{
 				ProjectID: projectID, EntityTypeID: id,
@@ -435,24 +433,23 @@ func (s *Service) RemoveEntityType(ctx context.Context, projectID, id uuid.UUID,
 	// way the per-edge cascade is not: a game has a handful of relation
 	// types and thousands of edges.
 	//
-	// **Defensive against a plan `RETURNING` gives no promise on, and
-	// pinned rather than merely asserted.** `PruneEntityTypeFromEndpointLists`
-	// is a single `UPDATE`; Postgres documents no ordering for its
-	// `RETURNING` at all, so a query planner free to prefer a sequential
-	// scan on a larger table is free to hand this back in any order. This
-	// sort is raw `Key` in byte order — not `lower(key)`, the order the
-	// unique index (`relation_types_key_key`) actually keeps, since
-	// stored keys permit uppercase. Both orders are deterministic, so
-	// picking one over the other changes nothing about correctness, but
-	// they are not the same order, and this line is the one that is
-	// contractual: what a caller sees is whatever this comparison says,
-	// never whatever the statement above happened to return.
-	// TestPrunedEndpointListsArePublishedInSortOrderNotDatabaseOrder
-	// (events_test.go) is built to fail if this line is deleted: it
-	// prunes two relation types whose keys disagree between byte order
-	// and folded order, so the database's own natural `RETURNING`
-	// sequence — today, an index scan ordered by `lower(key)` — is the
-	// exact reverse of what this sort demands, and removing the sort was
+	// **Defensive against a plan `RETURNING` gives no promise on, and pinned
+	// rather than merely asserted.** `PruneEntityTypeFromEndpointLists` is a
+	// single `UPDATE`; Postgres documents no ordering for its `RETURNING` at
+	// all, so a query planner free to prefer a sequential scan on a larger
+	// table is free to hand this back in any order. This sort is raw `Key` in
+	// byte order — not `lower(key)`, the order the unique index
+	// (`relation_types_key_key`) actually keeps, since stored keys permit
+	// uppercase. Both orders are deterministic, so picking one over the other
+	// changes nothing about correctness, but they are not the same order, and
+	// this line is the one that is contractual: what a caller sees is whatever
+	// this comparison says, never whatever the statement above happened to
+	// return. TestEventsArea's "pruned endpoint lists are published in sort
+	// order not database order" case (events_test.go) is built to fail if this
+	// line is deleted: it prunes two relation types whose keys disagree
+	// between byte order and folded order, so the database's own natural
+	// `RETURNING` sequence — today, an index scan ordered by `lower(key)` — is
+	// the exact reverse of what this sort demands, and removing the sort was
 	// verified to turn that test red.
 	sort.Slice(pruned, func(i, j int) bool { return pruned[i].Key < pruned[j].Key })
 	for _, row := range pruned {

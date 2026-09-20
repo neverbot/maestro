@@ -103,10 +103,10 @@ const MaxSearchQuery = 4 << 10
 // Ties break by name and then id, so two identical calls answer
 // identically.
 //
-// What this is *not* is a name lookup. A word that appears nowhere but
-// in a field is still found — TestSearchStillFindsAWordOnlyAFieldCarries
-// pins it — it simply ranks below a row that carries the word in its
-// name.
+// What this is *not* is a name lookup. A word that appears nowhere but in a
+// field is still found — TestSearchArea's "search still finds a word only a
+// field carries" case pins it — it simply ranks below a row that carries
+// the word in its name.
 //
 // **It matches across entity types**, which is the point: an agent
 // looking for "Hogger" does not know whether the game modelled him as a

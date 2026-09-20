@@ -60,18 +60,18 @@ func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 // client re-reads instead.
 //
 // **Every caller must call this after withTx has returned, never from
-// inside fn.** An event published inside the transaction announces a
-// change that may still roll back, and a subscriber that re-reads on
-// hearing it — which is the only thing this hub's payloads let it do —
-// would read the state before the change and cache it as the state
-// after. The hub itself cannot enforce that; the metamodel's own tests
-// pin it, including the last placement — a publish as the final
-// statement inside fn, which differs from the correct one only by the
-// commit that follows: TestNoEventIsPublishedWhenTheCommitFails installs
-// a deferred constraint in the test's own throwaway database so the
-// commit, and only the commit, fails. The other two are
-// TestNoEventIsPublishedWhenTheWriteIsRolledBack and
-// TestNothingIsAnnouncedWhileTheTransactionIsStillOpen.
+// inside fn.** An event published inside the transaction announces a change
+// that may still roll back, and a subscriber that re-reads on hearing it —
+// which is the only thing this hub's payloads let it do — would read the
+// state before the change and cache it as the state after. The hub itself
+// cannot enforce that; the metamodel's own tests pin it, including the last
+// placement — a publish as the final statement inside fn, which differs
+// from the correct one only by the commit that follows:
+// TestNoEventIsPublishedWhenTheCommitFails installs a deferred constraint
+// in the test's own throwaway database so the commit, and only the commit,
+// fails. The other two are TestEventsArea's "no event is published when the
+// write is rolled back" case and TestEventsArea's "nothing is announced
+// while the transaction is still open" case.
 func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role, humanOnly bool, payload any) {
 	if s.hub == nil {
 		return

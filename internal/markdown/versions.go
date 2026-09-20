@@ -219,12 +219,13 @@ func (s *Service) History(ctx context.Context, projectID uuid.UUID, f HistoryFil
 // games, since two games' documents at one path are two different rows, so
 // dropping the project id leaves TestVersionsArea's "a cursor from another
 // games history is refused" case green. That test is this domain's required
-// equivalent of the metamodel's TestACursorFromAnotherGameIsRefused and it
-// pins the *behaviour*; TestTheHistoryFingerprintLeadsWithTheProjectId pins
-// the composition itself, which is the only way this rule can be pinned in
-// a listing whose other parts happen to be sufficient. Both exist because
-// the part stops being redundant the moment this listing grows a filter
-// that is not derived from a per-game row.
+// equivalent of the metamodel's TestListArea's "a cursor from another game
+// is refused" case and it pins the *behaviour*;
+// TestTheHistoryFingerprintLeadsWithTheProjectId pins the composition
+// itself, which is the only way this rule can be pinned in a listing whose
+// other parts happen to be sufficient. Both exist because the part stops
+// being redundant the moment this listing grows a filter that is not
+// derived from a per-game row.
 //
 // "document_versions" is a domain discriminator, which
 // paging.Fingerprint mandates for nobody and this package supplies

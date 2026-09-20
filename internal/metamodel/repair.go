@@ -55,19 +55,20 @@ import (
 //   - It may not run as a side effect of a schema edit. UpsertEntityType
 //     and UpsertRelationType call revalidate and nothing else; this
 //     function is reachable only from a tool a designer invokes, with
-//     values a designer chose. TestASchemaEditRepairsNothingByItself is
-//     the standing check that the back door stays shut.
-//   - It may not touch a valid row, which is what stops it becoming a
-//     bulk content editor wearing a repair's name. The selection is the
+//     values a designer chose. TestRepairArea's "a schema edit repairs
+//     nothing by itself" case is the standing check that the back door
+//     stays shut.
+//   - It may not touch a valid row, which is what stops it becoming a bulk
+//     content editor wearing a repair's name. The selection is the
 //     enforcement.
 //   - It may not accept per-row values. One `set` covers the whole
 //     selection, because a repair is one decision about what a newly
 //     required field means. Per-row values are entities.upsert, with the
 //     version claim that belongs to editing content.
 //   - It may not create a row, rename one, or move an edge's endpoints.
-//   - It may not skip validation. There is no "mark these valid"
-//     argument, and there is nowhere to add one: the flag is written by
-//     the write path, from the schema.
+//   - It may not skip validation. There is no "mark these valid" argument,
+//     and there is nowhere to add one: the flag is written by the write
+//     path, from the schema.
 //
 // **It is not a new power.** A repair does exactly what an agent could
 // already do with a listing and a batch of upserts — it is that loop,

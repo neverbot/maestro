@@ -153,18 +153,18 @@ type EntityFilter struct {
 // mismatch is refused as invalid_input at path `cursor`. Pass a cursor
 // back only to the call that produced it, with the same filter.
 //
-// **It is not a capability and it is not signed.** It is base64 of JSON;
-// a caller can decode it, rewrite the position and recompute the
-// fingerprint from values it already holds. That buys nothing, because
-// the position only ever becomes a `>` comparison inside a statement
-// already filtered by the caller's own project id — the worst a forged
-// position does is skip the caller's own rows, which
-// TestAForgedCursorCannotReachAnotherGamesRows pins. The fingerprint is
-// a consistency check against a caller's own mistake, and it must not be
-// relied on as a security boundary. For the same reason it leaks
-// nothing: the position is the sort value and id of a row this same call
-// just returned to this same caller, and the fingerprint is a digest of
-// the filter that caller supplied.
+// **It is not a capability and it is not signed.** It is base64 of JSON; a
+// caller can decode it, rewrite the position and recompute the fingerprint
+// from values it already holds. That buys nothing, because the position
+// only ever becomes a `>` comparison inside a statement already filtered by
+// the caller's own project id — the worst a forged position does is skip
+// the caller's own rows, which TestListArea's "a forged cursor cannot reach
+// another games rows" case pins. The fingerprint is a consistency check
+// against a caller's own mistake, and it must not be relied on as a
+// security boundary. For the same reason it leaks nothing: the position is
+// the sort value and id of a row this same call just returned to this same
+// caller, and the fingerprint is a digest of the filter that caller
+// supplied.
 //
 // Cursor.Sort, for this listing, is the row's name — paging.Cursor
 // generalises Sort away from any one listing's sort key, and this is
@@ -193,31 +193,31 @@ const (
 // paging another game's rows — would have been fixed in one copy and
 // left standing in the other.
 //
-// What stays here is this package's own spelling of that API: six
-// one-line delegations, which the three listings and this package's
-// in-package tests (list_internal_test.go, relations_internal_test.go)
-// both go through. Keeping the names is what proves the extraction did
-// not move the shared code out from under the tests that pin it —
-// dropping the project id from a fingerprintOf call still reddens
-// TestACursorFromAnotherGameIsRefused, and folding paging.Size's
-// over-cap arm onto the default still reddens
-// TestAnEntityPageAsksForTooMuchAndGetsTheCap and
-// TestARelationPageAsksForTooMuchAndGetsTheCap — and it is why nothing
-// in internal/metamodel's tests changed for this extraction.
+// What stays here is this package's own spelling of that API: six one-line
+// delegations, which the three listings and this package's in-package tests
+// (list_internal_test.go, relations_internal_test.go) both go through.
+// Keeping the names is what proves the extraction did not move the shared
+// code out from under the tests that pin it — dropping the project id from
+// a fingerprintOf call still reddens TestListArea's "a cursor from another
+// game is refused" case, and folding paging.Size's over-cap arm onto the
+// default still reddens TestAnEntityPageAsksForTooMuchAndGetsTheCap and
+// TestARelationPageAsksForTooMuchAndGetsTheCap — and it is why nothing in
+// internal/metamodel's tests changed for this extraction.
 //
 // **The contract a caller has to know is EntityPage's**, where a caller
 // can read it, and paging.Cursor's, which states it once for both
 // domains: what a position buys and does not buy, why a cursor cannot
 // be carried between listings, and why nothing signs it.
 //
-// A fingerprint here is over the *resolved* listing: the project id
-// first, then which listing it is, then the filter — the entity type
-// id, the invalid flag, and a traversal's relation type, anchor and
-// direction. Resolved and not as spelled, so two spellings of one key
-// give one fingerprint. The project id is first because without it two
-// games' unfiltered listings shared a fingerprint and one game's cursor
-// paged the other's rows from a position that meant nothing there:
-// TestACursorFromAnotherGameIsRefused pins each of the three listings.
+// A fingerprint here is over the *resolved* listing: the project id first,
+// then which listing it is, then the filter — the entity type id, the
+// invalid flag, and a traversal's relation type, anchor and direction.
+// Resolved and not as spelled, so two spellings of one key give one
+// fingerprint. The project id is first because without it two games'
+// unfiltered listings shared a fingerprint and one game's cursor paged the
+// other's rows from a position that meant nothing there: TestListArea's "a
+// cursor from another game is refused" case pins each of the three
+// listings.
 type cursor = paging.Cursor
 
 func pageSize(limit, def, max int32) int32 { return paging.Size(limit, def, max) }
@@ -284,13 +284,13 @@ func (s *Service) ListEntities(ctx context.Context, projectID uuid.UUID, f Entit
 	// traversal narrowed by entity type answers the question it was
 	// asked instead of dropping the clause.
 	//
-	// Bounded before the lookup runs, through rowKeyProblems -- the same
-	// rule UpsertEntityType checks a caller's key against before it is
-	// ever a row -- so a type_key holding an invalid UTF-8 byte is a
-	// named invalid_input rather than a bare "invalid byte sequence for
-	// encoding \"UTF8\"" (SQLSTATE 22021) surfacing as internal_error
-	// over a value the caller itself supplied.
-	// TestATypeKeyFilterIsBoundedBeforePostgresSeesIt pins it.
+	// Bounded before the lookup runs, through rowKeyProblems -- the same rule
+	// UpsertEntityType checks a caller's key against before it is ever a row
+	// -- so a type_key holding an invalid UTF-8 byte is a named invalid_input
+	// rather than a bare "invalid byte sequence for encoding \"UTF8\""
+	// (SQLSTATE 22021) surfacing as internal_error over a value the caller
+	// itself supplied. TestListArea's "a type key filter is bounded before
+	// postgres sees it" case pins it.
 	var typeID *uuid.UUID
 	typePart := ""
 	var typeSchema []byte
@@ -467,15 +467,15 @@ func pageOf(rows []dbq.Entity, limit int32, fingerprint string, order entityOrde
 // block would move six constants away from the six arguments that
 // justify them.
 const (
-	// DefaultEntityPage and MaxEntityPage bound one page of
-	// ListEntities, in both of its shapes: a one-hop traversal is paged
-	// by the same pageSize, the same cursor and the same pageOf as the
-	// plain listing (see listRelated), so these two numbers describe a
-	// page there too and not a cap on the neighbour set. An earlier
-	// comment here, and the tool description built from it, said the
-	// traversal returned up to MaxEntityPage neighbours and stopped;
-	// review finding H1 caught it, and TestATraversalPagesLikeEveryOther
-	// Listing had already been pinning the truth.
+	// DefaultEntityPage and MaxEntityPage bound one page of ListEntities, in
+	// both of its shapes: a one-hop traversal is paged by the same pageSize,
+	// the same cursor and the same pageOf as the plain listing (see
+	// listRelated), so these two numbers describe a page there too and not a
+	// cap on the neighbour set. An earlier comment here, and the tool
+	// description built from it, said the traversal returned up to
+	// MaxEntityPage neighbours and stopped; review finding H1 caught it, and
+	// TestListArea's "a traversal pages like every other listing" case had
+	// already been pinning the truth.
 	DefaultEntityPage = defaultEntityPage
 	MaxEntityPage     = maxEntityPage
 

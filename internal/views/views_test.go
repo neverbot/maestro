@@ -1015,17 +1015,16 @@ func TestViewsArea(t *testing.T) {
 	// covers the database's own backstop over the audit columns, the half of
 	// them a read-back cannot see.
 	//
-	// 0008_views.sql gives views the same composite
-	// FOREIGN KEY (updated_by_token_id, project_id) REFERENCES
-	// api_tokens (id, project_id) that every table in 0004_metamodel.sql
-	// carries, so a token scoped to another game cannot be recorded as the
-	// editor of this one's view. The constraint worked already; what did not
-	// was the reporting, which surfaced "upsert view: ... violates foreign
-	// key constraint ... (SQLSTATE 23503)" into whatever log caught it —
-	// nothing in that string says a token was scoped to the wrong game.
-	// metamodel's TestAnActorFromAnotherGameIsNamed is the same test next
-	// door, and this package shares its judgement rather than copying the
-	// scan.
+	// 0008_views.sql gives views the same composite FOREIGN KEY
+	// (updated_by_token_id, project_id) REFERENCES api_tokens (id, project_id)
+	// that every table in 0004_metamodel.sql carries, so a token scoped to
+	// another game cannot be recorded as the editor of this one's view. The
+	// constraint worked already; what did not was the reporting, which
+	// surfaced "upsert view: ... violates foreign key constraint ... (SQLSTATE
+	// 23503)" into whatever log caught it — nothing in that string says a
+	// token was scoped to the wrong game. metamodel's TestTypesArea's "an
+	// actor from another game is named" case is the same test next door, and
+	// this package shares its judgement rather than copying the scan.
 	t.Run("a view written by another games token is refused", func(t *testing.T) {
 		azeroth, outland := a.games(t)
 		ctx := context.Background()

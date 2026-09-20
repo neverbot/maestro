@@ -812,16 +812,16 @@ func callOK(t *testing.T, session *mcp.ClientSession, name string, args map[stri
 // TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire closes review
 // findings H1 and H2 at the layer where both were wrong: the wire.
 //
-// H1: `entities.list`'s description claimed the `related_to` traversal
-// was not paged, never set `next_cursor`, and silently dropped every
-// neighbour past `MaxEntityPage`. All three clauses were false —
-// `listRelated` has always used the same `pageSize`, cursor and `pageOf`
-// as the plain listing — and the description sent an agent to
-// `relations.list` as the escape hatch for a case that does not exist.
-// An agent believing it would have stopped at the first page holding a
-// whole neighbourhood it had only part of. The domain side was already
-// pinned by TestATraversalPagesLikeEveryOtherListing (internal/metamodel);
-// what was missing was a guard at the wire, where the sentence lives.
+// H1: `entities.list`'s description claimed the `related_to` traversal was
+// not paged, never set `next_cursor`, and silently dropped every neighbour
+// past `MaxEntityPage`. All three clauses were false — `listRelated` has
+// always used the same `pageSize`, cursor and `pageOf` as the plain listing
+// — and the description sent an agent to `relations.list` as the escape
+// hatch for a case that does not exist. An agent believing it would have
+// stopped at the first page holding a whole neighbourhood it had only part
+// of. The domain side was already pinned by TestListArea's "a traversal
+// pages like every other listing" case (internal/metamodel); what was
+// missing was a guard at the wire, where the sentence lives.
 //
 // H2: `direction` was `omitempty`, so the served input schema left it
 // out of `required`, and the description called "outgoing" its default —

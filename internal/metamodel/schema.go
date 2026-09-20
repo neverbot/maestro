@@ -29,11 +29,11 @@ const (
 // tool descriptions and Validate's own refusals print them.
 //
 // It is the list, and the constants above are its members.
-// TestFieldTypesListsEveryDeclaredFieldType parses this file and pins
-// both directions, so a seventh type cannot be declared without being
-// listed here, nor listed here without being declared — the shape a
-// closed vocabulary rots in is one copy growing while the other does
-// not.
+// TestSchemaVocabArea's "field types lists every declared field type" case
+// parses this file and pins both directions, so a seventh type cannot be
+// declared without being listed here, nor listed here without being
+// declared — the shape a closed vocabulary rots in is one copy growing
+// while the other does not.
 var FieldTypes = []FieldType{
 	FieldText, FieldLongText, FieldNumber, FieldBool, FieldEnum, FieldListText,
 }

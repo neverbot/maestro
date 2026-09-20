@@ -63,17 +63,16 @@ const (
 // BulkFailure is one rejected item of a batch.
 //
 // Index and Key are what let a caller retry only what failed: an agent
-// seeding four hundred rows re-sends the handful named here rather than
-// the batch. Message is the item's own error, and what it holds depends
-// on the fault: a field path and a rule where the item's own arguments
-// or values are wrong (`schema_violation: fields.min_level: expected
-// number, got string`), and otherwise the plain reason the item was
-// refused, which may name nothing of the item at all (`not_found: no
-// entity type "quest" in this game`). What it never holds is another
-// item's values: a batch report is the one place a row's content could
-// leak into a neighbour's error, and
-// TestBulkPartialLandsTheGoodRowsAndReportsTheRest pins that it does
-// not.
+// seeding four hundred rows re-sends the handful named here rather than the
+// batch. Message is the item's own error, and what it holds depends on the
+// fault: a field path and a rule where the item's own arguments or values
+// are wrong (`schema_violation: fields.min_level: expected number, got
+// string`), and otherwise the plain reason the item was refused, which may
+// name nothing of the item at all (`not_found: no entity type "quest" in
+// this game`). What it never holds is another item's values: a batch report
+// is the one place a row's content could leak into a neighbour's error, and
+// TestEntitiesArea's "bulk partial lands the good rows and reports the
+// rest" case pins that it does not.
 type BulkFailure struct {
 	Index   int    `json:"index"`
 	Key     string `json:"key"`

@@ -134,9 +134,9 @@ func TestVersionsArea(t *testing.T) {
 	})
 
 	// TestVersionsArea's "a cursor from another games history is refused" case
-	// is this domain's equivalent of internal/metamodel's
-	// TestACursorFromAnotherGameIsRefused, which paging.Fingerprint's own
-	// comment instructs every new caller to write: without the project id
+	// is this domain's equivalent of internal/metamodel's TestListArea's "a
+	// cursor from another game is refused" case, which paging.Fingerprint's
+	// own comment instructs every new caller to write: without the project id
 	// leading the fingerprint, two games' histories of one path share it and
 	// one game's cursor pages the other's versions from a position that means
 	// nothing there.

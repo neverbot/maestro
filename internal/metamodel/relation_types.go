@@ -301,33 +301,32 @@ func endpointList(ids []uuid.UUID) []uuid.UUID {
 // locks one round trip at a time.
 //
 // **A failure to read at all is returned as an error, not folded into a
-// FieldError.** It used to be: any error from the lock query, including
-// one this transaction had no way to satisfy, came back as
-// `FieldError{Message: "could not be checked: " + err.Error()}`, which
-// the caller then wrapped as `codeInvalidInput`. That is a lie a lock
-// timeout can now tell that it could not before this function started
-// taking `FOR SHARE`: the old per-id `GetEntityTypeByID` took no lock and
-// could not be cancelled by `lock_timeout`, so nothing reached this
-// branch except a connection actually down. `FOR SHARE` can be parked
-// behind another transaction's row lock and cancelled by
-// `lock_timeout`/`statement_timeout` (SQLSTATE 55P03 / 57014) — a
-// retryable contention event, not a problem with the ids the caller
-// sent, and `invalid_input` is read by a seeding agent as "resending
+// FieldError.** It used to be: any error from the lock query, including one
+// this transaction had no way to satisfy, came back as `FieldError{Message:
+// "could not be checked: " + err.Error()}`, which the caller then wrapped
+// as `codeInvalidInput`. That is a lie a lock timeout can now tell that it
+// could not before this function started taking `FOR SHARE`: the old per-id
+// `GetEntityTypeByID` took no lock and could not be cancelled by
+// `lock_timeout`, so nothing reached this branch except a connection
+// actually down. `FOR SHARE` can be parked behind another transaction's row
+// lock and cancelled by `lock_timeout`/`statement_timeout` (SQLSTATE 55P03
+// / 57014) — a retryable contention event, not a problem with the ids the
+// caller sent, and `invalid_input` is read by a seeding agent as "resending
 // this unchanged is pointless," which for contention is exactly wrong.
-// `FieldError.Message` is also a bare string: flattening the error into
-// one erases the `*pgconn.PgError` a caller further up could otherwise
-// recover with `errors.As`. Returning the error instead keeps its
-// SQLSTATE intact and lets it propagate past `ValidationError` entirely,
-// landing on the `retryable` wire code: Task 7 took the call this
-// comment left open and gave contention a code of its own, so an agent
-// meeting a lock timeout here is told to resend the same call rather
-// than merely told it failed. IsRetryable (service.go) is the
-// classifier, failureFor (bulk.go) and mcpErrorFor
-// (internal/web/mcp_errors.go) are the two boundaries that read it, and
-// TestALockTimeoutOnTheEndpointCheckIsNotReportedAsInvalidInput proves
-// it end to end against a real held lock. What makes any of it possible
-// is that the error keeps its `*pgconn.PgError`, which is what
-// flattening it into a `FieldError` destroyed.
+// `FieldError.Message` is also a bare string: flattening the error into one
+// erases the `*pgconn.PgError` a caller further up could otherwise recover
+// with `errors.As`. Returning the error instead keeps its SQLSTATE intact
+// and lets it propagate past `ValidationError` entirely, landing on the
+// `retryable` wire code: Task 7 took the call this comment left open and
+// gave contention a code of its own, so an agent meeting a lock timeout
+// here is told to resend the same call rather than merely told it failed.
+// IsRetryable (service.go) is the classifier, failureFor (bulk.go) and
+// mcpErrorFor (internal/web/mcp_errors.go) are the two boundaries that read
+// it, and TestRelationsArea's "a lock timeout on the endpoint check is not
+// reported as invalid input" case proves it end to end against a real held
+// lock. What makes any of it possible is that the error keeps its
+// `*pgconn.PgError`, which is what flattening it into a `FieldError`
+// destroyed.
 //
 // A failure to read at all is still attributed to the list and not an
 // element in spirit — nothing was checked, so no index is the one at

@@ -129,13 +129,13 @@ func TestARaceOnAnEdgesParentsNamesWhichParentIsGone(t *testing.T) {
 // sees rows that transaction has written and not yet committed.
 //
 // No public caller can reach this yet — UpsertRelations writes edges and
-// nothing else, so the external
-// TestAnAtomicRelationBatchLandsEveryEdgeOfTheBatch pre-seeds both
-// endpoints through committed calls and would stay green with every
-// lookup routed through the pool. Task 9's seeding of a whole game is
-// where a public path arrives. Until then the claim is pinned here, at
-// the only level where it is true: the entity below is invisible to any
-// other connection while this test runs.
+// nothing else, so the external TestRelationsArea's "an atomic relation
+// batch lands every edge of the batch" case pre-seeds both endpoints
+// through committed calls and would stay green with every lookup routed
+// through the pool. Task 9's seeding of a whole game is where a public path
+// arrives. Until then the claim is pinned here, at the only level where it
+// is true: the entity below is invisible to any other connection while this
+// test runs.
 func TestAnEdgeResolvesItsEndpointsAgainstItsOwnTransaction(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := New(pool, nil)

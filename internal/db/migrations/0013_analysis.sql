@@ -141,21 +141,19 @@ ALTER TABLE relation_types
 --       which is the first transaction's remaining lifetime and not a
 --       cost of its own.
 --
---       **What that cost actually means, found by a test rather than
---       predicted here.** An open transaction that has written *anything*
---       to a game now holds a lock on the whole game, not merely on the
---       rows it touched. internal/metamodel's
---       TestACancelledBatchDoesNotReportTheItemInFlightAsAServerFault had
---       a rival transaction hold a contended row by updating it, and the
---       batch under test then blocked on the game rather than on that
---       row -- a true report of where it stopped and the wrong fixture
---       for that test, which now takes the row lock with SELECT FOR
---       UPDATE and says why. Nothing in the product holds a write
---       transaction open across a round trip, so the exposure is bounded
---       by how long one write takes; whoever adds a long-running write
---       transaction inherits this.
---   (c) Writes to *different* games touch different rows and do not
---       contend at all.
+-- **What that cost actually means, found by a test rather than predicted
+-- here.** An open transaction that has written *anything* to a game now
+-- holds a lock on the whole game, not merely on the rows it touched.
+-- internal/metamodel's TestEntitiesArea's "a cancelled batch does not
+-- report the item in flight as a server fault" case had a rival transaction
+-- hold a contended row by updating it, and the batch under test then
+-- blocked on the game rather than on that row -- a true report of where it
+-- stopped and the wrong fixture for that test, which now takes the row lock
+-- with SELECT FOR UPDATE and says why. Nothing in the product holds a write
+-- transaction open across a round trip, so the exposure is bounded by how
+-- long one write takes; whoever adds a long-running write transaction
+-- inherits this. (c) Writes to *different* games touch different rows and
+-- do not contend at all.
 --
 -- **Rejected: re-checking every route on every write.** Seeding a game is
 -- hundreds of writes, the cost is quadratic in exactly the situation that

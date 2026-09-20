@@ -33,7 +33,7 @@ var forwardReferencedTestNames = map[string]string{}
 // direction from forwardReferencedTestNames, found the day widening this
 // check to scan internal/metamodel (review of Task 7 of the markdown
 // plan) turned up a real instance: search_test.go narrates that
-// TestSearchRanksTheNameMatchFirst "used to be
+// TestSearchArea's "search ranks the name match first" case "used to be
 // TestSearchRanksTheStrongerMatchFirst", which is history, not a claim
 // that the old name is still coverage anywhere. That reads exactly like
 // a dangling citation to this check's regex, which cannot tell "used to

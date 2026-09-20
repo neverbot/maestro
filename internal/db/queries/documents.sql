@@ -139,15 +139,15 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- to bring back, and must hold it.
 --
 -- **What the lock buys, measured rather than asserted.** It does not buy
--- the refusal: the guarded DO UPDATE refuses on its own, and dropping
--- FOR UPDATE from this statement leaves the whole markdown suite green
--- at -count=5. Nor does it buy the freshness of the number the loser is
--- told to merge onto -- without the lock the read sees a stale version,
--- passes the Go check, and the guarded upsert then refuses and
--- conflictAfterFailedUpsert re-reads, arriving at the same fresh answer
--- by a longer route. TestTheReportedCurrentVersionIsTheOneTheWriteWould
--- HaveMet pins that answer, and it passes either way; it pins the
--- guarantee, not this clause.
+-- the refusal: the guarded DO UPDATE refuses on its own, and dropping FOR
+-- UPDATE from this statement leaves the whole markdown suite green at
+-- -count=5. Nor does it buy the freshness of the number the loser is told
+-- to merge onto -- without the lock the read sees a stale version, passes
+-- the Go check, and the guarded upsert then refuses and
+-- conflictAfterFailedUpsert re-reads, arriving at the same fresh answer by
+-- a longer route. TestTypesArea's "the reported current version is the one
+-- the write would have met" case pins that answer, and it passes either
+-- way; it pins the guarantee, not this clause.
 --
 -- What the lock does buy is the shape of the refusal rather than its
 -- existence: a conflicting writer is turned away before its body, its

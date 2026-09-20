@@ -246,11 +246,10 @@ type GetEntityByIDParams struct {
 
 // **No production caller since Metamodel 14**, which moved the entity
 // removal onto (type key, key) and took the last one with it. It stays
-// because the project filter is what
-// TestEntitiesAreScopedToTheirProject drives directly: the isolation
-// claim is about this statement, not about a Go caller, and the day
-// something needs a by-id read again it must not be re-added without
-// one.
+// because the project filter is what TestEntitiesArea's "entities are
+// scoped to their project" case drives directly: the isolation claim is
+// about this statement, not about a Go caller, and the day something needs
+// a by-id read again it must not be re-added without one.
 func (q *Queries) GetEntityByID(ctx context.Context, arg GetEntityByIDParams) (Entity, error) {
 	row := q.db.QueryRow(ctx, getEntityByID, arg.ProjectID, arg.ID)
 	var i Entity
@@ -322,13 +321,14 @@ type GetEntityByKeyForUpdateParams struct {
 
 // FOR UPDATE, for the reason GetEntityTypeByKeyForUpdate records: without
 // the lock the read runs against the transaction's snapshot, so a caller
-// racing an in-flight edit is told to merge onto a version that is
-// already stale by the time it retries, and retries into the same refusal
-// forever. What the lock buys is not the refusal -- the guarded DO UPDATE
-// refuses on its own -- but the *number* the caller is told to merge
-// onto. TestTheReportedCurrentEntityVersionIsTheOneTheWriteWouldHaveMet
-// pins exactly that, because nothing else here does: both entity race
-// tests block on the unique index inside the INSERT, not on this lock.
+// racing an in-flight edit is told to merge onto a version that is already
+// stale by the time it retries, and retries into the same refusal forever.
+// What the lock buys is not the refusal -- the guarded DO UPDATE refuses on
+// its own -- but the *number* the caller is told to merge onto.
+// TestEntitiesArea's "the reported current entity version is the one the
+// write would have met" case pins exactly that, because nothing else here
+// does: both entity race tests block on the unique index inside the INSERT,
+// not on this lock.
 func (q *Queries) GetEntityByKeyForUpdate(ctx context.Context, arg GetEntityByKeyForUpdateParams) (Entity, error) {
 	row := q.db.QueryRow(ctx, getEntityByKeyForUpdate, arg.ProjectID, arg.EntityTypeID, arg.Key)
 	var i Entity
@@ -902,16 +902,15 @@ type ListEntitiesPageParams struct {
 //
 // **`id` in the ORDER BY is half of that agreement and it is pinned by a
 // test**, which it was not at first: dropping it left the whole suite
-// green, because every test then in the suite seeded distinct names.
-// With ten rows sharing one name and a page of three, the unpinned
-// version returned five distinct rows of ten and three of them twice --
-// Postgres orders tied rows however each statement happens to, so the
-// comparison lands nowhere near where the previous page stopped.
-// Duplicate names are ordinary in game content, so
-// TestPagingIsStableWhenEveryRowSharesOneName now holds both listings to
-// it. The collation half below was defended from the start; this half
-// was not, and a convention defended only by a comment is what the next
-// listing will copy.
+// green, because every test then in the suite seeded distinct names. With
+// ten rows sharing one name and a page of three, the unpinned version
+// returned five distinct rows of ten and three of them twice -- Postgres
+// orders tied rows however each statement happens to, so the comparison
+// lands nowhere near where the previous page stopped. Duplicate names are
+// ordinary in game content, so TestListArea's "paging is stable when every
+// row shares one name" case now holds both listings to it. The collation
+// half below was defended from the start; this half was not, and a
+// convention defended only by a comment is what the next listing will copy.
 //
 // The text form was measured
 // on this project's own Postgres before the choice was made: over
@@ -2814,17 +2813,16 @@ type UpsertEntityTypeParams struct {
 // between games is enforced in SQL, not in Go, so a query trusting an id
 // alone would hand a caller another game's row the moment an id leaked.
 //
-// That is the whole mechanism only for the statements addressing a row
-// by its own primary key: GetEntityTypeByID and DeleteEntityType, which
-// TestTypesAreScopedToTheirProject pins, and GetEntityByID and
-// DeleteEntity, which
-// TestTheEntityQueriesThatAddressARowByIDAreScopedToTheProject pins.
-// Drop the filter from any of the four and a leaked id reads, or
-// deletes, another game's row. The entity pair needed a test of its own
-// against the queries: their only caller is RemoveEntity, which reads
-// the row, then its type, then deletes, so each of its three filters
-// masks the others and only mutating all three at once is observable
-// through the service.
+// That is the whole mechanism only for the statements addressing a row by
+// its own primary key: GetEntityTypeByID and DeleteEntityType, which
+// TestTypesArea's "types are scoped to their project" case pins, and
+// GetEntityByID and DeleteEntity, which TestEntitiesArea's "the entity
+// queries that address a row by ID are scoped to the project" case pins.
+// Drop the filter from any of the four and a leaked id reads, or deletes,
+// another game's row. The entity pair needed a test of its own against the
+// queries: their only caller is RemoveEntity, which reads the row, then its
+// type, then deletes, so each of its three filters masks the others and
+// only mutating all three at once is observable through the service.
 //
 // It is *not* the mechanism for the statements reaching entities through
 // an entity_type_id (ListEntityFieldsOfType, MarkEntitiesOfTypeInvalid,
@@ -2989,14 +2987,14 @@ type UpsertRelationParams struct {
 // nothing updates nothing, so the statement returns no row and Go sees
 // pgx.ErrNoRows instead of a silent success.
 //
-// Unreachable from Service.UpsertRelation, which resolves the type and
-// both endpoints by key inside the project before it gets here, and kept
-// anyway for the reason internal/views' position write keeps its twin: a
-// statement that is safe only because of how today's caller happens to
-// address it is a trap for tomorrow's caller.
-// TestUpsertRelationsConflictPathCannotWriteAnotherGamesEdge drives the
-// statement directly, which is the only way to observe a filter every
-// service path has already made redundant.
+// Unreachable from Service.UpsertRelation, which resolves the type and both
+// endpoints by key inside the project before it gets here, and kept anyway
+// for the reason internal/views' position write keeps its twin: a statement
+// that is safe only because of how today's caller happens to address it is
+// a trap for tomorrow's caller. TestRelationsArea's "upsert relations
+// conflict path cannot write another games edge" case drives the statement
+// directly, which is the only way to observe a filter every service path
+// has already made redundant.
 func (q *Queries) UpsertRelation(ctx context.Context, arg UpsertRelationParams) (Relation, error) {
 	row := q.db.QueryRow(ctx, upsertRelation,
 		arg.ProjectID,

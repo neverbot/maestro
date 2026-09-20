@@ -696,14 +696,14 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	}
 	typePart := ""
 	if f.TypeKey != "" {
-		// Bounded before the lookup runs, the same rule and the same
-		// reason as ListEntities' TypeKey: rowKeyProblems is what
-		// UpsertRelationType checks a caller's key against before it is
-		// ever a row, and running it here closes the same SQLSTATE 22021
-		// this domain's own correction elsewhere already closed for the
-		// markdown package's entity filter, rather than leaving this
-		// sibling listing to reach Postgres unbounded.
-		// TestARelationTypeKeyFilterIsBoundedBeforePostgresSeesIt pins it.
+		// Bounded before the lookup runs, the same rule and the same reason as
+		// ListEntities' TypeKey: rowKeyProblems is what UpsertRelationType checks
+		// a caller's key against before it is ever a row, and running it here
+		// closes the same SQLSTATE 22021 this domain's own correction elsewhere
+		// already closed for the markdown package's entity filter, rather than
+		// leaving this sibling listing to reach Postgres unbounded.
+		// TestRelationsArea's "a relation type key filter is bounded before
+		// postgres sees it" case pins it.
 		if problems := rowKeyProblems("type_key", f.TypeKey); len(problems) > 0 {
 			return RelationPage{}, &ValidationError{Code: codeInvalidInput, Fields: problems}
 		}
@@ -732,13 +732,13 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 	if after.ID != uuid.Nil {
 		at, err := time.Parse(time.RFC3339Nano, after.Sort)
 		if err != nil {
-			// Only a hand-edited cursor reaches this: encodeCursor below
-			// writes the same format this parses, and the fingerprint has
-			// already agreed. It is still the caller's own argument, so it
-			// is answered as one rather than as a server fault.
-			// TestARelationsCursorWithAForgedNonTimestampSortIsMalformed
-			// reaches this arm with exactly that: a cursor whose
-			// fingerprint agrees and whose sort half is not RFC 3339.
+			// Only a hand-edited cursor reaches this: encodeCursor below writes the
+			// same format this parses, and the fingerprint has already agreed. It is
+			// still the caller's own argument, so it is answered as one rather than
+			// as a server fault. TestRelationsArea's "a relations cursor with a
+			// forged non timestamp sort is malformed" case reaches this arm with
+			// exactly that: a cursor whose fingerprint agrees and whose sort half is
+			// not RFC 3339.
 			return RelationPage{}, malformedCursor("it carries no creation time")
 		}
 		params.AfterCreatedAt = pgtype.Timestamptz{Time: at, Valid: true}
@@ -782,12 +782,12 @@ func (s *Service) ListRelations(ctx context.Context, projectID uuid.UUID, f Rela
 // NUL byte reach Postgres as SQLSTATE 22021 and escape as a server
 // fault.
 //
-// The three not_founds are distinct on purpose. An unknown relation
-// type, an unknown endpoint and a real address with no edge on it are
-// three different mistakes, and a caller told only "not found" has to
-// guess which of the three strings it got wrong;
-// TestEachMissingPieceOfAnEdgeRead pins all three plus the fourth case,
-// where every piece exists and the edge does not.
+// The three not_founds are distinct on purpose. An unknown relation type,
+// an unknown endpoint and a real address with no edge on it are three
+// different mistakes, and a caller told only "not found" has to guess which
+// of the three strings it got wrong; TestRelationsArea's "each missing
+// piece of an edge read" case pins all three plus the fourth case, where
+// every piece exists and the edge does not.
 func (s *Service) RelationByEdge(ctx context.Context, projectID uuid.UUID, typeKey string, source, target Ref) (dbq.Relation, error) {
 	var problems []FieldError
 	for _, part := range []struct{ path, key string }{

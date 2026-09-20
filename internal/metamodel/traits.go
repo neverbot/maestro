@@ -10,17 +10,17 @@ import (
 // relation_types_traits_vocab CHECK lists them.
 //
 // **This slice and that CHECK are one list written twice, and this one is
-// the copy a caller ever sees.** SemanticRoles carries the same pairing
-// for the same reason, and it exists because of review finding H3: a
-// value outside the constraint travelled to Postgres, came back as an
-// untyped check-constraint violation and reached an agent as
-// `internal_error` — a server fault, with no path and no list of what
-// would have been accepted, for something the agent typed. The
-// constraint stays as the backstop for a writer that does not come
-// through this package;
-// TestTheTraitVocabularyIsOneSetInGoAndInTheDatabase reads the CHECK's
-// own text back out of pg_get_constraintdef and asserts set equality in
-// **both** directions, so neither list can grow a word the other lacks.
+// the copy a caller ever sees.** SemanticRoles carries the same pairing for
+// the same reason, and it exists because of review finding H3: a value
+// outside the constraint travelled to Postgres, came back as an untyped
+// check-constraint violation and reached an agent as `internal_error` — a
+// server fault, with no path and no list of what would have been accepted,
+// for something the agent typed. The constraint stays as the backstop for a
+// writer that does not come through this package; TestTraitsArea's "the
+// trait vocabulary is one set in go and in the database" case reads the
+// CHECK's own text back out of pg_get_constraintdef and asserts set
+// equality in **both** directions, so neither list can grow a word the
+// other lacks.
 //
 // **Why the vocabulary lives here and not in internal/analysis, which is
 // the package that reads it.** internal/analysis depends on this package

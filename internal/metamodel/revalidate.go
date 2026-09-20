@@ -48,16 +48,17 @@ type sweep struct {
 // repository's most repeated defect is a rule written once, copied, and
 // then fixed in one copy.
 //
-// **CheckValues, never Validate — an intent, not a behaviour.**
-// CheckValues *is* Validate with the map discarded (validate.go), so the
-// two return the same verdict on every input and no test can tell this
-// sweep's call from the write path's. What the narrower call earns is
-// that there is no normalised map in scope to write back: Validate hands
-// one back with declared defaults injected, and a later edit that stored
-// it would back-fill every row the sweep touched, silently, with values
-// no designer chose. TestSchemaChangeDoesNotBackFillDeclaredDefaults and
-// TestAnEdgeSchemaChangeDoesNotBackFillDeclaredDefaults pin the outcome
-// on each table; this line is what keeps the temptation out of reach.
+// **CheckValues, never Validate — an intent, not a behaviour.** CheckValues
+// *is* Validate with the map discarded (validate.go), so the two return the
+// same verdict on every input and no test can tell this sweep's call from
+// the write path's. What the narrower call earns is that there is no
+// normalised map in scope to write back: Validate hands one back with
+// declared defaults injected, and a later edit that stored it would
+// back-fill every row the sweep touched, silently, with values no designer
+// chose. TestTypesArea's "schema change does not back fill declared
+// defaults" case and TestRelationsArea's "an edge schema change does not
+// back fill declared defaults" case pin the outcome on each table; this
+// line is what keeps the temptation out of reach.
 //
 // **A row whose stored jsonb will not decode at all is flagged, not
 // returned as an error.** It is content in the database that does not fit

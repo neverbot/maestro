@@ -444,6 +444,22 @@ var namespaceDeclaration = regexp.MustCompile(`^export const [A-Z_]*NS = "http:/
 var documentationLink = regexp.MustCompile(
 	`^export const SKILL_BUNDLE_HREF = "https://github\.com/neverbot/maestro(#[a-z][a-z0-9-]*)?";$`)
 
+// publishedSite is the third exemption, and it is exact for the third
+// time.
+//
+// The strip every screen carries gained a **Documentation** item
+// pointing at the site this repository publishes. Like the two above it
+// is a hyperlink a person may press and not a resource any page loads:
+// it opens in a tab of its own, nothing fetches it, and an instance with
+// no outbound route draws the strip whole and simply fails to resolve it
+// when pressed.
+//
+// One shape, one host, nothing after the semicolon — the same bound the
+// other two carry, because an exemption nobody bounds is where the first
+// CDN import will hide.
+var publishedSite = regexp.MustCompile(
+	`^export const DOCUMENTATION_HREF = "https://neverbot\.github\.io/maestro/";$`)
+
 // networkReach is one line of one module that reaches outside the
 // instance.
 type networkReach struct {
@@ -489,7 +505,8 @@ func scanForNetworkReach(t *testing.T) (read []string, reaches []networkReach) {
 func networkReachesIn(file, src string) []networkReach {
 	var out []networkReach
 	for _, line := range codeLines(src) {
-		if namespaceDeclaration.MatchString(line.code) || documentationLink.MatchString(line.code) {
+		if namespaceDeclaration.MatchString(line.code) || documentationLink.MatchString(line.code) ||
+			publishedSite.MatchString(line.code) {
 			continue
 		}
 		if !outboundURL.MatchString(line.code) && !importScriptsFn.MatchString(line.code) {
@@ -939,5 +956,62 @@ func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
 	}
 	if found != 1 {
 		t.Errorf("the documentation link appears %d time(s) under internal/web/static, want exactly 1", found)
+	}
+}
+
+// TestThePublishedSiteExemptionIsExactlyOneDeclaration is the guard on
+// the third hole, written to the standard the first two set: what it
+// admits, what it still refuses, and that exactly one line in the front
+// end benefits from it.
+//
+// The strip on every screen inside a game ends with **Documentation**,
+// pointing at the site this repository publishes and opening in a tab of
+// its own. It is a hyperlink and not a resource: no page loads it, and
+// an instance with no outbound route draws the strip whole.
+func TestThePublishedSiteExemptionIsExactlyOneDeclaration(t *testing.T) {
+	t.Parallel()
+	admitted := `export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/";`
+	if !publishedSite.MatchString(admitted) {
+		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
+	}
+	for name, refused := range map[string]string{
+		"a fetch of the same URL":   `const r = await fetch("https://neverbot.github.io/maestro/");`,
+		"an http spelling":          `export const DOCUMENTATION_HREF = "http://neverbot.github.io/maestro/";`,
+		"another host":              `export const DOCUMENTATION_HREF = "https://docs.example.com/maestro/";`,
+		"another constant":          `export const ANALYTICS_HREF = "https://neverbot.github.io/maestro/";`,
+		"a declaration with a tail": `export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/"; fetch(DOCUMENTATION_HREF);`,
+	} {
+		if publishedSite.MatchString(refused) {
+			t.Errorf("the exemption admits %s: %q", name, refused)
+		}
+		if len(networkReachesIn("static/x.js", refused+"\n")) == 0 {
+			t.Errorf("the scan does not report %s: %q", name, refused)
+		}
+	}
+
+	found := 0
+	err := filepath.WalkDir("static", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !moduleExtensions[filepath.Ext(path)] {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, line := range codeLines(string(raw)) {
+			if publishedSite.MatchString(line.code) {
+				found++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk static: %v", err)
+	}
+	if found != 1 {
+		t.Errorf("the published site's address appears %d time(s) under internal/web/static, want exactly 1", found)
 	}
 }

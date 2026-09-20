@@ -107,8 +107,26 @@ button.ghost {
   box-shadow: none;
 }
 
+/* A ghost lifts off the surface it stands on. It painted --ground,
+   which is the page's own background, so the hover was invisible
+   everywhere the page is the surface — styles.css carried the same bug
+   and they are fixed together, because a control that answers the
+   pointer differently inside and outside a shadow root is exactly what
+   this file exists to prevent. */
 button.ghost:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--ink);
+}
+
+/* The pressed state. Nothing in this product had one. */
+button:active:not(:disabled) {
+  box-shadow: none;
+  background: var(--ink-hover);
+}
+
+button.ghost:active:not(:disabled) {
   background: var(--ground);
+  box-shadow: none;
 }
 
 /* Armed: a destructive control that has asked once and is waiting for

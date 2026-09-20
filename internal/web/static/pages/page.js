@@ -122,6 +122,24 @@ export const SKILL_BUNDLE_LABEL = "How an agent writes one";
 // link to a page that does not exist is one.
 export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";
 
+// The published documentation site, and the second address in this front
+// end that leaves the instance.
+//
+// **It opens in a tab of its own, and that is the whole of why it is
+// allowed to sit in the strip beside five destinations that do not.**
+// The other five are places inside this game; this one is a manual that
+// is not part of any game and is not served by this instance at all. A
+// link that replaced the screen with an external site would be the
+// strip's promise broken — every other item there keeps you where you
+// are working.
+//
+// An instance with no outbound route renders the strip whole and this
+// link simply does not resolve when pressed, which is the same position
+// SKILL_BUNDLE_HREF's own comment describes: nothing fetches it, nothing
+// on any page waits for it.
+export const DOCUMENTATION_HREF = "https://neverbot.github.io/maestro/";
+export const DESTINATION_DOCUMENTATION = "Documentation";
+
 // slugOf reads the game's slug out of a path. One reader, for the reason
 // this file exists.
 export function slugOf(pathname) {
@@ -419,7 +437,28 @@ export function destinations(doc, slug, current) {
     if (label === current) link.setAttribute("aria-current", "page");
     nav.append(link);
   }
+  nav.append(documentationLink(doc));
   return nav;
+}
+
+// documentationLink is the last item in the strip and the only one that
+// leaves this instance, so it says so twice: `target="_blank"` opens it
+// beside the work rather than over it, and the class marks it for the
+// stylesheet, which draws the arrow every convention uses for a link
+// that goes outside.
+//
+// `rel="noopener"` because a page opened with `target="_blank"` gets a
+// handle on the window that opened it otherwise. Nothing is being
+// trusted here beyond this project's own site, and the attribute costs
+// nothing.
+export function documentationLink(doc) {
+  const link = doc.createElement("a");
+  link.href = DOCUMENTATION_HREF;
+  link.textContent = DESTINATION_DOCUMENTATION;
+  link.className = "leaves";
+  link.target = "_blank";
+  link.setAttribute("rel", "noopener");
+  return link;
 }
 
 // --- The breadcrumb ---------------------------------------------------

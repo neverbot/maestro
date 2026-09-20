@@ -90,6 +90,9 @@ button {
    make every screen carrying a form the loudest screen in the product. */
 button:hover:not(:disabled) {
   background: var(--ink-hover);
+  /* The fill alone is a 1.18:1 change and nobody could see it; the
+     button lifts as well. styles.css carries the same pair. */
+  box-shadow: var(--shadow-2);
 }
 
 button:disabled {
@@ -153,6 +156,8 @@ button.link {
 
 button.link:hover:not(:disabled) {
   background: none;
+  color: var(--focus);
+  text-decoration-thickness: 2px;
 }
 
 input,
@@ -175,6 +180,12 @@ textarea {
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);
+}
+
+input:hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus) {
+  border-color: var(--line-strong);
 }
 
 input:focus,

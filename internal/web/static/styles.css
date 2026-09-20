@@ -863,8 +863,12 @@ ul.catalogue .link-button {
   content: "\2212"; /* MINUS SIGN, the same weight as the plus */
 }
 
+/* The ghost's bug, in the one control that is a `summary` rather than a
+   button: it painted the page's own background. It lifts, like every
+   other secondary control. */
 #new-game > summary:hover {
-  background: var(--ground);
+  background: var(--raised);
+  border-color: var(--ink);
 }
 
 /* --- Tabs -------------------------------------------------------------
@@ -906,9 +910,25 @@ ul.catalogue .link-button {
   cursor: pointer;
 }
 
+/* **A tab that is not the current one has to answer the pointer as
+   something other than the current one.** This changed the label from
+   muted to ink and nothing else, which at Label size is a difference a
+   reader has to look for. The tab now takes the raised ground under its
+   label and a line in the same muted stroke, so the shape a press will
+   produce is visible before the press — and still clearly not the
+   accent rule that marks the selected one. */
 .tabs .tab:hover {
   color: var(--ink);
-  background: none;
+  background: var(--raised);
+  border-bottom-color: var(--line-strong);
+}
+
+.tabs .tab:active {
+  background: var(--ground);
+}
+
+.tabs .tab[aria-selected="true"]:hover {
+  border-bottom-color: var(--focus);
 }
 
 .tabs .tab[aria-selected="true"] {
@@ -1266,6 +1286,15 @@ select {
   font: inherit;
 }
 
+/* A field says it is writable before it is focused. Nothing in this
+   product did, so a text input and a read-only value looked alike until
+   somebody clicked one. */
+input:hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus) {
+  border-color: var(--line-strong);
+}
+
 input:focus,
 select:focus {
   border-color: var(--focus);
@@ -1312,9 +1341,17 @@ a.button {
 /* **The primary button darkens; it does not invert.** This rule swapped
    the ink fill for --ground with ink text, which is the *ghost* button's
    hover: the two controls answered the pointer identically, and a solid
-   button going pale reads as "disabled", not as "armed". */
+   button going pale reads as "disabled", not as "armed".
+ *
+ * **And darkening alone was not an answer anybody could see.** --ink to
+   --ink-hover is a luminance change of 1.18:1, measured: on a small dark
+   button it is nothing, and the control was reported as dead. The fill
+   still darkens — the rule above stands — and the button also *lifts*,
+   which is the channel this identity already spends on surfaces and is
+   legible at any size and on any ground. */
 button:hover:not(:disabled) {
   background: var(--ink-hover);
+  box-shadow: var(--shadow-2);
 }
 
 button:disabled {
@@ -1414,8 +1451,15 @@ a.button:active {
   text-underline-offset: 2px;
 }
 
+/* **This was `background: none` on a control that already had no
+   background: a hover rule that changed nothing.** A control written as
+   a sentence cannot lift or fill, so it answers the only way prose can:
+   the underline thickens and takes the accent, which is what a reader
+   already expects of a word that can be pressed. */
 .link-button:hover:not(:disabled) {
   background: none;
+  color: var(--focus);
+  text-decoration-thickness: 2px;
 }
 
 /* Sign out is a ghost and never the primary button: it is the least
@@ -2233,9 +2277,13 @@ li.cycle:last-child { border-bottom: 0; }
   padding-bottom: 1px;
 }
 
+/* A destination is prose in a strip, so it answers the way prose does.
+   It used to *remove* an underline it never had, which is a rule that
+   reads as an answer and is not one. */
 .destinations a:hover {
   color: var(--ink);
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* The accent's third job: the current item. It is the only place in the

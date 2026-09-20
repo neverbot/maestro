@@ -172,3 +172,147 @@ func TestNoStyleSheetIsCutInHalfByABacktick(t *testing.T) {
 		}
 	}
 }
+
+// interactiveControls is every named thing in this product a person can
+// point at, with the selector that dresses it. It is a list rather than
+// a scan because the point is to be *told* when something is added
+// without its states: a new control nobody adds here is a new control
+// nobody checked, and that is the review this file failed three times in
+// one afternoon — the ghost, then the primary, then a tab, each found by
+// a person moving a pointer over it.
+var interactiveControls = []struct {
+	name     string
+	selector string
+}{
+	{"the primary button", "button:hover:not(:disabled)"},
+	{"the ghost button", ".ghost:hover:not(:disabled)"},
+	{"a button written as a sentence", ".link-button:hover:not(:disabled)"},
+	{"a chip", ".chip:hover:not(:disabled)"},
+	{"a tab", ".tabs .tab:hover"},
+	{"a destination in the strip", ".destinations a:hover"},
+	{"the game switcher", ".game-switcher > summary:hover"},
+	{"the create-game disclosure", "#new-game > summary:hover"},
+	{"a catalogue row", "ul.catalogue li:hover"},
+}
+
+// standsOnPaper names the two controls that only ever appear on a
+// `--paper` surface, where painting `--ground` is a darkening a reader
+// can see rather than the invisible repaint it is on the page itself.
+// The exemption is by name, and it is two, so a third one has to be
+// argued here rather than inherited.
+//
+//   - the game switcher lives in the header, which is paper;
+//   - a chip belongs to a panel's control strip, never to bare page.
+var standsOnPaper = map[string]bool{
+	"the game switcher": true,
+	"a chip":            true,
+	// A catalogue is a paper sheet on the desk — `ul.catalogue` sets
+	// `background: var(--paper)` — so a row darkening to the desk's own
+	// colour is the sheet being pressed, and visible.
+	"a catalogue row": true,
+}
+
+// TestEveryControlSaysSomethingWhenPointedAt is the standing version of
+// a review that kept being done by hand and kept missing things.
+//
+// Two ways a hover can exist and say nothing, and this product shipped
+// both: painting the colour that is already behind the control
+// (`.ghost` painted `--ground`, which is `body`'s background) and
+// declaring a property the control does not have (`.link-button:hover`
+// set `background: none` on a control with no background). A third,
+// weaker, is a change too small to see: the primary's fill moves 1.18:1
+// in luminance, which is why it now lifts as well.
+func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("static/styles.css")
+	if err != nil {
+		t.Fatalf("read styles.css: %v", err)
+	}
+	styles := string(raw)
+
+	for _, control := range interactiveControls {
+		rule := ruleFor(styles, control.selector)
+		if rule == "" {
+			t.Errorf("%s does not answer the pointer at all: no rule for %q",
+				control.name, control.selector)
+			continue
+		}
+		body := strings.TrimSpace(rule)
+		// Painting the page's own background is the first way to say
+		// nothing. The surfaces a control stands on are --ground (the
+		// page) and --paper (a panel); a hover that paints either is
+		// only legible when it happens to stand on the other, which is
+		// not a property a stylesheet can promise.
+		if strings.Contains(body, "background: var(--ground)") && !standsOnPaper[control.name] {
+			t.Errorf("%s paints --ground on hover, which is the page's own background:\n%s",
+				control.name, body)
+		}
+		// Declaring nothing is the second. A rule whose whole content is
+		// `background: none` on a control that has no background is a
+		// rule that reads as an answer and is not one.
+		if declarationsIn(body) == 1 && strings.Contains(body, "background: none") {
+			t.Errorf("%s answers the pointer with a rule that changes nothing:\n%s", control.name, body)
+		}
+		if declarationsIn(body) == 0 {
+			t.Errorf("%s has an empty hover rule", control.name)
+		}
+	}
+
+	// The primary carries two channels, because one of them is a change
+	// of 1.18:1 that a person reported as no change at all.
+	primary := ruleFor(styles, "button:hover:not(:disabled)")
+	if !strings.Contains(primary, "box-shadow") {
+		t.Errorf("the primary button's hover is a fill change and nothing else:\n%s", primary)
+	}
+}
+
+// ruleFor returns the body of the first rule whose selector list
+// contains this exact selector, so `.ghost:hover:not(:disabled)` does
+// not match a rule that merely mentions it inside a longer one.
+//
+// The stylesheet is read with comments stripped first: this file's own
+// prose contains braces and selectors, and a scanner that read them
+// would report rules nobody wrote.
+func ruleFor(styles, selector string) string {
+	clean := stripComments(styles)
+	for at := 0; ; {
+		found := strings.Index(clean[at:], selector)
+		if found < 0 {
+			return ""
+		}
+		start := at + found
+		at = start + len(selector)
+		// The character before must end a selector list or a rule, so
+		// `.tab:hover` does not match inside `.mytab:hover`.
+		if start > 0 {
+			before := clean[start-1]
+			if before != '\n' && before != ',' && before != ' ' && before != '}' && before != ';' {
+				continue
+			}
+		}
+		rest := strings.TrimLeft(clean[at:], " \t\n")
+		if !strings.HasPrefix(rest, "{") && !strings.HasPrefix(rest, ",") {
+			continue
+		}
+		// Walk to the opening brace of this rule, then to its close.
+		open := strings.Index(clean[at:], "{")
+		if open < 0 {
+			return ""
+		}
+		close := strings.Index(clean[at+open:], "}")
+		if close < 0 {
+			return ""
+		}
+		return clean[at+open+1 : at+open+close]
+	}
+}
+
+func declarationsIn(body string) int {
+	count := 0
+	for _, part := range strings.Split(stripComments(body), ";") {
+		if strings.TrimSpace(part) != "" {
+			count++
+		}
+	}
+	return count
+}

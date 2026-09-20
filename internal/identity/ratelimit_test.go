@@ -8,6 +8,7 @@ import (
 )
 
 func TestLimiterBlocksAfterMaxAttempts(t *testing.T) {
+	t.Parallel()
 	l := NewLimiter(3, time.Minute)
 	for i := 0; i < 3; i++ {
 		if !l.Allowed("designer@example.test") {
@@ -24,6 +25,7 @@ func TestLimiterBlocksAfterMaxAttempts(t *testing.T) {
 }
 
 func TestLimiterNormalizesKeyCasingAndWhitespace(t *testing.T) {
+	t.Parallel()
 	l := NewLimiter(1, time.Minute)
 	l.Record("Bob@Example.test")
 	if l.Allowed(" bob@example.test ") {
@@ -32,6 +34,7 @@ func TestLimiterNormalizesKeyCasingAndWhitespace(t *testing.T) {
 }
 
 func TestLimiterAllowedDoesNotCharge(t *testing.T) {
+	t.Parallel()
 	l := NewLimiter(1, time.Minute)
 	for i := 0; i < 5; i++ {
 		if !l.Allowed("k") {
@@ -41,6 +44,7 @@ func TestLimiterAllowedDoesNotCharge(t *testing.T) {
 }
 
 func TestLimiterForgetsAfterWindow(t *testing.T) {
+	t.Parallel()
 	clock := newFakeClock()
 	l := NewLimiter(1, 10*time.Millisecond)
 	l.now = clock.now
@@ -60,6 +64,7 @@ func TestLimiterForgetsAfterWindow(t *testing.T) {
 // is exact rather than a loose bound that could pass by coincidence even
 // without a working sweep.
 func TestLimiterSweepsStaleKeys(t *testing.T) {
+	t.Parallel()
 	clock := newFakeClock()
 	l := NewLimiter(1, time.Minute)
 	l.now = clock.now
@@ -89,6 +94,7 @@ func TestLimiterSweepsStaleKeys(t *testing.T) {
 // goroutine, under -race. Nothing here asserts on counts: the point is
 // that the race detector finds no unsynchronized access to the map.
 func TestLimiterConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	l := NewLimiter(1000, time.Minute)
 	const goroutines = 50
 	var wg sync.WaitGroup

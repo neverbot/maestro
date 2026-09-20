@@ -18,6 +18,7 @@ import (
 )
 
 func TestInviteRedemptionCreatesUser(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -69,6 +70,7 @@ func TestInviteRedemptionCreatesUser(t *testing.T) {
 // cannot be doing this test's job either) — the only variant that isolates
 // single-use as its own property.
 func TestUnboundInviteIsSingleUse(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -93,6 +95,7 @@ func TestUnboundInviteIsSingleUse(t *testing.T) {
 }
 
 func TestInviteBoundToEmailRejectsAnother(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -116,6 +119,7 @@ func TestInviteBoundToEmailRejectsAnother(t *testing.T) {
 // redemption for "new@example.test" even though that is the same account
 // CreateUser would produce.
 func TestInviteEmailComparisonNormalisesLikeUsers(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -137,6 +141,7 @@ func TestInviteEmailComparisonNormalisesLikeUsers(t *testing.T) {
 }
 
 func TestRedeemUnknownInvite(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	_, err := svc.RedeemInvite(context.Background(), "made-up", identity.CreateUserRequest{
@@ -154,6 +159,7 @@ func TestRedeemUnknownInvite(t *testing.T) {
 // many addresses (a failed attempt never consumes the invite) and read
 // account existence straight off the distinguishable error.
 func TestRedeemInviteWithExistingEmailIsRejectedAsInvalid(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -197,6 +203,7 @@ func TestRedeemInviteWithExistingEmailIsRejectedAsInvalid(t *testing.T) {
 // the account and add it to the project at that role, not just the
 // account.
 func TestInviteWithProjectGrantsMembership(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -242,6 +249,7 @@ func TestInviteWithProjectGrantsMembership(t *testing.T) {
 // building an invite through this service should learn what is wrong from
 // Go, not from Postgres.
 func TestCreateInviteRejectsRoleWithoutProject(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -253,6 +261,7 @@ func TestCreateInviteRejectsRoleWithoutProject(t *testing.T) {
 }
 
 func TestCreateInviteRejectsProjectWithoutRole(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -270,6 +279,7 @@ func TestCreateInviteRejectsProjectWithoutRole(t *testing.T) {
 // memberships rejected would only surface as a broken redemption, deep
 // inside RedeemInvite's transaction.
 func TestCreateInviteRejectsUnknownRole(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -288,6 +298,7 @@ func TestCreateInviteRejectsUnknownRole(t *testing.T) {
 // invite for a domain this instance would refuse at registration time is a
 // dead credential the moment it is created.
 func TestCreateInviteRejectsOverlongEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -303,6 +314,7 @@ func TestCreateInviteRejectsOverlongEmail(t *testing.T) {
 }
 
 func TestCreateInviteRejectsDisallowedDomain(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.AllowedEmailDomains = []string{"example.test"}
@@ -326,6 +338,7 @@ func TestCreateInviteRejectsDisallowedDomain(t *testing.T) {
 // had explicitly configured which domains may hold accounts — this test
 // replaces the one that pinned that overly broad behavior.
 func TestRedeemUnboundInviteAppliesDomainAllowlist(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.AllowedEmailDomains = []string{"example.test"}
@@ -363,6 +376,7 @@ func TestRedeemUnboundInviteAppliesDomainAllowlist(t *testing.T) {
 // ALLOWED_EMAIL_DOMAINS after an invite was already minted and handed out,
 // which must not retroactively break it.
 func TestRedeemBoundInviteAllowsOffDomainEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	creator := identity.New(pool, testConfig())
 
@@ -391,6 +405,7 @@ func TestRedeemBoundInviteAllowsOffDomainEmail(t *testing.T) {
 // instead of the hardcoded 14-day constant it used to be, and the optional
 // per-invite override bounded above by config.MaxInviteTTL.
 func TestCreateInviteUsesConfiguredDefaultTTL(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig() // InviteTTL: 24 * time.Hour, see testConfig's doc comment.
 	svc := identity.New(pool, cfg)
@@ -416,6 +431,7 @@ func TestCreateInviteUsesConfiguredDefaultTTL(t *testing.T) {
 }
 
 func TestCreateInviteHonoursExpiresIn(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -435,6 +451,7 @@ func TestCreateInviteHonoursExpiresIn(t *testing.T) {
 }
 
 func TestCreateInviteRejectsExpiresInAboveMax(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -451,6 +468,7 @@ func TestCreateInviteRejectsExpiresInAboveMax(t *testing.T) {
 // callers can both observe the invite as live and both create an account
 // from it.
 func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -533,6 +551,7 @@ func TestRedeemInviteConcurrentDoubleRedemptionIsRejected(t *testing.T) {
 // PruneExpiredInvites, the counterpart to invites_expires_idx, must actually
 // remove it.
 func TestRedeemExpiredInviteReturnsErrInviteExpired(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -582,6 +601,7 @@ func TestRedeemExpiredInviteReturnsErrInviteExpired(t *testing.T) {
 // that would tell one holder of a shared link whether another holder
 // already used it.
 func TestRedeemAlreadyRedeemedInviteReturnsGenericError(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -612,6 +632,7 @@ func TestRedeemAlreadyRedeemedInviteReturnsGenericError(t *testing.T) {
 // revocable (RevokeInvite) without direct database access, and once
 // revoked it must behave exactly like an expired one to RedeemInvite.
 func TestListOutstandingInvitesAndRevoke(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -654,6 +675,7 @@ func TestListOutstandingInvitesAndRevoke(t *testing.T) {
 // TestRevokeUnknownSessionIsANoOp: revoking an id nobody minted must not
 // error, the same convention RevokeSession already established.
 func TestRevokeUnknownInviteIsANoOp(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -684,6 +706,7 @@ func createTestProject(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sl
 // instance admin has no standing in a game they are not a member of
 // anywhere else in this codebase.
 func TestListOutstandingInvitesExcludesProjectBound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -724,6 +747,7 @@ func TestListOutstandingInvitesExcludesProjectBound(t *testing.T) {
 // project-bound invite is only ever revocable through its own game's
 // RevokeProjectInvite (TestRevokeProjectInviteScopedToItsGame, below).
 func TestRevokeInviteIgnoresProjectBound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -752,6 +776,7 @@ func TestRevokeInviteIgnoresProjectBound(t *testing.T) {
 // /api/games/{game}/invites: findable by game, revocable by game, and
 // scoped so one game's revoke can never touch another game's invite.
 func TestListAndRevokeOutstandingProjectInvites(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -819,6 +844,7 @@ func TestListAndRevokeOutstandingProjectInvites(t *testing.T) {
 // An account-only invite (no project) must never appear in a game's own
 // listing.
 func TestListOutstandingInvitesForProjectExcludesAccountOnly(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -848,6 +874,7 @@ func TestListOutstandingInvitesForProjectExcludesAccountOnly(t *testing.T) {
 // of — only the instance-wide RevokeInvite (DELETE /api/invites/{id},
 // gated on Caller.IsAdmin) may touch it.
 func TestRevokeProjectInviteIgnoresAccountOnly(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -879,6 +906,7 @@ func TestRevokeProjectInviteIgnoresAccountOnly(t *testing.T) {
 // (api_projects.go) can log how many invites a game deletion is about to
 // destroy.
 func TestCountInvitesForProjectIncludesRedeemed(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -917,6 +945,7 @@ func TestCountInvitesForProjectIncludesRedeemed(t *testing.T) {
 // project-bound invite, without RedeemInviteForExistingUser creating a
 // second account or touching the existing one's password.
 func TestRedeemInviteForExistingUserGrantsMembershipWithoutCreatingAnAccount(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -971,6 +1000,7 @@ func TestRedeemInviteForExistingUserGrantsMembershipWithoutCreatingAnAccount(t *
 // already-a-member existing user redeeming a higher-role invite upserts
 // to the new role rather than being refused.
 func TestRedeemInviteForExistingUserPromotesAnExistingMember(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1004,6 +1034,7 @@ func TestRedeemInviteForExistingUserPromotesAnExistingMember(t *testing.T) {
 }
 
 func TestRedeemInviteForExistingUserRejectsAccountOnlyInvite(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1029,6 +1060,7 @@ func TestRedeemInviteForExistingUserRejectsAccountOnlyInvite(t *testing.T) {
 // membership to whichever account happens to be logged in, only to the
 // account that email actually belongs to.
 func TestRedeemInviteForExistingUserRejectsBoundInviteForAnotherEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1060,6 +1092,7 @@ func TestRedeemInviteForExistingUserRejectsBoundInviteForAnotherEmail(t *testing
 }
 
 func TestRedeemInviteForExistingUserAllowsBoundInviteForMatchingEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1082,6 +1115,7 @@ func TestRedeemInviteForExistingUserAllowsBoundInviteForMatchingEmail(t *testing
 }
 
 func TestRedeemInviteForExistingUserUnknownTokenReturnsErrInviteInvalid(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1103,6 +1137,7 @@ func TestRedeemInviteForExistingUserUnknownTokenReturnsErrInviteInvalid(t *testi
 // watching GET .../invites sees it disappear from the outstanding list
 // either way.
 func TestRedeemInviteForExistingUserMarksInviteRedeemed(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1162,6 +1197,7 @@ func TestRedeemInviteForExistingUserMarksInviteRedeemed(t *testing.T) {
 // answer. Both directions, because a fix that expired everything would
 // pass a one-sided version of this test.
 func TestAnInviteIsJudgedByTheClockThatWroteItsExpiry(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1215,6 +1251,7 @@ func TestAnInviteIsJudgedByTheClockThatWroteItsExpiry(t *testing.T) {
 // milliseconds ahead reported a just-revoked invite as live. The flag is
 // now computed beside the column it is about.
 func TestARevokedInviteListsAsRevoked(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -1272,6 +1309,7 @@ func TestARevokedInviteListsAsRevoked(t *testing.T) {
 // answered 500 — a caller told this server broke, when what happened is
 // that the thing they named is gone.
 func TestInviteForAVanishedGameIsRefusedNotAFault(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -1305,6 +1343,7 @@ func TestInviteForAVanishedGameIsRefusedNotAFault(t *testing.T) {
 // whose own account was deleted mid-request hits it exactly the way the
 // game half above does.
 func TestInviteByAVanishedAccountIsRefusedNotAFault(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	gone := uuid.New()

@@ -10,6 +10,7 @@ import (
 )
 
 func TestSubscriberReceivesItsProjectEvents(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 
@@ -29,6 +30,7 @@ func TestSubscriberReceivesItsProjectEvents(t *testing.T) {
 }
 
 func TestSubscriberIgnoresOtherProjects(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	mine, theirs := uuid.New(), uuid.New()
 
@@ -45,6 +47,7 @@ func TestSubscriberIgnoresOtherProjects(t *testing.T) {
 }
 
 func TestPublishDoesNotBlockOnASlowSubscriber(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 	sub := hub.Subscribe(project, "owner", false)
@@ -78,6 +81,7 @@ func TestPublishDoesNotBlockOnASlowSubscriber(t *testing.T) {
 // works afterward, which would hang if Unsubscribe left the hub in a
 // broken state.
 func TestUnsubscribeManyDistinctProjectsLeavesHubUsable(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	for i := 0; i < 200; i++ {
 		sub := hub.Subscribe(uuid.New(), "owner", false)
@@ -114,6 +118,7 @@ func TestUnsubscribeManyDistinctProjectsLeavesHubUsable(t *testing.T) {
 // subscribers of the very same project each see their own Seq start at
 // 1.
 func TestPublishAssignsPerSubscriptionSequence(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	a, b := uuid.New(), uuid.New()
 	subA := hub.Subscribe(a, "owner", false)
@@ -151,6 +156,7 @@ func TestPublishAssignsPerSubscriptionSequence(t *testing.T) {
 // subscriber (its first-ever received event) and Seq 2 for the one that
 // received both.
 func TestPublishSequenceSkipsEventsFilteredOutForThisSubscription(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 	owner := hub.Subscribe(project, "owner", false)
@@ -187,6 +193,7 @@ func TestPublishSequenceSkipsEventsFilteredOutForThisSubscription(t *testing.T) 
 // gap this leaves is exactly the size of what was actually dropped, not
 // silently absorbed the way a filtered event correctly is.
 func TestPublishSequenceAdvancesOnADropEvenThoughNothingWasSent(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 	sub := hub.Subscribe(project, "owner", false)
@@ -224,6 +231,7 @@ func TestPublishSequenceAdvancesOnADropEvenThoughNothingWasSent(t *testing.T) {
 // quality review found a token caller's own MinRole-only gating left
 // open (Event.HumanOnly's own doc comment).
 func TestPublishFiltersByHumanOnly(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 
@@ -251,6 +259,7 @@ func TestPublishFiltersByHumanOnly(t *testing.T) {
 // that does receives it, and an event with no MinRole reaches everyone
 // regardless of role — the default every event uses today.
 func TestPublishFiltersByMinRole(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 
@@ -301,6 +310,7 @@ func TestPublishFiltersByMinRole(t *testing.T) {
 // long-lived stream's role current after a mid-stream promotion or
 // demotion.
 func TestUpdateRoleChangesFutureFiltering(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	project := uuid.New()
 	sub := hub.Subscribe(project, "viewer", false)
@@ -329,6 +339,7 @@ func TestUpdateRoleChangesFutureFiltering(t *testing.T) {
 // contract directly: it starts at zero, tracks Subscribe and Unsubscribe
 // exactly, and is scoped per project.
 func TestSubscriberCountReflectsActiveSubscriptions(t *testing.T) {
+	t.Parallel()
 	hub := realtime.NewHub()
 	a, b := uuid.New(), uuid.New()
 

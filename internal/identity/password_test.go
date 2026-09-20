@@ -11,6 +11,7 @@ import (
 var testParams = config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyLen: 32, SaltLen: 16}
 
 func TestHashAndVerify(t *testing.T) {
+	t.Parallel()
 	hash, err := HashPassword("correct horse battery staple", testParams)
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -37,6 +38,7 @@ func TestHashAndVerify(t *testing.T) {
 }
 
 func TestHashIsSalted(t *testing.T) {
+	t.Parallel()
 	a, err := HashPassword("same", testParams)
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -51,6 +53,7 @@ func TestHashIsSalted(t *testing.T) {
 }
 
 func TestVerifyRejectsMalformedHash(t *testing.T) {
+	t.Parallel()
 	if _, err := VerifyPassword("x", "not-a-hash"); err == nil {
 		t.Fatal("expected an error for a malformed hash")
 	}
@@ -60,6 +63,7 @@ func TestVerifyRejectsMalformedHash(t *testing.T) {
 // panics if time or threads is less than 1, so a corrupted or maliciously
 // crafted hash string must never reach it with either at zero.
 func TestVerifyRejectsZeroCostParameters(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"$argon2id$v=19$m=8192,t=0,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		"$argon2id$v=19$m=8192,t=1,p=0$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -75,6 +79,7 @@ func TestVerifyRejectsZeroCostParameters(t *testing.T) {
 // vector: without a ceiling, a crafted "m=" value would make VerifyPassword
 // allocate an unbounded amount of memory before any comparison happens.
 func TestVerifyRejectsExcessiveMemory(t *testing.T) {
+	t.Parallel()
 	encoded := "$argon2id$v=19$m=4294967295,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	if _, err := VerifyPassword("x", encoded); err == nil {
 		t.Fatal("expected an error for an excessive memory parameter")
@@ -84,6 +89,7 @@ func TestVerifyRejectsExcessiveMemory(t *testing.T) {
 // TestVerifyRejectsUnsupportedVersion guards against silently comparing
 // against a different argon2 version than this package produces.
 func TestVerifyRejectsUnsupportedVersion(t *testing.T) {
+	t.Parallel()
 	encoded := "$argon2id$v=16$m=8192,t=1,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	if _, err := VerifyPassword("x", encoded); err == nil {
 		t.Fatal("expected an error for an unsupported argon2 version")
@@ -96,6 +102,7 @@ func TestVerifyRejectsUnsupportedVersion(t *testing.T) {
 // subtle.ConstantTimeCompare reports two zero-length slices as equal, so
 // every password would verify against such a row.
 func TestVerifyRejectsEmptyKey(t *testing.T) {
+	t.Parallel()
 	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$"
 
@@ -111,6 +118,7 @@ func TestVerifyRejectsEmptyKey(t *testing.T) {
 // TestVerifyRejectsEmptySalt guards against the same class of malformed
 // input on the salt field, for symmetry with the empty-key check.
 func TestVerifyRejectsEmptySalt(t *testing.T) {
+	t.Parallel()
 	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$$" + key
 
@@ -126,6 +134,7 @@ func TestVerifyRejectsEmptySalt(t *testing.T) {
 // happens (the key length in particular is passed straight through as
 // argon2.IDKey's keyLen).
 func TestVerifyRejectsOversizedSalt(t *testing.T) {
+	t.Parallel()
 	salt := base64.RawStdEncoding.EncodeToString(make([]byte, maxDecodedSaltLen+1))
 	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
@@ -136,6 +145,7 @@ func TestVerifyRejectsOversizedSalt(t *testing.T) {
 }
 
 func TestVerifyRejectsOversizedKey(t *testing.T) {
+	t.Parallel()
 	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
 	key := base64.RawStdEncoding.EncodeToString(make([]byte, maxDecodedKeyLen+1))
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
@@ -152,6 +162,7 @@ func TestVerifyRejectsOversizedKey(t *testing.T) {
 // (a 1-byte key matches roughly 1 wrong password in 256), which is an
 // authentication weakness rather than a mere robustness gap.
 func TestVerifyRejectsUndersizedSalt(t *testing.T) {
+	t.Parallel()
 	salt := base64.RawStdEncoding.EncodeToString(make([]byte, minDecodedSaltLen-1))
 	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
@@ -162,6 +173,7 @@ func TestVerifyRejectsUndersizedSalt(t *testing.T) {
 }
 
 func TestVerifyRejectsUndersizedKey(t *testing.T) {
+	t.Parallel()
 	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
 	key := base64.RawStdEncoding.EncodeToString(make([]byte, minDecodedKeyLen-1))
 	encoded := "$argon2id$v=19$m=8192,t=1,p=1$" + salt + "$" + key
@@ -180,6 +192,7 @@ func TestVerifyRejectsUndersizedKey(t *testing.T) {
 // conversion and skips leading whitespace before one, so it would silently
 // accept inputs like these instead of rejecting them.
 func TestVerifyRejectsMalformedParameterField(t *testing.T) {
+	t.Parallel()
 	salt := base64.RawStdEncoding.EncodeToString(make([]byte, 16))
 	key := base64.RawStdEncoding.EncodeToString(make([]byte, 32))
 	cases := []string{
@@ -197,6 +210,7 @@ func TestVerifyRejectsMalformedParameterField(t *testing.T) {
 // TestVerifyRejectsFlippedSaltByte confirms that tampering with a stored
 // hash by a single byte fails closed: no panic, no error, just ok=false.
 func TestVerifyRejectsFlippedSaltByte(t *testing.T) {
+	t.Parallel()
 	hash, err := HashPassword("flip me", testParams)
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -225,6 +239,7 @@ func TestVerifyRejectsFlippedSaltByte(t *testing.T) {
 // (t=1, m=8MiB) so tests run fast, but none of them exercise the real
 // production cost (t=3, m=64MiB, p=2).
 func TestHashAndVerifyAtProductionParameters(t *testing.T) {
+	t.Parallel()
 	prod := config.Argon2Params{Time: 3, Memory: 64 * 1024, Threads: 2, KeyLen: 32, SaltLen: 16}
 
 	hash, err := HashPassword("correct horse battery staple", prod)
@@ -250,6 +265,7 @@ func TestHashAndVerifyAtProductionParameters(t *testing.T) {
 }
 
 func TestHashPasswordRejectsZeroCostParameters(t *testing.T) {
+	t.Parallel()
 	base := config.Argon2Params{Time: 1, Memory: 8 * 1024, Threads: 1, KeyLen: 32, SaltLen: 16}
 	cases := []config.Argon2Params{
 		{Time: 0, Memory: base.Memory, Threads: base.Threads, KeyLen: base.KeyLen, SaltLen: base.SaltLen},
@@ -265,6 +281,7 @@ func TestHashPasswordRejectsZeroCostParameters(t *testing.T) {
 }
 
 func TestNeedsRehash(t *testing.T) {
+	t.Parallel()
 	hash, err := HashPassword("x", testParams)
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)

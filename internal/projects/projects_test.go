@@ -46,6 +46,7 @@ func newUserNamed(t *testing.T, ids *identity.Service, email, displayName string
 }
 
 func TestCreateProjectMakesCreatorOwner(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -71,6 +72,7 @@ func TestCreateProjectMakesCreatorOwner(t *testing.T) {
 }
 
 func TestCreateUnknownCreatorReturnsErrMemberNotFound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := projects.New(pool)
 	ctx := context.Background()
@@ -81,6 +83,7 @@ func TestCreateUnknownCreatorReturnsErrMemberNotFound(t *testing.T) {
 }
 
 func TestListForUserOnlyReturnsMemberships(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -116,6 +119,7 @@ func TestListForUserOnlyReturnsMemberships(t *testing.T) {
 // hiding), the order must still be deterministic across repeated calls,
 // not whatever order Postgres happens to return ties in.
 func TestListForUserOrderingIsStableOnTies(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -153,6 +157,7 @@ func TestListForUserOrderingIsStableOnTies(t *testing.T) {
 }
 
 func TestRoleOfNonMember(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -177,6 +182,7 @@ func TestRoleOfNonMember(t *testing.T) {
 // kind of information the game-isolation invariant says a caller with no
 // standing in a game must never get.
 func TestRoleOfUnknownProjectAlsoErrNotAMember(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -190,6 +196,7 @@ func TestRoleOfUnknownProjectAlsoErrNotAMember(t *testing.T) {
 }
 
 func TestDuplicateSlugRejected(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -205,6 +212,7 @@ func TestDuplicateSlugRejected(t *testing.T) {
 }
 
 func TestSlugIsNormalisedToLowerCase(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -221,6 +229,7 @@ func TestSlugIsNormalisedToLowerCase(t *testing.T) {
 }
 
 func TestSlugShapeIsValidated(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -253,6 +262,7 @@ func TestSlugShapeIsValidated(t *testing.T) {
 }
 
 func TestCreateRejectsInvalidName(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -277,6 +287,7 @@ func TestCreateRejectsInvalidName(t *testing.T) {
 }
 
 func TestListMembersReturnsRolesForEveryMember(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -318,6 +329,7 @@ func TestListMembersReturnsRolesForEveryMember(t *testing.T) {
 // name must still come back in a deterministic order across repeated
 // calls, via the `, id` tiebreak ListMembers' query added.
 func TestListMembersOrderingIsStableOnTies(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -372,6 +384,7 @@ func TestListMembersOrderingIsStableOnTies(t *testing.T) {
 }
 
 func TestSetRoleCanPromoteAnotherMemberToOwner(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -411,6 +424,7 @@ func TestSetRoleCanPromoteAnotherMemberToOwner(t *testing.T) {
 // rather than the contract silently shifting underneath Task 12's own
 // authorization logic.
 func TestSetRoleHasNoAuthorizationCheck(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -436,6 +450,7 @@ func TestSetRoleHasNoAuthorizationCheck(t *testing.T) {
 }
 
 func TestSetRoleRejectsInvalidRole(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -454,6 +469,7 @@ func TestSetRoleRejectsInvalidRole(t *testing.T) {
 }
 
 func TestSetRoleCannotDemoteSoleOwner(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -480,6 +496,7 @@ func TestSetRoleCannotDemoteSoleOwner(t *testing.T) {
 }
 
 func TestSetRoleUnknownProjectReturnsErrProjectNotFound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -492,6 +509,7 @@ func TestSetRoleUnknownProjectReturnsErrProjectNotFound(t *testing.T) {
 }
 
 func TestSetRoleUnknownUserReturnsErrMemberNotFound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -509,6 +527,7 @@ func TestSetRoleUnknownUserReturnsErrMemberNotFound(t *testing.T) {
 }
 
 func TestRemoveMemberCannotRemoveSoleOwner(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -534,6 +553,7 @@ func TestRemoveMemberCannotRemoveSoleOwner(t *testing.T) {
 }
 
 func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -558,6 +578,7 @@ func TestRemoveMemberSucceedsWithSecondOwner(t *testing.T) {
 }
 
 func TestRemoveMemberOfNonMemberIsNoop(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -585,6 +606,7 @@ func TestRemoveMemberOfNonMemberIsNoop(t *testing.T) {
 // close that in the same call, not leave it as something an operator
 // remembers to do separately.
 func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -624,6 +646,7 @@ func TestRemoveMemberRevokesTheirTokensInThatProject(t *testing.T) {
 // member from one game must not touch tokens the same person holds for
 // a different game they are still a member of.
 func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -662,6 +685,7 @@ func TestRemoveMemberLeavesTheirTokensInOtherProjectsAlone(t *testing.T) {
 }
 
 func TestByIDRoundTrips(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -713,6 +737,7 @@ func TestByIDRoundTrips(t *testing.T) {
 // owners: exactly one must succeed and the other must see ErrLastOwner,
 // every time, and the project must never end up with zero owners.
 func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
+	t.Parallel()
 	for run := 0; run < 5; run++ {
 		pool := testutil.NewPool(t)
 		ids := identity.New(pool, testConfig())
@@ -775,6 +800,7 @@ func TestConcurrentRemovalLeavesExactlyOneOwner(t *testing.T) {
 // owners — has to hold across the mix, not just within either method on
 // its own.
 func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *testing.T) {
+	t.Parallel()
 	for run := 0; run < 5; run++ {
 		pool := testutil.NewPool(t)
 		ids := identity.New(pool, testConfig())
@@ -834,6 +860,7 @@ func TestConcurrentRemovalAndDemotionOfDifferentOwnersLeavesExactlyOneOwner(t *t
 // promoting must never trigger this; only a demotion to viewer does,
 // since editor and owner both remain roles.AtLeast Editor.
 func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -890,6 +917,7 @@ func TestSetRoleDemotionBelowEditorRevokesTheDemotedMembersTokens(t *testing.T) 
 // is latent until one lands), so the delete is issued directly here to
 // simulate one.
 func TestDeletingSoleOwnerUserIsBlockedByDatabase(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -919,6 +947,7 @@ func TestDeletingSoleOwnerUserIsBlockedByDatabase(t *testing.T) {
 // must not fire at all when a project still has another owner left after
 // the delete.
 func TestDeletingNonSoleOwnerUserSucceeds(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -949,6 +978,7 @@ func TestDeletingNonSoleOwnerUserSucceeds(t *testing.T) {
 // succeed rather than the trigger mistaking a legitimate project deletion
 // for an attempt to strip a live project of its last owner.
 func TestDeletingProjectCascadesDespiteTrigger(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -976,6 +1006,7 @@ func TestDeletingProjectCascadesDespiteTrigger(t *testing.T) {
 // considers valid but the database rejects (or the reverse) fails this
 // test; no doc comment can do that job.
 func TestAllRolesAcceptedByDatabase(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -1019,6 +1050,7 @@ func TestAllRolesAcceptedByDatabase(t *testing.T) {
 // membership delete and svc.Delete below would fail loudly with a raw
 // constraint-violation error instead of quietly returning nil.
 func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -1053,6 +1085,7 @@ func TestDeleteProjectCascadesMembershipsAndTokens(t *testing.T) {
 // one 204 and one 500 for what is, from either caller's perspective, the
 // same outcome ("the game is gone").
 func TestDeleteProjectTwiceIsIdempotent(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)
@@ -1077,6 +1110,7 @@ func TestDeleteProjectTwiceIsIdempotent(t *testing.T) {
 // accent folds instead of vanishing, and a run of anything else is one
 // hyphen.
 func TestSlugFromDerivesAnAddressFromAName(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"Azeroth":                   "azeroth",
 		"  The Ashfall  ":           "the-ashfall",
@@ -1100,6 +1134,7 @@ func TestSlugFromDerivesAnAddressFromAName(t *testing.T) {
 // service and the database: the create form has no address field any
 // more, so this is the path every game made in a browser now takes.
 func TestAnEmptySlugIsDerivedFromTheName(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	svc := projects.New(pool)

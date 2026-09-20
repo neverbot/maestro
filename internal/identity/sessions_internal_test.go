@@ -21,6 +21,7 @@ import (
 // anywhere, and the doc comments on both sides would go on describing an
 // agreement that had stopped being true.
 func TestMaxSessionLifetimeMatchesExtendSessionSQL(t *testing.T) {
+	t.Parallel()
 	sqlBytes, err := os.ReadFile("../db/queries/identity.sql")
 	if err != nil {
 		t.Fatalf("read identity.sql: %v", err)

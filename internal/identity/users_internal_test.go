@@ -27,6 +27,7 @@ func internalTestConfig() config.Config {
 // would make the test pass without ever touching the code path it claims to
 // cover). bootstrapRaceHook confirms that degeneration did not happen.
 func TestBootstrapFirstAdminConcurrentBootIsSafe(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := internalTestConfig()
 	cfg.FirstAdminEmail = "race@example.test"
@@ -76,6 +77,7 @@ func TestBootstrapFirstAdminConcurrentBootIsSafe(t *testing.T) {
 }
 
 func TestWithTxCommitsOnSuccess(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := New(pool, internalTestConfig())
 	ctx := context.Background()
@@ -103,6 +105,7 @@ func TestWithTxCommitsOnSuccess(t *testing.T) {
 }
 
 func TestWithTxRollsBackOnError(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := New(pool, internalTestConfig())
 	ctx := context.Background()

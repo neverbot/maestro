@@ -18,6 +18,7 @@ import (
 )
 
 func TestSetAdminPromotesANonAdmin(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -46,6 +47,7 @@ func TestSetAdminPromotesANonAdmin(t *testing.T) {
 }
 
 func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -90,6 +92,7 @@ func TestSetAdminDemotesAnAdminWhenAnotherRemains(t *testing.T) {
 // where the last admin is demoting themselves, not only a hypothetical
 // second admin doing it to them.
 func TestSetAdminRefusesToDemoteTheLastAdmin(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -122,6 +125,7 @@ func TestSetAdminRefusesToDemoteTheLastAdmin(t *testing.T) {
 // flag to false again must never consult, or be blocked by, the
 // last-admin count.
 func TestSetAdminDemotingANonAdminIsANoOp(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -139,6 +143,7 @@ func TestSetAdminDemotingANonAdminIsANoOp(t *testing.T) {
 }
 
 func TestSetAdminUnknownUserReturnsErrUserNotFound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -165,6 +170,7 @@ func TestSetAdminUnknownUserReturnsErrUserNotFound(t *testing.T) {
 // independent chances to occur; the assertion inside each round is
 // exactly as strict as the single-round version was.
 func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -249,6 +255,7 @@ func TestConcurrentDemotionsOfTheLastTwoAdminsLeaveExactlyOne(t *testing.T) {
 }
 
 func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -297,6 +304,7 @@ func TestSetAdminByEmailPromotesAndDemotes(t *testing.T) {
 }
 
 func TestSetAdminByEmailUnknownEmailReturnsErrUserNotFound(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -307,6 +315,7 @@ func TestSetAdminByEmailUnknownEmailReturnsErrUserNotFound(t *testing.T) {
 }
 
 func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -333,6 +342,7 @@ func TestSetAdminByEmailStillRefusesToDemoteTheLastAdmin(t *testing.T) {
 // BootstrapFirstAdmin creating a second account or touching the
 // account's password.
 func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -405,6 +415,7 @@ func TestBootstrapFirstAdminRepromotesConfiguredAdminWhenDemoted(t *testing.T) {
 // stored hash does not verify against FIRST_ADMIN_PASSWORD, this boot
 // resets it, and every prior session for that account is gone.
 func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatch(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -458,6 +469,7 @@ func TestBootstrapFirstAdminResetsPasswordWhenConfiguredAdminPasswordDoesNotMatc
 // restart silently log its admin out of every device — the reset only
 // ever fires on an actual mismatch.
 func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -497,6 +509,7 @@ func TestBootstrapFirstAdminResetLeavesPasswordAloneWhenAlreadyCorrect(t *testin
 // no existing account on a non-empty instance is left alone, not used to
 // conjure a brand-new admin account on every boot.
 func TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "nobody-yet@example.test"
@@ -523,6 +536,7 @@ func TestBootstrapFirstAdminDoesNotCreateAnAccountOnANonEmptyInstance(t *testing
 // pins the common case: nothing changes, and nothing errors, when the
 // configured admin already has the flag.
 func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -554,6 +568,7 @@ func TestBootstrapFirstAdminIsANoOpWhenConfiguredAdminAlreadyHoldsTheFlag(t *tes
 // FIRST_ADMIN_EMAIL/FIRST_ADMIN_PASSWORD set — as compose.yml ships and
 // the readme normalises — and keeps their sessions too.
 func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -597,6 +612,7 @@ func TestBootstrapFirstAdminLeavesARotatedPasswordAloneWithoutTheOptIn(t *testin
 // is_admin destroys nothing an operator would miss, so it stays
 // unconditional. Only the password write is opt-in.
 func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -645,6 +661,7 @@ func TestBootstrapFirstAdminStillRepromotesWithoutTheOptIn(t *testing.T) {
 // no opt-in there is no password write, so there is nothing to validate
 // and nothing to abort.
 func TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -671,6 +688,7 @@ func TestBootstrapFirstAdminIgnoresAShortPasswordWithoutTheOptIn(t *testing.T) {
 // password the product would refuse from any other surface must fail
 // loudly at start-up rather than half-apply.
 func TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -702,6 +720,7 @@ func TestBootstrapFirstAdminRejectsAShortPasswordWithTheOptIn(t *testing.T) {
 // admin promotion was "the most privilege-sensitive mutation in the
 // product and the least attributable" — this is strictly more so.
 func TestBootstrapFirstAdminLogsTheRecoveryReset(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"

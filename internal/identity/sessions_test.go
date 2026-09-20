@@ -15,6 +15,7 @@ import (
 )
 
 func TestSessionLifecycle(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -62,6 +63,7 @@ func TestSessionLifecycle(t *testing.T) {
 }
 
 func TestUnknownSessionToken(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	if _, _, err := svc.UserForSession(context.Background(), "not-a-real-token"); !errors.Is(err, identity.ErrNoSession) {
@@ -70,6 +72,7 @@ func TestUnknownSessionToken(t *testing.T) {
 }
 
 func TestIssueSessionSetsExpiryFromConfig(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	svc := identity.New(pool, cfg)
@@ -114,6 +117,7 @@ func TestIssueSessionSetsExpiryFromConfig(t *testing.T) {
 }
 
 func TestIssueSessionProducesDistinctTokens(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -141,6 +145,7 @@ func TestIssueSessionProducesDistinctTokens(t *testing.T) {
 }
 
 func TestRevokeUnknownSessionIsANoOp(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	if err := svc.RevokeSession(context.Background(), "not-a-real-token"); err != nil {
@@ -154,6 +159,7 @@ func TestRevokeUnknownSessionIsANoOp(t *testing.T) {
 // them, not just the one TestChangePasswordRotatesHashAndRevokesSessions
 // already covers.
 func TestChangePasswordRevokesEverySessionOfTheAccount(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -192,6 +198,7 @@ func TestChangePasswordRevokesEverySessionOfTheAccount(t *testing.T) {
 // ChangePassword's DeleteSessionsForUser is scoped to one user, not a
 // blanket wipe.
 func TestChangePasswordLeavesOtherUsersSessionsAlone(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -237,6 +244,7 @@ func TestChangePasswordLeavesOtherUsersSessionsAlone(t *testing.T) {
 // fresh enough to skip — a session within a minute of now()+ttl already
 // is exactly the case this method is supposed to leave alone.
 func TestExtendSessionPushesExpiryForward(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -316,6 +324,7 @@ func TestExtendSessionPushesExpiryForward(t *testing.T) {
 // Postgres reports, not an inference from a value that cannot tell one
 // write apart from several.
 func TestConcurrentRenewalsProduceExactlyOneWrite(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -367,6 +376,7 @@ func TestConcurrentRenewalsProduceExactlyOneWrite(t *testing.T) {
 }
 
 func TestChangePasswordRotatesHashAndRevokesSessions(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -401,6 +411,7 @@ func TestChangePasswordRotatesHashAndRevokesSessions(t *testing.T) {
 }
 
 func TestChangePasswordRejectsWeakPassword(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -420,6 +431,7 @@ func TestChangePasswordRejectsWeakPassword(t *testing.T) {
 }
 
 func TestChangeOwnPasswordSucceedsAndRevokesSessions(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -455,6 +467,7 @@ func TestChangeOwnPasswordSucceedsAndRevokesSessions(t *testing.T) {
 // be able to rotate it, even though the session itself already
 // authenticates the request.
 func TestChangeOwnPasswordRejectsWrongCurrentPassword(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -487,6 +500,7 @@ func TestChangeOwnPasswordRejectsWrongCurrentPassword(t *testing.T) {
 }
 
 func TestChangeOwnPasswordRejectsWeakNewPassword(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -510,6 +524,7 @@ func TestChangeOwnPasswordRejectsWeakNewPassword(t *testing.T) {
 // resubmitting the current password as the new one succeeded and
 // revoked every other session for a change that took no effect at all.
 func TestChangeOwnPasswordRejectsSamePassword(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -538,6 +553,7 @@ func TestChangeOwnPasswordRejectsSamePassword(t *testing.T) {
 }
 
 func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -598,6 +614,7 @@ func TestExpiredSessionIsRejectedAndPruned(t *testing.T) {
 // here, so nothing in this package's own logic would catch it if the
 // migration ever lost that clause.
 func TestDeletingUserCascadesSessions(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()

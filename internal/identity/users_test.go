@@ -28,6 +28,7 @@ func testConfig() config.Config {
 }
 
 func TestCreateUserAndAuthenticate(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -64,6 +65,7 @@ func TestCreateUserAndAuthenticate(t *testing.T) {
 }
 
 func TestCreateUserRejectsDuplicateEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 	ctx := context.Background()
@@ -78,6 +80,7 @@ func TestCreateUserRejectsDuplicateEmail(t *testing.T) {
 }
 
 func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.AllowedEmailDomains = []string{"example.test"}
@@ -92,6 +95,7 @@ func TestCreateUserRejectsDisallowedDomain(t *testing.T) {
 }
 
 func TestCreateUserRejectsShortPassword(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -104,6 +108,7 @@ func TestCreateUserRejectsShortPassword(t *testing.T) {
 }
 
 func TestCreateUserCountsRunesNotBytes(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -128,6 +133,7 @@ func TestCreateUserCountsRunesNotBytes(t *testing.T) {
 }
 
 func TestCreateUserRejectsOverlongPassword(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -144,6 +150,7 @@ func TestCreateUserRejectsOverlongPassword(t *testing.T) {
 }
 
 func TestCreateUserRejectsInvalidEmail(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -159,6 +166,7 @@ func TestCreateUserRejectsInvalidEmail(t *testing.T) {
 }
 
 func TestCreateUserRejectsEmptyDisplayName(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -171,6 +179,7 @@ func TestCreateUserRejectsEmptyDisplayName(t *testing.T) {
 }
 
 func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	svc := identity.New(pool, testConfig())
 
@@ -187,6 +196,7 @@ func TestCreateUserRejectsOverlongDisplayName(t *testing.T) {
 }
 
 func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "boss@example.test"
@@ -212,6 +222,7 @@ func TestBootstrapFirstAdminRunsOnceAndIsAdmin(t *testing.T) {
 }
 
 func TestBootstrapFirstAdminNamesTheEnvVarOnFailure(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "boss@example.test"

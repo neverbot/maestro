@@ -18,6 +18,7 @@ import (
 )
 
 func TestAPITokenResolvesToItsProject(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -61,6 +62,7 @@ func TestAPITokenResolvesToItsProject(t *testing.T) {
 }
 
 func TestUnknownAPIToken(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	if _, err := ids.ResolveAPIToken(context.Background(), "mst_nonsense"); !errors.Is(err, identity.ErrTokenInvalid) {
@@ -69,6 +71,7 @@ func TestUnknownAPIToken(t *testing.T) {
 }
 
 func TestCreateAPITokenGeneratesUniqueTokens(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -91,6 +94,7 @@ func TestCreateAPITokenGeneratesUniqueTokens(t *testing.T) {
 }
 
 func TestCreateAPITokenRejectsInvalidLabel(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -110,6 +114,7 @@ func TestCreateAPITokenRejectsInvalidLabel(t *testing.T) {
 }
 
 func TestRevokeAPITokenIsScopedToItsOwnProject(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -141,6 +146,7 @@ func TestRevokeAPITokenIsScopedToItsOwnProject(t *testing.T) {
 }
 
 func TestListAPITokensIsScopedToOneProjectAndOmitsTheHash(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -186,6 +192,7 @@ func TestListAPITokensIsScopedToOneProjectAndOmitsTheHash(t *testing.T) {
 // dropped the throttle condition would change: whether the column moves
 // on every call or only when it should.
 func TestResolveAPITokenThrottlesLastUsedAtWrites(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -280,6 +287,7 @@ func (c *statementCounter) count() int64 { return c.n.Load() }
 // only the statements ResolveAPIToken itself issues are counted — setup
 // and the deliberate backdate are excluded on purpose, not by luck.
 func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -337,6 +345,7 @@ func TestResolveAPITokenIssuesOneStatementInsideTheThrottleWindowAndTwoOutsideIt
 }
 
 func TestRevokedTokenIsIndistinguishableFromUnknown(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -367,6 +376,7 @@ func TestRevokedTokenIsIndistinguishableFromUnknown(t *testing.T) {
 // checks each resolves to its own binding — the one this package's
 // isolation invariant is actually about.
 func TestResolveAPITokenReturnsTheCorrectProjectAmongMany(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -403,6 +413,7 @@ func TestResolveAPITokenReturnsTheCorrectProjectAmongMany(t *testing.T) {
 }
 
 func TestRevokeUnknownAPITokenIsANoOp(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -417,6 +428,7 @@ func TestRevokeUnknownAPITokenIsANoOp(t *testing.T) {
 }
 
 func TestRevokeAlreadyRevokedAPITokenIsANoOp(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -447,6 +459,7 @@ func TestRevokeAlreadyRevokedAPITokenIsANoOp(t *testing.T) {
 // and length look right, and that was never itself minted or revoked,
 // is exactly the outcome that check exists to produce.
 func TestResolveAPITokenRejectsTamperedTokenWithoutTouchingTheDatabase(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -479,6 +492,7 @@ func TestResolveAPITokenRejectsTamperedTokenWithoutTouchingTheDatabase(t *testin
 // heartbeat re-check calls this, not ResolveAPIToken, specifically so an
 // open browser tab does nothing to keep a token looking recently used.
 func TestCheckAPITokenNeverTouchesLastUsedAt(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)
@@ -535,6 +549,7 @@ func TestCheckAPITokenNeverTouchesLastUsedAt(t *testing.T) {
 // corrections so handleDeleteGame (api_projects.go) can log how many
 // tokens a game deletion is about to destroy.
 func TestCountAPITokensForProjectIncludesRevoked(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ids := identity.New(pool, testConfig())
 	projSvc := projects.New(pool)

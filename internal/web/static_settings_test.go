@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -78,6 +79,62 @@ func TestTheInstallCommandSaysWhatThisServerActuallySpeaks(t *testing.T) {
 	for _, call := range []string{"listTokens", "createToken", "revokeToken"} {
 		if !strings.Contains(string(client), "async function "+call) {
 			t.Errorf("client.js no longer carries %s, so the screen calls nothing", call)
+		}
+	}
+}
+
+// TestTheDialogIsASurfaceAndTrapsItsOwnFocus guards the two halves of
+// mst-dialog a harness cannot see: the sheet it adopts (a shadow root's
+// styles are invisible to every check in jstest/, which runs against a
+// stub with no CSS at all) and the fact that it is reached through one
+// shared component rather than hand-rolled per screen.
+//
+// The behaviour — Escape, the press outside, the secret leaving the page
+// on close, Tab staying inside — is pinned in jstest/settings_test.mjs,
+// which is where it belongs: it is behaviour, and it is mutation-checked
+// there.
+func TestTheDialogIsASurfaceAndTrapsItsOwnFocus(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("static/components/mst-dialog.js")
+	if err != nil {
+		t.Fatalf("read mst-dialog.js: %v", err)
+	}
+	source := string(raw)
+
+	for _, token := range []string{"var(--paper)", "var(--ink)", "var(--line)", "var(--radius)", "var(--shadow-2)"} {
+		if !strings.Contains(source, token) {
+			t.Errorf("the dialog's panel does not draw itself with %s", token)
+		}
+	}
+	// The dim behind it is tinted toward the paper's own brown. A
+	// neutral black wash over this ground is what makes an interface
+	// read as a dashboard, which docs/product.md names as the first
+	// anti-reference.
+	if strings.Contains(source, "rgba(0, 0, 0") || strings.Contains(source, "rgba(0,0,0") {
+		t.Error("the backdrop is a neutral black wash")
+	}
+	if !strings.Contains(source, `setAttribute("aria-modal", "true")`) {
+		t.Error("the dialog does not tell a screen reader that the page behind it is blocked")
+	}
+	if !strings.Contains(source, `aria-labelledby`) {
+		t.Error("the dialog is announced as `dialog` with no name")
+	}
+
+	// One dialog, not one per screen. A second hand-rolled modal is the
+	// thing this component exists to stop, so the pages are read for a
+	// backdrop of their own.
+	pages, err := filepath.Glob("static/pages/*.js")
+	if err != nil {
+		t.Fatalf("glob pages: %v", err)
+	}
+	for _, path := range pages {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(string(body), "position: fixed") {
+			t.Errorf("%s pins something to the viewport of its own; a floating surface is "+
+				"components/mst-dialog.js or components/mst-hint.js, not a page's own CSS", path)
 		}
 	}
 }

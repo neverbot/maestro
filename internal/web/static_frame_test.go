@@ -221,6 +221,15 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // is pages/page.js's read-only notice, whose words are that module's and
 // are pinned there.
 //
+// mst-dialog.js is the product's one modal, and it holds **no Lit
+// template** either: a caller hands it nodes it built itself, and the
+// only strings it owns are two control labels, "Done" and "Close". So
+// the scan passes over it vacuously and the argument is that it says
+// nothing *about an answer* — it has no answer of its own, only a title
+// and a footer its caller named. The words inside any dialog belong to
+// whoever opened it, and are pinned there: the token dialog's are in
+// pages/settings.js.
+//
 // control-styles.js joined the directory in the 2026-09-10 design pass
 // and is **not** a component: it defines no custom element and holds no
 // template. It is the one statement of what a button and a field look
@@ -235,6 +244,7 @@ func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	found := componentFiles(t)
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
+		filepath.Join("static", "components", "mst-dialog.js"),
 		filepath.Join("static", "components", "mst-ground.js"),
 		filepath.Join("static", "components", "mst-hint.js"),
 		filepath.Join("static", "components", "mst-picker.js"),

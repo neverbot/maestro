@@ -91,8 +91,31 @@ function mount({ tokens = [], hash = "" } = {}) {
   // rather than the tab's id, so the harness has to carry it too.
   elements["tab-game"].setAttribute("data-panel", "panel-game");
   elements["tab-agents"].setAttribute("data-panel", "panel-agents");
+  // The dialog mounts itself into the document's body, so the harness
+  // has one for it to find. It is a mount point and not a stub element:
+  // the strict stub only accepts its own elements as children, and what
+  // is being appended here is a custom element.
+  const body = { children: [], append(...nodes) { this.children.push(...nodes); } };
+  // **A custom element is upgraded, as a browser upgrades it.** The
+  // stub records definitions and hands back plain elements, so a
+  // document that did not upgrade would give the dialog a div with no
+  // behaviour and every assertion below would be about nothing.
+  const create = (tag) => {
+    if (typeof tag === "string" && tag.includes("-")) {
+      const Ctor = globalThis.customElements.get(tag);
+      if (Ctor) {
+        const made = new Ctor();
+        made.ownerDocument = doc;
+        made.hidden = false;
+        return made;
+      }
+    }
+    return dom.document.createElement(tag);
+  };
   const doc = {
-    createElement: (tag) => dom.document.createElement(tag),
+    body,
+    activeElement: null,
+    createElement: create,
     getElementById: (id) => (Object.prototype.hasOwnProperty.call(elements, id) ? elements[id] : null),
   };
   const calls = [];
@@ -122,6 +145,7 @@ function mount({ tokens = [], hash = "" } = {}) {
   globalThis.window = win;
   return {
     opened: { document: doc, client, origin: ORIGIN, slug: "ashfall" },
+    doc,
     elements,
     calls,
     copied,
@@ -202,51 +226,71 @@ check("anEditorMayMint", async () => {
 
 // --- The token itself -------------------------------------------------
 
-check("theTokenIsRenderedOnceWithItsCommand", () => {
+check("theTokenIsShownInADialogTheReaderCanClose", () => {
   const world = mount();
-  settings.showIssuedToken(world.opened, TOKEN);
-  assertEqual(world.elements["token-issued"].hidden, false, "the token was minted and never shown");
-  assertEqual(world.elements["token-value"].textContent, TOKEN, "the token is not on the page");
+  const dialog = settings.showIssuedToken(world.opened, TOKEN);
+  assert(dialog, "minting a token opened nothing at all");
+  assertEqual(dialog.hidden, false, "the dialog was built and never shown");
+  assertEqual(dialog.titleEl.textContent, settings.TOKEN_ISSUED_TITLE, "the dialog does not say what it is");
+  const said = dialog.bodyEl.textContent;
+  assert(said.includes(TOKEN), "the token is not in the dialog");
+  assert(said.includes(settings.installCommand(ORIGIN, TOKEN)), "the command is not in the dialog");
+  assert(said.includes("only time"), "nothing says this is the only time the token is shown");
+  assert(said.includes("fetches Maestro's instructions"), "nothing says the agent fetches its own instructions");
+});
+
+// The whole reason it is a dialog: the secret leaves the screen when the
+// reader is done with it, and it does not stay behind in a hidden node.
+check("closingTakesTheSecretWithIt", () => {
+  const world = mount();
+  const dialog = settings.showIssuedToken(world.opened, TOKEN);
+  dialog.close();
+  assertEqual(dialog.hidden, true, "the dialog stayed open");
+  assertEqual(dialog.bodyEl.textContent, "", "the token is still in the page, one inspector away");
+});
+
+check("escapeClosesIt", () => {
+  const world = mount();
+  const dialog = settings.showIssuedToken(world.opened, TOKEN);
+  dialog.dispatchEvent({ type: "keydown", key: "Escape" });
+  assertEqual(dialog.hidden, true, "Escape does not close the dialog");
+});
+
+check("tabStaysInsideTheDialog", () => {
+  const world = mount();
+  const dialog = settings.showIssuedToken(world.opened, TOKEN);
+  const stops = dialog.focusable();
+  assert(stops.length >= 3, `the trap can reach ${stops.length} controls, want the two copies and the dismiss`);
   assertEqual(
-    world.elements["token-snippet"].textContent,
-    settings.installCommand(ORIGIN, TOKEN),
-    "the command on the page is not the one this module builds",
-  );
-  assert(
-    world.elements["token-once"].textContent.includes("only time"),
-    "nothing says this is the only time the token is shown",
-  );
-  assert(
-    world.elements["token-next"].textContent.includes("fetches Maestro's instructions"),
-    "nothing says the agent fetches its own instructions",
+    stops[stops.length - 1].textContent,
+    settings.DONE_LABEL,
+    "the last stop inside the dialog is not the control that closes it",
   );
 });
 
 check("copyingPutsTheTokenAndTheCommandOnTheClipboard", async () => {
   const world = mount();
-  settings.showIssuedToken(world.opened, TOKEN);
-  await world.elements["copy-token"].listeners; // no-op: onclick, not a listener
-  await world.elements["copy-token"].onclick();
-  await world.elements["copy-snippet"].onclick();
+  const dialog = settings.showIssuedToken(world.opened, TOKEN);
+  const buttons = dialog.focusable().filter((stop) => stop.textContent === settings.COPY_LABEL);
+  assertEqual(buttons.length, 2, "the dialog does not offer a copy for both values");
+  await buttons[0].click();
+  await buttons[1].click();
   assertEqual(world.copied[0], TOKEN, "the token did not reach the clipboard");
   assertEqual(
     world.copied[1],
     settings.installCommand(ORIGIN, TOKEN),
     "the command did not reach the clipboard",
   );
-  assertEqual(world.elements["copy-token"].textContent, settings.COPIED, "the button said nothing back");
+  assertEqual(buttons[0].textContent, settings.COPIED, "the button said nothing back");
 });
 
 check("aCopyThatFailedSaysSo", async () => {
   const world = mount();
   setClipboard({ async writeText() { throw new Error("denied"); } });
-  settings.showIssuedToken(world.opened, TOKEN);
-  await world.elements["copy-token"].onclick();
-  assertEqual(
-    world.elements["copy-token"].textContent,
-    settings.COPY_FAILED,
-    "a copy that failed left the button saying it had worked",
-  );
+  const dialog = settings.showIssuedToken(world.opened, TOKEN);
+  const copy = dialog.focusable().find((stop) => stop.textContent === settings.COPY_LABEL);
+  await copy.click();
+  assertEqual(copy.textContent, settings.COPY_FAILED, "a copy that failed left the button saying it had worked");
 });
 
 // --- The list ---------------------------------------------------------
@@ -308,7 +352,10 @@ check("mintingAsksTheServerAndShowsWhatItAnswered", async () => {
     world.calls.some((c) => c[0] === "createToken" && c[1] === "my laptop"),
     `the label was not sent as typed: ${JSON.stringify(world.calls)}`,
   );
-  assertEqual(world.elements["token-value"].textContent, TOKEN, "what the server minted was not shown");
+  assert(
+    world.doc._mstDialog && world.doc._mstDialog.bodyEl.textContent.includes(TOKEN),
+    "what the server minted was not shown",
+  );
   assertEqual(world.elements["token-label"].value, "", "the field kept the label of a token already minted");
 });
 

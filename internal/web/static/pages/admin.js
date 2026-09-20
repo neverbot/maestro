@@ -166,6 +166,17 @@ export async function loadInvites(doc, onRevoke) {
 
 // One link and the button that copies it. A copy that fails leaves the
 // link on screen, selectable, which is what it was there for anyway.
+//
+// **This is the other secret shown once, and it deliberately does not
+// use components/mst-dialog.js.** The token on the Agents tab moved into
+// a dialog so a credential stops sitting on a screen nobody is watching;
+// an invitation link is the same shape and the opposite case. Creating a
+// second invitation used to destroy the first link on screen — the only
+// copy of a still-valid secret, gone, with nothing said — and the fix
+// was to keep every link of this sitting and mark the earlier ones. A
+// dialog is dismissed, and dismissing it is exactly that defect again,
+// performed by the reader instead of by the page. So the links stay,
+// and this comment is here so the next survey does not "finish the job".
 export function inviteLink(doc, href) {
   const line = doc.createElement("div");
   line.className = "secret-line";

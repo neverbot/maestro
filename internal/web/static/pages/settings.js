@@ -32,6 +32,7 @@ import {
   setBreadcrumb,
 } from "./page.js";
 import { goToLogin, setFormBusy } from "../app.js";
+import { openDialog } from "../components/mst-dialog.js";
 
 // What the warning says, with this game's own address in it. The
 // sentence names the thing that is about to stop working rather than
@@ -244,14 +245,16 @@ export function tokenRow(doc, token, onRevoke) {
   by.textContent = token.minted_by ? "created by " + token.minted_by : "";
   item.append(by);
 
-  const state = doc.createElement("span");
-  state.className = "muted";
+  // **Four cells, always.** A revoked row that simply left the control
+  // out shortened itself by a column and stopped lining up with the rows
+  // above it; the word goes where the button would be.
   if (token.revoked_at) {
+    const state = doc.createElement("span");
+    state.className = "token-state";
     state.textContent = REVOKED;
     item.append(state);
     return item;
   }
-  item.append(state);
 
   // **Armed in the row, not in a dialog.** A modal is this product's
   // first-reach ban, and revoking is the one destructive thing on this
@@ -404,30 +407,74 @@ export async function agentsTab(opened, role) {
   await refresh();
 }
 
-// showIssuedToken is the one place a clear token is ever rendered. It is
-// never stored, never put in the address, and never read back out of the
-// page: the panel holds it until the next navigation and that is all.
+// showIssuedToken is the one place a clear token is ever rendered, and
+// it renders it **in a dialog the reader closes**.
+//
+// It was a panel on the page, and a panel is the wrong shape for this
+// twice over: a credential nobody can dismiss stays on screen while its
+// owner walks away from the desk, and it pushed the list of tokens half
+// a window down, so the screen said two things at once. Closing the
+// dialog empties it, so the token is not left in a hidden node either.
 export function showIssuedToken(opened, token) {
   const doc = opened.document;
-  const panel = doc.getElementById("token-issued");
-  if (!panel) return;
   const origin = opened.origin || (globalThis.window && globalThis.window.location
     ? globalThis.window.location.origin
     : "");
   const command = installCommand(origin, token);
 
-  say(doc.getElementById("token-once"), TOKEN_ONCE);
-  say(doc.getElementById("token-value"), token);
-  say(doc.getElementById("token-snippet"), command);
-  say(doc.getElementById("token-elsewhere"), elsewhereSentence(origin));
-  say(doc.getElementById("token-next"), TOKEN_NEXT);
+  const note = doc.createElement("p");
+  note.className = "note";
+  note.textContent = TOKEN_ONCE;
 
-  const copyToken = doc.getElementById("copy-token");
-  if (copyToken) copyToken.onclick = () => void copyInto(copyToken, token);
-  const copySnippet = doc.getElementById("copy-snippet");
-  if (copySnippet) copySnippet.onclick = () => void copyInto(copySnippet, command);
+  const content = [
+    note,
+    copyable(doc, "The token", token, "token-value"),
+    copyable(doc, "In Claude Code", command, "token-snippet"),
+    line(doc, elsewhereSentence(origin)),
+    line(doc, TOKEN_NEXT),
+  ];
+  return openDialog(doc, { title: TOKEN_ISSUED_TITLE, content, dismissLabel: DONE_LABEL });
+}
 
-  panel.hidden = false;
+export const TOKEN_ISSUED_TITLE = "Token created";
+export const DONE_LABEL = "Done";
+export const COPY_LABEL = "Copy";
+
+// A labelled value and the button that copies it. Two of them, and they
+// are built rather than written into the shell because the dialog they
+// live in does not exist until a token does.
+export function copyable(doc, label, value, id) {
+  const wrap = doc.createElement("div");
+
+  const name = doc.createElement("label");
+  name.setAttribute("for", id);
+  name.textContent = label;
+  wrap.append(name);
+
+  const row = doc.createElement("div");
+  row.className = "copyable";
+
+  const code = doc.createElement("code");
+  code.setAttribute("id", id);
+  code.textContent = value;
+  row.append(code);
+
+  const copy = doc.createElement("button");
+  copy.type = "button";
+  copy.className = "ghost";
+  copy.textContent = COPY_LABEL;
+  copy.addEventListener("click", () => void copyInto(copy, value));
+  row.append(copy);
+
+  wrap.append(row);
+  return wrap;
+}
+
+function line(doc, text) {
+  const p = doc.createElement("p");
+  p.className = "muted";
+  p.textContent = text;
+  return p;
 }
 
 if (globalThis.document && globalThis.document.getElementById("game-settings")) {

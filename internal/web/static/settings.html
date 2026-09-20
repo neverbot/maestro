@@ -108,30 +108,6 @@
 <!-- The hole for a reader who may list and revoke but not mint. -->
 <div id="agents-refused" hidden></div>
 
-<!-- **Shown once and never again.** The clear token comes back from the
-     call that mints it and from nowhere else; pages/settings.js fills
-     this and the page never reads it back from anywhere. -->
-<div id="token-issued" hidden>
-  <p class="notice" id="token-once"></p>
-
-  <label for="token-value">The token</label>
-  <div class="copyable">
-    <code id="token-value"></code>
-    <button type="button" id="copy-token">Copy</button>
-  </div>
-
-  <label for="token-snippet">In Claude Code</label>
-  <div class="copyable">
-    <code id="token-snippet"></code>
-    <button type="button" id="copy-snippet">Copy</button>
-  </div>
-
-  <!-- The same three facts apart, for a client that is not Claude Code:
-       an address, a header and a transport. -->
-  <p class="muted" id="token-elsewhere"></p>
-  <p class="muted" id="token-next"></p>
-</div>
-
 <h2>Tokens</h2>
 <div class="scroller">
   <ul class="catalogue tokens" id="tokens" hidden></ul>

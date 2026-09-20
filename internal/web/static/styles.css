@@ -916,48 +916,60 @@ ul.catalogue .link-button {
   border-bottom-color: var(--focus);
 }
 
-/* --- A value somebody has to copy -------------------------------------
- *
- * The token and the command it goes into. Mono, on the raised ground, in
- * a box that wraps rather than scrolls: a command a reader cannot see
- * the end of is a command they cannot check before running it.
- */
-.copyable {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--s3);
-  max-width: 46rem;
-}
-
-.copyable code {
-  flex: 1;
-  min-width: 0;
-  padding: var(--s3);
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  font: 400 0.8125rem/1.5 var(--mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 /* The token list: a label, its fingerprint, who made it, and the one
    control. Not a catalogue — a catalogue is a table and this list
-   carries a button — so it states its own row. */
+   carries a button — so it states its own row.
+ *
+ * **The tracks are the list's, and the rows take them.** Each row used
+ * to be its own grid, which is the defect rows.js records for the
+ * catalogue: two rows with different name lengths disagree about where
+ * every column after the first begins, and a row whose token is revoked
+ * emits one cell fewer and disagrees with all of them. `subgrid` on the
+ * row is the same fix, and a revoked row now emits the same four cells
+ * as a live one, with the word where the button would be.
+ */
 ul.tokens {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   list-style: none;
-  margin: 0;
+  margin: var(--s4) 0 0;
   padding: 0;
   max-width: 46rem;
 }
 
 ul.tokens .token {
   display: grid;
-  grid-template-columns: minmax(0, max-content) auto 1fr auto auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: var(--s3);
-  padding: var(--s2) 0;
+  gap: var(--s4);
+  /* The row height every list in this product uses, rather than a
+     padding that happened to look right: a token list beside a
+     catalogue is two lists, and two lists with different rhythms read
+     as two designs. */
+  min-height: var(--row-h);
+  padding: 0 var(--s3);
   border-bottom: 1px solid var(--line);
+}
+
+ul.tokens .token:last-child {
+  border-bottom: none;
+}
+
+/* A long name gives way before anything else does, which is the same
+   rule the catalogue's own name track follows. */
+ul.tokens .token-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The state, where the control would be, so the column reads down the
+   list instead of jumping. */
+ul.tokens .token-state {
+  justify-self: end;
+  color: var(--muted);
 }
 
 ul.tokens .token-label {

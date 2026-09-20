@@ -56,6 +56,12 @@
 // Every rule below names a token and no rule spells a colour, a radius or
 // a duration literally — internal/web/static_tokens_test.go reads this
 // file the way it reads the stylesheet.
+// **What is left here is only what a page stylesheet cannot say.**
+// `:host` has no meaning outside a shadow root and `:focus-visible`
+// inside one is not reached by the page's own rule. Every other control
+// rule moved to static/controls.css, which this module fetches once and
+// every shadow root adopts — see the sheet's own header for why one
+// statement replaced two.
 export const CONTROL_CSS = `
 :host {
   color: var(--ink);
@@ -71,172 +77,6 @@ export const CONTROL_CSS = `
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-
-button {
-  font: inherit;
-  height: var(--control-h);
-  padding: 0 13px;
-  cursor: pointer;
-  border: 1px solid var(--ink);
-  border-radius: var(--radius);
-  background: var(--ink);
-  color: var(--paper);
-  box-shadow: var(--shadow-1);
-  transition: background var(--dur-state) var(--ease);
-}
-
-/* The primary button is ink on paper and never accent on accent-ink: a
-   filled accent button would spend the accent on a fourth meaning and
-   make every screen carrying a form the loudest screen in the product. */
-button:hover:not(:disabled) {
-  background: var(--ink-hover);
-  /* The fill alone is a 1.18:1 change and nobody could see it; the
-     button lifts as well. styles.css carries the same pair. */
-  box-shadow: var(--shadow-2);
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: default;
-  box-shadow: none;
-}
-
-/* Secondary. Most controls in this product are secondary — a screen has
-   one most-likely action and the rest are ghosts. */
-button.ghost {
-  background: transparent;
-  color: var(--ink);
-  border-color: var(--line-strong);
-  box-shadow: none;
-}
-
-/* A ghost lifts off the surface it stands on. It painted --ground,
-   which is the page's own background, so the hover was invisible
-   everywhere the page is the surface — styles.css carried the same bug
-   and they are fixed together, because a control that answers the
-   pointer differently inside and outside a shadow root is exactly what
-   this file exists to prevent. */
-button.ghost:hover:not(:disabled) {
-  background: var(--raised);
-  border-color: var(--ink);
-}
-
-/* The pressed state. Nothing in this product had one. */
-button:active:not(:disabled) {
-  box-shadow: none;
-  background: var(--ink-hover);
-}
-
-button.ghost:active:not(:disabled) {
-  background: var(--ground);
-  box-shadow: none;
-}
-
-/* Armed: a destructive control that has asked once and is waiting for
-   the answer. The word is the one this system spends on a fault, on the
-   label that now says what the next click does. */
-button[data-armed="true"] {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-
-/* An action that reads as a sentence rather than as a target. It carries
-   no box at all, because a box around three words in a paragraph is the
-   thing that makes a paragraph look like a form. */
-button.link {
-  height: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  box-shadow: none;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-button.link:hover:not(:disabled) {
-  background: none;
-  color: var(--focus);
-  text-decoration-thickness: 2px;
-}
-
-input,
-select,
-textarea {
-  font: inherit;
-  height: var(--control-h);
-  padding: 0 9px;
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--raised);
-}
-
-textarea {
-  height: auto;
-  padding: var(--s2) 9px;
-}
-
-input::placeholder,
-textarea::placeholder {
-  color: var(--muted);
-}
-
-input:hover:not(:disabled):not(:focus),
-select:hover:not(:disabled):not(:focus),
-textarea:hover:not(:disabled):not(:focus) {
-  border-color: var(--line-strong);
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: var(--focus);
-}
-
-/* A file input renders its own button, which the rule above does not
-   reach; it is named here so the one control a person uploads an image
-   with is not the only platform-styled thing left on the screen. */
-input[type="file"] {
-  height: auto;
-  padding: var(--s1) 0;
-  border: 0;
-  background: none;
-}
-
-/* Exactly one chip in a group is selected, and the selected chip is the
-   only surface in this product the accent fills. */
-button.chip {
-  height: 26px;
-  padding: 0 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  box-shadow: none;
-}
-
-button.chip:hover:not(:disabled) {
-  background: var(--ground);
-  color: var(--ink);
-}
-
-button.chip[aria-pressed="true"] {
-  background: var(--focus);
-  border-color: var(--focus);
-  color: var(--focus-ink);
-  font-weight: 500;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
 `;
 
 // For the Lit components, which wrap it themselves:
@@ -251,16 +91,58 @@ a:hover {
 // A shadow root that cannot adopt is left unstyled and honest about it,
 // which is the same decision adoptCanvasStyles already made and the
 // reason this one is written to match rather than to improve on it.
-export function adoptControlStyles(shadow) {
-  if (!shadow || !Array.isArray(shadow.adoptedStyleSheets)) return null;
+// CONTROLS_HREF is the one file that says what a control looks like. It
+// is fetched rather than inlined because the page reads the very same
+// bytes through an @import: two readers, one statement.
+export const CONTROLS_HREF = "/static/controls.css";
+
+// The shared sheet. **One `CSSStyleSheet` for the whole document**, not
+// one per shadow root: a constructed sheet may be adopted by any number
+// of roots, so every component is dressed by the same object and a
+// future edit cannot reach half of them.
+//
+// It is created empty and filled when the fetch answers. A shadow root
+// that mounts in that window is unstyled for a frame and then correct,
+// which is the same trade every component here already made for a sheet
+// that fails to construct at all.
+let controlsSheet = null;
+
+export function sharedControlSheet(fetchImpl) {
+  if (controlsSheet) return controlsSheet;
   if (typeof CSSStyleSheet !== "function") return null;
-  let sheet;
   try {
-    sheet = new CSSStyleSheet();
-    sheet.replaceSync(CONTROL_CSS);
+    controlsSheet = new CSSStyleSheet();
   } catch {
     return null;
   }
-  shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, sheet];
-  return sheet;
+  const load = fetchImpl || (typeof fetch === "function" ? fetch : null);
+  if (!load) return controlsSheet;
+  Promise.resolve(load(CONTROLS_HREF))
+    .then((answer) => (answer && typeof answer.text === "function" ? answer.text() : ""))
+    .then((css) => {
+      if (typeof css === "string" && css !== "") controlsSheet.replaceSync(css);
+    })
+    .catch(() => {});
+  return controlsSheet;
+}
+
+// adoptControlStyles dresses one shadow root: the shared vocabulary
+// first, then the two rules that only mean something inside a root.
+//
+// It returns the host sheet it built, which is what the callers that
+// check for null already expect.
+export function adoptControlStyles(shadow) {
+  if (!shadow || !Array.isArray(shadow.adoptedStyleSheets)) return null;
+  if (typeof CSSStyleSheet !== "function") return null;
+  let host;
+  try {
+    host = new CSSStyleSheet();
+    host.replaceSync(CONTROL_CSS);
+  } catch {
+    return null;
+  }
+  const shared = sharedControlSheet();
+  const sheets = shared ? [shared, host] : [host];
+  shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, ...sheets];
+  return host;
 }

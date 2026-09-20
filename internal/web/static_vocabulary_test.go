@@ -181,11 +181,25 @@ var controlsTheStylesheetMustDress = []string{"button", "input", "select"}
 // like is a design decision and this is a check that one was made.
 func TestTheStylesheetDressesEveryLightDomControl(t *testing.T) {
 	t.Parallel()
+	// **The page's controls are dressed by static/controls.css**, which
+	// styles.css imports and every shadow root adopts: one statement,
+	// read by both sides of the boundary. This test reads the pair,
+	// because "the page dresses its controls" is now true of the two
+	// files together and of neither alone.
 	body, err := os.ReadFile(filepath.Join("static", "styles.css"))
 	if err != nil {
 		t.Fatalf("read styles.css: %v", err)
 	}
-	sheet := string(body)
+	shared, err := os.ReadFile(filepath.Join("static", "controls.css"))
+	if err != nil {
+		t.Fatalf("read controls.css: %v", err)
+	}
+	// And the import is what makes the page read it at all: without that
+	// line the vocabulary exists and reaches nothing.
+	if !strings.Contains(string(body), `@import url("/static/controls.css")`) {
+		t.Fatal("styles.css does not import the control vocabulary, so the page is dressed by nothing")
+	}
+	sheet := string(body) + "\n" + string(shared)
 
 	var missing []string
 	for _, control := range controlsTheStylesheetMustDress {

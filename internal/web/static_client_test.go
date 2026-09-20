@@ -138,9 +138,24 @@ var networkPrimitives = regexp.MustCompile(
 // existing HTML shells make (fetchAPI, postJSON, fetchGames); doc.js
 // reaches the server only through those, and is deliberately *not* on
 // this list, which is what makes the list mean something.
+// components/control-styles.js is the third, and it is on this list for
+// a reason none of the data rules touch: what it fetches is **a
+// stylesheet, not data**. There is one statement of what a control looks
+// like (static/controls.css); the page reads it through an `@import` and
+// every shadow root adopts the same constructed sheet, which has to be
+// read from somewhere. The alternative was the one this repository had —
+// the vocabulary written twice, in the sheet and in a JavaScript string
+// — and it diverged: an invisible hover shipped on both sides of the
+// shadow boundary and had to be found twice.
+//
+// It reaches its own origin, for a file this server serves, and no page
+// waits on it: a root that mounts before the sheet arrives is unstyled
+// for a frame. Nothing about "one module owns the data" is weakened,
+// which is what this list is for.
 var modulesAllowedToFetch = map[string]string{
-	"static/client.js": "the data client: one fetcher for every call and the stream",
-	"static/app.js":    "the shipped page bundle, whose wrappers every other page calls",
+	"static/client.js":                    "the data client: one fetcher for every call and the stream",
+	"static/app.js":                       "the shipped page bundle, whose wrappers every other page calls",
+	"static/components/control-styles.js": "the one control stylesheet, read once and adopted by every shadow root",
 }
 
 // TestOnlyTheDataClientAndTheShippedBundleFetch holds the architectural

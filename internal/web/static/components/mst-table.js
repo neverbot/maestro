@@ -25,7 +25,7 @@
 
 import { LitElement, css, html, nothing, unsafeCSS } from "lit";
 
-import { CONTROL_CSS } from "./control-styles.js";
+import { CONTROL_CSS, adoptControlStyles } from "./control-styles.js";
 
 import { ASCENDING, tableScene } from "../render/table.js";
 
@@ -147,6 +147,21 @@ export class MstTable extends LitElement {
     }
   `,
   ];
+
+  // The shared control vocabulary is a fetched sheet rather than a
+  // string, so it cannot be spread into `static styles`; `CONTROL_CSS`
+  // there is only the two rules a page stylesheet cannot express.
+  //
+  // **`firstUpdated` and not `connectedCallback`**: Lit builds the
+  // render root on its first update, so a call from connectedCallback
+  // adopts into `undefined` and does nothing at all — silently, because
+  // adoptControlStyles answers null for a root it cannot dress. Which is
+  // exactly the shape of defect this repository keeps recording: correct
+  // in the module, dead at the call site.
+  firstUpdated() {
+    adoptControlStyles(this.renderRoot);
+  }
+
 
   render() {
     const table = this.table;

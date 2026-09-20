@@ -85,7 +85,12 @@ func TestTheHintPanelIsASurfaceAndNotABox(t *testing.T) {
 // prevent.
 func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 	t.Parallel()
-	for _, path := range []string{"static/styles.css", "static/components/control-styles.js"} {
+	// **One file, where there were two.** The ghost's rule used to be
+	// written in the stylesheet and again in the components' own string,
+	// which is why this defect had to be found twice; static/controls.css
+	// is now the only place it exists, and control-styles.js is checked
+	// for having stopped carrying a second copy.
+	for _, path := range []string{"static/controls.css"} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -105,6 +110,21 @@ func TestEveryControlAnswersThePointerAndThePress(t *testing.T) {
 		}
 		if !strings.Contains(source, ":active:not(:disabled)") {
 			t.Errorf("%s: no control has a pressed state", path)
+		}
+	}
+
+	// The second copy must stay gone. control-styles.js may say what a
+	// page stylesheet cannot — `:host`, and the focus ring inside a
+	// shadow root — and nothing else: a `button` rule there is the
+	// divergence this consolidation removed, growing back.
+	raw, err := os.ReadFile("static/components/control-styles.js")
+	if err != nil {
+		t.Fatalf("read control-styles.js: %v", err)
+	}
+	for _, selector := range []string{"button {", "button.ghost", "input,", ".chip {"} {
+		if strings.Contains(string(raw), selector) {
+			t.Errorf("control-styles.js writes `%s` again: the control vocabulary is "+
+				"static/controls.css, which every shadow root adopts", selector)
 		}
 	}
 }
@@ -224,11 +244,18 @@ var standsOnPaper = map[string]bool{
 // in luminance, which is why it now lifts as well.
 func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 	t.Parallel()
+	// The control vocabulary and the screens' own rules, read together:
+	// a button is dressed by static/controls.css and a tab by the
+	// stylesheet, and both are things a person points at.
 	raw, err := os.ReadFile("static/styles.css")
 	if err != nil {
 		t.Fatalf("read styles.css: %v", err)
 	}
-	styles := string(raw)
+	shared, err := os.ReadFile("static/controls.css")
+	if err != nil {
+		t.Fatalf("read controls.css: %v", err)
+	}
+	styles := string(raw) + "\n" + string(shared)
 
 	for _, control := range interactiveControls {
 		rule := ruleFor(styles, control.selector)

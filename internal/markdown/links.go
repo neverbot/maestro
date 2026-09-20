@@ -23,19 +23,19 @@ import (
 // (document, entity), so free text cannot produce two attachments of one
 // pair under two spellings.
 //
-// TestALinkRoleIsBoundedAsTheCallersOwnArgument pins the bound, its
-// boundary, the control-character refusal, and that the role is stored
-// exactly as written.
+// TestLinksArea's "a link role is bounded as the callers own argument" case
+// pins the bound, its boundary, the control-character refusal, and that the
+// role is stored exactly as written.
 const MaxRoleLen = 64
 
 // MaxLinksPerWrite bounds the links array a single write may carry.
 //
-// A document about a hundred entities is not a document, it is a
-// taxonomy that should be entities and relations. The bound is here so
-// that a caller that has confused the two is told, at its own argument,
-// rather than discovering it as a slow write.
-// TestAWriteCarryingTooManyAttachmentsIsRefusedAtLinks pins it, and
-// pins that the refusal lands before anything is written.
+// A document about a hundred entities is not a document, it is a taxonomy
+// that should be entities and relations. The bound is here so that a caller
+// that has confused the two is told, at its own argument, rather than
+// discovering it as a slow write. TestLinksArea's "a write carrying too
+// many attachments is refused at links" case pins it, and pins that the
+// refusal lands before anything is written.
 const MaxLinksPerWrite = 100
 
 // LinkTarget is one end of an attachment: the entity, and the role the
@@ -101,14 +101,14 @@ type DocumentLink struct {
 // LinkAdd attaches a document to an entity, or updates the role of an
 // attachment that is already there.
 //
-// It does not take an expected_version and does not move the document's
-// own version, deliberately. A link is not the document's content: two
-// people attaching one script to two different quests are not editing
-// the same thing, and making them serialise on the document's version
-// would turn an independent operation into a conflict. What that costs
-// is that a link change is not in the version history, which is the
-// right trade — the history is the history of the *writing*.
-// TestLinkingIsAnnounced reads the unmoved version back off the event.
+// It does not take an expected_version and does not move the document's own
+// version, deliberately. A link is not the document's content: two people
+// attaching one script to two different quests are not editing the same
+// thing, and making them serialise on the document's version would turn an
+// independent operation into a conflict. What that costs is that a link
+// change is not in the version history, which is the right trade — the
+// history is the history of the *writing*. TestLinksArea's "linking is
+// announced" case reads the unmoved version back off the event.
 //
 // **Attachment is never inferred from content.** Not from frontmatter,
 // not from a heading that happens to match an entity's name. A wrong
@@ -158,9 +158,10 @@ func (s *Service) LinkAdd(ctx context.Context, projectID uuid.UUID, in LinkInput
 //
 // Removing an attachment that is not there is not_found rather than
 // silence: an agent that detached the wrong pair, or that detached the
-// right pair twice, has made a mistake it can act on, and "it worked"
-// tells it nothing. TestRemovingALinkLeavesTheDocumentAndTheEntity pins
-// both the refusal and that neither endpoint is touched by a removal.
+// right pair twice, has made a mistake it can act on, and "it worked" tells
+// it nothing. TestLinksArea's "removing a link leaves the document and the
+// entity" case pins both the refusal and that neither endpoint is touched
+// by a removal.
 //
 // LinkRemove's argument carries no role, and the reason is the key: an
 // attachment is identified by (document, entity), so there is no second
@@ -273,12 +274,11 @@ type DocumentLinkPage struct {
 // LinksByDocument lists one page of everything a document is attached
 // to.
 //
-// TestALinkAttachesADocumentToAnEntityAndReadsBackFromBothSides reads
-// every column back through it,
-// TestADocumentIsAttachedToSeveralEntitiesAndListedInAStableOrder pins
-// the order, and
-// TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide pins the
-// paging.
+// TestLinksArea's "a link attaches a document to an entity and reads back
+// from both sides" case reads every column back through it, TestLinksArea's
+// "a document is attached to several entities and listed in a stable order"
+// case pins the order, and TestLinksArea's "a documents attachments page
+// and the cursor belongs to its own side" case pins the paging.
 func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path string,
 	f LinksFilter,
 ) (EntityLinkPage, error) {
@@ -308,10 +308,10 @@ func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path
 	if err != nil {
 		return EntityLinkPage{}, fmt.Errorf("list links by document: %w", err)
 	}
-	// Never nil: an empty slice marshals as [], and "this document is
-	// attached to nothing" must not reach a client as null.
-	// TestADocumentWithNoAttachmentsIsAnOrdinaryDocument pins it,
-	// through encoding/json rather than by asserting non-nilness alone.
+	// Never nil: an empty slice marshals as [], and "this document is attached
+	// to nothing" must not reach a client as null. TestLinksArea's "a document
+	// with no attachments is an ordinary document" case pins it, through
+	// encoding/json rather than by asserting non-nilness alone.
 	page := EntityLinkPage{Links: make([]EntityLink, 0, len(rows))}
 	for _, row := range rows {
 		page.Links = append(page.Links, EntityLink{
@@ -349,11 +349,12 @@ func (s *Service) LinksByDocument(ctx context.Context, projectID uuid.UUID, path
 //
 // **No behaviour test goes red when the two names are collapsed into
 // one**, and that is said here rather than left for someone to discover:
-// TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide refuses
-// the crossing today because a document id and an entity id are
-// different uuids, which is arithmetic and not the rule. The composition
-// is pinned instead, by TestTheTwoSidesOfTheJoinDoNotShareAFingerprint,
-// which builds both sides from one id.
+// TestLinksArea's "a documents attachments page and the cursor belongs to
+// its own side" case refuses the crossing today because a document id and
+// an entity id are different uuids, which is arithmetic and not the rule.
+// The composition is pinned instead, by
+// TestTheTwoSidesOfTheJoinDoNotShareAFingerprint, which builds both sides
+// from one id.
 func documentLinksFingerprint(projectID, documentID uuid.UUID) string {
 	return paging.Fingerprint(projectID.String(), "document_links_by_document",
 		documentID.String())
@@ -363,11 +364,11 @@ func documentLinksFingerprint(projectID, documentID uuid.UUID) string {
 // the UI builds an entity page, and how an agent asked to rewrite the
 // Hogger dialogue finds the document from the quest.
 //
-// Soft-deleted documents are not listed: an entity page naming prose
-// nobody can read is a dead link on every quest it was attached to. The
-// link row itself survives the deletion and comes back with the document
-// (TestAnEntityStopsListingADocumentThatWasDeleted, which pins both
-// halves).
+// Soft-deleted documents are not listed: an entity page naming prose nobody
+// can read is a dead link on every quest it was attached to. The link row
+// itself survives the deletion and comes back with the document
+// (TestLinksArea's "an entity stops listing a document that was deleted"
+// case, which pins both halves).
 func (s *Service) LinksByEntity(ctx context.Context, projectID uuid.UUID,
 	entityType, entityKey string, f LinksFilter,
 ) (DocumentLinkPage, error) {
@@ -429,9 +430,9 @@ func entityLinksFingerprint(projectID, entityID uuid.UUID) string {
 }
 
 // documentForLinks resolves a path to the document links hang from. A
-// soft-deleted document is not found: attaching prose nobody can read
-// would put a dead entry on an entity page.
-// TestADeletedDocumentIsNotAnAddressForLinks pins both directions.
+// soft-deleted document is not found: attaching prose nobody can read would
+// put a dead entry on an entity page. TestLinksArea's "a deleted document
+// is not an address for links" case pins both directions.
 func (s *Service) documentForLinks(ctx context.Context, q *dbq.Queries, projectID uuid.UUID, path string) (dbq.Document, error) {
 	row, err := q.GetDocumentByPath(ctx, dbq.GetDocumentByPathParams{
 		ProjectID: projectID, Path: path, IncludeDeleted: false,
@@ -459,16 +460,16 @@ func (s *Service) documentForLinks(ctx context.Context, q *dbq.Queries, projectI
 // sent.
 //
 // The two keys go through metamodel.RowKeyProblems rather than through a
-// rule written here, because they are the metamodel's keys: the rule
-// that decides which spellings can exist is the one that must decide
-// which spellings can be asked for, and a second copy of it in this
-// package would drift the day either one is loosened. The concrete thing
-// it closes is an address Postgres itself refuses — an entity key
-// holding an invalid UTF-8 byte raises SQLSTATE 22021, which would reach
-// an agent as internal_error over a value the agent supplied, and this
-// package's standing rule is that nothing a caller can fix reports one.
-// TestAnEntityAddressIsBoundedBeforePostgresSeesIt pins it, at the
-// single-link path and inside a write's array.
+// rule written here, because they are the metamodel's keys: the rule that
+// decides which spellings can exist is the one that must decide which
+// spellings can be asked for, and a second copy of it in this package would
+// drift the day either one is loosened. The concrete thing it closes is an
+// address Postgres itself refuses — an entity key holding an invalid UTF-8
+// byte raises SQLSTATE 22021, which would reach an agent as internal_error
+// over a value the agent supplied, and this package's standing rule is that
+// nothing a caller can fix reports one. TestLinksArea's "an entity address
+// is bounded before postgres sees it" case pins it, at the single-link path
+// and inside a write's array.
 //
 // prefix is "" for the single-link calls and "links[i]." for an element
 // of a write's array.
@@ -495,12 +496,12 @@ func entityAddressProblems(prefix string, target LinkTarget) []metamodel.FieldEr
 // is wrong — the rule metamodel.parseIDs applies to a list of ids.
 //
 // **This is what the spec's proposed `entity_not_found` code was for**,
-// and it is why that code does not ship: the discrimination an agent
-// needs is *which argument*, and a path is that, as data. See
-// MissingError's own doc comment.
-// TestAMistypedEntityTypeAndAMistypedEntityKeyAreToldApart pins the two
-// misses apart, and TestABadLinkInAWriteRollsTheWholeWriteBack pins the
-// prefix.
+// and it is why that code does not ship: the discrimination an agent needs
+// is *which argument*, and a path is that, as data. See MissingError's own
+// doc comment. TestLinksArea's "a mistyped entity type and a mistyped
+// entity key are told apart" case pins the two misses apart, and
+// TestLinksArea's "a bad link in a write rolls the whole write back" case
+// pins the prefix.
 func (s *Service) resolveEntity(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	prefix string, target LinkTarget,
 ) (uuid.UUID, error) {
@@ -536,19 +537,18 @@ func (s *Service) resolveEntity(ctx context.Context, q *dbq.Queries, projectID u
 // address an entity an earlier element already addressed, folding case
 // the way the entity key's own unique index does.
 //
-// The metamodel's bulk writes settled the analogous question for a
-// batch that names one row twice: refused whole, up front, because a
-// caller who asked for two attachments to one entity cannot have that
-// request satisfied as submitted, and left to the writes the repetition
-// would surface as whichever spelling's UpsertDocumentLink ran last —
-// the second role silently winning over the first, with nothing telling
-// the caller half its array was discarded. That precedent is
-// `metamodel.bulkAtomic`'s `repeatedIdentities`, over rows in a batch
-// call; this is the same argument over targets in one write's array,
-// where "the same row" is the (entity type, entity key) pair the link's
-// own key is built from (LinkAdd's doc comment).
-// TestALinksArrayNamingOneEntityTwiceIsRefused pins it, at two
-// spellings of one key.
+// The metamodel's bulk writes settled the analogous question for a batch
+// that names one row twice: refused whole, up front, because a caller who
+// asked for two attachments to one entity cannot have that request
+// satisfied as submitted, and left to the writes the repetition would
+// surface as whichever spelling's UpsertDocumentLink ran last — the second
+// role silently winning over the first, with nothing telling the caller
+// half its array was discarded. That precedent is `metamodel.bulkAtomic`'s
+// `repeatedIdentities`, over rows in a batch call; this is the same
+// argument over targets in one write's array, where "the same row" is the
+// (entity type, entity key) pair the link's own key is built from
+// (LinkAdd's doc comment). TestLinksArea's "a links array naming one entity
+// twice is refused" case pins it, at two spellings of one key.
 func duplicateLinkTargets(targets []LinkTarget) []metamodel.FieldError {
 	first := make(map[string]int, len(targets))
 	var problems []metamodel.FieldError
@@ -573,8 +573,8 @@ func duplicateLinkTargets(targets []LinkTarget) []metamodel.FieldError {
 // replaceLinks is the links array a write carries. It runs inside the
 // write's own transaction, so a bad link rolls the body back with it: a
 // document and what it is about are one change, and half of it landing
-// would attach a script to a quest it no longer describes.
-// TestABadLinkInAWriteRollsTheWholeWriteBack pins both halves.
+// would attach a script to a quest it no longer describes. TestLinksArea's
+// "a bad link in a write rolls the whole write back" case pins both halves.
 func (s *Service) replaceLinks(ctx context.Context, q *dbq.Queries, projectID uuid.UUID,
 	documentID uuid.UUID, targets []LinkTarget,
 ) error {
@@ -601,13 +601,12 @@ func (s *Service) replaceLinks(ctx context.Context, q *dbq.Queries, projectID uu
 		}
 		keep = append(keep, entityID)
 	}
-	// pgx encodes a nil slice as SQL NULL, and `NOT (x = ANY(NULL))` is
-	// NULL, which deletes nothing — so an empty links array would
-	// silently preserve the set it was meant to clear. Measured, not
-	// assumed: with `keep` declared as a nil slice instead of the make
-	// above, the empty-array case of
-	// TestALinksArrayOnAWriteReplacesTheSetAndOmittingItPreservesIt
-	// fails with the-defias still attached.
+	// pgx encodes a nil slice as SQL NULL, and `NOT (x = ANY(NULL))` is NULL,
+	// which deletes nothing — so an empty links array would silently preserve
+	// the set it was meant to clear. Measured, not assumed: with `keep`
+	// declared as a nil slice instead of the make above, the empty-array case
+	// of TestLinksArea's "a links array on a write replaces the set and
+	// omitting it preserves it" case fails with the-defias still attached.
 	//
 	// The make above is what actually avoids it, so **this branch cannot
 	// fire as the function stands** and it is not claimed to be doing

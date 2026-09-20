@@ -102,13 +102,14 @@ const (
 	//
 	// The payload is a DocumentEvent like a write's, carrying the
 	// *tombstone's* version number rather than the last live one. That
-	// is the number a subscriber must compare against what it holds to
-	// know its copy is stale, and it is the number a caller passes as
-	// expected_version to bring the document back.
-	// TestADeletionIsAnnounced pins the kind and the version;
-	// TestNoDeletionIsAnnouncedWhenTheTombstoneCannotBeWritten pins
-	// that a delete which rolls back announces nothing, which is the
-	// case TestADeletionIsAnnounced cannot reach on its own.
+	// is the number a subscriber must compare against what it holds to know
+	// its copy is stale, and it is the number a caller passes as
+	// expected_version to bring the document back. TestDeleteArea's "a
+	// deletion is announced" case pins the kind and the version;
+	// TestDeleteArea's "no deletion is announced when the tombstone cannot be
+	// written" case pins that a delete which rolls back announces nothing,
+	// which is the case TestDeleteArea's "a deletion is announced" case cannot
+	// reach on its own.
 	eventDocumentDeleted = "document.deleted"
 
 	// eventDocumentReverted fires from Revert once its transaction has
@@ -127,9 +128,10 @@ const (
 	// that was restored as well as the new one, which is the whole
 	// difference.
 	//
-	// TestRevertIsAnnouncedWithTheVersionItRestored pins the kind and
-	// both numbers; TestNoRevertIsAnnouncedWhenTheRevertIsRefused pins
-	// that a revert which never happened announces nothing.
+	// TestVersionsArea's "revert is announced with the version it restored"
+	// case pins the kind and both numbers; TestVersionsArea's "no revert is
+	// announced when the revert is refused" case pins that a revert which
+	// never happened announces nothing.
 	eventDocumentReverted = "document.reverted"
 
 	// eventDocumentMoved fires from Move once its transaction has
@@ -148,13 +150,13 @@ const (
 	// where it has to look, and a payload carrying one path could only
 	// ever be half an instruction.
 	//
-	// The same argument is the whole reason this event has to exist at
-	// all rather than being folded into document.written. A move does
-	// not change a document's content, so a client that treated it as a
-	// write would re-fetch a path that is no longer there.
-	// TestAMoveIsAnnouncedWithBothEnds pins the kind and both paths;
-	// TestNoMoveIsAnnouncedWhenTheMoveIsRefused pins that a refused move
-	// announces nothing.
+	// The same argument is the whole reason this event has to exist at all
+	// rather than being folded into document.written. A move does not change a
+	// document's content, so a client that treated it as a write would
+	// re-fetch a path that is no longer there. TestMoveArea's "a move is
+	// announced with both ends" case pins the kind and both paths;
+	// TestMoveArea's "no move is announced when the move is refused" case pins
+	// that a refused move announces nothing.
 	eventDocumentMoved = "document.moved"
 
 	// eventDocumentLinked fires from LinkAdd, LinkRemove and any Write
@@ -165,25 +167,24 @@ const (
 	// content, and the viewer whose browser is rendering an entity page
 	// has no other way to learn that the page's list of documents moved.
 	//
-	// One kind covers attach and detach, deliberately: the payload
-	// carries the document's identity and nothing about the link set, so
-	// there is no sentence a client could write from "linked" that it
-	// could not write from "unlinked", and both have the same recovery —
-	// re-read the document's links, or the entity's. Two kinds would be
-	// two things to subscribe to for one refresh.
-	// TestLinkingIsAnnounced pins that both operations announce this one
-	// kind, and TestNoLinkIsAnnouncedWhenTheAttachmentIsRefused pins
-	// that a refused one announces nothing.
+	// One kind covers attach and detach, deliberately: the payload carries the
+	// document's identity and nothing about the link set, so there is no
+	// sentence a client could write from "linked" that it could not write from
+	// "unlinked", and both have the same recovery — re-read the document's
+	// links, or the entity's. Two kinds would be two things to subscribe to
+	// for one refresh. TestLinksArea's "linking is announced" case pins that
+	// both operations announce this one kind, and TestLinksArea's "no link is
+	// announced when the attachment is refused" case pins that a refused one
+	// announces nothing.
 	//
 	// **A write that carries a links array publishes both
-	// document.written and document.linked**, in that order. A client
-	// watching only one of them is watching for one of the two things
-	// that changed, and the alternative — folding the link change into
-	// the write event — would mean a client had to re-read links on
-	// every write in case one had.
-	// TestAWriteCarryingLinksAnnouncesBothTheWriteAndTheLink pins the
-	// order, and pins that an edit with no links array announces the
-	// write alone.
+	// document.written and document.linked**, in that order. A client watching
+	// only one of them is watching for one of the two things that changed, and
+	// the alternative — folding the link change into the write event — would
+	// mean a client had to re-read links on every write in case one had.
+	// TestLinksArea's "a write carrying links announces both the write and the
+	// link" case pins the order, and pins that an edit with no links array
+	// announces the write alone.
 	//
 	// The payload is a DocumentEvent, carrying the document's *unmoved*
 	// version: a link is not the document's content and LinkAdd does not
@@ -196,11 +197,11 @@ const (
 // documentEventMinRole and documentEventHumanOnly are the gating decided
 // above, named so the call sites read as the decision rather than as two
 // bare literals a later edit could drift apart. Tasks 4 and 6 both reuse
-// them — the kinds this package publishes are one
-// decision about one kind of fact, unlike the metamodel's four pairs,
-// which cover two genuinely different facts (a game's vocabulary and its
-// content). TestADocumentEventReachesAViewerAndATokenAlike is what pins
-// the two values; without it they are a comment.
+// them — the kinds this package publishes are one decision about one kind
+// of fact, unlike the metamodel's four pairs, which cover two genuinely
+// different facts (a game's vocabulary and its content).
+// TestDocumentsArea's "a document event reaches a viewer and a token alike"
+// case is what pins the two values; without it they are a comment.
 const (
 	documentEventMinRole   = roles.Role("")
 	documentEventHumanOnly = false

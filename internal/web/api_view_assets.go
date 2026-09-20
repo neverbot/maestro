@@ -46,10 +46,10 @@ import (
 // of a bound that is already applied while reading.
 //
 // The protection is unchanged either way — nothing here reads more than
-// eight megabytes and one byte off the socket, whichever object stops
-// it. internal/views' TestAssetsArea's "an oversize asset is refused before it is read" case counts
-// the bytes; TestAnOversizeUploadIsRefusedOverTheWire asserts that the
-// refusal reaches a browser as a 400 naming /bytes.
+// eight megabytes and one byte off the socket, whichever object stops it.
+// internal/views' TestAssetsArea's "an oversize asset is refused before it
+// is read" case counts the bytes; TestAnOversizeUploadIsRefusedOverTheWire
+// asserts that the refusal reaches a browser as a 400 naming /bytes.
 //
 // **Everything else about the bytes is decided in internal/views**, and
 // deliberately not here: the mime is sniffed there, the dimensions are

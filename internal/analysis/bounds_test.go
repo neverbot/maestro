@@ -96,11 +96,11 @@ func TestBounds(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the statement budget is clamped to its hard cap" case is the *other* side of the
-	// same rule, and the two are in one file on purpose. The statement
-	// budget is the package's one clamp, and it is allowed to be one because
-	// no caller can set it: there is nobody to mislead about the bound their
-	// answer was computed under.
+	// TestBoundsArea's "the statement budget is clamped to its hard cap" case
+	// is the *other* side of the same rule, and the two are in one file on
+	// purpose. The statement budget is the package's one clamp, and it is
+	// allowed to be one because no caller can set it: there is nobody to
+	// mislead about the bound their answer was computed under.
 	t.Run("the statement budget is clamped to its hard cap", func(t *testing.T) {
 		g := a.game(t)
 		if got := g.analysis.statementBudget(); got != DefaultStatementTimeout {
@@ -167,7 +167,8 @@ func TestBounds(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the budget postgres holds is the one this package computed" case.
+	// TestBoundsArea's "the budget postgres holds is the one this package
+	// computed" case.
 	//
 	// This is not decoration. On the default path the knob is zero, `0ms`
 	// means *no timeout at all* in Postgres, and a run that quietly lost its
@@ -204,10 +205,11 @@ func TestBounds(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the bounds do not leak onto the next caller" case. Both settings are installed
-	// with is_local = true, which is what SET LOCAL means, so a pooled
-	// connection handed to the next caller carries neither. Without it, one
-	// analysis would leave every later query on that connection read-only.
+	// TestBoundsArea's "the bounds do not leak onto the next caller" case.
+	// Both settings are installed with is_local = true, which is what SET
+	// LOCAL means, so a pooled connection handed to the next caller carries
+	// neither. Without it, one analysis would leave every later query on that
+	// connection read-only.
 	t.Run("the bounds do not leak onto the next caller", func(t *testing.T) {
 		g := a.game(t)
 		if err := g.analysis.runInTx(t.Context(), 250*time.Millisecond, "SELECT 1", nil,

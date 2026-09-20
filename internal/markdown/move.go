@@ -38,52 +38,53 @@ type MoveInput struct {
 //
 // **This is the whole point of the call and it is worth stating as a
 // contract rather than as an implementation note.** Before it existed, a
-// document written to the wrong path could only be re-written at the
-// right one and deleted at the old one, which forked its history in two:
-// the new path started at version one holding none of what came before,
-// and the old path kept everything under a tombstone nobody would think
-// to look at. Everything in this domain that is not the path hangs off
-// documents.id — every version row, every link row — so a move is one
-// UPDATE and none of them has to be touched. What survives a move, and
-// is pinned by name: the version numbering continues rather than
-// restarting (TestAMovedDocumentKeepsItsHistoryAndItsNumbering), every
-// attachment stays attached (TestAMovedDocumentKeepsItsLinks), and the
-// document's id, kind and creator are unchanged.
+// document written to the wrong path could only be re-written at the right
+// one and deleted at the old one, which forked its history in two: the new
+// path started at version one holding none of what came before, and the old
+// path kept everything under a tombstone nobody would think to look at.
+// Everything in this domain that is not the path hangs off documents.id —
+// every version row, every link row — so a move is one UPDATE and none of
+// them has to be touched. What survives a move, and is pinned by name: the
+// version numbering continues rather than restarting (TestMoveArea's "a
+// moved document keeps its history and its numbering" case), every
+// attachment stays attached (TestMoveArea's "a moved document keeps its
+// links" case), and the document's id, kind and creator are unchanged.
 //
 // **A case-only move is refused, and that is a decision rather than an
-// oversight.** documents_path_key is UNIQUE (project_id, lower(path)),
-// so `lore/Duskwood` and `lore/duskwood` are not two addresses — they
-// are one address spelled two ways, and every reader in this package
-// already finds the document under either. A "move" between them would
-// therefore change no address at all; it would rewrite a stored display
-// string, and this repository has already decided what happens when a
-// caller asks for that. metamodel.keyRespellingError refuses a case-only
-// respelling of a row key rather than silently updating the stored one,
-// and pathRespellingError refuses it for a document path on the write
-// path, for the reason both comments give: the stored spelling is the
-// handle other things refer to, and a typo'd capital must not be able to
-// move it under them. A move is a *stronger* case for the same answer,
-// not a weaker one — it is the call that would make the rewrite explicit
-// and durable, appending a version row and an event announcing a change
-// of address that no reader can observe. So the first spelling stored
-// stands here too, and the refusal names both spellings and says what a
-// caller who genuinely wants a different subtree should do instead.
-// TestACaseOnlyMoveIsRefusedAsARespelling pins it.
+// oversight.** documents_path_key is UNIQUE (project_id, lower(path)), so
+// `lore/Duskwood` and `lore/duskwood` are not two addresses — they are one
+// address spelled two ways, and every reader in this package already finds
+// the document under either. A "move" between them would therefore change
+// no address at all; it would rewrite a stored display string, and this
+// repository has already decided what happens when a caller asks for that.
+// metamodel.keyRespellingError refuses a case-only respelling of a row key
+// rather than silently updating the stored one, and pathRespellingError
+// refuses it for a document path on the write path, for the reason both
+// comments give: the stored spelling is the handle other things refer to,
+// and a typo'd capital must not be able to move it under them. A move is a
+// *stronger* case for the same answer, not a weaker one — it is the call
+// that would make the rewrite explicit and durable, appending a version row
+// and an event announcing a change of address that no reader can observe.
+// So the first spelling stored stands here too, and the refusal names both
+// spellings and says what a caller who genuinely wants a different subtree
+// should do instead. TestMoveArea's "a case only move is refused as a
+// respelling" case pins it.
 //
 // **Only a live document moves.** A deleted path keeps its tombstone and
-// its history exactly where they are; the recovery is to write to the
-// path and bring the document back, and then move it. Moving a tombstone
-// would have to answer what happens to the resurrection rule at two
-// paths at once, and there is no question anyone is asking that it
-// answers. TestMovingADeletedDocumentSaysToBringItBackFirst pins the
-// refusal and its wording.
+// its history exactly where they are; the recovery is to write to the path
+// and bring the document back, and then move it. Moving a tombstone would
+// have to answer what happens to the resurrection rule at two paths at
+// once, and there is no question anyone is asking that it answers.
+// TestMoveArea's "moving a deleted document says to bring it back first"
+// case pins the refusal and its wording.
 //
 // **An occupied destination is refused, live or tombstoned.** The unique
-// index covers soft-deleted rows, so a path someone deleted is still
-// taken; merging two histories onto one path is not something this call
-// does quietly. Both refusals name the destination and its remedy
-// (TestMovingOntoALiveDocumentIsRefusedAtTheDestination,
-// TestMovingOntoADeletedPathSaysItsHistoryIsStillThere).
+// index covers soft-deleted rows, so a path someone deleted is still taken;
+// merging two histories onto one path is not something this call does
+// quietly. Both refusals name the destination and its remedy
+// (TestMoveArea's "moving onto a live document is refused at the
+// destination" case, TestMoveArea's "moving onto a deleted path says its
+// history is still there" case).
 func (s *Service) Move(ctx context.Context, projectID uuid.UUID, in MoveInput) (dbq.Document, error) {
 	// One pass over every argument, as Write and Delete do.
 	problems := pathProblemsAt("from", in.From)
@@ -145,14 +146,13 @@ func (s *Service) Move(ctx context.Context, projectID uuid.UUID, in MoveInput) (
 			return fmt.Errorf("move document: %w", err)
 		}
 		moved = row
-		// The snapshot the move appends carries the document exactly as
-		// it stands — same title, summary, body and frontmatter as the
-		// version before it — at the *new* path. That equality is the
-		// point: "this version is a move" is what a reader concludes
-		// from a snapshot whose content did not change and whose path
-		// did, rather than from a flag it would have to trust.
-		// TestTheVersionAMoveAppendsCarriesTheNewPathAndTheOldContent
-		// pins both halves.
+		// The snapshot the move appends carries the document exactly as it stands
+		// — same title, summary, body and frontmatter as the version before it —
+		// at the *new* path. That equality is the point: "this version is a move"
+		// is what a reader concludes from a snapshot whose content did not change
+		// and whose path did, rather than from a flag it would have to trust.
+		// TestMoveArea's "the version a move appends carries the new path and the
+		// old content" case pins both halves.
 		if _, err := q.InsertDocumentVersion(ctx, dbq.InsertDocumentVersionParams{
 			ProjectID:     projectID,
 			DocumentID:    row.ID,
@@ -197,7 +197,7 @@ func (s *Service) Move(ctx context.Context, projectID uuid.UUID, in MoveInput) (
 // both of its writers, and the reason it is stated again here is that
 // the ordering key is different: there, a fixed order of two *tables*;
 // here, a data-dependent order of two rows in one table.
-// TestTwoOppositeMovesDoNotDeadlock pins it.
+// TestMoveArea's "two opposite moves do not deadlock" case pins it.
 //
 // Move has already refused From and To folding together, so the order is
 // total: no two calls can disagree about which end goes first.

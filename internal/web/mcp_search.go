@@ -69,11 +69,11 @@ const (
 // JSON, and there was no argument that turned it off. There is now, it
 // is spelled the same as the listing's, and it defaults the same way.
 //
-// It gates the entity half only. A document hit has never carried a
-// body — DocumentHitOutput's comment argues why, and
-// TestASearchHitCarriesNoBodyAtAll pins it over every field — so there
-// is nothing on that side for this flag to withhold, and a flag that
-// silently meant less on one of two kinds would be worse than no flag.
+// It gates the entity half only. A document hit has never carried a body —
+// DocumentHitOutput's comment argues why, and TestSearchArea's "a search
+// hit carries no body at all" case pins it over every field — so there is
+// nothing on that side for this flag to withhold, and a flag that silently
+// meant less on one of two kinds would be worse than no flag.
 type SearchInput struct {
 	ScopedArgs
 	Query   string `json:"query"`
@@ -119,12 +119,12 @@ type SearchHit struct {
 	Document  *DocumentHitOutput `json:"document,omitempty"`
 }
 
-// DocumentHitOutput is the document half of a search result. It carries
-// a summary and never a body: prose is the largest payload in the system
-// and a search that returned bodies would blow a context window on its
-// first answer. markdown.DocumentHit, which this is built from, carries
-// no body either, and TestASearchHitCarriesNoBodyAtAll pins that over
-// every one of its fields.
+// DocumentHitOutput is the document half of a search result. It carries a
+// summary and never a body: prose is the largest payload in the system and
+// a search that returned bodies would blow a context window on its first
+// answer. markdown.DocumentHit, which this is built from, carries no body
+// either, and TestSearchArea's "a search hit carries no body at all" case
+// pins that over every one of its fields.
 type DocumentHitOutput struct {
 	ID       uuid.UUID   `json:"id"`
 	Path     string      `json:"path"`

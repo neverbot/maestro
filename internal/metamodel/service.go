@@ -141,18 +141,17 @@ func decodeFields(raw []byte) (map[string]any, error) {
 // place.
 //
 // **created_by_* is in the list too, and was not for two sub-projects.**
-// The scan named the two `updated_by_` columns only, which was complete
-// for 0004_metamodel.sql and stopped being complete at
-// 0007_documents.sql; 0008_views.sql's view_assets is a table whose only
-// audit columns are `created_by_`, because an asset's bytes never change
-// and there is no update path to record. Its upload with a foreign token
-// therefore came back as a raw SQLSTATE 23503 over a generated
-// constraint name — the same defect this function exists to remove, one
-// column prefix along. Both prefixes are named in actorColumns, in one
-// place, so a third table cannot fall out of step by being written
-// somewhere else.
-// TestAssetsArea's "the uploader is recorded and a foreign token is refused" case (internal/views) is
-// what caught it.
+// The scan named the two `updated_by_` columns only, which was complete for
+// 0004_metamodel.sql and stopped being complete at 0007_documents.sql;
+// 0008_views.sql's view_assets is a table whose only audit columns are
+// `created_by_`, because an asset's bytes never change and there is no
+// update path to record. Its upload with a foreign token therefore came
+// back as a raw SQLSTATE 23503 over a generated constraint name — the same
+// defect this function exists to remove, one column prefix along. Both
+// prefixes are named in actorColumns, in one place, so a third table cannot
+// fall out of step by being written somewhere else. TestAssetsArea's "the
+// uploader is recorded and a foreign token is refused" case
+// (internal/views) is what caught it.
 //
 // **author_* is in the list too, and completing the list one prefix at a
 // time is itself the pattern this comment keeps recording.** Extending a

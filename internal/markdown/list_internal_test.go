@@ -12,15 +12,15 @@ import (
 // composition paging.Fingerprint's comment mandates and that no
 // behaviour test can be trusted to reach.
 //
-// TestACursorFromAnotherGamesListingIsRefused does go red today when the
-// project id is dropped, because an unfiltered listing's other parts are
-// the same string in every game — but that is a property of the filters
-// this listing happens to have, not of the rule, and it is exactly how
-// the history listing's equivalent test came to pass for the wrong
-// reason (Task 6's correction 4: its document id already discriminated).
-// The moment this listing grows a filter whose resolved form differs per
-// game, the behavioural test goes green with the project id gone and
-// this one does not.
+// TestListArea's "a cursor from another games listing is refused" case does
+// go red today when the project id is dropped, because an unfiltered
+// listing's other parts are the same string in every game — but that is a
+// property of the filters this listing happens to have, not of the rule,
+// and it is exactly how the history listing's equivalent test came to pass
+// for the wrong reason (Task 6's correction 4: its document id already
+// discriminated). The moment this listing grows a filter whose resolved
+// form differs per game, the behavioural test goes green with the project
+// id gone and this one does not.
 func TestTheDocumentListingFingerprintLeadsWithTheProjectId(t *testing.T) {
 	project := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	other := uuid.MustParse("33333333-3333-3333-3333-333333333333")

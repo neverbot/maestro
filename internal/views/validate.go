@@ -130,19 +130,18 @@ func (s *Service) Validate(ctx context.Context, projectID uuid.UUID,
 // documents this package itself stored.
 //
 // **It does not read view_refs, and the boolean is exact anyway.** The
-// dependency index exists so a run can follow a type by id after a
-// rename and report the rename instead of a missing type — and that
-// changes *which* diagnostic a run gives, never whether there is one.
-// The index can only turn "this key names nothing" into "this key was
-// renamed", both of which are things the game did to this view; it can
-// never rescue a reference that has no id recorded and no live key, and
-// it can never break one whose key still resolves. So a per-view refs
-// read — one statement per row of a page — would buy a distinction this
-// answer does not carry. **What it costs is that a caller wanting to
-// know what moved runs the view or opens it**, which is what the
-// diagnostics are for and where their pointers are useful.
-// TestValidateArea's "the stale flag agrees with what a run reports" case is what holds the two
-// together.
+// dependency index exists so a run can follow a type by id after a rename
+// and report the rename instead of a missing type — and that changes
+// *which* diagnostic a run gives, never whether there is one. The index can
+// only turn "this key names nothing" into "this key was renamed", both of
+// which are things the game did to this view; it can never rescue a
+// reference that has no id recorded and no live key, and it can never break
+// one whose key still resolves. So a per-view refs read — one statement per
+// row of a page — would buy a distinction this answer does not carry.
+// **What it costs is that a caller wanting to know what moved runs the view
+// or opens it**, which is what the diagnostics are for and where their
+// pointers are useful. TestValidateArea's "the stale flag agrees with what
+// a run reports" case is what holds the two together.
 //
 // **The renderer half is observed by nothing today, and it stays.**
 // StaleViews asks the same two questions runStored asks — the document's

@@ -30,17 +30,17 @@ import (
 //     blob on the wire and must not be one in practice: a typo'd
 //     `rank_dircetion` that is stored, returned and silently ignored
 //     forever is the most expensive shape of bug this project has. Every
-//     parameter here is declared with a kind, every kind has a checker,
-//     and TestRenderersArea's "every declared parameter is checked not just stored" case drives every
-//     parameter of every renderer through a wrong value and requires a
-//     refusal that names it.
+//     parameter here is declared with a kind, every kind has a checker, and
+//     TestRenderersArea's "every declared parameter is checked not just
+//     stored" case drives every parameter of every renderer through a wrong
+//     value and requires a refusal that names it.
 //   - **The catalogue is closed and names itself back.** An unknown
-//     renderer is refused with the six spellings, an unknown parameter
-//     with the ones this renderer declares.
-//   - **A requirement is judged against the *saved* query.** Not against
-//     a run: `include_fields` is a per-run option, so a column that would
-//     only exist when a caller asks for it is not a column a saved view
-//     may name.
+//     renderer is refused with the six spellings, an unknown parameter with
+//     the ones this renderer declares.
+//   - **A requirement is judged against the *saved* query.** Not against a
+//     run: `include_fields` is a per-run option, so a column that would
+//     only exist when a caller asks for it is not a column a saved view may
+//     name.
 
 // The six renderer names, as constants so that Task 11's storage, Task
 // 15's tool surface and this package's own tests spell them once.
@@ -53,10 +53,11 @@ const (
 	RendererTimeline = "timeline"
 )
 
-// ParamKind is what a renderer parameter's value has to be. Every kind
-// has exactly one checker in paramCheckers, and every checker's kind is
-// used by at least one parameter: TestRenderersArea's "a parameter kind cannot be half added" case
-// asserts both directions, the way the operator table's own guard does.
+// ParamKind is what a renderer parameter's value has to be. Every kind has
+// exactly one checker in paramCheckers, and every checker's kind is used by
+// at least one parameter: TestRenderersArea's "a parameter kind cannot be
+// half added" case asserts both directions, the way the operator table's
+// own guard does.
 type ParamKind string
 
 // The parameter kinds.
@@ -106,9 +107,8 @@ type RendererParam struct {
 	// which is why no renderer's Requires has to repeat the check.
 	Required bool
 	// Values are the admitted spellings, and are declared by kindEnum
-	// parameters and by no others.
-	// TestRenderersArea's "an enum parameter declares its values and nothing else does" case pins both
-	// directions.
+	// parameters and by no others. TestRenderersArea's "an enum parameter
+	// declares its values and nothing else does" case pins both directions.
 	Values []string
 	// Doc is the one line the generated description carries for this
 	// parameter. It is prose for an agent, and it is the only place a
@@ -181,9 +181,9 @@ type Renderer struct {
 	// view in the game.
 	//
 	// So this flag is what assets.go's SetBackground reads to apply this
-	// file's first rule — a stored value no renderer reads is a lie a
-	// designer will believe — to a value stored one table over.
-	// TestAssetsArea's "only a renderer that draws a background accepts one" case drives every
+	// file's first rule — a stored value no renderer reads is a lie a designer
+	// will believe — to a value stored one table over. TestAssetsArea's "only
+	// a renderer that draws a background accepts one" case drives every
 	// renderer in this catalogue through that setter, so the flag cannot
 	// disagree with what the product actually does.
 	ReadsBackground bool
@@ -420,9 +420,10 @@ var renderers = []Renderer{
 		// a renderer choice rather than dead weight in the document.
 		// That is the line this catalogue draws between the two: a
 		// *parameter* a renderer's own mode ignores is refused, because
-		// nothing else will ever read it; a *query* member this renderer
-		// ignores is read by the next renderer the view is switched to.
-		// TestRenderersArea's "a table does not refuse a query that draws edges" case pins it.
+		// nothing else will ever read it; a *query* member this renderer ignores
+		// is read by the next renderer the view is switched to.
+		// TestRenderersArea's "a table does not refuse a query that draws edges"
+		// case pins it.
 		Consumes: "nodes only",
 		Doc: "Rows and columns. Probably the most-used renderer: \"every quest " +
 			"in Elwynn with its level and its rewards\" is a question designers " +
@@ -600,13 +601,13 @@ func RendererParamKind(renderer, param string) (string, bool) {
 	return "", false
 }
 
-// RendererDescription is the catalogue as prose, **generated from the
-// table above and from nothing else**, so that views.upsert's tool
-// description cannot drift from what CheckRenderer enforces. A hand-written sentence
+// RendererDescription is the catalogue as prose, **generated from the table
+// above and from nothing else**, so that views.upsert's tool description
+// cannot drift from what CheckRenderer enforces. A hand-written sentence
 // naming a knob that does not exist is a knob an agent will send and this
-// package will refuse; a knob added to the table and left out of the
-// prose is one no agent will ever find.
-// TestRenderersArea's "every renderer declares its parameters and the description is generated from them" case
+// package will refuse; a knob added to the table and left out of the prose
+// is one no agent will ever find. TestRenderersArea's "every renderer
+// declares its parameters and the description is generated from them" case
 // reads this text back and compares it with the table in both directions.
 func RendererDescription() string {
 	var b strings.Builder
@@ -629,15 +630,15 @@ func RendererDescription() string {
 	return b.String()
 }
 
-// kindPhrases is how each kind reads in the description an agent is
-// handed. The identifiers themselves are this package's own vocabulary and
-// were being printed straight into agent-facing prose — "rank_by:
-// rank_by.", "sort: column.", "x_field: number_field." — which names a Go
-// constant at a reader who has never seen one and says nothing about what
-// to send. kindEnum is the exception and prints its own admitted
-// spellings instead.
-// TestRenderersArea's "a parameter kind cannot be half added" case requires a phrase for every kind and
-// a kind for every phrase, the same both-arms guard the checkers get.
+// kindPhrases is how each kind reads in the description an agent is handed.
+// The identifiers themselves are this package's own vocabulary and were
+// being printed straight into agent-facing prose — "rank_by: rank_by.",
+// "sort: column.", "x_field: number_field." — which names a Go constant at
+// a reader who has never seen one and says nothing about what to send.
+// kindEnum is the exception and prints its own admitted spellings instead.
+// TestRenderersArea's "a parameter kind cannot be half added" case requires
+// a phrase for every kind and a kind for every phrase, the same both-arms
+// guard the checkers get.
 var kindPhrases = map[ParamKind]string{
 	kindBool:         "true or false",
 	kindNumber:       "a number",
@@ -721,11 +722,11 @@ func CheckRenderer(name string, params map[string]any, r *Resolved) error {
 		}
 		check, ok := paramCheckers[p.Kind]
 		if !ok {
-			// A kind with no checker would otherwise be a parameter
-			// stored and never judged, which is the failure this whole
-			// file is built against. TestRenderersArea's "a parameter kind cannot be half added" case
-			// catches it in the test suite; this catches it in
-			// production, loudly, rather than by accepting anything.
+			// A kind with no checker would otherwise be a parameter stored and never
+			// judged, which is the failure this whole file is built against.
+			// TestRenderersArea's "a parameter kind cannot be half added" case
+			// catches it in the test suite; this catches it in production, loudly,
+			// rather than by accepting anything.
 			return fmt.Errorf("views: renderer %q declares parameter %q with kind %q "+
 				"and no checker", renderer.Name, p.Name, p.Kind)
 		}
@@ -832,10 +833,10 @@ func rendererPointer(p RendererParam) string {
 // inside the two functions that need it, because those two — the refs a
 // save writes and the resolution a run performs — must agree about which
 // parameters are references. A kind added to one and not the other is a
-// parameter whose type deletion reports nothing, which is the defect
-// Task 12's finding 2 already fixed once for @type operands.
-// TestRenderersArea's "every type naming parameter kind is a recorded reference" case asserts the
-// membership against the checkers that consult the catalogue.
+// parameter whose type deletion reports nothing, which is the defect Task
+// 12's finding 2 already fixed once for @type operands. TestRenderersArea's
+// "every type naming parameter kind is a recorded reference" case asserts
+// the membership against the checkers that consult the catalogue.
 var typeNamingKinds = map[ParamKind]string{
 	kindRelationType: KindRelationType,
 }
@@ -1164,12 +1165,11 @@ func (f paramFaults) at(i int) paramFaults {
 // another checker's refusal inside its own.
 func (f paramFaults) message() string { return f[0].message }
 
-// paramCheckers is the kind table: one checker per kind, and the reason
-// the kinds are data rather than a switch.
-// TestRenderersArea's "a parameter kind cannot be half added" case asserts both directions — a kind
-// used by a parameter and missing here would panic on the first value
-// sent, and a checker no parameter uses is a kind somebody meant to
-// declare.
+// paramCheckers is the kind table: one checker per kind, and the reason the
+// kinds are data rather than a switch. TestRenderersArea's "a parameter
+// kind cannot be half added" case asserts both directions — a kind used by
+// a parameter and missing here would panic on the first value sent, and a
+// checker no parameter uses is a kind somebody meant to declare.
 var paramCheckers = map[ParamKind]func(rc *rendererCheck, p RendererParam, v any) paramFaults{
 	kindBool: func(_ *rendererCheck, _ RendererParam, v any) paramFaults {
 		if _, ok := v.(bool); !ok {
@@ -1511,16 +1511,14 @@ func (rc *rendererCheck) requireDeclaredAs(key string, admitted ...metamodel.Fie
 						"and would be drawn at the origin or not at all",
 					schema[j].Type, on, joinTypes(admitted))
 			}
-			// An enum with no options is an axis with no order and no
-			// admitted value, so every node on it is unplaceable.
-			// metamodel.Schema.Validate refuses one at upsert, which is
-			// what made this rule *unreachable* through the API rather
-			// than true: nothing revalidates a schema on the way back out
-			// of the database, so a row written straight into the schema
-			// column loads and is accepted. One arm here makes the rule
-			// hold on the read side as well.
-			// TestRenderersArea's "an optionless enum is no axis even if the schema column holds one" case
-			// pins it.
+			// An enum with no options is an axis with no order and no admitted
+			// value, so every node on it is unplaceable. metamodel.Schema.Validate
+			// refuses one at upsert, which is what made this rule *unreachable*
+			// through the API rather than true: nothing revalidates a schema on the
+			// way back out of the database, so a row written straight into the
+			// schema column loads and is accepted. One arm here makes the rule hold
+			// on the read side as well. TestRenderersArea's "an optionless enum is
+			// no axis even if the schema column holds one" case pins it.
 			if schema[j].Type == metamodel.FieldEnum && len(schema[j].Options) == 0 {
 				return unmetStale(DiagFieldTypeChanged, string(metamodel.FieldEnum),
 					"is an enum declared on %s with no options: an enum axis "+

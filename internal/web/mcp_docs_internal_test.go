@@ -219,12 +219,12 @@ func TestAPlainNotFoundCarriesNoFieldList(t *testing.T) {
 }
 
 // TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType re-pins,
-// against the real type, the claim internal/markdown could only pin
-// against a stand-in: TestOmittingLinksAndSendingAnEmptyArrayAreDifferent
-// OnTheWire (internal/markdown/links_test.go) decodes into a struct
-// declared in its own file, because DocsWriteInput did not exist when it
-// was written, and its own comment says its claim must be re-pinned
-// here.
+// against the real type, the claim internal/markdown could only pin against
+// a stand-in: TestLinksArea's "omitting links and sending an empty array
+// are different on the wire" case (internal/markdown/links_test.go) decodes
+// into a struct declared in its own file, because DocsWriteInput did not
+// exist when it was written, and its own comment says its claim must be
+// re-pinned here.
 //
 // The three states have to survive JSON in both directions: omitted and
 // an explicit null preserve the document's attachments, an empty array

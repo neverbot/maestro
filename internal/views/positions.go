@@ -27,12 +27,12 @@ import (
 // draws that is sub-project 5's question.
 //
 // That claim is a claim about behaviour, so it is asserted rather than
-// promised: TestPositionsArea's "the layout mode changes nothing the server answers" case saves one
-// view under each of the three modes and requires the positions this
-// package hands back to be identical in all three. A comment saying the
-// server honours a mode it never sees is this project's first defect in
-// its purest form, and a comment saying the server ignores one it
-// secretly reads is the same defect with the sign flipped.
+// promised: TestPositionsArea's "the layout mode changes nothing the server
+// answers" case saves one view under each of the three modes and requires
+// the positions this package hands back to be identical in all three. A
+// comment saying the server honours a mode it never sees is this project's
+// first defect in its purest form, and a comment saying the server ignores
+// one it secretly reads is the same defect with the sign flipped.
 //
 // **Addressed by entity key plus type key, never by id.** An agent that
 // has never read this game can write a position from the two keys it
@@ -108,12 +108,12 @@ type EntityAddress struct {
 // GetPositions is addressed in the same vocabulary the write took: a
 // caller can round-trip it without ever having read the game's ids.
 //
-// UpdatedAt is when the node was last moved, and it is the one field
-// here nothing renders. It is what lets a caller — and
-// TestPositionsArea's "running a view never rewrites positions" case — tell "this arrangement is
-// untouched" from "somebody re-dragged it to the same spot", which is
-// the property that lets a query be edited without losing an afternoon
-// of map work.
+// UpdatedAt is when the node was last moved, and it is the one field here
+// nothing renders. It is what lets a caller — and TestPositionsArea's
+// "running a view never rewrites positions" case — tell "this arrangement
+// is untouched" from "somebody re-dragged it to the same spot", which is
+// the property that lets a query be edited without losing an afternoon of
+// map work.
 type Position struct {
 	EntityType string    `json:"entity_type"`
 	EntityKey  string    `json:"entity_key"`
@@ -218,18 +218,17 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 			// and reports zero.
 			//
 			// **Unreachable from this call, and recorded as such rather
-			// than dressed up.** The view was resolved inside this game and
-			// so was every entity, and 0008_views.sql's composite key means
-			// a row they collide with carries this game's project id — so
-			// deleting these three lines leaves the whole package green,
-			// measured. It stays because the alternative is discarding a
-			// row count that can only be zero if an invariant of this
-			// package has been broken, and a silent no-op is how the
-			// cross-game overwrite this guard exists for got as far as a
-			// green test run (views.sql says what it was). The guard
-			// itself is load-bearing and is asserted by driving the
-			// statement directly, in
-			// TestPositionsArea's "positions of another game are not reachable" case.
+			// than dressed up.** The view was resolved inside this game and so was
+			// every entity, and 0008_views.sql's composite key means a row they
+			// collide with carries this game's project id — so deleting these three
+			// lines leaves the whole package green, measured. It stays because the
+			// alternative is discarding a row count that can only be zero if an
+			// invariant of this package has been broken, and a silent no-op is how
+			// the cross-game overwrite this guard exists for got as far as a green
+			// test run (views.sql says what it was). The guard itself is
+			// load-bearing and is asserted by driving the statement directly, in
+			// TestPositionsArea's "positions of another game are not reachable"
+			// case.
 			if written == 0 {
 				return fmt.Errorf("write %s: the stored position belongs to another game",
 					pointer("positions", i))
@@ -263,21 +262,20 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 // **The same three passes SetPositions makes, in the same order**: the
 // arguments this call carries, then the addresses they name, then the
 // write. The order is stated on both calls and was wrong here — the view
-// was resolved before the arguments were judged, so a call naming a
-// missing view *and* a malformed address heard about the view, while the
-// same pair on SetPositions heard about the address. Now both answer the
-// argument first, and TestPositionsArea's "a position call refuses its arguments in the same order" case
-// pins that they agree.
+// was resolved before the arguments were judged, so a call naming a missing
+// view *and* a malformed address heard about the view, while the same pair
+// on SetPositions heard about the address. Now both answer the argument
+// first, and TestPositionsArea's "a position call refuses its arguments in
+// the same order" case pins that they agree.
 //
 // **The list is capped at MaxPositions, exactly as a write is**, and for
-// the reason a write is: one statement per entity is a lookup plus a
-// delete per address, on one pooled connection, and an uncapped list is
-// an unbounded loop a single call can park that connection on. Measured
-// before the cap existed: fifty thousand addresses took 24.6 s and
-// returned success. The cap is answered here, before a single address is
-// resolved, which is what
-// TestPositionsArea's "an empty or oversize clear is refused" case asserts by naming entities that do
-// not exist.
+// the reason a write is: one statement per entity is a lookup plus a delete
+// per address, on one pooled connection, and an uncapped list is an
+// unbounded loop a single call can park that connection on. Measured before
+// the cap existed: fifty thousand addresses took 24.6 s and returned
+// success. The cap is answered here, before a single address is resolved,
+// which is what TestPositionsArea's "an empty or oversize clear is refused"
+// case asserts by naming entities that do not exist.
 //
 // An address that names no entity of this game is refused exactly as it
 // is in SetPositions, and through the same lookup. An entity that exists

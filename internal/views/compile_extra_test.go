@@ -51,12 +51,12 @@ func TestCompileExtraArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestCompileExtraArea's "an edge predicate admits only the builtins a relation has" case is the refusal a
-	// relation's missing columns need. A relation has an id, a type, two
-	// endpoints, its declared fields, its validity flag and its timestamps —
-	// 0004_metamodel.sql plus 0009 — so @name and @key compile to columns
-	// Postgres does not have, and without this refusal the whole view fails
-	// with a SQL error instead of a pointer.
+	// TestCompileExtraArea's "an edge predicate admits only the builtins a
+	// relation has" case is the refusal a relation's missing columns need. A
+	// relation has an id, a type, two endpoints, its declared fields, its
+	// validity flag and its timestamps — 0004_metamodel.sql plus 0009 — so
+	// @name and @key compile to columns Postgres does not have, and without
+	// this refusal the whole view fails with a SQL error instead of a pointer.
 	//
 	// **@invalid moved from the refused list to the controls**, and that is
 	// 0009: an edge now carries the same flag an entity does, so "the edges a
@@ -98,11 +98,11 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileExtraArea's "an edge entrys relation type is resolved and listed" case pins that the
-	// via/between spelling of an edges entry goes through the same resolution
-	// every other type key does — so a key this game does not have is a
-	// refusal with a pointer, and a key it does have is a dependency Task 12
-	// can report on.
+	// TestCompileExtraArea's "an edge entrys relation type is resolved and
+	// listed" case pins that the via/between spelling of an edges entry goes
+	// through the same resolution every other type key does — so a key this
+	// game does not have is a refusal with a pointer, and a key it does have
+	// is a dependency Task 12 can report on.
 	t.Run("an edge entrys relation type is resolved and listed", func(t *testing.T) {
 		g, _ := a.games(t)
 		err := resolveOnly(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -129,10 +129,10 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileExtraArea's "a misspelled type name is refused rather than drawn as nothing" case is the
-	// decision Task 4 left to the compiler: @type is compared against the id
-	// a row actually holds, and a key this game does not declare is a
-	// refusal, not a picture with nothing in it.
+	// TestCompileExtraArea's "a misspelled type name is refused rather than
+	// drawn as nothing" case is the decision Task 4 left to the compiler:
+	// @type is compared against the id a row actually holds, and a key this
+	// game does not declare is a refusal, not a picture with nothing in it.
 	//
 	// **Task 12 moved where the refusal is raised, and this test moved with
 	// it.** Task 6 left the operand as text and let the compiler look it up,
@@ -162,14 +162,14 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileExtraArea's "a multi hop step emits a recursion rather than a second join" case replaces the
-	// refusal this build carried until the walk arrived. The refusal existed
-	// so that a depth-3 question could not be answered with a depth-1 answer
-	// and no error; what keeps that from happening now is that the step is
-	// compiled by internal/graph, and this asserts it as text — a compiler
-	// that quietly emitted its own one-hop join for a depth-3 step would
-	// still return rows, and only the shape of the statement says which
-	// question was asked.
+	// TestCompileExtraArea's "a multi hop step emits a recursion rather than a
+	// second join" case replaces the refusal this build carried until the walk
+	// arrived. The refusal existed so that a depth-3 question could not be
+	// answered with a depth-1 answer and no error; what keeps that from
+	// happening now is that the step is compiled by internal/graph, and this
+	// asserts it as text — a compiler that quietly emitted its own one-hop
+	// join for a depth-3 step would still return rows, and only the shape of
+	// the statement says which question was asked.
 	t.Run("a multi hop step emits a recursion rather than a second join", func(t *testing.T) {
 		g, _ := a.games(t)
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -207,9 +207,9 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileExtraArea's "an edge entry naming a selector is refused" case: a selector walks no relation,
-	// so there is nothing for the entry to draw and an empty edge set would
-	// say so in silence.
+	// TestCompileExtraArea's "an edge entry naming a selector is refused"
+	// case: a selector walks no relation, so there is nothing for the entry to
+	// draw and an empty edge set would say so in silence.
 	t.Run("an edge entry naming a selector is refused", func(t *testing.T) {
 		g, _ := a.games(t)
 		r, err := g.views.Resolve(t.Context(), g.projectID,
@@ -221,12 +221,13 @@ func TestCompileExtraArea(t *testing.T) {
 		oneProblem(t, err, "/edges/0/from_step", "walks no relations")
 	})
 
-	// TestCompileExtraArea's "a glob pattern maps its wildcards and escapes everything else" case pins the
-	// operator table's promise for `matches`: `*` and `?` are the only
-	// metacharacters, and a per-cent or an underscore the caller wrote is a
-	// literal. The previous emitter escaped the caller's characters and then
-	// ran a second replacer that unescaped them again, so `matches "50%"`
-	// compiled to the pattern `50%` — a prefix match — and nothing tested it.
+	// TestCompileExtraArea's "a glob pattern maps its wildcards and escapes
+	// everything else" case pins the operator table's promise for `matches`:
+	// `*` and `?` are the only metacharacters, and a per-cent or an underscore
+	// the caller wrote is a literal. The previous emitter escaped the caller's
+	// characters and then ran a second replacer that unescaped them again, so
+	// `matches "50%"` compiled to the pattern `50%` — a prefix match — and
+	// nothing tested it.
 	t.Run("a glob pattern maps its wildcards and escapes everything else", func(t *testing.T) {
 		for _, c := range []struct {
 			op          Operator
@@ -248,11 +249,12 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileExtraArea's "an edge entrys empty direction is filled once and refused after" case closes the
-	// asymmetry a step and an edge entry used to have: a step refused an
-	// empty direction while an edge entry read it as "out" in a switch arm of
-	// its own. Now applyDefaults fills both, and the compiler refuses what is
-	// left — which is only reachable from a *Resolved a Go caller built.
+	// TestCompileExtraArea's "an edge entrys empty direction is filled once
+	// and refused after" case closes the asymmetry a step and an edge entry
+	// used to have: a step refused an empty direction while an edge entry read
+	// it as "out" in a switch arm of its own. Now applyDefaults fills both,
+	// and the compiler refuses what is left — which is only reachable from a
+	// *Resolved a Go caller built.
 	t.Run("an edge entrys empty direction is filled once and refused after", func(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"from":[{"type":"quest","as":"quests"}],

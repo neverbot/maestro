@@ -31,9 +31,10 @@ func TestCompileArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestCompileArea's "no caller value ever reaches the statement text" case is the injection question,
-	// answered by construction rather than by care. Every string the caller
-	// controls is a distinctive sentinel; none may appear in the SQL.
+	// TestCompileArea's "no caller value ever reaches the statement text" case
+	// is the injection question, answered by construction rather than by care.
+	// Every string the caller controls is a distinctive sentinel; none may
+	// appear in the SQL.
 	t.Run("no caller value ever reaches the statement text", func(t *testing.T) {
 		g, _ := a.games(t)
 		// The sentinels have to be legal for the document to resolve, so they
@@ -60,11 +61,11 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileArea's "the project filter guard sees the shapes it must see" case tests the guard rather
-	// than the compiler, because a guard is only worth what it can see and
-	// this one has been broken by review three times — twice by a shape it
-	// did not match, once by a placeholder prefix. Every case below is a
-	// statement the guard used to pass in silence.
+	// TestCompileArea's "the project filter guard sees the shapes it must see"
+	// case tests the guard rather than the compiler, because a guard is only
+	// worth what it can see and this one has been broken by review three times
+	// — twice by a shape it did not match, once by a placeholder prefix. Every
+	// case below is a statement the guard used to pass in silence.
 	t.Run("the project filter guard sees the shapes it must see", func(t *testing.T) {
 		for _, c := range []struct {
 			name, sql string
@@ -153,9 +154,9 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileArea's "every table reference is project filtered" case walks the emitted SQL rather
-	// than one query's behaviour, so a clause added by a later task cannot
-	// quietly drop the filter.
+	// TestCompileArea's "every table reference is project filtered" case walks
+	// the emitted SQL rather than one query's behaviour, so a clause added by
+	// a later task cannot quietly drop the filter.
 	//
 	// **It asserts per table reference, not per block.** Asking whether
 	// `project_id = $1` appears *somewhere* in a block passes with a filter
@@ -170,12 +171,12 @@ func TestCompileArea(t *testing.T) {
 	// **Why this text test is the only real guard.** Every project filter
 	// this compiler emits is, in the current build, redundant: the selector
 	// filters on an entity_type_id resolved in *this* game, the step on a
-	// relation_type_id and a to_type resolved the same way, the between arm
-	// on its own relation_type_id, and the join-backs join to rows those
-	// filters already isolated. So `TestExecuteArea's "a run from another game sees nothing" case`
-	// cannot fail on a lost project filter under any shape the compiler emits
-	// today — the filters are defence in depth against the shapes Tasks 7, 8
-	// and 9 add, and this test is what defends them.
+	// relation_type_id and a to_type resolved the same way, the between arm on
+	// its own relation_type_id, and the join-backs join to rows those filters
+	// already isolated. So `TestExecuteArea's "a run from another game sees
+	// nothing" case` cannot fail on a lost project filter under any shape the
+	// compiler emits today — the filters are defence in depth against the
+	// shapes Tasks 7, 8 and 9 add, and this test is what defends them.
 	t.Run("every table reference is project filtered", func(t *testing.T) {
 		g, _ := a.games(t)
 		// The query carries a **multi-hop** step as well as a one-hop one,
@@ -233,21 +234,22 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileArea's "the worked examples compile to these statements" case freezes the emitted SQL.
-	// A golden file is what makes a change to the emitter a diff a reviewer
-	// reads rather than a behaviour they infer — and the ids are already $n
-	// by construction, because every value the compiler handles is a bind
-	// parameter.
+	// TestCompileArea's "the worked examples compile to these statements" case
+	// freezes the emitted SQL. A golden file is what makes a change to the
+	// emitter a diff a reviewer reads rather than a behaviour they infer — and
+	// the ids are already $n by construction, because every value the compiler
+	// handles is a bind parameter.
 	//
 	// **These files are load-bearing, not a convenience, and -update is not
-	// how a failure is resolved.** Three invariants used to be red here and
-	// in no other test — the selector's project filter, a step's invalid-row
+	// how a failure is resolved.** Three invariants used to be red here and in
+	// no other test — the selector's project filter, a step's invalid-row
 	// exclusion and its destination-type filter — so regenerating rather than
 	// reading the diff erased three guarantees in one keystroke. Each now has
-	// a test of its own (TestCompileArea's "every table reference is project filtered" case and
-	// TestExecuteArea's "a step draws only its destination type and only valid rows" case), but the next
-	// clause a task adds arrives here first and unaccompanied, which is why
-	// the failure message says read the diff before it names the flag.
+	// a test of its own (TestCompileArea's "every table reference is project
+	// filtered" case and TestExecuteArea's "a step draws only its destination
+	// type and only valid rows" case), but the next clause a task adds arrives
+	// here first and unaccompanied, which is why the failure message says read
+	// the diff before it names the flag.
 	t.Run("the worked examples compile to these statements", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, example := range workedExamples {
@@ -275,19 +277,19 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestCompileArea's "the only string to fragment conversions are the ones named here" case is the
-	// construction half of the injection answer, and the half a behavioural
-	// test cannot give.
+	// TestCompileArea's "the only string to fragment conversions are the ones
+	// named here" case is the construction half of the injection answer, and
+	// the half a behavioural test cannot give.
 	//
-	// TestCompileArea's "no caller value ever reaches the statement text" case proves that the queries it
-	// compiles put nothing in the text; it cannot prove that a query nobody
-	// wrote will not. What can is the type: a `string` variable does not
-	// convert to frag implicitly, so the only way to spell a caller's value
-	// into a statement is an explicit `frag(...)`. This test reads the whole
-	// package's syntax tree and refuses that conversion outside the four
-	// helpers that build placeholders, names and formats from things a
-	// caller cannot reach, plus the one that adopts internal/graph's own
-	// statement.
+	// TestCompileArea's "no caller value ever reaches the statement text" case
+	// proves that the queries it compiles put nothing in the text; it cannot
+	// prove that a query nobody wrote will not. What can is the type: a
+	// `string` variable does not convert to frag implicitly, so the only way
+	// to spell a caller's value into a statement is an explicit `frag(...)`.
+	// This test reads the whole package's syntax tree and refuses that
+	// conversion outside the four helpers that build placeholders, names and
+	// formats from things a caller cannot reach, plus the one that adopts
+	// internal/graph's own statement.
 	//
 	// **It reads every non-test file in the package, not compile.go alone**,
 	// and it closes the four routes a one-file walk over function bodies
@@ -544,12 +546,12 @@ func parenBody(s string) (string, bool) {
 	return "", false
 }
 
-// projectFilterProblems is the guard itself, factored out of the test
-// that runs it over the compiler's real output so that
-// TestCompileArea's "the project filter guard sees the shapes it must see" case can run it over the
-// shapes that used to slip past. It returns one message per reference it
-// cannot see as filtered — plus one per lateral whose nesting would put a
-// filter where it cannot see it at all — and how many times each table
+// projectFilterProblems is the guard itself, factored out of the test that
+// runs it over the compiler's real output so that TestCompileArea's "the
+// project filter guard sees the shapes it must see" case can run it over
+// the shapes that used to slip past. It returns one message per reference
+// it cannot see as filtered — plus one per lateral whose nesting would put
+// a filter where it cannot see it at all — and how many times each table
 // was referenced; the second is what makes the assertion non-vacuous.
 func projectFilterProblems(sql string) ([]string, map[string]int) {
 	problems := flatLateralProblems(sql)

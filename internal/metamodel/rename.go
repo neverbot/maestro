@@ -42,8 +42,8 @@ import (
 // the query the old one, resolution would fall through to the by-key
 // lookup, find nothing, and every affected view would report its type
 // *missing*: the feature causing the exact failure it exists to prevent.
-// TestStaleArea's "a rename leaves the view reference index spelling the old key" case
-// (internal/views) is what holds that hands-off.
+// TestStaleArea's "a rename leaves the view reference index spelling the
+// old key" case (internal/views) is what holds that hands-off.
 //
 // **Repair stays an explicit views.upsert**, for the reason
 // internal/views/stale.go already gives about every other kind of

@@ -21,10 +21,11 @@ func TestBoundsArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestBoundsArea's "every query runs in a read only transaction" case is what turns "the compiler
-	// only ever emits SELECT" from a property of the current code into a
-	// guarantee. The compiler is careful today; a transaction that refuses a
-	// write is careful in every task that adds a clause to it.
+	// TestBoundsArea's "every query runs in a read only transaction" case is
+	// what turns "the compiler only ever emits SELECT" from a property of the
+	// current code into a guarantee. The compiler is careful today; a
+	// transaction that refuses a write is careful in every task that adds a
+	// clause to it.
 	//
 	// It asserts the refusal rather than the settings, and it asserts it
 	// through runInTx itself with a statement of its own, because the
@@ -68,10 +69,11 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "a truncated result is flagged not errored" case is the truncation half, and the
-	// fixture is sized to distinguish a policy rather than to be convenient:
-	// twelve quests against a cap of ten separates "trimmed to the cap" from
-	// "returned whatever there was", which three against ten cannot.
+	// TestBoundsArea's "a truncated result is flagged not errored" case is the
+	// truncation half, and the fixture is sized to distinguish a policy rather
+	// than to be convenient: twelve quests against a cap of ten separates
+	// "trimmed to the cap" from "returned whatever there was", which three
+	// against ten cannot.
 	//
 	// It asserts exactly ten rather than eleven, so the sentinel row the
 	// `LIMIT cap + 1` fetches is proved to be consumed rather than returned.
@@ -98,9 +100,9 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "an untruncated result says so" case is the control the test above needs.
-	// Without it a Truncated.Nodes that was always true would pass, and the
-	// flag would be worth nothing.
+	// TestBoundsArea's "an untruncated result says so" case is the control the
+	// test above needs. Without it a Truncated.Nodes that was always true
+	// would pass, and the flag would be worth nothing.
 	t.Run("an untruncated result says so", func(t *testing.T) {
 		g, _ := a.games(t)
 
@@ -121,9 +123,9 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the node cap counts nodes not rows" case is the assertion the two tests above
-	// cannot make: both draw one set, where a row and a node are trivially
-	// the same thing.
+	// TestBoundsArea's "the node cap counts nodes not rows" case is the
+	// assertion the two tests above cannot make: both draw one set, where a
+	// row and a node are trivially the same thing.
 	//
 	// `max_nodes` is documented as a cap on nodes. It was enforced as a cap
 	// on *rows*, and the same entity drawn by two `nodes` entries is two rows
@@ -174,10 +176,11 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "an edge result is truncated too" case is the same mechanism at the other
-	// collection point, which is a separate arm with a separate cap and would
-	// otherwise be held by nothing. Its control is in the same test: the same
-	// query at a cap of ten draws all three edges and is not flagged.
+	// TestBoundsArea's "an edge result is truncated too" case is the same
+	// mechanism at the other collection point, which is a separate arm with a
+	// separate cap and would otherwise be held by nothing. Its control is in
+	// the same test: the same query at a cap of ten draws all three edges and
+	// is not flagged.
 	t.Run("an edge result is truncated too", func(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"from":[{"type":"class","as":"cls"}],
@@ -213,10 +216,11 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "stats count what came back" case pins the three numbers the first question
-	// about a slow view is answered with. The counts are asserted against a
-	// result whose contents the test also names, so a stats block computed
-	// from the wrong thing cannot agree with it by accident.
+	// TestBoundsArea's "stats count what came back" case pins the three
+	// numbers the first question about a slow view is answered with. The
+	// counts are asserted against a result whose contents the test also names,
+	// so a stats block computed from the wrong thing cannot agree with it by
+	// accident.
 	t.Run("stats count what came back", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -243,10 +247,11 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "a timed out query is retryable and says which bound to lower" case settles the
-	// spec's query_timeout proposal: the code is `retryable`, because that is
-	// already what a cancelled statement maps to and a ninth code meaning the
-	// same thing helps nobody, and the *advice* is what gets completed.
+	// TestBoundsArea's "a timed out query is retryable and says which bound to
+	// lower" case settles the spec's query_timeout proposal: the code is
+	// `retryable`, because that is already what a cancelled statement maps to
+	// and a ninth code meaning the same thing helps nobody, and the *advice*
+	// is what gets completed.
 	//
 	// "Send the same call again" is right for contention and wrong for a
 	// query that is simply too expensive, and 57014 cannot tell those apart —
@@ -298,10 +303,10 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the statement budget is clamped to its hard cap" case holds the other half of
-	// "the value that reaches statement_timeout is one this package computed
-	// from its own two constants": the knob exists, so the ceiling over it
-	// has to be asserted rather than assumed.
+	// TestBoundsArea's "the statement budget is clamped to its hard cap" case
+	// holds the other half of "the value that reaches statement_timeout is one
+	// this package computed from its own two constants": the knob exists, so
+	// the ceiling over it has to be asserted rather than assumed.
 	t.Run("the statement budget is clamped to its hard cap", func(t *testing.T) {
 		// The two numbers of the bounds table, asserted rather than left to
 		// the constants to agree with themselves. Everything else in this file
@@ -342,9 +347,10 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the budget postgres holds is the one this package computed" case is the assertion
-	// the clamp above cannot make: statementBudget is a pure function, and a
-	// pure function nobody calls is worth nothing.
+	// TestBoundsArea's "the budget postgres holds is the one this package
+	// computed" case is the assertion the clamp above cannot make:
+	// statementBudget is a pure function, and a pure function nobody calls is
+	// worth nothing.
 	//
 	// Run passes `s.statementBudget()` to runInTx. Change that one identifier
 	// to `s.statementTimeout` and every other test in this package stays
@@ -413,10 +419,11 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestBoundsArea's "the bounds do not leak onto the next caller" case is the pooled-connection half:
-	// the connection a run borrowed goes back to the pool carrying neither
-	// setting, and if it did not, every later write in this process would be
-	// refused with 25006 and every later query would inherit a millisecond.
+	// TestBoundsArea's "the bounds do not leak onto the next caller" case is
+	// the pooled-connection half: the connection a run borrowed goes back to
+	// the pool carrying neither setting, and if it did not, every later write
+	// in this process would be refused with 25006 and every later query would
+	// inherit a millisecond.
 	//
 	// **Two things make that true and the test holds the pair, not either
 	// half.** The settings are made with is_local, and runInTx always rolls
@@ -472,16 +479,17 @@ func TestBoundsArea(t *testing.T) {
 		g.entity(t, "quest", "after-the-bounds", "After the bounds", nil)
 	})
 
-	// TestBoundsArea's "no statement text is assembled outside the compiler" case closes the route the
-	// frag guard cannot see.
+	// TestBoundsArea's "no statement text is assembled outside the compiler"
+	// case closes the route the frag guard cannot see.
 	//
-	// TestCompileArea's "the only string to fragment conversions are the ones named here" case watches
-	// conversions into the builder's fragment type, which is every statement
-	// the compiler emits — but this file executes SQL of its own, written as
-	// Go string literals that never become a frag, and a value concatenated
-	// or formatted into one of those would reach Postgres with no guard
-	// speaking. That is the shape of defect this repository keeps producing:
-	// a hole closed at one call site and left open one step along.
+	// TestCompileArea's "the only string to fragment conversions are the ones
+	// named here" case watches conversions into the builder's fragment type,
+	// which is every statement the compiler emits — but this file executes SQL
+	// of its own, written as Go string literals that never become a frag, and
+	// a value concatenated or formatted into one of those would reach Postgres
+	// with no guard speaking. That is the shape of defect this repository
+	// keeps producing: a hole closed at one call site and left open one step
+	// along.
 	//
 	// So: every statement this package hands to pgx is either a literal it
 	// wrote or the identifier holding the compiler's output. A `+`, a

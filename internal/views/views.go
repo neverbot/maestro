@@ -96,13 +96,14 @@ const createExpectedVersion int32 = 0
 //
 // Query is the document **as the caller wrote it** and that is what gets
 // stored: a rename never rewrites it (Task 12), so what is read back is
-// what was written. Semantically, not byte for byte — the column is
-// jsonb, which normalises whitespace, collapses duplicate keys and
-// reorders an object's keys, so a read-back compares decoded values and
-// TestViewsArea's "a view is read back with every field it was saved with" case does exactly that. It is parsed and resolved
-// before anything is stored, and the refs written beside it are the ones
-// that pass returned — see UpsertView, which is where the difference
-// between a parsed query and a resolved one is spent.
+// what was written. Semantically, not byte for byte — the column is jsonb,
+// which normalises whitespace, collapses duplicate keys and reorders an
+// object's keys, so a read-back compares decoded values and TestViewsArea's
+// "a view is read back with every field it was saved with" case does
+// exactly that. It is parsed and resolved before anything is stored, and
+// the refs written beside it are the ones that pass returned — see
+// UpsertView, which is where the difference between a parsed query and a
+// resolved one is spent.
 //
 // RendererParams is a free map judged entirely by CheckRenderer: an
 // unknown name is refused, and every declared one is judged by its
@@ -287,21 +288,18 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 		switch {
 		case err == nil:
 			// Spelling before version, the order internal/metamodel and
-			// internal/markdown both settled: a caller failing for two
-			// reasons at once hears the one it can act on, rather than
-			// "current version is N" over a key that would be refused
-			// again at the same version.
-			// The order is what this check is *for*, and it is the only
-			// thing that makes it load-bearing: the post-write check
-			// below catches a respelling whose version matched, and the
-			// re-read after a failed guard catches one whose version did
-			// not, so with a correct version in hand this branch is
-			// redundant. Neither of those can choose which fault to
-			// report when a caller has both, and being told "current
-			// version is N" over a key that would be refused again at
-			// that version is a loop a caller cannot leave by doing what
-			// the error said.
-			// TestViewsArea's "a respelling is named even when the version is also stale" case pins it.
+			// internal/markdown both settled: a caller failing for two reasons at
+			// once hears the one it can act on, rather than "current version is N"
+			// over a key that would be refused again at the same version. The order
+			// is what this check is *for*, and it is the only thing that makes it
+			// load-bearing: the post-write check below catches a respelling whose
+			// version matched, and the re-read after a failed guard catches one
+			// whose version did not, so with a correct version in hand this branch
+			// is redundant. Neither of those can choose which fault to report when a
+			// caller has both, and being told "current version is N" over a key that
+			// would be refused again at that version is a loop a caller cannot leave
+			// by doing what the error said. TestViewsArea's "a respelling is named
+			// even when the version is also stale" case pins it.
 			if existing.Key != in.Key {
 				return viewKeyRespellingError(in.Key, existing.Key)
 			}
@@ -330,13 +328,12 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 			// The refusal there even named this call as the way to
 			// change the renderer.
 			//
-			// It is a refusal rather than a silent clear for the reason
-			// every write in this package refuses rather than repairs: a
-			// designer who spent an afternoon placing a world map must
-			// not lose it to an agent editing the query, and the
-			// repair — clear the background first — is one call the
-			// message names. TestAssetsArea's "changing the renderer away from map is refused while a background is attached" case
-			// drives it.
+			// It is a refusal rather than a silent clear for the reason every write
+			// in this package refuses rather than repairs: a designer who spent an
+			// afternoon placing a world map must not lose it to an agent editing the
+			// query, and the repair — clear the background first — is one call the
+			// message names. TestAssetsArea's "changing the renderer away from map
+			// is refused while a background is attached" case drives it.
 			//
 			// It sits after the version check, so a caller that is also
 			// stale hears the version first, which is the order this
@@ -435,10 +432,10 @@ func (s *Service) UpsertView(ctx context.Context, projectID uuid.UUID, in ViewIn
 		}
 		// **There is deliberately no `row.Key != in.Key` check here any
 		// more.** It was live, and it was staged rather than argued:
-		// TestViewsArea's "a creation racing a creator under another spelling is told the spelling" case
-		// held an ExpectedVersion equal to the version the winning
-		// creator landed on, passed both the locked read and the guard,
-		// and updated a row it never saw under a spelling it never sent.
+		// TestViewsArea's "a creation racing a creator under another spelling is
+		// told the spelling" case held an ExpectedVersion equal to the version
+		// the winning creator landed on, passed both the locked read and the
+		// guard, and updated a row it never saw under a spelling it never sent.
 		//
 		// That writer is now turned away at the locked read, because a
 		// version claim against a row that is not there is a
@@ -673,10 +670,11 @@ func (s *Service) ListViews(ctx context.Context, projectID uuid.UUID, f ViewFilt
 // the other perfectly and answer a different question.
 //
 // It is asserted compositionally as well as behaviourally, by
-// TestListArea's "the view listing fingerprint is project id first and carries its domain" case,
-// because the behavioural test can pass without the project id whenever
-// another part discriminates — here the renderer filter does — and that
-// is exactly how the original defect survived its first test.
+// TestListArea's "the view listing fingerprint is project id first and
+// carries its domain" case, because the behavioural test can pass without
+// the project id whenever another part discriminates — here the renderer
+// filter does — and that is exactly how the original defect survived its
+// first test.
 func viewListingFingerprint(projectID uuid.UUID, f ViewFilter) string {
 	return paging.Fingerprint(projectID.String(), "views", f.Renderer)
 }

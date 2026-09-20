@@ -24,11 +24,11 @@ import (
 // unexported constants exist only so this function can clamp without
 // importing a bound it would then have to re-export.
 //
-// TestASearchLimitDefaultsAndIsHonoured pins that a default applies and
-// that a requested limit is passed through. It does *not* pin the cap:
-// separating "clamped at the cap" from "no cap at all" needs more than
-// maxSearchLimit matching documents in one fixture, and the clamping
-// policy itself is pinned against paging.Size in
+// TestSearchArea's "a search limit defaults and is honoured" case pins that
+// a default applies and that a requested limit is passed through. It does
+// *not* pin the cap: separating "clamped at the cap" from "no cap at all"
+// needs more than maxSearchLimit matching documents in one fixture, and the
+// clamping policy itself is pinned against paging.Size in
 // internal/paging/cursor_test.go's
 // TestSizeClampsRatherThanFoldingOntoTheDefault.
 const (
@@ -47,9 +47,9 @@ const (
 // that tool already discloses the metamodel's 128 KiB row bound.
 //
 // **This constant mirrors a literal in a migration and nothing in
-// Postgres reads it.** What keeps the two in step is
-// TestAWordPastTheIndexBoundIsStoredButNotFindable, which writes a body
-// with a distinctive word on each side of exactly this offset and
+// Postgres reads it.** What keeps the two in step is TestSearchArea's "a
+// word past the index bound is stored but not findable" case, which writes
+// a body with a distinctive word on each side of exactly this offset and
 // asserts that search finds the earlier one and not the later one — so
 // changing the migration's literal without changing this constant fails
 // there rather than quietly making the tool description a lie.
@@ -65,11 +65,12 @@ const MaxIndexedChars = 131072
 //
 // NameMatch is on the wire and not only in the sort, for the reason
 // metamodel's SearchHit gives: the order is `(name_match, rank)`, and a
-// caller that re-sorts by rank alone — or simply reasons that a higher
-// rank must come first — reconstructs the wrong order, because a hit
-// with name_match false can carry a higher rank than one with it true
-// and still sort after it. TestADocumentTheQueryNamesOutranksOneThatOnlyMentionsIt
-// asserts exactly that inversion in its fixture.
+// caller that re-sorts by rank alone — or simply reasons that a higher rank
+// must come first — reconstructs the wrong order, because a hit with
+// name_match false can carry a higher rank than one with it true and still
+// sort after it. TestSearchArea's "a document the query names outranks one
+// that only mentions it" case asserts exactly that inversion in its
+// fixture.
 //
 // LinkedEntities is what makes a document hit actionable. A word that
 // appears only in a quest's script produces a *document* hit and not a
@@ -80,10 +81,11 @@ const MaxIndexedChars = 131072
 // attached to nothing marshals as [] and not null.
 //
 // **There is no body here and there must not be one.** A search is the
-// one call an agent makes against a whole game without knowing what it
-// will get back, and fifty bodies would blow a context window on the
-// first answer. TestASearchHitCarriesNoBodyAtAll pins the absence over
-// every field of this struct rather than over a field it can name.
+// one call an agent makes against a whole game without knowing what it will
+// get back, and fifty bodies would blow a context window on the first
+// answer. TestSearchArea's "a search hit carries no body at all" case pins
+// the absence over every field of this struct rather than over a field it
+// can name.
 type DocumentHit struct {
 	ID             uuid.UUID
 	Path           string
@@ -114,25 +116,25 @@ type DocumentHit struct {
 // to be a sort key and not a weight, because ts_rank saturates towards
 // 1.0 as a lexeme repeats, so a body repeating a two-word phrase beats
 // the weights alone. SearchDocuments' own SQL comment works it through;
-// TestADocumentTheQueryNamesOutranksOneThatOnlyMentionsIt pins it,
-// against a fixture where the mentioning document carries the higher
-// rank.
+// TestSearchArea's "a document the query names outranks one that only
+// mentions it" case pins it, against a fixture where the mentioning
+// document carries the higher rank.
 //
 // **The query is bounded and validated by metamodel.CheckSearchQuery**,
-// shared rather than copied: the rule about UTF-8, control characters,
-// the 4 KiB cap and "a query with no word in it is refused rather than
-// answered empty" is one rule, and it is tied to the `simple` text
-// search configuration both indexes use. A copy here would be a second
-// place that has to change the day the configuration does.
-// `kind` goes through this package's own checkShortText, the same bound
-// List applies to the same argument.
-// TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument and
-// TestASearchKindIsBoundedAsTheCallersOwnArgument pin the two.
+// shared rather than copied: the rule about UTF-8, control characters, the
+// 4 KiB cap and "a query with no word in it is refused rather than answered
+// empty" is one rule, and it is tied to the `simple` text search
+// configuration both indexes use. A copy here would be a second place that
+// has to change the day the configuration does. `kind` goes through this
+// package's own checkShortText, the same bound List applies to the same
+// argument. TestSearchArea's "a search query is bounded and reported as the
+// callers own argument" case and TestSearchArea's "a search kind is bounded
+// as the callers own argument" case pin the two.
 //
 // **Deleted documents are absent, and so is history.** Only the current
 // version of a live document is indexed
-// (TestADeletedDocumentIsNotSearchable,
-// TestOnlyTheCurrentVersionIsSearchable).
+// (TestSearchArea's "a deleted document is not searchable" case,
+// TestSearchArea's "only the current version is searchable" case).
 //
 // **It is not paginated.** The answer is the top `limit` hits, and a
 // caller holding exactly `limit` of them cannot tell whether there were

@@ -110,11 +110,11 @@ func CheckPath(path string) error {
 }
 
 // pathProblems is CheckPath in the shape a caller collecting several
-// problems at once needs: the field errors rather than a wrapped error,
-// so a write refusing both its path and its kind reports both in one
-// answer instead of making an agent fix one, call again, and learn about
-// the other. Write is its only caller;
-// TestEveryProblemWithOneWriteIsReportedInOnePass pins the shape.
+// problems at once needs: the field errors rather than a wrapped error, so
+// a write refusing both its path and its kind reports both in one answer
+// instead of making an agent fix one, call again, and learn about the
+// other. Write is its only caller; TestDocumentsArea's "every problem with
+// one write is reported in one pass" case pins the shape.
 //
 // CheckPath only ever answers with a *metamodel.ValidationError built by
 // invalidInput, so the assertion below cannot fail; a nil v would panic
@@ -127,13 +127,13 @@ func pathProblems(path string) []metamodel.FieldError {
 // pathProblemsAt is pathProblems for a call whose path argument is not
 // called "path".
 //
-// Move has two of them, `from` and `to`, and reporting both at "path"
-// would hand a caller two field errors with one name and leave it to
-// guess which end each belongs to — the exact discrimination
-// MissingError's own comment says a field path exists to provide. The
-// judgement is CheckPath's and is not duplicated; only the label moves.
-// TestEveryProblemWithOneMoveIsReportedAtItsOwnEnd pins that a call with
-// two bad paths hears about both, at "from" and at "to".
+// Move has two of them, `from` and `to`, and reporting both at "path" would
+// hand a caller two field errors with one name and leave it to guess which
+// end each belongs to — the exact discrimination MissingError's own comment
+// says a field path exists to provide. The judgement is CheckPath's and is
+// not duplicated; only the label moves. TestMoveArea's "every problem with
+// one move is reported at its own end" case pins that a call with two bad
+// paths hears about both, at "from" and at "to".
 func pathProblemsAt(field, path string) []metamodel.FieldError {
 	err := CheckPath(path)
 	if err == nil {

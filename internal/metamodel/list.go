@@ -112,12 +112,12 @@ type EntityFilter struct {
 // **NextCursor is set when the page came back full**, and empty
 // otherwise. That is one call more than strictly necessary on a listing
 // whose length is an exact multiple of the limit: the last full page
-// carries a cursor to an empty one. The alternative — reading limit+1
-// rows and dropping the extra — costs a row on every page of every
-// listing to save that one call, so the empty page stands and
-// TestAFullFinalPageCarriesACursorToAnEmptyOne pins it. A caller looping
-// until NextCursor is empty is therefore correct, and must expect to be
-// handed an empty final page rather than treating one as an error.
+// carries a cursor to an empty one. The alternative — reading limit+1 rows
+// and dropping the extra — costs a row on every page of every listing to
+// save that one call, so the empty page stands and TestListArea's "a full
+// final page carries a cursor to an empty one" case pins it. A caller
+// looping until NextCursor is empty is therefore correct, and must expect
+// to be handed an empty final page rather than treating one as an error.
 //
 // **A cursor is a position, not a snapshot, and this is the part that
 // bites.** It is the keyset position of the page's last row — (name, id)

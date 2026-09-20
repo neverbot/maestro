@@ -89,13 +89,13 @@ type ResolvedHop struct {
 // the key simply carries no attribute, which is the same "unset" a node
 // with no value carries, and "colour the quests by min_level, the zones
 // have none" is a picture a designer legitimately asks for. So the rule
-// here is *declared by at least one type in scope*, which still refuses
-// the case worth refusing — a key nothing declares, which is a typo, and
-// a typo answered with a picture in one flat colour is the silent-empty
-// failure this language refuses everywhere else.
-// TestProjectArea's "a projected field of an undeclared key is refused at resolution" case pins the
-// refusal and TestProjectArea's "a projected field declared on one of several types is allowed" case
-// pins the other side.
+// here is *declared by at least one type in scope*, which still refuses the
+// case worth refusing — a key nothing declares, which is a typo, and a typo
+// answered with a picture in one flat colour is the silent-empty failure
+// this language refuses everywhere else. TestProjectArea's "a projected
+// field of an undeclared key is refused at resolution" case pins the
+// refusal and TestProjectArea's "a projected field declared on one of
+// several types is allowed" case pins the other side.
 type projectionScope struct {
 	// subject names what the schemas belong to, for the refusal message.
 	subject string
@@ -487,8 +487,8 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // **A LEFT join, not an inner one.** A node whose hop finds nothing keeps
 // its row; dropping it would silently narrow the picture to "the quests
 // that have a zone", which is a different query and one nobody asked for.
-// TestProjectArea's "a one hop related attribute reads the far entity" case is red under a plain JOIN
-// LATERAL, because the zoneless quest disappears.
+// TestProjectArea's "a one hop related attribute reads the far entity" case
+// is red under a plain JOIN LATERAL, because the zoneless quest disappears.
 //
 // **LIMIT 1 with the count taken over the whole match set**, which is not
 // what this task's plan prescribed. The plan asked for LIMIT 2, on the
@@ -509,19 +509,19 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 //
 // **The GROUP BY is what makes matches count far entities rather than
 // edges**, and the flag is about entities everywhere it is documented —
-// Node.Ambiguous, this file's header, the plan. Windows are computed
-// after grouping, so grouping by far.id makes one far entity one row
-// whatever number of edges reached it. Without it, `direction: "any"`
-// lied: its anchor is `(rel.source_id = e.id OR rel.target_id = e.id)`,
-// so a relation type declared in **both** directions between the same
-// pair matched twice and flagged a node ambiguous with a single
-// candidate — see TestProjectArea's "a reciprocal pair is one far entity not two" case, and note that
-// `any` is the natural spelling for a symmetric type such as
+// Node.Ambiguous, this file's header, the plan. Windows are computed after
+// grouping, so grouping by far.id makes one far entity one row whatever
+// number of edges reached it. Without it, `direction: "any"` lied: its
+// anchor is `(rel.source_id = e.id OR rel.target_id = e.id)`, so a relation
+// type declared in **both** directions between the same pair matched twice
+// and flagged a node ambiguous with a single candidate — see
+// TestProjectArea's "a reciprocal pair is one far entity not two" case, and
+// note that `any` is the natural spelling for a symmetric type such as
 // `connects_to`. Two edges to one zone is not a colour a designer has to
 // resolve; a flag that fires where there is nothing to choose is one
 // designers learn to ignore, which costs what a flag that never fires
-// costs. `out` and `in` were never affected — the unique index on
-// (type, source, target) already makes one row one far entity there.
+// costs. `out` and `in` were never affected — the unique index on (type,
+// source, target) already makes one row one far entity there.
 //
 // **The ordering is the reason the same query paints the same picture
 // twice.** far.name first because that is the rule the flag documents —
@@ -529,12 +529,12 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // name would otherwise swap between runs.
 //
 // **Every project filter sits ahead of the subquery's own SELECT**, which
-// is a requirement of TestCompileArea's "every table reference is project filtered" case rather
-// than a style: that guard splits the statement on the word SELECT, so a
-// filter written after a nested one lands in another block and is not
-// seen. There is no nested SELECT in here at all, and the three
-// references — relations, entities and, for @type, entity_types — each
-// carry their own filter in the JOIN or WHERE that introduces them.
+// is a requirement of TestCompileArea's "every table reference is project
+// filtered" case rather than a style: that guard splits the statement on
+// the word SELECT, so a filter written after a nested one lands in another
+// block and is not seen. There is no nested SELECT in here at all, and the
+// three references — relations, entities and, for @type, entity_types —
+// each carry their own filter in the JOIN or WHERE that introduces them.
 //
 // **That requirement is enforced, not merely written here**, by
 // flatLateralProblems: the body of every JOIN LATERAL must hold exactly

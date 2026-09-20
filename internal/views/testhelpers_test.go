@@ -98,17 +98,18 @@ func (g *game) seed(t *testing.T) {
 	rank := metamodel.Field{Key: "rank", Type: metamodel.FieldEnum,
 		Options: []string{"common", "rare", "epic"}}
 	// difficulty carries declared bounds, which min_level deliberately does
-	// not: TestResolveArea's "a declared range does not refuse a comparison outside it" case needs a
-	// field whose range a query can legally ask outside of, and a fixture
-	// where no field declares one cannot tell the two rules apart.
+	// not: TestResolveArea's "a declared range does not refuse a comparison
+	// outside it" case needs a field whose range a query can legally ask
+	// outside of, and a fixture where no field declares one cannot tell the
+	// two rules apart.
 	low, high := 1.0, 10.0
 	difficulty := metamodel.Field{Key: "difficulty", Type: metamodel.FieldNumber,
 		Min: &low, Max: &high}
-	// region and faction exist so a step can reach two types that declare
-	// the *same* field key two different ways, which is the case
-	// TestResolveArea's "a field declared two ways names each type with its own declaration" case and
-	// TestResolveArea's "enum options are compared as a set not a sequence" case need and no other
-	// fixture type provides:
+	// region and faction exist so a step can reach two types that declare the
+	// *same* field key two different ways, which is the case TestResolveArea's
+	// "a field declared two ways names each type with its own declaration"
+	// case and TestResolveArea's "enum options are compared as a set not a
+	// sequence" case need and no other fixture type provides:
 	//
 	//   - region declares min_level as an enum where quest declares it a
 	//     number, and rank with quest's three options in another order —
@@ -116,9 +117,9 @@ func (g *game) seed(t *testing.T) {
 	//   - faction declares rank with a genuinely different option set, so
 	//     a value legal on one really is illegal on the other.
 	//
-	// Neither declares min_level absent-but-comparable on a type already
-	// used by TestResolveArea's "a field must be declared the same way on every type a step reaches" case,
-	// which still leans on zone declaring nothing.
+	// Neither declares min_level absent-but-comparable on a type already used
+	// by TestResolveArea's "a field must be declared the same way on every
+	// type a step reaches" case, which still leans on zone declaring nothing.
 	regionLevel := metamodel.Field{Key: "min_level", Type: metamodel.FieldEnum,
 		Options: []string{"low", "high"}}
 	shuffledRank := metamodel.Field{Key: "rank", Type: metamodel.FieldEnum,
@@ -135,12 +136,11 @@ func (g *game) seed(t *testing.T) {
 		{"quest", "Quest", "Quests", metamodel.Schema{minLevel, tags, rank, difficulty}},
 		{"region", "Region", "Regions", metamodel.Schema{regionLevel, shuffledRank}},
 		{"faction", "Faction", "Factions", metamodel.Schema{narrowRank}},
-		// Boss is seeded with a capital, which row keys allow and the
-		// database folds. It is the only type here whose *stored* spelling
-		// is not already folded, so it is the only one that can tell
-		// whether the catalogue folds on the way in as well as on the way
-		// out: TestResolveArea's "a catalogue folds case on both sides" case asks for it in lower
-		// case.
+		// Boss is seeded with a capital, which row keys allow and the database
+		// folds. It is the only type here whose *stored* spelling is not already
+		// folded, so it is the only one that can tell whether the catalogue folds
+		// on the way in as well as on the way out: TestResolveArea's "a catalogue
+		// folds case on both sides" case asks for it in lower case.
 		{"Boss", "Boss", "Bosses", nil},
 	} {
 		if _, err := g.meta.UpsertEntityType(ctx, g.projectID, metamodel.EntityTypeInput{

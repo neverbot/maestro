@@ -61,33 +61,33 @@ const diffContext = 3
 // is a true answer rather than a degraded one -- nobody reads a
 // 2,000-line unified diff line by line either.
 //
-// The trim is what makes the bound generous rather than tight. It
-// applies to the *difference*, not to the document, so a one-line edit
-// in a 40,000-line script builds a table of 7 by 7
-// (TestAHugeButLocalChangeIsStillComputedLineByLine). Only a document
+// The trim is what makes the bound generous rather than tight. It applies
+// to the *difference*, not to the document, so a one-line edit in a
+// 40,000-line script builds a table of 7 by 7 (TestDiffArea's "a huge but
+// local change is still computed line by line" case). Only a document
 // rewritten from top to bottom reaches the limit.
 const lcsLimit = 1000
 
 // DiffResult is one comparison between two versions of a document.
 //
 // **Coarse is not decoration.** A caller that renders Unified without
-// reading it would show "the whole document was replaced" for two
-// versions that differ by a word, and blame the author. It is a field of
-// its own because a client cannot reconstruct from the diff itself why
-// the diff looks like that. TestAHugeChangeComesBackCoarseAndSaysSo
-// pins the true case and every other diff test the false one.
+// reading it would show "the whole document was replaced" for two versions
+// that differ by a word, and blame the author. It is a field of its own
+// because a client cannot reconstruct from the diff itself why the diff
+// looks like that. TestDiffArea's "a huge change comes back coarse and says
+// so" case pins the true case and every other diff test the false one.
 //
 // **FromDeleted and ToDeleted are not decoration either**, and they were
 // added by the sub-project's end-to-end run rather than designed in. A
 // delete appends a tombstone version carrying the document exactly as it
-// stood, so the last live version and the tombstone hold the same body
-// and the diff between them is empty — the same answer, byte for byte,
-// as diffing a version against itself. Without these two bools nothing
-// in this result tells a caller that a deletion is what it is looking
-// at, and the reading view turned that empty diff into the sentence
-// "These two versions are identical", which is false.
-// TestADiffAcrossATombstoneSaysWhichSideIsDeleted pins all three cases:
-// onto a tombstone, back off one, and between two live versions.
+// stood, so the last live version and the tombstone hold the same body and
+// the diff between them is empty — the same answer, byte for byte, as
+// diffing a version against itself. Without these two bools nothing in this
+// result tells a caller that a deletion is what it is looking at, and the
+// reading view turned that empty diff into the sentence "These two versions
+// are identical", which is false. TestDiffArea's "a diff across a tombstone
+// says which side is deleted" case pins all three cases: onto a tombstone,
+// back off one, and between two live versions.
 //
 // They are two fields rather than one "spans a delete" flag because the
 // comparison reads in whichever direction it was asked, and a deletion
@@ -107,7 +107,7 @@ type DiffResult struct {
 // The versions may be given in either order; the diff reads from the
 // first to the second, so `from: 3, to: 1` is the reverse of
 // `from: 1, to: 3` and both are legitimate questions
-// (TestDiffReadsInTheDirectionItWasAsked).
+// (TestDiffArea's "diff reads in the direction it was asked" case).
 //
 // It reads both sides through ReadVersion, so the project filter, the
 // path grammar and the two not_founds are the ones that call already
@@ -131,15 +131,15 @@ func (s *Service) Diff(ctx context.Context, projectID uuid.UUID, path string, fr
 }
 
 // versionArgument re-points a MissingError at the argument the caller
-// actually sent. ReadVersion reports at `version`, which is right for
-// its own tool and wrong here, where there are two of them and a caller
-// that mistyped one needs to know which.
-// TestDiffNamesWhichVersionArgumentWasWrong pins both.
+// actually sent. ReadVersion reports at `version`, which is right for its
+// own tool and wrong here, where there are two of them and a caller that
+// mistyped one needs to know which. TestDiffArea's "diff names which
+// version argument was wrong" case pins both.
 //
-// Only a miss at `version` moves. A missing *document* keeps its own
-// path, because "check your version number" is the wrong instruction
-// when the document itself is not there
-// (TestDiffingAnotherGamesDocumentIsNotFoundAtThePath).
+// Only a miss at `version` moves. A missing *document* keeps its own path,
+// because "check your version number" is the wrong instruction when the
+// document itself is not there (TestDiffArea's "diffing another games
+// document is not found at the path" case).
 func versionArgument(err error, path string) error {
 	var missing *MissingError
 	if errors.As(err, &missing) && missing.Path == "version" {
@@ -218,17 +218,17 @@ func unifiedDiff(fromName, toName, fromBody, toBody string) (string, bool) {
 // "0,0" in "@@ -1,3 +0,0 @@").
 //
 // **A zero-length range is numbered by the line before it, not the line
-// after.** That is the unified format's own rule — GNU diff writes
-// "@@ -0,0 +1,3 @@" for a file created from nothing, never "@@ -1,0" —
-// and start is always the first line the *non-empty* side would have
-// occupied, one past where a caller trimming context already stands.
-// Printing start verbatim when count is 0 claims the empty range
-// follows a line that does not exist on an empty side (line 1 of a body
-// with no line 1), and anything positioning by that number — patch, a
-// renderer jumping to a hunk — lands one line high.
-// TestAnAddedDocumentsDiffNumbersTheEmptySideByGNURules and
-// TestADeletedDocumentsDiffNumbersTheEmptySideByGNURules pin both
-// directions against GNU diff's own output.
+// after.** That is the unified format's own rule — GNU diff writes "@@ -0,0
+// +1,3 @@" for a file created from nothing, never "@@ -1,0" — and start is
+// always the first line the *non-empty* side would have occupied, one past
+// where a caller trimming context already stands. Printing start verbatim
+// when count is 0 claims the empty range follows a line that does not exist
+// on an empty side (line 1 of a body with no line 1), and anything
+// positioning by that number — patch, a renderer jumping to a hunk — lands
+// one line high. TestDiffArea's "an added documents diff numbers the empty
+// side by GNU rules" case and TestDiffArea's "a deleted documents diff
+// numbers the empty side by GNU rules" case pin both directions against GNU
+// diff's own output.
 func hunkRange(start, count int) string {
 	if count == 0 {
 		return fmt.Sprintf("%d,0", start-1)
@@ -330,9 +330,10 @@ func writeHunks(b *strings.Builder, ops []op, offset int) {
 }
 
 // splitLines splits a body into lines, dropping the empty element a
-// trailing newline produces so that a body ending in "\n" and one that
-// does not are not reported as differing by a phantom line.
-// TestADocumentThatDoesNotEndInANewlineDiffsAgainstOneThatDoes pins it.
+// trailing newline produces so that a body ending in "\n" and one that does
+// not are not reported as differing by a phantom line. TestDiffArea's "a
+// document that does not end in a newline diffs against one that does" case
+// pins it.
 //
 // The consequence, stated rather than hidden: this diff cannot show a
 // change that is *only* the presence or absence of a trailing newline.

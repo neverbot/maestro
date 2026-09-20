@@ -153,11 +153,11 @@ func keyRespellingError(path, requested, stored string) error {
 // Postgres.
 //
 // A wrapper rather than a rename: every call site in this package is
-// unexported and reads better that way, and a second, hand-written copy
-// of the same three rules in the markdown package is exactly the drift
-// markdown/errors.go's package comment takes this dependency to avoid.
-// What the markdown domain needs it for is stated at
-// markdown.entityAddressProblems, its only caller, and
-// TestAnEntityAddressIsBoundedBeforePostgresSeesIt is what pins that a
-// key Postgres itself would refuse never reaches it.
+// unexported and reads better that way, and a second, hand-written copy of
+// the same three rules in the markdown package is exactly the drift
+// markdown/errors.go's package comment takes this dependency to avoid. What
+// the markdown domain needs it for is stated at
+// markdown.entityAddressProblems, its only caller, and TestLinksArea's "an
+// entity address is bounded before postgres sees it" case is what pins that
+// a key Postgres itself would refuse never reaches it.
 func RowKeyProblems(path, key string) []FieldError { return rowKeyProblems(path, key) }

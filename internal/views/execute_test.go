@@ -14,10 +14,10 @@ func TestExecuteArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestExecuteArea's "a seed selector comes back as nodes" case is the read-back this whole
-	// sub-project's first feature owes. It asserts a named quest with its
-	// key, name, type and set — not a row count, which an unrelated bug can
-	// also satisfy.
+	// TestExecuteArea's "a seed selector comes back as nodes" case is the
+	// read-back this whole sub-project's first feature owes. It asserts a
+	// named quest with its key, name, type and set — not a row count, which an
+	// unrelated bug can also satisfy.
 	t.Run("a seed selector comes back as nodes", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -88,8 +88,9 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a run from another game sees nothing" case is the isolation test at the
-	// execution boundary, with its positive control in the same test.
+	// TestExecuteArea's "a run from another game sees nothing" case is the
+	// isolation test at the execution boundary, with its positive control in
+	// the same test.
 	t.Run("a run from another game sees nothing", func(t *testing.T) {
 		g, other := a.games(t)
 		q := `{"v":1,"from":[{"type":"quest"}]}`
@@ -110,9 +111,10 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a run binds its parameters over the declared defaults" case is the read-back a
-	// parameter owes: the default draws one answer, the binding draws
-	// another, and both come back through Run rather than through Resolve.
+	// TestExecuteArea's "a run binds its parameters over the declared
+	// defaults" case is the read-back a parameter owes: the default draws one
+	// answer, the binding draws another, and both come back through Run rather
+	// than through Resolve.
 	t.Run("a run binds its parameters over the declared defaults", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.entity(t, "class", "rogue", "Rogue", nil)
@@ -152,9 +154,10 @@ func TestExecuteArea(t *testing.T) {
 		oneProblem(t, err, "/params/0", "expected text, got int")
 	})
 
-	// TestExecuteArea's "a parameter with no value is refused rather than compiled as nothing" case: a
-	// parameter declared without a default and left unbound has no value, and
-	// compiling it as NULL would draw an empty picture and say nothing.
+	// TestExecuteArea's "a parameter with no value is refused rather than
+	// compiled as nothing" case: a parameter declared without a default and
+	// left unbound has no value, and compiling it as NULL would draw an empty
+	// picture and say nothing.
 	t.Run("a parameter with no value is refused rather than compiled as nothing", func(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"params":[{"key":"class_key","type":"text"}],
@@ -171,8 +174,9 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a node in two sets comes back once under the first set that claimed it" case pins the
-	// deduplication, and pins the ordering **as text**.
+	// TestExecuteArea's "a node in two sets comes back once under the first
+	// set that claimed it" case pins the deduplication, and pins the ordering
+	// **as text**.
 	//
 	// The split matters, and it was found by mutation: deleting the ORDER BY
 	// leaves the behavioural half green, because a UNION of two arms happens
@@ -206,8 +210,9 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "include fields is what puts fields in the envelope" case reads back the switch
-	// that decides whether a run carries its jsonb payload, on both sides.
+	// TestExecuteArea's "include fields is what puts fields in the envelope"
+	// case reads back the switch that decides whether a run carries its jsonb
+	// payload, on both sides.
 	t.Run("include fields is what puts fields in the envelope", func(t *testing.T) {
 		g, _ := a.games(t)
 		doc := `{"v":1,"from":[{"type":"quest","keys":["hogger"]}]}`
@@ -229,11 +234,11 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a like patterns metacharacters are escaped" case is why escapeLike exists: a
-	// designer's quest name may hold a per-cent sign, and `starts_with:
-	// "50%"` must mean a name starting "50%" rather than a name starting
-	// "50". The control is in the same assertion, so an empty answer cannot
-	// pass it.
+	// TestExecuteArea's "a like patterns metacharacters are escaped" case is
+	// why escapeLike exists: a designer's quest name may hold a per-cent sign,
+	// and `starts_with: "50%"` must mean a name starting "50%" rather than a
+	// name starting "50". The control is in the same assertion, so an empty
+	// answer cannot pass it.
 	t.Run("a like patterns metacharacters are escaped", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.entity(t, "quest", "half", "50% Off", nil)
@@ -259,10 +264,10 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a key comparison folds case on both sides" case: a row key is matched
-	// case-insensitively by the write path (entities_key_key is UNIQUE over
-	// lower(key)), so folding one side only would refuse a spelling the
-	// metamodel accepted.
+	// TestExecuteArea's "a key comparison folds case on both sides" case: a
+	// row key is matched case-insensitively by the write path
+	// (entities_key_key is UNIQUE over lower(key)), so folding one side only
+	// would refuse a spelling the metamodel accepted.
 	t.Run("a key comparison folds case on both sides", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.entity(t, "quest", "Deadmines", "The Deadmines", nil)
@@ -285,9 +290,10 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a list field answers its own operators" case covers the arms nothing else
-	// reaches: containment, the any/all set operators, empty and the length
-	// family, each with the row that must not match in the same fixture.
+	// TestExecuteArea's "a list field answers its own operators" case covers
+	// the arms nothing else reaches: containment, the any/all set operators,
+	// empty and the length family, each with the row that must not match in
+	// the same fixture.
 	t.Run("a list field answers its own operators", func(t *testing.T) {
 		g, _ := a.games(t)
 		for _, c := range []struct {
@@ -315,11 +321,12 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a value of the wrong jsonb type is skipped rather than raised" case is the failure
-	// the jsonb_typeof guard exists for, seen. internal/metamodel flags an
-	// entity invalid on a schema change and leaves its values in place, so a
-	// field declared number can hold a string; without the guard the cast
-	// raises SQLSTATE 22P02 and the whole view fails on one stale row.
+	// TestExecuteArea's "a value of the wrong jsonb type is skipped rather
+	// than raised" case is the failure the jsonb_typeof guard exists for,
+	// seen. internal/metamodel flags an entity invalid on a schema change and
+	// leaves its values in place, so a field declared number can hold a
+	// string; without the guard the cast raises SQLSTATE 22P02 and the whole
+	// view fails on one stale row.
 	t.Run("a value of the wrong jsonb type is skipped rather than raised", func(t *testing.T) {
 		g, _ := a.games(t)
 		// Written past the schema the way MarkEntitiesOfTypeInvalid leaves a
@@ -342,10 +349,11 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a glob pattern does not leak the per cent it was given" case is the behavioural half
-	// of the same rule, and the test the operator had none of: `matches
-	// "50%*"` asks for names that start "50%", not for names that start "50".
-	// The control row is in the same fixture, so an empty answer cannot pass.
+	// TestExecuteArea's "a glob pattern does not leak the per cent it was
+	// given" case is the behavioural half of the same rule, and the test the
+	// operator had none of: `matches "50%*"` asks for names that start "50%",
+	// not for names that start "50". The control row is in the same fixture,
+	// so an empty answer cannot pass.
 	t.Run("a glob pattern does not leak the per cent it was given", func(t *testing.T) {
 		g, _ := a.games(t)
 		g.entity(t, "quest", "half", "50% Off", nil)
@@ -384,12 +392,13 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "an in list compares as its own type" case pins the typed-array cast, which
-	// nothing reached before: `in` binds its operand list as an array of the
-	// field's declared type and says so in the statement, because a list
-	// bound as `any` arrives as text and compares a number against its own
-	// spelling. Both halves are here — the emitted cast and the rows it
-	// returns — because the cast is what the behaviour rests on.
+	// TestExecuteArea's "an in list compares as its own type" case pins the
+	// typed-array cast, which nothing reached before: `in` binds its operand
+	// list as an array of the field's declared type and says so in the
+	// statement, because a list bound as `any` arrives as text and compares a
+	// number against its own spelling. Both halves are here — the emitted cast
+	// and the rows it returns — because the cast is what the behaviour rests
+	// on.
 	t.Run("an in list compares as its own type", func(t *testing.T) {
 		g, _ := a.games(t)
 		numeric := `{"v":1,"from":[{"type":"quest",
@@ -422,10 +431,11 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a between edge reads its direction" case: the two sets of a `between` entry
-	// are ordered, and `in` draws the relations that run the other way. No
-	// test used a non-default direction before this one, so the arm shipped
-	// on a reading of the code rather than on an answer from the database.
+	// TestExecuteArea's "a between edge reads its direction" case: the two
+	// sets of a `between` entry are ordered, and `in` draws the relations that
+	// run the other way. No test used a non-default direction before this one,
+	// so the arm shipped on a reading of the code rather than on an answer
+	// from the database.
 	t.Run("a between edge reads its direction", func(t *testing.T) {
 		g, _ := a.games(t)
 		// takes_place_in runs quest -> zone, so "out" between quests and
@@ -453,10 +463,11 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "an edge drawn twice comes back once" case: the node dedupe was pinned and the
-	// edge dedupe was not. Two entries drawing the same relation cannot be
-	// deduplicated by the UNION, because each arm carries its own bound rank,
-	// so the edge arriving once is Go's doing and this is what says so.
+	// TestExecuteArea's "an edge drawn twice comes back once" case: the node
+	// dedupe was pinned and the edge dedupe was not. Two entries drawing the
+	// same relation cannot be deduplicated by the UNION, because each arm
+	// carries its own bound rank, so the edge arriving once is Go's doing and
+	// this is what says so.
 	t.Run("an edge drawn twice comes back once", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -483,10 +494,10 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "max depth reached counts the hops that contributed a node" case pins the
-	// arithmetic Task 8 is told to replace, which had no test at all: a
-	// selector is depth 0, a step is its source's depth plus its own, and a
-	// set that drew no node contributes nothing.
+	// TestExecuteArea's "max depth reached counts the hops that contributed a
+	// node" case pins the arithmetic Task 8 is told to replace, which had no
+	// test at all: a selector is depth 0, a step is its source's depth plus
+	// its own, and a set that drew no node contributes nothing.
 	t.Run("max depth reached counts the hops that contributed a node", func(t *testing.T) {
 		g, _ := a.games(t)
 		depthOf := func(doc string) int {
@@ -530,10 +541,10 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "an empty result serialises as empty lists not null" case: a nil slice marshals as
-	// JSON null, and an envelope whose nodes are null is a different shape
-	// from one whose nodes are [] for every client that reads it — Task 15's
-	// REST mirror included.
+	// TestExecuteArea's "an empty result serialises as empty lists not null"
+	// case: a nil slice marshals as JSON null, and an envelope whose nodes are
+	// null is a different shape from one whose nodes are [] for every client
+	// that reads it — Task 15's REST mirror included.
 	t.Run("an empty result serialises as empty lists not null", func(t *testing.T) {
 		g, _ := a.games(t)
 		res, err := g.views.Run(t.Context(), g.projectID, RunRequest{
@@ -556,10 +567,11 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "a step draws only its destination type and only valid rows" case pins the two
-	// filters a step's entity join carries that only the golden files were
-	// red for: `to_type` and the invalid exclusion. A golden file is a diff a
-	// reviewer might regenerate; this is an answer from the database.
+	// TestExecuteArea's "a step draws only its destination type and only valid
+	// rows" case pins the two filters a step's entity join carries that only
+	// the golden files were red for: `to_type` and the invalid exclusion. A
+	// golden file is a diff a reviewer might regenerate; this is an answer
+	// from the database.
 	//
 	// The fixture needs a relation of the walked type reaching a row of
 	// another type, which the seed does not have, and an invalid row on the
@@ -616,11 +628,12 @@ func TestExecuteArea(t *testing.T) {
 		}
 	})
 
-	// TestExecuteArea's "no arm of a picture draws an edge that no longer validates" case is the edge twin of
-	// TestExecuteArea's "a step draws only its destination type and only valid rows" case, and it exists
-	// because until 0009 an edge could not be flagged at all: a relation type
-	// carries a field schema, an edge's values are validated against it, and
-	// nothing re-judged them when the schema changed.
+	// TestExecuteArea's "no arm of a picture draws an edge that no longer
+	// validates" case is the edge twin of TestExecuteArea's "a step draws only
+	// its destination type and only valid rows" case, and it exists because
+	// until 0009 an edge could not be flagged at all: a relation type carries
+	// a field schema, an edge's values are validated against it, and nothing
+	// re-judged them when the schema changed.
 	//
 	// **It exercises every arm of the compiler that names the `relations`
 	// table**, in one fixture, because that is the failure this repository

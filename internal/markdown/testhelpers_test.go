@@ -15,13 +15,41 @@ import (
 	"github.com/neverbot/maestro/internal/testutil"
 )
 
-// newService gives a test its own throwaway database, a markdown
+// area is one database shared by every claim in a test file.
+//
+// Documents are scoped by project, and every claim here seeds its own
+// game, so the database is the one thing they can share: a migrated
+// template copy and a connection pool per claim bought isolation this
+// package already had from project_id. A claim that changes the schema —
+// the ALTER TABLE ones that force a commit to fail — still takes a
+// database of its own through newService, because an altered table is
+// not scoped by project.
+type area struct{ pool *pgxpool.Pool }
+
+func newArea(t *testing.T) area {
+	t.Helper()
+	return area{pool: testutil.NewPool(t)}
+}
+
+// service builds a markdown service, a metamodel service and a fresh hub
+// over the area's database. The hub is per call rather than per area so
+// one claim's subscribers never hear another claim's events.
+func (a area) service(t *testing.T) (*markdown.Service, *metamodel.Service, *realtime.Hub, *pgxpool.Pool) {
+	t.Helper()
+	return serviceOver(t, a.pool)
+}
+
+// newService gives a claim its own throwaway database, a markdown
 // service and a metamodel service over the same pool. The hub is real,
 // so the event tests have something to subscribe to; a test that does
 // not care simply ignores it.
 func newService(t *testing.T) (*markdown.Service, *metamodel.Service, *realtime.Hub, *pgxpool.Pool) {
 	t.Helper()
-	pool := testutil.NewPool(t)
+	return serviceOver(t, testutil.NewPool(t))
+}
+
+func serviceOver(t *testing.T, pool *pgxpool.Pool) (*markdown.Service, *metamodel.Service, *realtime.Hub, *pgxpool.Pool) {
+	t.Helper()
 	hub := realtime.NewHub()
 	return markdown.New(pool, hub), metamodel.New(pool, hub), hub, pool
 }
@@ -33,6 +61,11 @@ func newService(t *testing.T) (*markdown.Service, *metamodel.Service, *realtime.
 func newGame(t *testing.T, pool *pgxpool.Pool, slug string) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
+	// The suffix is what lets many games share one database: the slug
+	// column is unique, and the name the caller chose is the one that
+	// makes the test read, so it is kept and made unique rather than
+	// replaced.
+	slug += "-" + uuid.NewString()[:8]
 	if err := pool.QueryRow(context.Background(),
 		`INSERT INTO projects (slug, name) VALUES ($1, $1) RETURNING id`, slug).Scan(&id); err != nil {
 		t.Fatalf("insert project %s: %v", slug, err)

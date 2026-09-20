@@ -72,18 +72,18 @@ import (
 // WriteInput.Kind unconverted.
 //
 // **Links is `*[]DocsLinkInput`, and the pointer is load-bearing for
-// the same reason.** `omitempty` on a plain slice omits an empty one,
-// which would collapse "detach everything" back into "say nothing" — the
-// single most destructive thing this tool could do quietly, in the
-// silent direction. markdown pins the distinction on a stand-in of this
-// exact shape (TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThe
-// Wire, internal/markdown/links_test.go) and
+// the same reason.** `omitempty` on a plain slice omits an empty one, which
+// would collapse "detach everything" back into "say nothing" — the single
+// most destructive thing this tool could do quietly, in the silent
+// direction. markdown pins the distinction on a stand-in of this exact
+// shape (TestLinksArea's "omitting links and sending an empty array are
+// different on the wire" case , internal/markdown/links_test.go) and
 // TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType
 // (mcp_docs_internal_test.go) re-pins the claim against this real type.
 // `"links": null` decodes to nil and therefore *preserves*, the same as
-// omitting the field; docs.write's description says so in words, because
-// an agent sending null meaning "detach" otherwise gets the opposite
-// with nothing to notice by.
+// omitting the field; docs.write's description says so in words, because an
+// agent sending null meaning "detach" otherwise gets the opposite with
+// nothing to notice by.
 type DocsWriteInput struct {
 	ScopedArgs
 	Path            string           `json:"path"`
@@ -513,14 +513,14 @@ type DocsVersionOutput struct {
 // would otherwise render "everything changed" for two versions that
 // differ by a word.
 //
-// FromDeleted and ToDeleted say whether either endpoint is a tombstone,
-// and they are on the wire for a reason the unified text cannot supply:
-// a tombstone carries the body the document had when it was deleted, so
-// a diff spanning a deletion is empty and reads as "nothing changed".
+// FromDeleted and ToDeleted say whether either endpoint is a tombstone, and
+// they are on the wire for a reason the unified text cannot supply: a
+// tombstone carries the body the document had when it was deleted, so a
+// diff spanning a deletion is empty and reads as "nothing changed".
 // markdown.DiffResult's own comment carries the argument, and
-// TestADiffAcrossATombstoneSaysWhichSideIsDeleted pins it there;
-// TestDocumentsEndToEnd asserts both of them on this type. Neither is
-// omitempty: false is a statement about a live version.
+// TestDiffArea's "a diff across a tombstone says which side is deleted"
+// case pins it there; TestDocumentsEndToEnd asserts both of them on this
+// type. Neither is omitempty: false is a statement about a live version.
 type DocsDiffOutput struct {
 	Path        string `json:"path"`
 	FromVersion int32  `json:"from_version"`

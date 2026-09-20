@@ -9,36 +9,35 @@
 --   * On documents, every one of them is. A path is caller-supplied and
 --     names no parent, and a document id is a value a previous answer
 --     handed back, so nothing but the project filter keeps either inside
---     one game. TestReadingAnotherGamesDocumentIsNotFound pins it for
---     GetDocumentByPath; the FOR UPDATE read's filter is pinned by the
---     same test too, if indirectly: dropping it reddens
---     TestWritingAPathAnotherGameUsesCreatesASecondDocument immediately,
---     because a write to another game's path would otherwise lock and
---     resurrect the first game's row instead of creating its own.
---   * On document_versions, the project filter is load-bearing *as
---     well*, and this is the one place Maestro deliberately does not
---     follow the metamodel's reasoning. There, a query reaching entities
---     through an entity_type_id is covered by the composite foreign key
---     and the filter is defence in depth. Here 0007_documents.sql gives
---     the child tables the same composite key, so the same argument
---     would apply -- and the spec (§5) rejects it for these tables
---     specifically: GetDocumentVersion and ListDocumentVersions are the
---     calls
---     where "join to the parent, then check" is one forgotten join away
---     from serving another game's prose, and the invariant must not
---     depend on anyone remembering. So the version queries carry their
---     own denormalised project_id and never join documents to establish
---     scope. InsertDocumentVersion writes it as a column rather than
---     filtering on it, and the composite key is what keeps it honest.
---     **Stated plainly, because it is checkable and was checked:** no
---     call this package offers can make that filter matter -- History
---     and ReadVersion resolve the document inside the game first, and
---     the composite key makes a version row disagreeing with its
---     document unrepresentable, so dropping the filter from either
---     query leaves the suite green. It stays for the callers that do
---     not resolve first, which Task 11's REST mirror may be. See
---     markdown.documentForVersions, which says the same thing where a
---     reader of the Go will find it.
+--     one game. TestDocumentsArea's "reading another games document is not
+--     found" case pins it for GetDocumentByPath; the FOR UPDATE read's
+--     filter is pinned by the same test too, if indirectly: dropping it
+--     reddens TestDocumentsArea's "writing a path another game uses creates
+--     a second document" case immediately, because a write to another
+--     game's path would otherwise lock and resurrect the first game's row
+--     instead of creating its own.
+--   * On document_versions, the project filter is load-bearing *as well*,
+--     and this is the one place Maestro deliberately does not follow the
+--     metamodel's reasoning. There, a query reaching entities through an
+--     entity_type_id is covered by the composite foreign key and the filter
+--     is defence in depth. Here 0007_documents.sql gives the child tables
+--     the same composite key, so the same argument would apply -- and the
+--     spec (§5) rejects it for these tables specifically:
+--     GetDocumentVersion and ListDocumentVersions are the calls where "join
+--     to the parent, then check" is one forgotten join away from serving
+--     another game's prose, and the invariant must not depend on anyone
+--     remembering. So the version queries carry their own denormalised
+--     project_id and never join documents to establish scope.
+--     InsertDocumentVersion writes it as a column rather than filtering on
+--     it, and the composite key is what keeps it honest. **Stated plainly,
+--     because it is checkable and was checked:** no call this package
+--     offers can make that filter matter -- History and ReadVersion resolve
+--     the document inside the game first, and the composite key makes a
+--     version row disagreeing with its document unrepresentable, so
+--     dropping the filter from either query leaves the suite green. It
+--     stays for the callers that do not resolve first, which Task 11's REST
+--     mirror may be. See markdown.documentForVersions, which says the same
+--     thing where a reader of the Go will find it.
 --
 -- No write here sets updated_at. 0007_documents.sql puts a
 -- set_updated_at trigger on documents, so the column has one mechanism
@@ -48,9 +47,10 @@
 -- name: UpsertDocument :one
 -- The compare-and-set, in one statement. Two writers cannot both read
 -- current_version 3 and both succeed: the DO UPDATE is guarded by the
--- caller's expected version, so the loser matches no row and gets back
--- no row rather than an error, which Go turns into the typed conflict.
--- TestTwoConcurrentWritesLeaveOneWinnerAndNoGapInTheVersions pins it.
+-- caller's expected version, so the loser matches no row and gets back no
+-- row rather than an error, which Go turns into the typed conflict.
+-- TestDocumentsArea's "two concurrent writes leave one winner and no gap in
+-- the versions" case pins it.
 --
 -- A creating caller passes expected_version 0, which no stored version
 -- can equal -- current_version starts at 1 and only climbs -- so the
@@ -71,28 +71,28 @@
 -- refuses a from/to pair that folds together for exactly the reason
 -- stated here, and cannot be reached by a write.
 --
--- kind is in the SET list, but not unconditionally: it is COALESCEd
--- against the stored value rather than overwritten by excluded.kind,
--- because kind is a property of the document -- what shelf it sits on --
--- and not a property of any one edit. A caller passes NULL to mean "say
--- nothing about kind", and every value including the empty string means
--- "set it to this"; SQL's COALESCE already treats a NULL argument as
--- "keep the left side" and a non-NULL one, empty string included, as
--- "replace it," which is exactly that rule. On the insert arm the same
--- COALESCE falls back to '' -- a new document's kind is never left NULL,
--- matching the NOT NULL DEFAULT '' the column already carries.
--- TestAnEditThatOmitsKindLeavesItUnchanged pins both directions.
+-- kind is in the SET list, but not unconditionally: it is COALESCEd against
+-- the stored value rather than overwritten by excluded.kind, because kind
+-- is a property of the document -- what shelf it sits on -- and not a
+-- property of any one edit. A caller passes NULL to mean "say nothing about
+-- kind", and every value including the empty string means "set it to this";
+-- SQL's COALESCE already treats a NULL argument as "keep the left side" and
+-- a non-NULL one, empty string included, as "replace it," which is exactly
+-- that rule. On the insert arm the same COALESCE falls back to '' -- a new
+-- document's kind is never left NULL, matching the NOT NULL DEFAULT '' the
+-- column already carries. TestDocumentsArea's "an edit that omits kind
+-- leaves it unchanged" case pins both directions.
 --
 -- created_by_* are not in the SET list either: the creator of a document
 -- is a fact about its first version and does not change when someone
 -- else edits it. updated_by_* do change, on every write.
 --
--- deleted_at = NULL on the update arm is the resurrection rule (spec
--- §3): writing to a soft-deleted path brings the document back and
--- continues its version numbering, because the path is still taken and
--- the history is still there. TestWritingToADeletedPathResurrectsItAnd
--- ContinuesTheNumbering is what pins it: delete the clause and the
--- resurrected document reads back as still deleted.
+-- deleted_at = NULL on the update arm is the resurrection rule (spec §3):
+-- writing to a soft-deleted path brings the document back and continues its
+-- version numbering, because the path is still taken and the history is
+-- still there. TestDocumentsArea's "writing to a deleted path resurrects it
+-- and continues the numbering" case is what pins it: delete the clause and
+-- the resurrected document reads back as still deleted.
 INSERT INTO documents (project_id, path, kind, title, summary, body_md, frontmatter,
                        current_version,
                        created_by_user_id, created_by_token_id,
@@ -120,13 +120,14 @@ RETURNING *;
 -- The read path. A soft-deleted document is not found unless the caller
 -- asked for it: deletion is soft so nothing is lost, not so that every
 -- reader has to filter. Both arms are exercised: the filtering one by
--- TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory, through
--- Read, and the include_deleted one by deleteRefusal and
--- conflictAfterFailedUpsert, which have to re-read a row that may be
+-- TestDeleteArea's "deleting a document hides it from reads and keeps its
+-- history" case, through Read, and the include_deleted one by deleteRefusal
+-- and conflictAfterFailedUpsert, which have to re-read a row that may be
 -- deleted in order to say why a write or a delete was refused --
--- deleteRefusal's arm by TestDeletingTwiceIsNotFoundRatherThanASecond
--- Tombstone, and conflictAfterFailedUpsert's by
--- TestACreationRacingACreateAndDeleteIsToldTheTombstone.
+-- deleteRefusal's arm by TestDeleteArea's "deleting twice is not found
+-- rather than a second tombstone" case , and conflictAfterFailedUpsert's by
+-- TestDocumentsArea's "a creation racing a create and delete is told the
+-- tombstone" case.
 SELECT * FROM documents
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND lower(path) = lower(sqlc.arg('path')::text)
@@ -186,16 +187,16 @@ FOR UPDATE;
 -- with its document's cannot be inserted at all
 -- (documents_schema_test.go pins that refusal).
 --
--- deleted is a required argument rather than a column left to its
--- DEFAULT false, and that is deliberate: Delete's tombstone is the one
--- caller that passes true, and every other caller has to say false out
--- loud. A defaulted column would let a future snapshot-writing path
--- forget the question and store a live version where a tombstone
--- belonged, silently; a required argument turns the same omission into
--- a compile error. TestDeletingADocumentHidesItFromReadsAndKeepsIts
--- History reads the true case back and Task 3's
--- TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage the
--- false one.
+-- deleted is a required argument rather than a column left to its DEFAULT
+-- false, and that is deliberate: Delete's tombstone is the one caller that
+-- passes true, and every other caller has to say false out loud. A
+-- defaulted column would let a future snapshot-writing path forget the
+-- question and store a live version where a tombstone belonged, silently; a
+-- required argument turns the same omission into a compile error.
+-- TestDeleteArea's "deleting a document hides it from reads and keeps its
+-- history" case reads the true case back and Task 3's TestDocumentsArea's
+-- "the first write also writes version one with its author and message"
+-- case the false one.
 INSERT INTO document_versions (project_id, document_id, version, path, title, summary, body_md,
                                frontmatter, message, deleted, author_user_id, author_token_id)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('document_id')::uuid,
@@ -207,23 +208,24 @@ VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('document_id')::uuid,
 RETURNING *;
 
 -- name: SoftDeleteDocument :one
--- Guarded by the caller's expected version, exactly as UpsertDocument
--- is, so a delete cannot race an edit: the loser matches no row and gets
--- back no row, which Go turns into the typed conflict.
--- TestDeletingWithAStaleVersionIsAConflict pins the guard and
--- TestDeletingAnotherGamesDocumentIsNotFound the project filter.
+-- Guarded by the caller's expected version, exactly as UpsertDocument is,
+-- so a delete cannot race an edit: the loser matches no row and gets back
+-- no row, which Go turns into the typed conflict. TestDeleteArea's
+-- "deleting with a stale version is a conflict" case pins the guard and
+-- TestDeleteArea's "deleting another games document is not found" case the
+-- project filter.
 --
--- deleted_at IS NULL is part of the guard, so deleting a document twice
--- is not_found on the second call rather than a second tombstone. That
--- is the honest answer: the document is already gone, and the caller has
--- nothing to do. TestDeletingTwiceIsNotFoundRatherThanASecondTombstone
--- pins it.
+-- deleted_at IS NULL is part of the guard, so deleting a document twice is
+-- not_found on the second call rather than a second tombstone. That is the
+-- honest answer: the document is already gone, and the caller has nothing
+-- to do. TestDeleteArea's "deleting twice is not found rather than a second
+-- tombstone" case pins it.
 --
 -- current_version advances here and the caller appends the matching
 -- tombstone version in the same transaction. The two are one change and
--- withTx is what keeps them so; the count assertion in
--- TestDeletingADocumentHidesItFromReadsAndKeepsItsHistory is what
--- refuses to let them drift.
+-- withTx is what keeps them so; the count assertion in TestDeleteArea's
+-- "deleting a document hides it from reads and keeps its history" case is
+-- what refuses to let them drift.
 --
 -- There is no FOR UPDATE read before this statement, unlike the write
 -- path. It would buy nothing here: this UPDATE takes the row lock
@@ -248,9 +250,10 @@ RETURNING *;
 -- SET list is a statement about *writes* rather than about the column.
 --
 -- It is guarded exactly as UpsertDocument and SoftDeleteDocument are, by
--- the caller's expected version, so a move cannot race an edit: the
--- loser matches no row and gets back no row, which Go turns into the
--- typed conflict. TestMovingWithAStaleVersionIsAConflict pins the guard.
+-- the caller's expected version, so a move cannot race an edit: the loser
+-- matches no row and gets back no row, which Go turns into the typed
+-- conflict. TestMoveArea's "moving with a stale version is a conflict" case
+-- pins the guard.
 --
 -- deleted_at IS NULL is part of the guard for the reason it is part of
 -- SoftDeleteDocument's: a deleted document has no address to move, and
@@ -289,15 +292,15 @@ RETURNING *;
 -- same reason -- a caller cannot filter by a vocabulary nobody will
 -- tell it.
 --
--- Grouped by lower(kind), not by kind, because that is the identity
--- every other statement in this file uses: ListDocumentsPage and
--- SearchDocuments both compare lower(d.kind) = lower(@kind), so "Lore"
--- and "lore" are one filter result and must be one catalogue row. The
--- folded spelling is what comes back, for the same reason: it is the
--- value that, fed to either filter, selects exactly the rows this row
--- counted. Reporting one of the stored spellings instead would return a
--- value that happens to work and a count that belongs to a different
--- set. TestTwoSpellingsOfOneKindAreOneCatalogueRow pins it.
+-- Grouped by lower(kind), not by kind, because that is the identity every
+-- other statement in this file uses: ListDocumentsPage and SearchDocuments
+-- both compare lower(d.kind) = lower(@kind), so "Lore" and "lore" are one
+-- filter result and must be one catalogue row. The folded spelling is what
+-- comes back, for the same reason: it is the value that, fed to either
+-- filter, selects exactly the rows this row counted. Reporting one of the
+-- stored spellings instead would return a value that happens to work and a
+-- count that belongs to a different set. TestKindsArea's "two spellings of
+-- one kind are one catalogue row" case pins it.
 --
 -- The kind-less documents are excluded here and counted by
 -- CountDocuments instead: '' is not a vocabulary entry, and there is no
@@ -336,29 +339,29 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND deleted_at IS NULL;
 
 -- name: ListDocumentVersions :many
--- Version metadata only, newest first. **No bodies**: prose is the
--- largest payload in the system and agents are its main consumer, so a
--- history that carried them would blow a context window on the first
--- call against a document anyone has actually worked on (spec §7).
--- TestHistoryIsNewestFirstAndCarriesNoBodies pins the order and the
--- absence, the latter by reading the returned row type's own fields.
+-- Version metadata only, newest first. **No bodies**: prose is the largest
+-- payload in the system and agents are its main consumer, so a history that
+-- carried them would blow a context window on the first call against a
+-- document anyone has actually worked on (spec §7). TestVersionsArea's
+-- "history is newest first and carries no bodies" case pins the order and
+-- the absence, the latter by reading the returned row type's own fields.
 --
 -- Keyset by version alone, which is unique within a document
--- (document_versions_key), so there is no tiebreak to add and the page
--- is an index scan. This is one of the two calls the file header names
--- as being one forgotten join away from serving another game's prose,
--- and it deliberately does not reach the parent document at all -- but
--- no call markdown.History offers can make this query's own project
--- filter matter (see markdown.documentForVersions): the document id
--- only ever reaches here already resolved inside the caller's own game,
--- and 0007_documents.sql's composite key makes a version row whose
--- project_id disagrees with its document's unrepresentable
--- (TestAVersionRowCannotClaimAGameItsDocumentDoesNotBelongTo forces
--- that refusal). What the project filter separates nothing for is
--- covered instead by TestAVersionIsAddressedByItsOwnDocument, the
--- document_id filter, and TestTwoGamesSharingOnePathKeepSeparateHistories
--- pins that a version row carries its own document's project id in the
--- first place.
+-- (document_versions_key), so there is no tiebreak to add and the page is
+-- an index scan. This is one of the two calls the file header names as
+-- being one forgotten join away from serving another game's prose, and it
+-- deliberately does not reach the parent document at all -- but no call
+-- markdown.History offers can make this query's own project filter matter
+-- (see markdown.documentForVersions): the document id only ever reaches
+-- here already resolved inside the caller's own game, and
+-- 0007_documents.sql's composite key makes a version row whose project_id
+-- disagrees with its document's unrepresentable (TestVersionsArea's "a
+-- version row cannot claim a game its document does not belong to" case
+-- forces that refusal). What the project filter separates nothing for is
+-- covered instead by TestVersionsArea's "a version is addressed by its own
+-- document" case, the document_id filter, and TestVersionsArea's "two games
+-- sharing one path keep separate histories" case pins that a version row
+-- carries its own document's project id in the first place.
 SELECT id, project_id, document_id, version, path, title, summary, message, deleted,
        author_user_id, author_token_id, created_at
 FROM document_versions
@@ -370,11 +373,11 @@ ORDER BY version DESC
 LIMIT sqlc.arg('limit')::int;
 
 -- name: GetDocumentVersion :one
--- The other call the file header names. Same rule: filtered by
--- project_id and document_id, never by version alone and never by a
--- join -- and the same caveat: no call markdown.ReadVersion offers can
--- make this query's own project filter matter, for the reason above
--- ListDocumentVersions. TestReadingAnotherGamesVersionIsNotFound is
+-- The other call the file header names. Same rule: filtered by project_id
+-- and document_id, never by version alone and never by a join -- and the
+-- same caveat: no call markdown.ReadVersion offers can make this query's
+-- own project filter matter, for the reason above ListDocumentVersions.
+-- TestVersionsArea's "reading another games version is not found" case is
 -- refused one join earlier, in markdown.documentForVersions.
 SELECT * FROM document_versions
 WHERE project_id = sqlc.arg('project_id')::uuid
@@ -382,18 +385,17 @@ WHERE project_id = sqlc.arg('project_id')::uuid
   AND version = sqlc.arg('version')::integer;
 
 -- name: GetEntityTypeIDByKey :one
--- Link endpoints are resolved here rather than through
--- internal/metamodel's own EntityByKey, in two steps rather than one
--- join, for a reason that is about the *answer* and not about coupling:
--- a caller that typed "quesst" and a caller that typed "wanted-hoggerr"
--- have made two different mistakes at two different arguments, and one
--- flat "not found" makes an agent guess which. Two lookups let the
--- refusal name entity_type or entity_key, which is the discrimination
--- the spec wanted a whole extra wire code for.
--- TestAMistypedEntityTypeAndAMistypedEntityKeyAreToldApart pins that the
--- two misses are told apart, and the project filter here is what refuses
--- an entity type another game declared
--- (TestALinkToAnEntityInAnotherGameIsRefused).
+-- Link endpoints are resolved here rather than through internal/metamodel's
+-- own EntityByKey, in two steps rather than one join, for a reason that is
+-- about the *answer* and not about coupling: a caller that typed "quesst"
+-- and a caller that typed "wanted-hoggerr" have made two different mistakes
+-- at two different arguments, and one flat "not found" makes an agent guess
+-- which. Two lookups let the refusal name entity_type or entity_key, which
+-- is the discrimination the spec wanted a whole extra wire code for.
+-- TestLinksArea's "a mistyped entity type and a mistyped entity key are
+-- told apart" case pins that the two misses are told apart, and the project
+-- filter here is what refuses an entity type another game declared
+-- (TestLinksArea's "a link to an entity in another game is refused" case).
 SELECT id FROM entity_types
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND lower(key) = lower(sqlc.arg('key')::text);
@@ -401,23 +403,24 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- name: GetEntityIDByKey :one
 -- The second half of that resolution.
 --
--- **This query's own project filter separates nothing markdown.resolveEntity
--- can reach, and that is stated rather than credited to a test that would
--- not go red.** entity_type_id arrives already resolved inside the
--- caller's own game (GetEntityTypeIDByKey filters on project_id), and
--- 0004_metamodel.sql gives entities a composite key to entity_types
--- carrying project_id, so an entity whose project_id disagrees with its
--- type's is unrepresentable. Verified by mutation: neutralising this
--- filter behind a no-op `OR TRUE` leaves the package green, including
--- TestALinkToAnEntityFromAnotherGamesTypeOfTheSameNameIsRefusedAtTheKey,
--- which is refused by the entity_type_id filter instead. The filter
--- stays for the same reason ListDocumentVersions' does -- a future
--- caller that obtains a type id some other way, which Task 11's REST
--- mirror may be -- and because the file header's rule is that isolation
--- is in SQL and not in whoever remembers to resolve first.
--- What the test above does pin is the *answer*: a caller naming another
--- game's entity under a type key both games declare is refused at
--- entity_key, not at entity_type and not with somebody else's row.
+-- **This query's own project filter separates nothing
+-- markdown.resolveEntity can reach, and that is stated rather than credited
+-- to a test that would not go red.** entity_type_id arrives already
+-- resolved inside the caller's own game (GetEntityTypeIDByKey filters on
+-- project_id), and 0004_metamodel.sql gives entities a composite key to
+-- entity_types carrying project_id, so an entity whose project_id disagrees
+-- with its type's is unrepresentable. Verified by mutation: neutralising
+-- this filter behind a no-op `OR TRUE` leaves the package green, including
+-- TestLinksArea's "a link to an entity from another games type of the same
+-- name is refused at the key" case, which is refused by the entity_type_id
+-- filter instead. The filter stays for the same reason
+-- ListDocumentVersions' does -- a future caller that obtains a type id some
+-- other way, which Task 11's REST mirror may be -- and because the file
+-- header's rule is that isolation is in SQL and not in whoever remembers to
+-- resolve first. What the test above does pin is the *answer*: a caller
+-- naming another game's entity under a type key both games declare is
+-- refused at entity_key, not at entity_type and not with somebody else's
+-- row.
 SELECT id FROM entities
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND entity_type_id = sqlc.arg('entity_type_id')::uuid
@@ -426,15 +429,15 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- name: UpsertDocumentLink :one
 -- Idempotent by (document, entity): re-adding a link updates its role
 -- rather than making a second edge, which is what keeps a re-run seeding
--- script from doubling every attachment.
--- TestReAddingALinkUpdatesItsRoleRatherThanDuplicatingIt pins it.
+-- script from doubling every attachment. TestLinksArea's "re adding a link
+-- updates its role rather than duplicating it" case pins it.
 --
 -- project_id is written, not filtered, and 0007_documents.sql's two
 -- composite keys are what make a cross-game link impossible to
 -- *insert*: this row's project_id must agree with the document's *and*
 -- with the entity's, so a document in one game cannot be attached to an
--- entity in another whatever Go believes.
--- TestALinkRowCannotClaimAGameItsDocumentDoesNotBelongTo forces that
+-- entity in another whatever Go believes. TestLinksArea's "a link row
+-- cannot claim a game its document does not belong to" case forces that
 -- refusal from this package.
 --
 -- **Those keys check nothing on the conflict path, and the guard below
@@ -453,12 +456,12 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- the caller sees pgx.ErrNoRows rather than a silent success.
 --
 -- Unreachable from either call site -- both resolve the document and the
--- entity by key inside the project first -- and kept anyway, for the
--- reason internal/views' position write keeps its twin: a statement that
--- is safe only because of how today's caller happens to address it is a
--- trap for tomorrow's caller.
--- TestUpsertDocumentLinksConflictPathCannotWriteAnotherGamesLink drives
--- the statement directly, which is the only way to observe it.
+-- entity by key inside the project first -- and kept anyway, for the reason
+-- internal/views' position write keeps its twin: a statement that is safe
+-- only because of how today's caller happens to address it is a trap for
+-- tomorrow's caller. TestLinksArea's "upsert document links conflict path
+-- cannot write another games link" case drives the statement directly,
+-- which is the only way to observe it.
 INSERT INTO document_links (project_id, document_id, entity_id, role)
 VALUES (sqlc.arg('project_id')::uuid, sqlc.arg('document_id')::uuid,
         sqlc.arg('entity_id')::uuid, sqlc.arg('role')::text)
@@ -468,9 +471,9 @@ WHERE document_links.project_id = excluded.project_id
 RETURNING *;
 
 -- name: DeleteDocumentLink :execrows
--- The row count is what tells LinkRemove that there was nothing to
--- detach, which it reports as not_found rather than as silence
--- (TestRemovingALinkLeavesTheDocumentAndTheEntity).
+-- The row count is what tells LinkRemove that there was nothing to detach,
+-- which it reports as not_found rather than as silence (TestLinksArea's
+-- "removing a link leaves the document and the entity" case).
 DELETE FROM document_links
 WHERE project_id = sqlc.arg('project_id')::uuid
   AND document_id = sqlc.arg('document_id')::uuid
@@ -506,14 +509,14 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 -- document's attachments grouped by type groups them.
 --
 -- The project filter here separates nothing that markdown.LinksByDocument
--- can reach, and this is stated rather than credited to a test that
--- would not go red: the document id only ever arrives already resolved
--- inside the caller's own game (markdown.documentForLinks), and
--- 0007_documents.sql's composite keys make a link row whose project_id
--- disagrees with its document's unrepresentable. It stays for the same
--- reason ListDocumentVersions' does -- a caller that does not resolve
--- first, which Task 11's REST mirror may be. What is pinned is the
--- document_id filter: TestALinkIsAddressedByItsOwnDocument uses two
+-- can reach, and this is stated rather than credited to a test that would
+-- not go red: the document id only ever arrives already resolved inside the
+-- caller's own game (markdown.documentForLinks), and 0007_documents.sql's
+-- composite keys make a link row whose project_id disagrees with its
+-- document's unrepresentable. It stays for the same reason
+-- ListDocumentVersions' does -- a caller that does not resolve first, which
+-- Task 11's REST mirror may be. What is pinned is the document_id filter:
+-- TestLinksArea's "a link is addressed by its own document" case uses two
 -- documents in one game, where the project filter separates nothing.
 SELECT l.role, t.key AS entity_type_key, e.key AS entity_key,
        e.name AS entity_name, e.id AS entity_id
@@ -533,11 +536,11 @@ LIMIT sqlc.arg('limit')::int;
 -- from the quest instead of guessing a path.
 --
 -- Soft-deleted documents are excluded: an entity page listing a document
--- nobody can read would be a dead link on every quest it was attached
--- to. TestAnEntityStopsListingADocumentThatWasDeleted pins it, and pins
--- the other half of the same rule in its second act: nothing cascades on
--- a soft delete, so the link row survives and comes back with its role
--- when the document is written to again.
+-- nobody can read would be a dead link on every quest it was attached to.
+-- TestLinksArea's "an entity stops listing a document that was deleted"
+-- case pins it, and pins the other half of the same rule in its second act:
+-- nothing cascades on a soft delete, so the link row survives and comes
+-- back with its role when the document is written to again.
 --
 -- One page, keyset-ordered by (path, id), which is the documents
 -- listing's own order: an entity that a hundred scripts hang off is an
@@ -558,36 +561,36 @@ LIMIT sqlc.arg('limit')::int;
 -- One page of a game's documents, keyset-ordered by (path, id).
 --
 -- **No body_md and no frontmatter in the select list.** They are the two
--- largest columns in the schema and a listing never needs either; a
--- SELECT * here would quietly put a megabyte of prose per row on a page
--- of fifty. markdown.DocumentSummary carries no field for either, which
--- is what makes the rule a fact about the type rather than a promise
--- about this select list (TestAListingRowCarriesNoBodyAtAll).
+-- largest columns in the schema and a listing never needs either; a SELECT
+-- * here would quietly put a megabyte of prose per row on a page of fifty.
+-- markdown.DocumentSummary carries no field for either, which is what makes
+-- the rule a fact about the type rather than a promise about this select
+-- list (TestListArea's "a listing row carries no body at all" case).
 --
 -- **starts_with, not LIKE, and this is a correctness choice rather than
 -- a style one.** A path may legally contain `_`, which is LIKE's
 -- single-character wildcard, so `path_prefix: "lore_x"` under LIKE would
--- also match `loreax` -- a filter silently answering a question the
--- caller did not ask, which is the class of defect this whole read
--- surface is most exposed to. Escaping it correctly is possible and is
--- one forgotten backslash away from the same bug.
--- TestAPathPrefixFilterDoesNotTreatUnderscoreAsAWildcard pins it. The
--- cost is that starts_with cannot use documents_listing_idx for the
--- prefix, so a prefixed listing scans the game's documents; a game has
--- hundreds of documents, not millions, and the ordering half of the
--- index still applies.
+-- also match `loreax` -- a filter silently answering a question the caller
+-- did not ask, which is the class of defect this whole read surface is most
+-- exposed to. Escaping it correctly is possible and is one forgotten
+-- backslash away from the same bug. TestListArea's "a path prefix filter
+-- does not treat underscore as a wildcard" case pins it. The cost is that
+-- starts_with cannot use documents_listing_idx for the prefix, so a
+-- prefixed listing scans the game's documents; a game has hundreds of
+-- documents, not millions, and the ordering half of the index still
+-- applies.
 --
 -- The prefix and the kind are folded, like every other path comparison
 -- in this file, so `Lore/` and `lore/` name the same subtree and
 -- `SCRIPT` and `script` name the same shelf
--- (TestAListingFiltersByKindAndByEntity).
+-- (TestListArea's "a listing filters by kind and by entity" case).
 --
--- The entity filter is an EXISTS rather than a join, so a document
--- attached to one entity appears once and the page's row count is the
--- number of documents rather than the number of links.
--- TestADocumentAttachedToTwoEntitiesAppearsOnceInAFilteredListing pins
--- that, with a document attached to two entities of which one is
--- filtered on; a JOIN would answer with the same row twice.
+-- The entity filter is an EXISTS rather than a join, so a document attached
+-- to one entity appears once and the page's row count is the number of
+-- documents rather than the number of links. TestListArea's "a document
+-- attached to two entities appears once in a filtered listing" case pins
+-- that, with a document attached to two entities of which one is filtered
+-- on; a JOIN would answer with the same row twice.
 --
 -- **`l.project_id = d.project_id` inside that EXISTS is defence in
 -- depth, not load-bearing, and no test here says otherwise.** The
@@ -601,9 +604,9 @@ LIMIT sqlc.arg('limit')::int;
 -- one a later edit removes first, and this one costs nothing to keep.
 --
 -- The project filter is load-bearing here, unlike the ones the header
--- describes as defence in depth: a listing resolves nothing beforehand,
--- so this filter is the only thing keeping one game's prose out of
--- another's page. TestAListingNeverCrossesGames pins it.
+-- describes as defence in depth: a listing resolves nothing beforehand, so
+-- this filter is the only thing keeping one game's prose out of another's
+-- page. TestListArea's "a listing never crosses games" case pins it.
 SELECT d.id, d.project_id, d.path, d.kind, d.title, d.summary, d.current_version,
        d.deleted_at, d.created_at, d.updated_at,
        d.created_by_user_id, d.created_by_token_id,
@@ -634,27 +637,28 @@ LIMIT sqlc.arg('limit')::int;
 -- Searching it would multiply the index by the number of versions to
 -- answer a question that in practice is asked about one known document,
 -- where history plus diff answers it better.
--- TestOnlyTheCurrentVersionIsSearchable pins it.
+-- TestSearchArea's "only the current version is searchable" case pins it.
 --
 -- The project filter is load-bearing, the way ListDocumentsPage's is and
 -- unlike the ones this file's other comments call defence in depth: the
 -- query text is the caller's and names no parent, and a search resolves
--- nothing beforehand, so nothing but this clause keeps one game's prose
--- out of another's answer. TestASearchNeverCrossesGames pins it.
+-- nothing beforehand, so nothing but this clause keeps one game's prose out
+-- of another's answer. TestSearchArea's "a search never crosses games" case
+-- pins it.
 --
 -- **name_match leads the ordering, and it is a guarantee rather than a
--- tendency**, for the reason metamodel.Search's own comment works
--- through at length: ts_rank saturates towards 1.0 as a lexeme repeats,
--- so weights alone lose to sheer frequency on a multi-word query. Here
--- the A-weighted half of the vector is the *title* and nothing else
--- (0007_documents.sql builds it that way), so ts_filter(search, '{a}')
--- @@ query asks exactly "does the title satisfy the query", and a
--- document the query names outranks one that merely mentions the words
--- in its body however often. ts_rank orders within each of the two
--- groups, which is the work the A/B/C weights were introduced for.
--- TestADocumentTheQueryNamesOutranksOneThatOnlyMentionsIt pins both
--- halves: it is red without `name_match DESC` and red with the
--- ts_filter replaced by the whole vector.
+-- tendency**, for the reason metamodel.Search's own comment works through
+-- at length: ts_rank saturates towards 1.0 as a lexeme repeats, so weights
+-- alone lose to sheer frequency on a multi-word query. Here the A-weighted
+-- half of the vector is the *title* and nothing else (0007_documents.sql
+-- builds it that way), so ts_filter(search, '{a}') @@ query asks exactly
+-- "does the title satisfy the query", and a document the query names
+-- outranks one that merely mentions the words in its body however often.
+-- ts_rank orders within each of the two groups, which is the work the A/B/C
+-- weights were introduced for. TestSearchArea's "a document the query names
+-- outranks one that only mentions it" case pins both halves: it is red
+-- without `name_match DESC` and red with the ts_filter replaced by the
+-- whole vector.
 --
 -- The configuration is 'simple' on both sides of that expression and on
 -- the column itself, matching entities.search: the two indexes are
@@ -672,7 +676,7 @@ LIMIT sqlc.arg('limit')::int;
 --
 -- Deleted documents are absent. A search result nobody can open is a
 -- worse answer than no answer.
--- TestADeletedDocumentIsNotSearchable pins it.
+-- TestSearchArea's "a deleted document is not searchable" case pins it.
 SELECT d.id, d.path, d.title, d.summary, d.kind, d.current_version,
        ts_rank(d.search, plainto_tsquery('simple', sqlc.arg('query')::text)) AS rank,
        (ts_filter(d.search, '{a}')

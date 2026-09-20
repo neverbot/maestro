@@ -30,12 +30,12 @@ import (
 // two sub-projects later.
 //
 // The refusal itself is synthesised rather than provoked: provoking one
-// requires a write path per table, three of which do not exist yet, and
-// the thing under test is the name scan and not the database's
-// willingness to refuse — which the per-domain tests
-// (TestAssetsArea's "the uploader is recorded and a foreign token is refused" case,
-// TestADocumentWrittenWithAnotherGamesTokenIsRefusedAsSuch) already
-// drive end to end.
+// requires a write path per table, three of which do not exist yet, and the
+// thing under test is the name scan and not the database's willingness to
+// refuse — which the per-domain tests (TestAssetsArea's "the uploader is
+// recorded and a foreign token is refused" case, TestDocumentsArea's "a
+// document written with another games token is refused as such" case)
+// already drive end to end.
 func TestEveryCompositeTokenKeyIsNamedInActorColumns(t *testing.T) {
 	pool := testutil.NewPool(t)
 	rows, err := pool.Query(context.Background(), `

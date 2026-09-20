@@ -19,11 +19,11 @@ import (
 // was not.
 //
 // **Both kinds and both modes**, because the check is in the shared
-// driver and a check in the shared driver is exactly the kind of thing
-// that gets moved to one call site later. internal/markdown's documents
-// are the third kind and are pinned in their own package, by
-// TestADocumentBatchIsBoundedByTheSameCeiling, because they reach the
-// same driver from outside this one.
+// driver and a check in the shared driver is exactly the kind of thing that
+// gets moved to one call site later. internal/markdown's documents are the
+// third kind and are pinned in their own package, by TestBulkArea's "a
+// document batch is bounded by the same ceiling" case, because they reach
+// the same driver from outside this one.
 //
 // The batches here are of *invalid* items — no entity type is declared —
 // so a build without the bound fails them at the item level rather than

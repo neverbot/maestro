@@ -403,12 +403,12 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 // listing's correction.
 //
 // The route answered with every asset a game held, with no limit and no
-// cursor, in a product where every other listing reads `cursor` and
-// `limit` off the query string and answers `next_cursor`. A client that
-// can page documents or entities must be able to page this the same way,
-// which is what the parameter *names* here are for — the service half
-// (TestAssetsArea's "the asset listing is paged and its cursor is its own" case) pins the keyset
-// itself.
+// cursor, in a product where every other listing reads `cursor` and `limit`
+// off the query string and answers `next_cursor`. A client that can page
+// documents or entities must be able to page this the same way, which is
+// what the parameter *names* here are for — the service half
+// (TestAssetsArea's "the asset listing is paged and its cursor is its own"
+// case) pins the keyset itself.
 func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 	f := newAssetFixture(t)
 	for i := 0; i < 5; i++ {

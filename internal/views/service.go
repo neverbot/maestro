@@ -64,16 +64,16 @@ type Service struct {
 // published; the package's own tests run that way.
 //
 // **The metamodel handle it builds gets the same hub**, and that is a
-// correction rather than a convenience. This package calls read
-// accessors on it almost everywhere, and the rule that keeps a views
-// write path publishing through this package's own events still holds —
-// but RemoveTypeReportingViews composes a metamodel *write*, and with a
-// nil hub there that removal announced nothing: a designer watching a
-// game would never learn a type had gone, because the one code path a
-// transport can reach the report through is this one. The event is the
-// metamodel's own, published by the metamodel's own code for a change it
-// made; what a nil hub bought was silence, not a boundary.
-// TestStaleArea's "removing a type through the views report still announces it" case pins it.
+// correction rather than a convenience. This package calls read accessors
+// on it almost everywhere, and the rule that keeps a views write path
+// publishing through this package's own events still holds — but
+// RemoveTypeReportingViews composes a metamodel *write*, and with a nil hub
+// there that removal announced nothing: a designer watching a game would
+// never learn a type had gone, because the one code path a transport can
+// reach the report through is this one. The event is the metamodel's own,
+// published by the metamodel's own code for a change it made; what a nil
+// hub bought was silence, not a boundary. TestStaleArea's "removing a type
+// through the views report still announces it" case pins it.
 func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 	return &Service{pool: pool, q: dbq.New(pool), meta: metamodel.New(pool, hub), hub: hub}
 }

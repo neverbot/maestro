@@ -36,10 +36,10 @@ import (
 //
 // **Everything about the bytes is read out of the bytes.** The mime is
 // sniffed from the leading magic numbers, never taken from the caller's
-// Content-Type or from the filename, and the width and height are
-// decoded from the image header rather than accepted as arguments. A
-// filename check is exactly what an SVG carrying a script walks past:
-// TestAssetsArea's "an SVG is refused whatever it calls itself" case sends an SVG's bytes with a
+// Content-Type or from the filename, and the width and height are decoded
+// from the image header rather than accepted as arguments. A filename check
+// is exactly what an SVG carrying a script walks past: TestAssetsArea's "an
+// SVG is refused whatever it calls itself" case sends an SVG's bytes with a
 // PNG's Content-Type and a .png name.
 //
 // **SVG is refused, and refused by an allowlist rather than by naming
@@ -55,34 +55,31 @@ import (
 // **What was decided about the decoder as an attack surface**, since
 // this is the one place hostile bytes meet a parser:
 //
-//   - **Nothing decodes pixels.** Dimensions come from
-//     png.DecodeConfig and jpeg.DecodeConfig, which read the header and
-//     return -- they never allocate the pixel buffer -- and from
-//     webpConfig below, which reads the RIFF chunk header and no more.
-//     A decompression bomb (a 20000x20000 flat-colour PNG compresses to
-//     a few hundred kilobytes) therefore never expands inside this
-//     process at all.
-//   - **The decoder is chosen by the sniffed mime, not by a second
-//     sniff.** image.DecodeConfig would re-sniff through the registry
-//     of whatever formats some other package happened to blank-import,
-//     which is a second judgement that can disagree with the stored one
-//     -- and the stored mime is what the serving route later answers
-//     with. Dispatching on the mime this file already decided makes
-//     "the format we say it is" and "the format we parsed it as" one
-//     decision.
+//   - **Nothing decodes pixels.** Dimensions come from png.DecodeConfig and
+//     jpeg.DecodeConfig, which read the header and return -- they never
+//     allocate the pixel buffer -- and from webpConfig below, which reads
+//     the RIFF chunk header and no more. A decompression bomb (a
+//     20000x20000 flat-colour PNG compresses to a few hundred kilobytes)
+//     therefore never expands inside this process at all.
+//   - **The decoder is chosen by the sniffed mime, not by a second sniff.**
+//     image.DecodeConfig would re-sniff through the registry of whatever
+//     formats some other package happened to blank-import, which is a
+//     second judgement that can disagree with the stored one -- and the
+//     stored mime is what the serving route later answers with. Dispatching
+//     on the mime this file already decided makes "the format we say it is"
+//     and "the format we parsed it as" one decision.
 //   - **WebP is parsed here rather than by adding a dependency.**
-//     golang.org/x/image/webp is a full lossy/lossless decoder for a
-//     job that needs fourteen bits of a chunk header; the parser below
-//     reads the first RIFF chunk, bounds-checks every offset against
-//     the buffer it already holds, allocates nothing and loops over
-//     nothing.
-//   - **A header the parsers believe is still bounded.** The three
-//     parsers report whatever the file claims, and a claim is free:
+//     golang.org/x/image/webp is a full lossy/lossless decoder for a job
+//     that needs fourteen bits of a chunk header; the parser below reads
+//     the first RIFF chunk, bounds-checks every offset against the buffer
+//     it already holds, allocates nothing and loops over nothing.
+//   - **A header the parsers believe is still bounded.** The three parsers
+//     report whatever the file claims, and a claim is free:
 //     MaxAssetDimension and MaxAssetPixels refuse an image whose header
-//     says it is enormous, because the browser that draws it *will*
-//     decode the pixels this process declined to, and 20000x20000 is
-//     1.6 GB of RGBA in a designer's tab. The bound protects the
-//     client, which is the only reader that expands these bytes.
+//     says it is enormous, because the browser that draws it *will* decode
+//     the pixels this process declined to, and 20000x20000 is 1.6 GB of
+//     RGBA in a designer's tab. The bound protects the client, which is the
+//     only reader that expands these bytes.
 //   - **The size bound is applied while reading, never after, and it is
 //     applied here only.** readBounded stops at MaxAssetBytes+1, so a
 //     caller streaming four gigabytes is refused having buffered eight
@@ -91,25 +88,25 @@ import (
 //     http.MaxBytesReader over the same constant, and that wrapper was
 //     measured, found unable to fire -- the limited read below takes the
 //     byte that would have tripped it -- and removed, which left this
-//     sentence describing code that is not there.
-//     api_view_assets.go's header carries the whole argument.
-//     TestAssetsArea's "an oversize asset is refused before it is read" case counts the bytes this
-//     package pulls from the reader, because "refused" and "refused
-//     before it was read" are different claims and only one of them is
-//     worth making.
-//   - **How many, as well as how big.** MaxAssetsPerGame is the
-//     aggregate bound; every other number here is per asset, and for a
-//     sub-project a game could hold as many eight-megabyte images as
-//     anyone cared to upload.
-//   - **The dimension bounds are per canvas, and an animated file has
-//     more than one frame. Recorded, not bounded, and here is the
-//     judgement.** Both PNG and WebP carry animation -- APNG's acTL
-//     chunk, WebP's ANIM/ANMF under a VP8X whose flags say so -- and the
-//     header decode above stops before either: png.DecodeConfig returns
-//     at IHDR and webpConfig reads the first chunk and no more, so
-//     nothing here ever sees a frame count. MaxAssetPixels therefore
-//     bounds one canvas and a browser's cost is that canvas times
-//     however many frames it decides to hold decoded.
+//     sentence describing code that is not there. api_view_assets.go's
+//     header carries the whole argument. TestAssetsArea's "an oversize
+//     asset is refused before it is read" case counts the bytes this
+//     package pulls from the reader, because "refused" and "refused before
+//     it was read" are different claims and only one of them is worth
+//     making.
+//   - **How many, as well as how big.** MaxAssetsPerGame is the aggregate
+//     bound; every other number here is per asset, and for a sub-project a
+//     game could hold as many eight-megabyte images as anyone cared to
+//     upload.
+//   - **The dimension bounds are per canvas, and an animated file has more
+//     than one frame. Recorded, not bounded, and here is the judgement.**
+//     Both PNG and WebP carry animation -- APNG's acTL chunk, WebP's
+//     ANIM/ANMF under a VP8X whose flags say so -- and the header decode
+//     above stops before either: png.DecodeConfig returns at IHDR and
+//     webpConfig reads the first chunk and no more, so nothing here ever
+//     sees a frame count. MaxAssetPixels therefore bounds one canvas and a
+//     browser's cost is that canvas times however many frames it decides to
+//     hold decoded.
 //
 //     No bound is added today, for two reasons. MaxAssetBytes already
 //     caps the compressed whole at eight megabytes, and every frame's
@@ -207,9 +204,9 @@ const (
 // Asset is one background image as it reads back, without its bytes.
 //
 // Width, Height and Mime are decoded and sniffed values, not arguments,
-// which is why views.list_assets returns them and why
-// TestAssetsArea's "width and height are decoded and read back" case reads them back through this
-// struct: a column filled by a decoder nobody ever reads is a decoder
+// which is why views.list_assets returns them and why TestAssetsArea's
+// "width and height are decoded and read back" case reads them back through
+// this struct: a column filled by a decoder nobody ever reads is a decoder
 // nobody can prove ran.
 type Asset struct {
 	ID        uuid.UUID
@@ -728,12 +725,12 @@ func assetFilenameProblems(filename string) []metamodel.FieldError {
 // **The +1 is the whole mechanism**: reading exactly the cap cannot tell
 // a file of exactly eight megabytes from the first eight megabytes of a
 // larger one, and the difference between those two is a stored truncated
-// image. Reading one byte past is what makes "too big" observable, and
-// it is the most this ever holds -- a caller streaming four gigabytes is
+// image. Reading one byte past is what makes "too big" observable, and it
+// is the most this ever holds -- a caller streaming four gigabytes is
 // refused having buffered 8 MB and one byte, not four gigabytes.
-// TestAssetsArea's "an oversize asset is refused before it is read" case counts what this pulls from
-// the reader, because "refused" and "refused before it was read" are
-// different claims.
+// TestAssetsArea's "an oversize asset is refused before it is read" case
+// counts what this pulls from the reader, because "refused" and "refused
+// before it was read" are different claims.
 func readBounded(body io.Reader) ([]byte, error) {
 	raw, err := io.ReadAll(io.LimitReader(body, MaxAssetBytes+1))
 	if err != nil {
@@ -785,9 +782,10 @@ var (
 //
 // **It is never told what to expect.** No Content-Type, no filename, no
 // caller argument reaches it, which is why an SVG labelled image/png and
-// named world-map.png is refused: the only thing consulted is the front
-// of the file. TestAssetsArea's "the mime is sniffed not trusted" case and
-// TestAssetsArea's "an SVG is refused whatever it calls itself" case are the two halves of that.
+// named world-map.png is refused: the only thing consulted is the front of
+// the file. TestAssetsArea's "the mime is sniffed not trusted" case and
+// TestAssetsArea's "an SVG is refused whatever it calls itself" case are
+// the two halves of that.
 func sniffedMime(raw []byte) string {
 	switch {
 	case bytes.HasPrefix(raw, magicPNG):

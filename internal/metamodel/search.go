@@ -41,16 +41,15 @@ const (
 // internal_error over its own argument.
 //
 // **This is one of two measurements of the same failure mode, not the
-// only one.** `search_test.go`'s
-// TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument timed the
-// identical failure with one word repeated rather than distinct words,
-// on a separate run, and got numbers roughly six times larger at the
-// same sizes. Distinct runs on different data are not directly
-// comparable and neither comment claims to be measuring the other's
-// workload; both are recorded because either one alone proves the bound
-// is needed, and the gap between them is a caution against reading a
-// single measured number as the constant rather than as one sample of a
-// quadratic curve.
+// only one.** `search_test.go`'s TestSearchArea's "a search query is
+// bounded and reported as the callers own argument" case timed the
+// identical failure with one word repeated rather than distinct words, on a
+// separate run, and got numbers roughly six times larger at the same sizes.
+// Distinct runs on different data are not directly comparable and neither
+// comment claims to be measuring the other's workload; both are recorded
+// because either one alone proves the bound is needed, and the gap between
+// them is a caution against reading a single measured number as the
+// constant rather than as one sample of a quadratic curve.
 const MaxSearchQuery = 4 << 10
 
 // Search runs a full-text query over a game's entities and returns the

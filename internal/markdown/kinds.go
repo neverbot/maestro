@@ -13,13 +13,13 @@ import (
 // Kind is the *folded* spelling, and that is a decision rather than an
 // accident of the query. Both filters that take a kind — ListFilter.Kind
 // and SearchDocuments' — compare lower(d.kind) = lower(the argument), so
-// "Lore" and "lore" select one and the same set of documents. A
-// catalogue is read in order to be fed back into those filters, and the
-// folded spelling is the one value that names exactly the set this row
-// counted. Returning a stored spelling instead would hand a caller a
-// value that works and a number that belonged to a different set the
-// moment two spellings were in use.
-// TestTwoSpellingsOfOneKindAreOneCatalogueRow pins it.
+// "Lore" and "lore" select one and the same set of documents. A catalogue
+// is read in order to be fed back into those filters, and the folded
+// spelling is the one value that names exactly the set this row counted.
+// Returning a stored spelling instead would hand a caller a value that
+// works and a number that belonged to a different set the moment two
+// spellings were in use. TestKindsArea's "two spellings of one kind are one
+// catalogue row" case pins it.
 type KindCount struct {
 	Kind          string
 	DocumentCount int64
@@ -72,16 +72,16 @@ type KindCatalogue struct {
 //
 // **It describes live documents only.** A kind kept alive by nothing but
 // a tombstone would be a filter value whose answer, under the default
-// listing and under search, is an empty page.
-// TestADeletedDocumentsKindLeavesTheCatalogue pins it, and pins that the
-// kind comes back when the document is resurrected.
+// listing and under search, is an empty page. TestKindsArea's "a deleted
+// documents kind leaves the catalogue" case pins it, and pins that the kind
+// comes back when the document is resurrected.
 //
-// The catalogue is a fixed-size answer in the sense that matters: it
-// grows with the number of *kinds* a game uses, not with the number of
-// documents it holds, which is what makes it safe to put on a page load
-// and in an agent's context. TestTheKindCatalogueDoesNotGrowWithThe
-// DocumentsItCounts pins that property the way the game summary's own
-// test does.
+// The catalogue is a fixed-size answer in the sense that matters: it grows
+// with the number of *kinds* a game uses, not with the number of documents
+// it holds, which is what makes it safe to put on a page load and in an
+// agent's context. TestKindsArea's "the kind catalogue does not grow with
+// the documents it counts" case pins that property the way the game
+// summary's own test does.
 func (s *Service) Kinds(ctx context.Context, projectID uuid.UUID) (KindCatalogue, error) {
 	rows, err := s.q.CountDocumentsPerKind(ctx, projectID)
 	if err != nil {

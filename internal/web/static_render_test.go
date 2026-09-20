@@ -25,12 +25,11 @@ import (
 // that the interface then draws as if the knob were off.
 //
 // So this file joins them, in both directions, over the *generated*
-// catalogue description rather than over a list retyped here: that text
-// is produced from the table and from nothing else, and
-// internal/views' own
-// TestRenderersArea's "every renderer declares its parameters and the description is generated from them" case
-// holds it against the table in both directions. Reading it is reading
-// the catalogue.
+// catalogue description rather than over a list retyped here: that text is
+// produced from the table and from nothing else, and internal/views' own
+// TestRenderersArea's "every renderer declares its parameters and the
+// description is generated from them" case holds it against the table in
+// both directions. Reading it is reading the catalogue.
 
 var (
 	// A renderer's section opens with "- name (consumes …)" and its

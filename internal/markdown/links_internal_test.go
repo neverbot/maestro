@@ -11,16 +11,16 @@ import (
 // TestTheTwoSidesOfTheJoinDoNotShareAFingerprint pins the composition no
 // behaviour test can be trusted to reach.
 //
-// TestADocumentsAttachmentsPageAndTheCursorBelongsToItsOwnSide does
-// refuse a document-side cursor offered to the entity side — but it does
-// so today because a document id and an entity id are different uuids,
-// not because the two listings are named apart, and it stays green with
-// both names collapsed into one. That is the shape Task 6's correction 4
-// found in the history fingerprint and it is recorded here rather than
-// papered over: the two sides sort on different columns, an entity key
-// one way and a document path the other, so a cursor crossing between
-// them would compare a path against a key. The discriminator is what
-// makes that impossible on purpose rather than by arithmetic.
+// TestLinksArea's "a documents attachments page and the cursor belongs to
+// its own side" case does refuse a document-side cursor offered to the
+// entity side — but it does so today because a document id and an entity id
+// are different uuids, not because the two listings are named apart, and it
+// stays green with both names collapsed into one. That is the shape Task
+// 6's correction 4 found in the history fingerprint and it is recorded here
+// rather than papered over: the two sides sort on different columns, an
+// entity key one way and a document path the other, so a cursor crossing
+// between them would compare a path against a key. The discriminator is
+// what makes that impossible on purpose rather than by arithmetic.
 func TestTheTwoSidesOfTheJoinDoNotShareAFingerprint(t *testing.T) {
 	project := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	other := uuid.MustParse("33333333-3333-3333-3333-333333333333")

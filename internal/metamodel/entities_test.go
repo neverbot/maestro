@@ -1373,10 +1373,10 @@ func TestAnEntityLosingItsKeyToAnotherSpellingIsNamedAsARespelling(t *testing.T)
 	}
 }
 
-// TestTheReportedCurrentEntityVersionIsTheOneTheWriteWouldHaveMet pins
-// the FOR UPDATE on GetEntityByKeyForUpdate, as
-// TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet does for
-// types.
+// TestTheReportedCurrentEntityVersionIsTheOneTheWriteWouldHaveMet pins the
+// FOR UPDATE on GetEntityByKeyForUpdate, as TestDocumentsArea's "the
+// reported current version is the one the write would have met" case does
+// for types.
 //
 // Deleting the lock leaves the rest of the file green: both entity race
 // tests block on the unique index inside the INSERT, not on this lock,

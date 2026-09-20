@@ -129,15 +129,15 @@ type Stats struct {
 // edge, or an edge whose node another traversal also reached — the
 // statement cannot say, so both are set rather than a guess made.
 //
-// This is the one position where Nodes and Edges can over-report, and
-// the over-report cannot be removed: the walk hands back one row past
-// its cap and no more, so "a traversal was cut" is knowable and "the
-// picture is poorer for it" is not — the cut traversals may all have
-// reached nodes and edges the picture already holds. The alternative is
-// the silent loss this replaced, where content vanished with all three
-// flags false.
-// TestTraverseArea's "a walk row cap is reported rather than losing content silently" case pins it, with
-// the same fixture under a larger cap as the control.
+// This is the one position where Nodes and Edges can over-report, and the
+// over-report cannot be removed: the walk hands back one row past its cap
+// and no more, so "a traversal was cut" is knowable and "the picture is
+// poorer for it" is not — the cut traversals may all have reached nodes and
+// edges the picture already holds. The alternative is the silent loss this
+// replaced, where content vanished with all three flags false.
+// TestTraverseArea's "a walk row cap is reported rather than losing content
+// silently" case pins it, with the same fixture under a larger cap as the
+// control.
 //
 // **An edge's endpoints are not guaranteed to be in Nodes.** The two caps
 // are independent and the edge arms are collected from the sets, not from
@@ -168,18 +168,18 @@ type Stats struct {
 //
 //   - It is about the *walk*, not about the picture. A hop the bound
 //     refused whose far entity the step's to_type or where would have
-//     filtered out still sets it: the traversal was cut short, and
-//     whether the next node would have been drawn is a different
-//     question from whether there was one.
-//   - A **one-hop step is not probed**, and cannot set it. A step that
-//     asks for exactly one hop is a neighbour query, not a bounded
-//     traversal, and probing it would cost a second scan of relations on
-//     the common case to tell a designer something they already know.
-//     So a false Depth on a query whose every step is one hop means "not
-//     measured", exactly as an all-false Truncated did before Task 8, and
-//     nothing but this paragraph says which — which is why
-//     TestTraverseArea's "truncated depth is flagged" case observes the one-hop case rather than
-//     leaving it to the prose.
+//     filtered out still sets it: the traversal was cut short, and whether
+//     the next node would have been drawn is a different question from
+//     whether there was one.
+//   - A **one-hop step is not probed**, and cannot set it. A step that asks
+//     for exactly one hop is a neighbour query, not a bounded traversal,
+//     and probing it would cost a second scan of relations on the common
+//     case to tell a designer something they already know. So a false Depth
+//     on a query whose every step is one hop means "not measured", exactly
+//     as an all-false Truncated did before Task 8, and nothing but this
+//     paragraph says which — which is why TestTraverseArea's "truncated
+//     depth is flagged" case observes the one-hop case rather than leaving
+//     it to the prose.
 //
 // The walk's own row cap cannot hide the evidence: the probe reads the
 // recursion, not the wrapper the cap is applied to (compiler.walk says
@@ -243,12 +243,12 @@ type RunRequest struct {
 	// or OnStaleBestEffort. stale.go argues the default.
 	//
 	// **It is read by RunView and refused by Run**, rather than accepted
-	// and ignored there. An ad-hoc query has no stored dependency index,
-	// so nothing can be resolved by an id a rename left alone and nothing
-	// is ever reported stale: a caller that sent on_stale with an inline
-	// document asked for a policy that cannot apply, and being told so is
-	// worth more than a knob that silently does nothing.
-	// TestStaleArea's "on stale is refused on an ad hoc run rather than ignored" case pins it.
+	// and ignored there. An ad-hoc query has no stored dependency index, so
+	// nothing can be resolved by an id a rename left alone and nothing is ever
+	// reported stale: a caller that sent on_stale with an inline document
+	// asked for a policy that cannot apply, and being told so is worth more
+	// than a knob that silently does nothing. TestStaleArea's "on stale is
+	// refused on an ad hoc run rather than ignored" case pins it.
 	OnStale string
 }
 
@@ -406,13 +406,13 @@ func (s *Service) execute(ctx context.Context, projectID uuid.UUID, resolved *Re
 				// is the only thing that knows whether the LIMIT was
 				// reached.
 				nodeRowsRead++
-				// One node per id, keeping the first `nodes` entry that
-				// claimed it: a node in two sets is one thing on the picture,
-				// and the ORDER BY on the entry's rank is what makes "first"
-				// mean the order the document declared rather than whatever
-				// Postgres happened to return.
-				// TestExecuteArea's "a node in two sets comes back once under the first set that claimed it" case
-				// pins both halves, and says which of the two the ordering is.
+				// One node per id, keeping the first `nodes` entry that claimed it: a
+				// node in two sets is one thing on the picture, and the ORDER BY on the
+				// entry's rank is what makes "first" mean the order the document
+				// declared rather than whatever Postgres happened to return.
+				// TestExecuteArea's "a node in two sets comes back once under the first
+				// set that claimed it" case pins both halves, and says which of the two
+				// the ordering is.
 				if seenNode[*id] {
 					continue
 				}
@@ -623,8 +623,8 @@ func (s *Service) statementBudget() time.Duration {
 // **A read-only transaction** is what makes "the compiler only ever emits
 // SELECT" a guarantee instead of a property of the current code. The
 // compiler is careful; a transaction that refuses a write is careful
-// forever. TestBoundsArea's "every query runs in a read only transaction" case asserts the refusal
-// with SQLSTATE 25006.
+// forever. TestBoundsArea's "every query runs in a read only transaction"
+// case asserts the refusal with SQLSTATE 25006.
 //
 // It is said twice, and the second saying is not the one the plan wrote.
 // `BEGIN READ ONLY` (pgx.ReadOnly) refuses on its own, and so does
@@ -647,11 +647,11 @@ func (s *Service) statementBudget() time.Duration {
 // **Both settings travel as bind arguments through set_config, not as
 // formatted text.** The plan's block spelled the milliseconds into a `SET
 // LOCAL` with fmt.Sprintf and called it the one deliberate exception to
-// this package's no-value-in-the-statement-text rule; set_config takes
-// its value as a parameter, so there is no exception to make. One
-// statement, one round trip, and
-// TestCompileArea's "the only string to fragment conversions are the ones named here" case keeps
-// watching a package where nothing formats a value into SQL at all.
+// this package's no-value-in-the-statement-text rule; set_config takes its
+// value as a parameter, so there is no exception to make. One statement,
+// one round trip, and TestCompileArea's "the only string to fragment
+// conversions are the ones named here" case keeps watching a package where
+// nothing formats a value into SQL at all.
 func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement string,
 	args []any, scan func(pgx.Rows) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
@@ -698,15 +698,15 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 	if err := scan(rows); err != nil {
 		return err
 	}
-	// Closed here rather than only by the defer, because pgx settles a
-	// failure into rows.Err() when the result is finished with, not when
-	// Query returns: a statement whose first response is an error — the
-	// read-only refusal below, a statement_timeout that fired before any
-	// row — leaves Err() nil until the rows are closed, so a scan that
-	// never iterated would return success on a statement the database
-	// refused. TestBoundsArea's "every query runs in a read only transaction" case is the test that
-	// found this; Close is idempotent, so the defer stays for the paths
-	// that return above.
+	// Closed here rather than only by the defer, because pgx settles a failure
+	// into rows.Err() when the result is finished with, not when Query
+	// returns: a statement whose first response is an error — the read-only
+	// refusal below, a statement_timeout that fired before any row — leaves
+	// Err() nil until the rows are closed, so a scan that never iterated would
+	// return success on a statement the database refused. TestBoundsArea's
+	// "every query runs in a read only transaction" case is the test that
+	// found this; Close is idempotent, so the defer stays for the paths that
+	// return above.
 	rows.Close()
 	return rows.Err()
 }

@@ -74,16 +74,16 @@ var renamedAwayTestNames = map[string]string{
 // not just the packages scanned.
 //
 // **internal/metamodel was added here, not just internal/markdown and
-// internal/db/queries, because a citation already lived there
-// uncovered.** internal/metamodel/keys.go:145's comment on
-// RowKeyProblems cites TestAnEntityAddressIsBoundedBeforePostgresSeesIt
-// — a real test, in this package — but until this line named that
+// internal/db/queries, because a citation already lived there uncovered.**
+// internal/metamodel/keys.go:145's comment on RowKeyProblems cites
+// TestLinksArea's "an entity address is bounded before postgres sees it"
+// case — a real test, in this package — but until this line named that
 // directory, this check could not have told that citation apart from a
-// dangling one had the cited test been renamed or removed. Task 7 is
-// what made internal/markdown cite into internal/metamodel; the check's
-// coverage had drifted from where this domain's citations actually live
-// from that point on, and it is widened here rather than left for
-// Task 8, which adds more of both.
+// dangling one had the cited test been renamed or removed. Task 7 is what
+// made internal/markdown cite into internal/metamodel; the check's coverage
+// had drifted from where this domain's citations actually live from that
+// point on, and it is widened here rather than left for Task 8, which adds
+// more of both.
 //
 // **internal/web was added here for the same reason, in Task 9's
 // review.** mcp_search.go and mcp_metamodel.go both cite this domain's

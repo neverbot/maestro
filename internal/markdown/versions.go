@@ -24,17 +24,17 @@ import (
 // 10's docs.history description is built with these values interpolated
 // rather than typed out.
 //
-// The clamp policy itself -- that a limit above the cap is clamped to
-// the cap rather than folded onto the default -- is pinned in
+// The clamp policy itself -- that a limit above the cap is clamped to the
+// cap rather than folded onto the default -- is pinned in
 // internal/paging/cursor_test.go's
 // TestSizeClampsRatherThanFoldingOntoTheDefault, against paging.Size
-// directly. TestAHistoryPageAsksForTooMuchAndGetsTheCap, in this
-// package, does not: its fixture holds two versions, and clamping to
-// MaxHistoryPage, folding onto DefaultHistoryPage or applying no bound
-// at all all return the same two rows, so it cannot tell the policies
-// apart. What it does pin is that asking for more than the cap does not
-// error and does not silently return fewer rows than the cap would --
-// which is worth having, and is not the same claim.
+// directly. TestVersionsArea's "a history page asks for too much and gets
+// the cap" case, in this package, does not: its fixture holds two versions,
+// and clamping to MaxHistoryPage, folding onto DefaultHistoryPage or
+// applying no bound at all all return the same two rows, so it cannot tell
+// the policies apart. What it does pin is that asking for more than the cap
+// does not error and does not silently return fewer rows than the cap would
+// -- which is worth having, and is not the same claim.
 const (
 	// DefaultHistoryPage and MaxHistoryPage bound one page of History.
 	DefaultHistoryPage int32 = 50
@@ -93,10 +93,10 @@ type HistoryPage struct {
 // a history page that has no use for either.
 //
 // **No body and no frontmatter**, which is a fact about the type rather
-// than a promise about the query — TestAHistoryRowCarriesNoBodyAtAll
-// checks the absence over every field, and now checks it over a field
-// list this package controls. A version's body is returned by
-// ReadVersion and by Diff and by nothing else.
+// than a promise about the query — TestVersionsArea's "a history row
+// carries no body at all" case checks the absence over every field, and now
+// checks it over a field list this package controls. A version's body is
+// returned by ReadVersion and by Diff and by nothing else.
 //
 // CreatedAt is a time.Time and not the generated pgtype.Timestamptz: a
 // version row's created_at is NOT NULL, so the Valid flag carries no
@@ -109,14 +109,14 @@ type VersionSummary struct {
 	// necessarily the address the document is at now.
 	//
 	// **It is here because a document can be moved** (Move), and a
-	// history that showed only the current path would show four
-	// snapshots of `lore/duskwood` that were taken while the document
-	// was called something else, with nothing to say so. It is also what
-	// makes the move's own version row legible: that row's content
-	// equals its predecessor's and its path does not, so "version 5 is
-	// where this moved" is a comparison a reader makes from the page it
-	// already has, rather than a second call.
-	// TestAHistoryShowsWhereEachVersionWasWritten pins it.
+	// history that showed only the current path would show four snapshots of
+	// `lore/duskwood` that were taken while the document was called something
+	// else, with nothing to say so. It is also what makes the move's own
+	// version row legible: that row's content equals its predecessor's and its
+	// path does not, so "version 5 is where this moved" is a comparison a
+	// reader makes from the page it already has, rather than a second call.
+	// TestMoveArea's "a history shows where each version was written" case
+	// pins it.
 	Path      string
 	Title     string
 	Summary   string
@@ -132,13 +132,13 @@ type VersionSummary struct {
 // **No bodies.** A version's body is returned by ReadVersion and by Diff
 // and by nothing else (spec §7): prose is the largest payload in the
 // system, and a history that carried every body would blow an agent's
-// context window on the first call against a document anyone has
-// actually worked on. TestAHistoryRowCarriesNoBodyAtAll pins the
-// absence over every field of the row rather than over a field it can
-// name, since what has to hold is that no such field exists.
+// context window on the first call against a document anyone has actually
+// worked on. TestVersionsArea's "a history row carries no body at all" case
+// pins the absence over every field of the row rather than over a field it
+// can name, since what has to hold is that no such field exists.
 //
-// The history of a deleted document is readable
-// (TestHistoryOfADeletedDocumentIsStillReadable). Deletion is soft
+// The history of a deleted document is readable (TestVersionsArea's
+// "history of a deleted document is still readable" case). Deletion is soft
 // precisely so that the record survives, and "what did this say before
 // someone cut it" is the first question anyone asks.
 func (s *Service) History(ctx context.Context, projectID uuid.UUID, f HistoryFilter) (HistoryPage, error) {
@@ -212,19 +212,18 @@ func (s *Service) History(ctx context.Context, projectID uuid.UUID, f HistoryFil
 // to: the game, then this domain's listing, then the document.
 //
 // **The project id is first, always**, which is paging.Fingerprint's
-// standing rule and the one that was learned the hard way — a
-// fingerprint that omitted it let one game's cursor page another game's
-// rows. It is worth saying exactly what that part buys *here*, because
-// the honest answer is "nothing yet": the document id already
-// discriminates between games, since two games' documents at one path
-// are two different rows, so dropping the project id leaves
-// TestACursorFromAnotherGamesHistoryIsRefused green. That test is this
-// domain's required equivalent of the metamodel's
-// TestACursorFromAnotherGameIsRefused and it pins the *behaviour*;
-// TestTheHistoryFingerprintLeadsWithTheProjectId pins the composition
-// itself, which is the only way this rule can be pinned in a listing
-// whose other parts happen to be sufficient. Both exist because the
-// part stops being redundant the moment this listing grows a filter
+// standing rule and the one that was learned the hard way — a fingerprint
+// that omitted it let one game's cursor page another game's rows. It is
+// worth saying exactly what that part buys *here*, because the honest
+// answer is "nothing yet": the document id already discriminates between
+// games, since two games' documents at one path are two different rows, so
+// dropping the project id leaves TestVersionsArea's "a cursor from another
+// games history is refused" case green. That test is this domain's required
+// equivalent of the metamodel's TestACursorFromAnotherGameIsRefused and it
+// pins the *behaviour*; TestTheHistoryFingerprintLeadsWithTheProjectId pins
+// the composition itself, which is the only way this rule can be pinned in
+// a listing whose other parts happen to be sufficient. Both exist because
+// the part stops being redundant the moment this listing grows a filter
 // that is not derived from a per-game row.
 //
 // "document_versions" is a domain discriminator, which
@@ -233,22 +232,22 @@ func (s *Service) History(ctx context.Context, projectID uuid.UUID, f HistoryFil
 // "related" and "relations", and two domains reaching for one word is a
 // collision nothing would catch.
 //
-// The document id is resolved, not the path as spelled, so two
-// spellings of one path give one fingerprint;
-// TestHistoryPagesWithACursorBelongingToItsOwnDocument covers the other
-// half, that two documents of one game do not share one.
+// The document id is resolved, not the path as spelled, so two spellings of
+// one path give one fingerprint; TestVersionsArea's "history pages with a
+// cursor belonging to its own document" case covers the other half, that
+// two documents of one game do not share one.
 func historyFingerprint(projectID, documentID uuid.UUID) string {
 	return paging.Fingerprint(projectID.String(), "document_versions", documentID.String())
 }
 
 // ReadVersion returns one past version in full, body included.
 //
-// It is the only public read of a version's body, frontmatter, message
-// and author — Task 3's correction 9 recorded that those had no public
-// reader at all and asserted them through raw SQL until this landed —
-// and TestTheFirstWriteAlsoWritesVersionOneWithItsAuthorAndMessage is
-// where the body and the frontmatter are now read back through it, in
-// place of the SQL that used to stand there.
+// It is the only public read of a version's body, frontmatter, message and
+// author — Task 3's correction 9 recorded that those had no public reader
+// at all and asserted them through raw SQL until this landed — and
+// TestDocumentsArea's "the first write also writes version one with its
+// author and message" case is where the body and the frontmatter are now
+// read back through it, in place of the SQL that used to stand there.
 func (s *Service) ReadVersion(ctx context.Context, projectID uuid.UUID, path string, version int32) (dbq.DocumentVersion, error) {
 	doc, err := s.documentForVersions(ctx, projectID, path)
 	if err != nil {
@@ -270,25 +269,26 @@ func (s *Service) ReadVersion(ctx context.Context, projectID uuid.UUID, path str
 // It is the one place the version calls touch `documents`, and what it
 // establishes is *identity* — which document — while the project filter
 // here is what keeps a path from naming another game's document in the
-// first place (TestReadingAnotherGamesVersionIsNotFound covers both
-// callers, and TestTwoGamesSharingOnePathKeepSeparateHistories covers
-// the case a miss cannot show, where the path is taken in both games).
+// first place (TestVersionsArea's "reading another games version is not
+// found" case covers both callers, and TestVersionsArea's "two games
+// sharing one path keep separate histories" case covers the case a miss
+// cannot show, where the path is taken in both games).
 //
 // ListDocumentVersions and GetDocumentVersion filter on their own
 // denormalised project_id as well, which is the spec's §5 rule for these
-// two tables and not defence in depth in the metamodel's sense. It is
-// worth saying plainly what no test here can show: **that second filter
-// cannot be made to matter by any call this package offers**, because a
-// document id only ever reaches those queries from the resolution above,
-// and 0007_documents.sql's composite key makes a version row whose
-// project_id disagrees with its document's unrepresentable
-// (TestAVersionRowCannotClaimAGameItsDocumentDoesNotBelongTo forces that
-// refusal). The plan's Task 6 predicted dropping either query's project
-// filter would redden TestReadingAnotherGamesVersionIsNotFound; it does
-// not, and it is recorded here rather than left as a mutation someone
-// re-runs and mistrusts. The filters stay because Task 11's REST mirror
-// may address a document by id, where the resolution above is not in the
-// path at all.
+// two tables and not defence in depth in the metamodel's sense. It is worth
+// saying plainly what no test here can show: **that second filter cannot be
+// made to matter by any call this package offers**, because a document id
+// only ever reaches those queries from the resolution above, and
+// 0007_documents.sql's composite key makes a version row whose project_id
+// disagrees with its document's unrepresentable (TestVersionsArea's "a
+// version row cannot claim a game its document does not belong to" case
+// forces that refusal). The plan's Task 6 predicted dropping either query's
+// project filter would redden TestVersionsArea's "reading another games
+// version is not found" case; it does not, and it is recorded here rather
+// than left as a mutation someone re-runs and mistrusts. The filters stay
+// because Task 11's REST mirror may address a document by id, where the
+// resolution above is not in the path at all.
 func (s *Service) documentForVersions(ctx context.Context, projectID uuid.UUID, path string) (dbq.Document, error) {
 	if err := CheckPath(path); err != nil {
 		return dbq.Document{}, err
@@ -312,11 +312,11 @@ func (s *Service) documentForVersions(ctx context.Context, projectID uuid.UUID, 
 // here, beside the first listing that pages, and **Task 8's document
 // listing must reuse it** rather than declaring a second one.
 //
-// It satisfies paging's contract that a refuse function never returns
-// nil: invalidInput always builds a *metamodel.ValidationError, and
-// paging panics naming the message if it ever did not.
-// TestAMalformedHistoryCursorIsInvalidInputAtItsOwnPath asserts the
-// path and the whole sentence.
+// It satisfies paging's contract that a refuse function never returns nil:
+// invalidInput always builds a *metamodel.ValidationError, and paging
+// panics naming the message if it ever did not. TestVersionsArea's "a
+// malformed history cursor is invalid input at its own path" case asserts
+// the path and the whole sentence.
 func refuseCursor(message string) error { return invalidInput("cursor", message) }
 
 // missingVersion names both the document and the version asked for, at
@@ -336,15 +336,15 @@ func missingVersion(path, docPath string, version int32) error {
 // versioned, so a revert leaves it alone. Restoring a grouping label
 // alongside the prose would be a second, unannounced change. Nothing is
 // needed to achieve that beyond saying nothing: Task 3's review made
-// WriteInput.Kind a *string whose nil means "say nothing about kind",
-// and the writeWith call below simply never sets it.
-// TestRevertingLeavesTheDocumentsKindAlone pins it.
+// WriteInput.Kind a *string whose nil means "say nothing about kind", and
+// the writeWith call below simply never sets it. TestVersionsArea's
+// "reverting leaves the documents kind alone" case pins it.
 //
 // Message is optional here and only here: a revert has an obvious one
-// ("reverted to version N") and forcing a caller to type it would be
-// asking for what the call already knows.
-// TestARevertTakesAMessageOfItsOwnWhenOneIsGiven pins that a caller's
-// own message wins.
+// ("reverted to version N") and forcing a caller to type it would be asking
+// for what the call already knows. TestVersionsArea's "a revert takes a
+// message of its own when one is given" case pins that a caller's own
+// message wins.
 type RevertInput struct {
 	Path            string
 	ToVersion       int32
@@ -358,47 +358,48 @@ type RevertInput struct {
 // ToVersion's, with an automatic message when the caller gives none.
 //
 // **History is append-only.** There is no state in which version 9
-// exists and version 8 does not, which is what lets a designer trust
-// that the record of the writing is the record of the writing.
-// TestRevertWritesForwardRatherThanRewritingHistory pins that a revert
-// of a three-version document leaves four versions, not one.
+// exists and version 8 does not, which is what lets a designer trust that
+// the record of the writing is the record of the writing.
+// TestVersionsArea's "revert writes forward rather than rewriting history"
+// case pins that a revert of a three-version document leaves four versions,
+// not one.
 //
 // **The restored content is the content that was stored**, not the
-// content re-derived from the old body: title, summary and frontmatter
-// come off the version row verbatim. Re-running today's derivation rules
-// over yesterday's body would mean "revert" restored something that was
-// never there the day the derivation changed. That reuse is possible
-// because writeWith takes its Content from its caller, which is why
-// SplitContent runs in Write and not in writeWith; if a later change
-// moves the split inside, revert silently starts re-deriving and
-// TestRevertKeepsTheStoredTitleRatherThanDerivingItAgain is what goes
+// content re-derived from the old body: title, summary and frontmatter come
+// off the version row verbatim. Re-running today's derivation rules over
+// yesterday's body would mean "revert" restored something that was never
+// there the day the derivation changed. That reuse is possible because
+// writeWith takes its Content from its caller, which is why SplitContent
+// runs in Write and not in writeWith; if a later change moves the split
+// inside, revert silently starts re-deriving and TestVersionsArea's "revert
+// keeps the stored title rather than deriving it again" case is what goes
 // red.
 //
-// Reverting to a tombstone version restores that version's body and
-// leaves the document alive; it does not re-delete it
-// (TestRevertingToATombstoneRestoresItsBodyAndLeavesTheDocumentAlive).
-// A revert is a content operation, and a caller that wants the document
-// gone says so with delete — where the expected version, and therefore
-// the refusal if someone else has since written, is its own.
+// Reverting to a tombstone version restores that version's body and leaves
+// the document alive; it does not re-delete it (TestVersionsArea's
+// "reverting to a tombstone restores its body and leaves the document
+// alive" case). A revert is a content operation, and a caller that wants
+// the document gone says so with delete — where the expected version, and
+// therefore the refusal if someone else has since written, is its own.
 //
 // **Reverting a currently-deleted document resurrects it**, live and
-// readable again, the same as Write does. That is a different case from
-// the tombstone-body one above — this one is the document itself sitting
-// deleted, and a caller reverting it to any past version, tombstone or
-// not — and it follows from the same route rather than a separate
-// decision: Revert shares writeWith with Write, and writeWith's own
+// readable again, the same as Write does. That is a different case from the
+// tombstone-body one above — this one is the document itself sitting
+// deleted, and a caller reverting it to any past version, tombstone or not
+// — and it follows from the same route rather than a separate decision:
+// Revert shares writeWith with Write, and writeWith's own
 // `GetDocumentByPathForUpdate` read carries no deleted_at filter, so a
-// write to a deleted path resurrects it (documents.go's writeWith
-// comment states that for Write; Task 4 made resurrection on write
-// deliberate). Revert never checks `existing.DeletedAt` either, so it
-// inherits the behaviour rather than choosing it, and
-// TestRevertingADeletedDocumentResurrectsIt pins that the document comes
-// back with `deleted_at` cleared and its version advanced past the
-// tombstone, not that anyone decided it should. The published
-// `document.reverted` event carries no field saying so — a subscriber
-// wanting to know already gets the same signal-free event Write's
-// `document.written` sends for the same resurrection, which is the
-// existing precedent and not a gap this task opened.
+// write to a deleted path resurrects it (documents.go's writeWith comment
+// states that for Write; Task 4 made resurrection on write deliberate).
+// Revert never checks `existing.DeletedAt` either, so it inherits the
+// behaviour rather than choosing it, and TestVersionsArea's "reverting a
+// deleted document resurrects it" case pins that the document comes back
+// with `deleted_at` cleared and its version advanced past the tombstone,
+// not that anyone decided it should. The published `document.reverted`
+// event carries no field saying so — a subscriber wanting to know already
+// gets the same signal-free event Write's `document.written` sends for the
+// same resurrection, which is the existing precedent and not a gap this
+// task opened.
 //
 // **A revert does not touch the document's links**, and it must not grow
 // a links argument. It calls writeWith directly rather than Write, so it
@@ -410,9 +411,9 @@ type RevertInput struct {
 // the links as they were" is not a thing this call could do even if it
 // wanted to.
 func (s *Service) Revert(ctx context.Context, projectID uuid.UUID, in RevertInput) (dbq.Document, error) {
-	// One pass over every argument, as Write and Delete do:
-	// TestEveryProblemWithOneRevertIsReportedInOnePass pins that four
-	// problems arrive as four fields of one refusal.
+	// One pass over every argument, as Write and Delete do: TestVersionsArea's
+	// "every problem with one revert is reported in one pass" case pins that
+	// four problems arrive as four fields of one refusal.
 	problems := pathProblems(in.Path)
 	problems = append(problems, checkShortText("message", in.Message, MaxMessageLen)...)
 	if in.ExpectedVersion == nil {
@@ -466,13 +467,13 @@ func (s *Service) Revert(ctx context.Context, projectID uuid.UUID, in RevertInpu
 			return s.conflictOn(ctx, q, projectID, existing, in.IncludeCurrent)
 		}
 
-		// Read the version to restore **before** anything is written, so
-		// a revert to a version that does not exist leaves the document
-		// exactly as it stood. Moving this below writeWith would still
-		// roll the transaction back, but the version numbering would
-		// have advanced in a way a reader of this function could not
-		// see. TestRevertingToAMissingVersionNamesTheArgument asserts
-		// both the argument path and that nothing was written.
+		// Read the version to restore **before** anything is written, so a revert
+		// to a version that does not exist leaves the document exactly as it
+		// stood. Moving this below writeWith would still roll the transaction
+		// back, but the version numbering would have advanced in a way a reader
+		// of this function could not see. TestVersionsArea's "reverting to a
+		// missing version names the argument" case asserts both the argument path
+		// and that nothing was written.
 		target, err := q.GetDocumentVersion(ctx, dbq.GetDocumentVersionParams{
 			ProjectID: projectID, DocumentID: existing.ID, Version: in.ToVersion,
 		})
@@ -499,9 +500,9 @@ func (s *Service) Revert(ctx context.Context, projectID uuid.UUID, in RevertInpu
 	if err != nil {
 		return dbq.Document{}, err
 	}
-	// After the commit, never inside it: Service.publish's own comment
-	// carries the argument. TestNoRevertIsAnnouncedWhenTheRevertIsRefused
-	// is the half this package can reach on its own.
+	// After the commit, never inside it: Service.publish's own comment carries
+	// the argument. TestVersionsArea's "no revert is announced when the revert
+	// is refused" case is the half this package can reach on its own.
 	s.publish(projectID, eventDocumentReverted, documentEventMinRole, documentEventHumanOnly,
 		RevertEvent{ID: written.ID, Path: written.Path, Version: written.CurrentVersion, FromVersion: from})
 	return written, nil

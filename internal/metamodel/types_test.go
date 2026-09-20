@@ -415,8 +415,9 @@ func TestUpsertEntityTypeRefusesAKeyThatDiffersOnlyByCase(t *testing.T) {
 	}
 }
 
-// TestViewsArea's "a respelling is named even when the version is also stale" case pins the only job
-// left to the spelling check in the locked pre-read.
+// TestViewsArea's "a respelling is named even when the version is also
+// stale" case pins the only job left to the spelling check in the locked
+// pre-read.
 //
 // Correction 15 made the post-write check the actual refusal, and it
 // closes the pre-read's path as well: deleting the pre-read branch
@@ -934,8 +935,8 @@ func TestACreationThatLosesItsKeyToAnotherSpellingIsNamedAsARespelling(t *testin
 	}
 }
 
-// TestTheReportedCurrentVersionIsTheOneTheWriteWouldHaveMet pins the
-// FOR UPDATE on GetEntityTypeByKeyForUpdate.
+// TestDocumentsArea's "the reported current version is the one the write
+// would have met" case pins the FOR UPDATE on GetEntityTypeByKeyForUpdate.
 //
 // Removing the lock leaves every other test in this file green, because
 // the compare-and-set in the upsert's own DO UPDATE still refuses every

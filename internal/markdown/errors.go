@@ -58,10 +58,11 @@ func invalidInput(path, message string) error {
 }
 
 // invalidInputProblems is invalidInput for a call that found several
-// problems at once, so a caller fixes all of them in one round trip
-// instead of discovering them one call apart. Write is its first caller,
-// and TestEveryProblemWithOneWriteIsReportedInOnePass is what pins that
-// two problems arrive as two fields of one refusal.
+// problems at once, so a caller fixes all of them in one round trip instead
+// of discovering them one call apart. Write is its first caller, and
+// TestDocumentsArea's "every problem with one write is reported in one
+// pass" case is what pins that two problems arrive as two fields of one
+// refusal.
 func invalidInputProblems(problems []metamodel.FieldError) error {
 	return &metamodel.ValidationError{Code: metamodel.CodeInvalidInput, Fields: problems}
 }
@@ -97,11 +98,12 @@ func (e *MissingError) Fields() []metamodel.FieldError {
 	return []metamodel.FieldError{{Path: e.Path, Message: e.Message}}
 }
 
-// missingDocument is what every by-path miss says. It names the path
-// back because that is the only part of the call a caller can compare
-// against what it holds. Read and Write are its first callers
-// (TestReadingAnotherGamesDocumentIsNotFound and
-// TestExpectingAVersionOfADocumentThatDoesNotExistIsNotFound).
+// missingDocument is what every by-path miss says. It names the path back
+// because that is the only part of the call a caller can compare against
+// what it holds. Read and Write are its first callers (TestDocumentsArea's
+// "reading another games document is not found" case and
+// TestDocumentsArea's "expecting a version of a document that does not
+// exist is not found" case).
 func missingDocument(path string) error {
 	return &MissingError{
 		Path:    "path",
@@ -131,15 +133,15 @@ func missingDocument(path string) error {
 // builds (TestAConflictErrorCarriesTheCurrentDocument).
 //
 // **Deleted is a fourth thing a conflict can be about**, added by Task 4
-// rather than inherited: the version a caller is told to merge onto may
-// be a tombstone. The default message sends that caller to re-read the
-// document, and a re-read of a deleted document answers not_found —
-// two refusals with nothing connecting them, from one call. Saying so
-// costs a bool and turns a dead end into an instruction, because
-// resurrection is exactly the same call the caller was already making.
-// TestAStaleVersionCannotSilentlyResurrectADocument pins it and
-// TestAnOrdinaryConflictDoesNotClaimTheDocumentWasDeleted pins that a
-// live conflict says nothing about deletion.
+// rather than inherited: the version a caller is told to merge onto may be
+// a tombstone. The default message sends that caller to re-read the
+// document, and a re-read of a deleted document answers not_found — two
+// refusals with nothing connecting them, from one call. Saying so costs a
+// bool and turns a dead end into an instruction, because resurrection is
+// exactly the same call the caller was already making. TestDeleteArea's "a
+// stale version cannot silently resurrect a document" case pins it and
+// TestDeleteArea's "an ordinary conflict does not claim the document was
+// deleted" case pins that a live conflict says nothing about deletion.
 type ConflictError struct {
 	Current     int32
 	Include     bool

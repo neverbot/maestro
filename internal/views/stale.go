@@ -450,9 +450,9 @@ type resolveCtx struct {
 //     answer exactly; exempting negations makes it "the views whose
 //     picture changes", which no index can answer.
 //
-// TestStaleArea's "a negated type comparison is a dependency like any other" case pins it, so the
-// asymmetry is a decision on the record rather than something nobody
-// noticed.
+// TestStaleArea's "a negated type comparison is a dependency like any
+// other" case pins it, so the asymmetry is a decision on the record rather
+// than something nobody noticed.
 func (rc *resolveCtx) typeOperand(scope fieldScope, leaf *ResolvedLeaf, ptr string,
 	value any,
 ) (any, bool) {
@@ -736,16 +736,15 @@ func pruneStale(r *Resolved, broken []string) (*Resolved, bool) {
 			}
 		}
 		// **A /project pointer prunes nothing, and that is not an
-		// omission.** resolveProjection walks past a slot or a
-		// project.fields key it cannot judge, so the resolved projection
-		// this function is handed already lacks it: a colour source that
-		// broke costs the colour and nothing else, and pruning it a
-		// second time here would be a second implementation of a rule
-		// resolution already applies. The first version of this function
-		// had one, and no mutation of it could be made to change a
-		// picture — which is what a mechanism nothing reads looks like
-		// from the inside. TestStaleArea's "best effort keeps the projected fields it can still read" case
-		// is what observes the surviving keys.
+		// omission.** resolveProjection walks past a slot or a project.fields key
+		// it cannot judge, so the resolved projection this function is handed
+		// already lacks it: a colour source that broke costs the colour and
+		// nothing else, and pruning it a second time here would be a second
+		// implementation of a rule resolution already applies. The first version
+		// of this function had one, and no mutation of it could be made to change
+		// a picture — which is what a mechanism nothing reads looks like from the
+		// inside. TestStaleArea's "best effort keeps the projected fields it can
+		// still read" case is what observes the surviving keys.
 		//
 		// It counts as acted on for that reason and not by omission: the
 		// pruning happened, one pass earlier, and the guard above is

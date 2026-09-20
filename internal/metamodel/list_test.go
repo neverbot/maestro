@@ -85,10 +85,10 @@ func TestListPaginatesWithACursor(t *testing.T) {
 	}
 }
 
-// TestAFullFinalPageCarriesACursorToAnEmptyOne pins the one cost of
-// deciding a cursor by "the page came back full": a listing whose row
-// count is an exact multiple of the limit spends one extra call finding
-// out it is over.
+// TestListArea's "a full final page carries a cursor to an empty one" case
+// pins the one cost of deciding a cursor by "the page came back full": a
+// listing whose row count is an exact multiple of the limit spends one
+// extra call finding out it is over.
 //
 // The alternative — reading limit+1 rows and dropping the last — buys
 // nothing here and costs a row on every page of every listing, so the
@@ -450,12 +450,12 @@ func TestAnUnknownTypeKeyInAListingNamesTheKey(t *testing.T) {
 }
 
 // TestATypeKeyFilterIsBoundedBeforePostgresSeesIt is markdown's
-// TestAnEntityFilterIsBoundedBeforePostgresSeesIt applied to this
-// listing's own type_key filter, which reached EntityTypeByKey
-// unbounded before this test existed: an invalid UTF-8 byte in the key
-// reaches Postgres as a byte sequence it refuses outright (SQLSTATE
-// 22021), which lands as internal_error over a value the caller itself
-// supplied.
+// TestListArea's "an entity filter is bounded before postgres sees it" case
+// applied to this listing's own type_key filter, which reached
+// EntityTypeByKey unbounded before this test existed: an invalid UTF-8 byte
+// in the key reaches Postgres as a byte sequence it refuses outright
+// (SQLSTATE 22021), which lands as internal_error over a value the caller
+// itself supplied.
 func TestATypeKeyFilterIsBoundedBeforePostgresSeesIt(t *testing.T) {
 	pool := testutil.NewPool(t)
 	svc := metamodel.New(pool, nil)

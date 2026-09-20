@@ -11,10 +11,10 @@ import (
 // TestTheHistoryFingerprintLeadsWithTheProjectId pins the composition
 // paging.Fingerprint's comment mandates and no behaviour test in this
 // package can reach: a history cursor's other two parts — the domain
-// discriminator and the document id — already tell two games apart,
-// because two games' documents at one path are two different rows. So
-// TestACursorFromAnotherGamesHistoryIsRefused stays green with the
-// project id dropped, and this is what does not.
+// discriminator and the document id — already tell two games apart, because
+// two games' documents at one path are two different rows. So
+// TestVersionsArea's "a cursor from another games history is refused" case
+// stays green with the project id dropped, and this is what does not.
 func TestTheHistoryFingerprintLeadsWithTheProjectId(t *testing.T) {
 	project := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	document := uuid.MustParse("22222222-2222-2222-2222-222222222222")

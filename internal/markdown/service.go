@@ -46,15 +46,15 @@ func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 // reasoning for each lives.
 //
 // **Every caller must call this after withTx has returned, never from
-// inside fn.** An event published inside the transaction announces a
-// change that may still roll back, and a subscriber that re-reads on
-// hearing it would read the state before the change and cache it as the
-// state after. TestAWriteIsAnnouncedOnlyAfterItCommits pins the refused
-// case — the one this task can reach, since Write's only failures
-// before the commit are refusals. The rolled-back and failed-commit
-// placements are pinned in internal/metamodel
-// (TestNoEventIsPublishedWhenTheCommitFails and its two neighbours) for
-// the identical helper, and Task 12 exercises this package's own.
+// inside fn.** An event published inside the transaction announces a change
+// that may still roll back, and a subscriber that re-reads on hearing it
+// would read the state before the change and cache it as the state after.
+// TestDocumentsArea's "a write is announced only after it commits" case
+// pins the refused case — the one this task can reach, since Write's only
+// failures before the commit are refusals. The rolled-back and
+// failed-commit placements are pinned in internal/metamodel
+// (TestNoEventIsPublishedWhenTheCommitFails and its two neighbours) for the
+// identical helper, and Task 12 exercises this package's own.
 func (s *Service) publish(projectID uuid.UUID, kind string, minRole roles.Role, humanOnly bool, payload any) {
 	if s.hub == nil {
 		return
@@ -127,11 +127,11 @@ const (
 // caller's input answers a question it did not ask.
 //
 // The encoding is checked before the control scan, and that ordering is
-// CheckText's own: ranging over a string turns an invalid byte into
-// U+FFFD, which is not a control character, so a scan alone lets an
-// invalid sequence through to Postgres and its SQLSTATE 22021.
-// TestAKindAndAMessageAreBoundedAsTheCallersOwnArguments pins the length
-// bound, both control refusals and the invalid-UTF-8 one.
+// CheckText's own: ranging over a string turns an invalid byte into U+FFFD,
+// which is not a control character, so a scan alone lets an invalid
+// sequence through to Postgres and its SQLSTATE 22021. TestDocumentsArea's
+// "a kind and a message are bounded as the callers own arguments" case pins
+// the length bound, both control refusals and the invalid-UTF-8 one.
 func checkShortText(path, value string, max int) []metamodel.FieldError {
 	problem := func(message string) []metamodel.FieldError {
 		return []metamodel.FieldError{{Path: path, Message: message}}
@@ -210,15 +210,15 @@ func oversizeForIndex(err error) error {
 // pathRespellingError is what a caller sees when its path matches an
 // existing document's only case-insensitively.
 //
-// It is metamodel.keyRespellingError applied to a path, and the argument
-// is the same one: silently updating the differently-spelled document
-// would let a typo'd capital overwrite content, and letting the database
-// raise it would surface as a version conflict — which says nothing
-// about the actual problem — because the upsert carries an ON CONFLICT
-// clause. Naming both spellings and both remedies is the whole answer,
-// and a designer never has to know an index folds case.
-// TestARespelledPathIsRefusedNamingBothSpellings pins the message and
-// that the document it names is left untouched.
+// It is metamodel.keyRespellingError applied to a path, and the argument is
+// the same one: silently updating the differently-spelled document would
+// let a typo'd capital overwrite content, and letting the database raise it
+// would surface as a version conflict — which says nothing about the actual
+// problem — because the upsert carries an ON CONFLICT clause. Naming both
+// spellings and both remedies is the whole answer, and a designer never has
+// to know an index folds case. TestDocumentsArea's "a respelled path is
+// refused naming both spellings" case pins the message and that the
+// document it names is left untouched.
 func pathRespellingError(requested, stored string) error {
 	return invalidInput("path", fmt.Sprintf(
 		"%q already exists here spelled %q, and paths are matched without regard to case: "+

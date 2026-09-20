@@ -235,9 +235,10 @@ func TestEveryDocumentFieldSurvivesARoundTripThroughTheTools(t *testing.T) {
 }
 
 // TestAnEditThatOmitsKindLeavesItAloneThroughTheTool is the wire half of
-// the domain's own TestAnEditThatOmitsKindLeavesItUnchanged: a plain
-// string with omitempty could not tell an omitted kind from an explicit
-// empty one, and every body-only edit would have erased the kind.
+// the domain's own TestDocumentsArea's "an edit that omits kind leaves it
+// unchanged" case: a plain string with omitempty could not tell an omitted
+// kind from an explicit empty one, and every body-only edit would have
+// erased the kind.
 func TestAnEditThatOmitsKindLeavesItAloneThroughTheTool(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
@@ -1630,10 +1631,10 @@ func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 // of a soft-deleted document answers not_found rather than an empty set.
 //
 // It is the one refusal of this surface that reads like a bug from the
-// caller's side — the document is still there, and every version of it
-// is still readable — so it has to be both said and pinned. The domain
-// pins its own half (TestADeletedDocumentIsNotAnAddressForLinks); this
-// is the wire code an agent actually receives.
+// caller's side — the document is still there, and every version of it is
+// still readable — so it has to be both said and pinned. The domain pins
+// its own half (TestLinksArea's "a deleted document is not an address for
+// links" case); this is the wire code an agent actually receives.
 func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
 	f := newMetamodelFixture(t)
 	ctx := context.Background()

@@ -431,9 +431,10 @@ func TestOnlyTheIndexedHeadOfALongFieldIsSearchable(t *testing.T) {
 	}
 }
 
-// TestASearchQueryIsBoundedAndReportedAsTheCallersOwnArgument pins the
-// three ways an unbounded or malformed query reached Postgres and came
-// back as something an agent reads as "the server is broken".
+// TestSearchArea's "a search query is bounded and reported as the callers
+// own argument" case pins the three ways an unbounded or malformed query
+// reached Postgres and came back as something an agent reads as "the server
+// is broken".
 //
 // Measured on this project's own Postgres before the bound went in,
 // through Search:

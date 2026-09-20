@@ -15,27 +15,28 @@ import (
 //
 // It is a *defined* type over string, and that is the whole point: an
 // untyped constant such as "SELECT " converts to it implicitly, while a
-// `string` variable — which is what every caller value in this package is
-// — does not. `b.write(set.Name)` therefore does not compile, and turning
-// a caller's value into statement text requires spelling `frag(...)`,
-// which is one grep and one review comment away from being caught.
-// TestCompileArea's "the only string to fragment conversions are the ones named here" case reads every
-// non-test file of this package and refuses a conversion outside the five
-// helpers below, so the guard is a test rather than a habit.
+// `string` variable — which is what every caller value in this package is —
+// does not. `b.write(set.Name)` therefore does not compile, and turning a
+// caller's value into statement text requires spelling `frag(...)`, which
+// is one grep and one review comment away from being caught.
+// TestCompileArea's "the only string to fragment conversions are the ones
+// named here" case reads every non-test file of this package and refuses a
+// conversion outside the five helpers below, so the guard is a test rather
+// than a habit.
 type frag string
 
 // builder is the only thing in this package that appends to a statement.
 //
 // **It has no method that takes a caller's value as text**, and that is
 // the whole design: bind() returns the placeholder and puts the value in
-// the argument slice, write() takes a fragment, and a fragment is either
-// a literal this file wrote or the output of bind. There is deliberately
-// no writef with a %s a value could reach — a single fmt.Sprintf with a
-// caller value in it is the injection this repository's only
-// runtime-built SQL could have, and the way to not have it is to make it
-// unspellable rather than to remember not to write it.
-// TestCompileArea's "no caller value ever reaches the statement text" case is the behavioural
-// assertion; the frag type and its own test are the construction.
+// the argument slice, write() takes a fragment, and a fragment is either a
+// literal this file wrote or the output of bind. There is deliberately no
+// writef with a %s a value could reach — a single fmt.Sprintf with a caller
+// value in it is the injection this repository's only runtime-built SQL
+// could have, and the way to not have it is to make it unspellable rather
+// than to remember not to write it. TestCompileArea's "no caller value ever
+// reaches the statement text" case is the behavioural assertion; the frag
+// type and its own test are the construction.
 type builder struct {
 	sql  sqlText
 	args []any
@@ -44,12 +45,12 @@ type builder struct {
 // sqlText is the statement being assembled, and it is a wrapper around
 // strings.Builder rather than a strings.Builder because the difference is
 // the guard. A bare strings.Builder field is package-visible and carries
-// WriteString, so `b.sql.WriteString(set.Name)` would put a caller's
-// value in the text with no frag conversion for a test to find. sqlText
-// exposes one appender, it takes a fragment, and the raw buffer is
-// reachable only as `.raw` — which
-// TestCompileArea's "the only string to fragment conversions are the ones named here" case refuses
-// outside this type's own two methods.
+// WriteString, so `b.sql.WriteString(set.Name)` would put a caller's value
+// in the text with no frag conversion for a test to find. sqlText exposes
+// one appender, it takes a fragment, and the raw buffer is reachable only
+// as `.raw` — which TestCompileArea's "the only string to fragment
+// conversions are the ones named here" case refuses outside this type's own
+// two methods.
 type sqlText struct{ raw strings.Builder }
 
 func (t *sqlText) append(literal frag) { t.raw.WriteString(string(literal)) }
@@ -158,7 +159,8 @@ type compileOptions struct {
 // Compile turns a resolved query into one SELECT and its arguments.
 //
 // $1 is always the project id, in every CTE and every arm, and
-// TestCompileArea's "every table reference is project filtered" case asserts it as text.
+// TestCompileArea's "every table reference is project filtered" case
+// asserts it as text.
 //
 // **The projection travels as one jsonb column**, built per node arm by
 // project.go: every slot the document asked for, plus the one hop a slot
@@ -231,13 +233,13 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 	b.write(" n\nUNION ALL\nSELECT 'edge' AS kind, e.* FROM ")
 	b.write(edgeRows)
 	// Ordered by kind, then by the declaration rank of the nodes or edges
-	// entry that produced the row, then by id. The rank is what makes
-	// "which set does a node that appears in two of them belong to"
-	// answerable in Go without a second query, and the id is what keeps
-	// two runs of the same query in the same order.
-	// TestExecuteArea's "a node in two sets comes back once under the first set that claimed it" case
-	// asserts this line as text, because deleting it leaves the
-	// behavioural half of that test green.
+	// entry that produced the row, then by id. The rank is what makes "which
+	// set does a node that appears in two of them belong to" answerable in Go
+	// without a second query, and the id is what keeps two runs of the same
+	// query in the same order. TestExecuteArea's "a node in two sets comes
+	// back once under the first set that claimed it" case asserts this line as
+	// text, because deleting it leaves the behavioural half of that test
+	// green.
 	b.write(" e")
 	// The depth arm: zero rows or one, and the one says that at least one
 	// walk had a hop left to make when its depth bound stopped it. It is a
@@ -360,10 +362,9 @@ func (c *compiler) invalidFilterEdge(alias frag) frag {
 //	)
 //
 // **The set name travels as a bind parameter**, not as SQL text, and so
-// do the keys — which is what makes
-// TestCompileArea's "no caller value ever reaches the statement text" case pass on a key that is
-// perfectly legal. The compiler cannot tell a legal key from a crafted
-// one and does not try.
+// do the keys — which is what makes TestCompileArea's "no caller value ever
+// reaches the statement text" case pass on a key that is perfectly legal.
+// The compiler cannot tell a legal key from a crafted one and does not try.
 func (c *compiler) selector(i int) (frag, error) {
 	set := c.r.Sets[i]
 	name := cteName(seedPrefix, i)
@@ -542,8 +543,9 @@ func walkDirection(i int, d string) (graph.Direction, error) {
 //     promises: "quests three steps up the prerequisite chain" does not
 //     stop at the zone in the middle.
 //
-// TestTraverseArea's "an edge where filters the hops a walk follows" case and
-// TestTraverseArea's "a walk draws only its destination type and only valid rows" case are the two sides.
+// TestTraverseArea's "an edge where filters the hops a walk follows" case
+// and TestTraverseArea's "a walk draws only its destination type and only
+// valid rows" case are the two sides.
 //
 // **The depth is absolute**, counted from the seed selector rather than
 // from this step's own start, which is what makes Stats.MaxDepthReached

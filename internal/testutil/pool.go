@@ -300,12 +300,14 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("parse test database config: %v", err)
 	}
-	// **Two, not four.** A test opens a pool, does its work in one
-	// goroutine and drops the database; the extra connections were
-	// never used and, now that a thousand tests run at once, they are
-	// the difference between fitting in the server's limit and failing
-	// with `sorry, too many clients already`.
-	cfg.MaxConns = 2
+	// **Four, and not two.** Lowering it to two to fit more tests into
+	// the server's connection limit hung the contention tests for ten
+	// minutes each: a test that deliberately holds one transaction open
+	// while a second one races it needs three connections at once, and
+	// on a pool of two the third waits for a connection that only frees
+	// when the test it is blocking finishes. The limit belongs on the
+	// server (see compose.yml) and not here.
+	cfg.MaxConns = 4
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

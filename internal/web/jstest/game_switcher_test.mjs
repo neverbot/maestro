@@ -356,6 +356,38 @@ check("theGamesPageOffersASecondGame", async () => {
   );
 });
 
+// An account with no games has exactly one thing it can do, and the
+// disclosure above the form was a control whose whole function was to
+// take that thing away again. The form is opened *and* the summary is
+// marked for removal by styles.css; both are asserted, because opening
+// alone is what the product already did and it was still one click from
+// an empty screen.
+check("anAccountWithNoGamesMeetsTheFormAndNoToggle", async () => {
+  const dom = mount({ ids: PICKER_IDS, pathname: "/games", games: [] });
+  await load("../static/app.js");
+  const form = dom.elements["new-game"];
+  assertEqual(form.hidden, false, "an account with no games is offered no way to make one");
+  assertEqual(form.open, true, "the create-game form is closed on the one screen that has nothing else");
+  assert(
+    form.getAttribute("data-only-action") !== null,
+    "the disclosure is still on the page on an account with no games, where its only effect is to hide the form",
+  );
+});
+
+// The other half: where there *is* a list, the summary is a control with
+// a job — keeping the form from pushing the list down — and it stays.
+check("theDisclosureSurvivesWhereThereIsAListToPushDown", async () => {
+  const dom = mount({ ids: PICKER_IDS, pathname: "/games" });
+  await load("../static/app.js");
+  const form = dom.elements["new-game"];
+  assertEqual(
+    form.getAttribute("data-only-action"),
+    null,
+    "the disclosure was removed on a screen that lists games, where it is what keeps the form out of the way",
+  );
+  assertEqual(form.open, false, "the form is open over a list it would push down");
+});
+
 // The first thing a brand-new account sees is the shared negative state,
 // built by app.js rather than written into index.html. The markup used to
 // carry the heading and the sentence; a hole with nothing in it is only

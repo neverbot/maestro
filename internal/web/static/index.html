@@ -47,13 +47,19 @@
 <!-- The hole; app.js carries the words. -->
 <div id="empty-state" hidden></div>
 
-<!-- The way a second game gets made. It sits beside the list rather than
-     inside the empty state, because "create a game" stopped being an
-     answer the moment you had one otherwise — and this shell is served
-     at /games as well as at "/", so it is reachable from inside a game
-     through the header's switcher. Hidden until app.js has an answer
-     from GET /api/games, so an unauthenticated visitor about to be sent
-     to /login never sees a form flash past. -->
+<!-- The way a game gets made, the first and every one after it. It sits
+     beside the list rather than inside the empty state, because "create
+     a game" stopped being an answer the moment you had one otherwise —
+     and this shell is served at /games as well as at "/", so it is
+     reachable from inside a game through the header's switcher. Hidden
+     until app.js has an answer from GET /api/games, so an
+     unauthenticated visitor about to be sent to /login never sees a form
+     flash past.
+
+     The disclosure is the form's manners beside a list it would
+     otherwise push down. On an account with no games there is no list,
+     so app.js marks it data-only-action and styles.css takes the
+     summary away: the form is the screen. -->
 <details id="new-game" hidden>
   <summary>New game</summary>
   <form id="create-game">

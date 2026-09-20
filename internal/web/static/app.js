@@ -783,10 +783,16 @@ if (gamesList) {
       if (emptyState) emptyState.hidden = false;
       if (newGame) {
         newGame.hidden = false;
-        // Opened, not merely shown: an account with nothing has exactly
-        // one useful action here, and making them click a disclosure to
-        // find it would be a step for its own sake.
+        // **No disclosure when the form is the screen.** An account with
+        // nothing has exactly one action here, and the summary above it
+        // did nothing but take that action away again: it was opened by
+        // the line below and could still be closed, leaving a person
+        // with no games looking at a button that hides the only thing
+        // they can do. Where there is a list the control earns its
+        // place; here it is removed from the page and from the tab
+        // order, by styles.css, off this attribute.
         newGame.open = true;
+        newGame.setAttribute("data-only-action", "");
       }
     } else {
       // The count belongs in the head, beside the title, which is where

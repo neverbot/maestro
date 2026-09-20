@@ -832,9 +832,28 @@ ul.catalogue .link-button {
 
 #new-game > summary::-webkit-details-marker { display: none; }
 
+/* The summary is the way to a *second* game, never to the first: an
+   account with no games meets the form itself, with nothing above it to
+   close it again. app.js sets the attribute in that one branch, and
+   `display: none` takes the control out of the tab order as well as off
+   the page, so the disclosure cannot be reached and then shut on a
+   screen that has nothing else on it. */
+#new-game[data-only-action] > summary { display: none; }
+
 #new-game > summary::before {
   content: "+";
   color: var(--muted);
+}
+
+/* **The sign says which way the control goes.** A "+ New game" that
+   stayed "+" after it had opened the form read as a button that had
+   stopped working: nothing on screen said the same click would put the
+   form away again. Open, it is a minus. The state itself is the
+   browser's — `details[open]` — so there is no second copy of it to go
+   stale, and screen readers get it from the summary's own expanded
+   state rather than from this glyph. */
+#new-game[open] > summary::before {
+  content: "\2212"; /* MINUS SIGN, the same weight as the plus */
 }
 
 #new-game > summary:hover {

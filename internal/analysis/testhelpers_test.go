@@ -48,18 +48,12 @@ func (a area) game(t *testing.T) game {
 	return gameIn(t, a.pool)
 }
 
-// newGame builds that fixture with a database of its own. It stays for
-// the claims that genuinely need one — anything that drops the database
-// or asserts over every project in it — and everything else goes
-// through an area.
+// gameIn seeds the fixture into a pool the caller chose: an area's
+// database for a claim that shares one, a fresh one for a claim that
+// needs a world of its own.
 //
 // The hub is nil: nothing in this package's own tests subscribes, and
 // internal/web is where publication is asserted end to end.
-func newGame(t *testing.T) game {
-	t.Helper()
-	return gameIn(t, testutil.NewPool(t))
-}
-
 func gameIn(t *testing.T, pool *pgxpool.Pool) game {
 	t.Helper()
 	slug := "azeroth-" + uuid.NewString()[:8]

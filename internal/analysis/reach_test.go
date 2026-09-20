@@ -11,21 +11,15 @@ import (
 	"github.com/neverbot/maestro/internal/metamodel"
 )
 
-// gatedGame is the fixture most of this file uses: one entity type,
-// three gating relation types declared with the three shapes the
-// normalisation has to tell apart, and one inert one.
+// gatedIn is the fixture most of this file uses: one entity type, three
+// gating relation types declared with the three shapes the normalisation
+// has to tell apart, and one inert one. It builds them in a game that
+// already exists, so a claim sharing an area's database gets the same
+// three gating types in a project of its own.
 //
 // The traits are declared rather than derived from roles, because the
 // subject here is the walk and not the resolver, and a fixture that let
 // the resolver choose would fail for two reasons at once.
-func gatedGame(t *testing.T) game {
-	t.Helper()
-	return gatedIn(t, newGame(t))
-}
-
-// gatedIn is the same fixture over a game that already exists, so a
-// claim sharing an area's database gets the same three gating types in
-// a project of its own.
 func gatedIn(t *testing.T, g game) game {
 	t.Helper()
 	g.declareEntityType(t, "quest")

@@ -66,7 +66,7 @@ func TestTraverseArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestAMultiHopStepReachesTransitively is the feature: a step with a
+	// TestTraverseArea's "a multi hop step reaches transitively" case is the feature: a step with a
 	// depth greater than one walks the relation, and the *fourth* quest is
 	// the assertion. Without the negative half the test passes against an
 	// unbounded walk, which is the failure mode a depth bound exists to
@@ -96,7 +96,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestACycleInContentIsDrawnRatherThanHung is why the walk lives in
+	// TestTraverseArea's "a cycle in content is drawn rather than hung" case is why the walk lives in
 	// internal/graph. A prerequisite cycle is content the core spec
 	// deliberately allows — the analysis engine exists to report it — so a
 	// view of it must come back, with the edge that closes it, rather than
@@ -175,7 +175,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestMinDepthDropsTheNearHops is the views-level half of the bound
+	// TestTraverseArea's "min depth drops the near hops" case is the views-level half of the bound
 	// internal/graph applies after walking. The control at min 1 in the same
 	// test is what makes the negative half mean "dropped" rather than "never
 	// reached".
@@ -198,7 +198,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestDirectionAnyWalksBothWaysWithoutDoubling is the views-level
+	// TestTraverseArea's "direction any walks both ways without doubling" case is the views-level
 	// counterpart of internal/graph's own direction test, over real content:
 	// from the middle of the chain, `any` reaches both ways, and each quest
 	// comes back once.
@@ -224,7 +224,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestTruncatedDepthIsFlagged is the field Task 7 shipped false with a
+	// TestTraverseArea's "truncated depth is flagged" case is the field Task 7 shipped false with a
 	// "not measured" note, measured.
 	//
 	// It is measured the way every other truncation flag in this package is:
@@ -285,7 +285,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestACompletePictureOfADenseGraphIsNotDepthTruncated is the honest
+	// TestTraverseArea's "a complete picture of a dense graph is not depth truncated" case is the honest
 	// half of Truncated.Depth.
 	//
 	// The probe asks whether there is a node **or an edge** past the bound
@@ -349,7 +349,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestAWalkRowCapIsReportedRatherThanLosingContentSilently is the
+	// TestTraverseArea's "a walk row cap is reported rather than losing content silently" case is the
 	// walk's own row cap, read.
 	//
 	// internal/graph caps a walk at MaxRows rows and emits LIMIT MaxRows + 1
@@ -409,7 +409,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestAWalkCTEsBindsAreRenumberedIntoTheOuterStatement is the test the
+	// TestTraverseArea's "a walk CT es binds are renumbered into the outer statement" case is the test the
 	// renumbering owes. graph.WalkCTE numbers its own arguments from $1 and
 	// the compiler splices them into a statement that already has some, so a
 	// renumbering that is off by one does not fail — it compares the right
@@ -437,7 +437,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeWhereFiltersTheHopsAWalkFollows is the views-level half of
+	// TestTraverseArea's "an edge where filters the hops a walk follows" case is the views-level half of
 	// internal/graph's EdgePredicate placement: a condition on the relation
 	// prunes the recursion, so a quest reachable only through an excluded
 	// edge is not reached — rather than reached and then filtered out of the
@@ -468,7 +468,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows is the multi-hop
+	// TestTraverseArea's "a walk draws only its destination type and only valid rows" case is the multi-hop
 	// half of the filters a one-hop step already applies. They are applied to
 	// the walk's *output* — a quest of the wrong type is walked through and
 	// not drawn — which is the difference between them and edge_where above,
@@ -515,7 +515,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestMaxDepthReachedIsWhatTheWalkReachedNotWhatItAskedFor is the
+	// TestTraverseArea's "max depth reached is what the walk reached not what it asked for" case is the
 	// arithmetic Task 6 shipped, replaced.
 	//
 	// A set's depth used to be its source set's depth plus the step's
@@ -544,7 +544,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestAWalkFromAWalkCountsItsDepthFromTheSeed is the case the depth
+	// TestTraverseArea's "a walk from a walk counts its depth from the seed" case is the case the depth
 	// column exists for. A step reading from another step starts at whatever
 	// depth its own seed row sits at, and internal/graph counts from its own
 	// anchor — so the seed row's depth is added back, per row, through the
@@ -574,7 +574,7 @@ func TestTraverseArea(t *testing.T) {
 		}
 	})
 
-	// TestAWalkFromASetThatReachedANodeTwiceCountsTheShorterPath is why the
+	// TestTraverseArea's "a walk from a set that reached a node twice counts the shorter path" case is why the
 	// from-set is grouped by id before a walk's depth is added back to it.
 	//
 	// One row of a step is one edge traversal, so a set can hold the same

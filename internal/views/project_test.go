@@ -22,7 +22,7 @@ func TestProjectArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestALabelDefaultsToTheEntityNameInTheResult pins the one projection
+	// TestProjectArea's "a label defaults to the entity name in the result" case pins the one projection
 	// every query has whether or not it asked for one. A document with no
 	// `project` at all still comes back with a label per node, because a
 	// renderer that has to fall back to `name` itself is a renderer that has
@@ -47,7 +47,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAProjectedFieldAppearsInAttrsAndNotInFields is a read-back: it
+	// TestProjectArea's "a projected field appears in attrs and not in fields" case is a read-back: it
 	// asserts the value came out of the database, not that the query ran.
 	//
 	// The second half is the token-discipline rule from the other side —
@@ -79,7 +79,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAOneHopRelatedAttributeReadsTheFarEntity is the spec's own case:
+	// TestProjectArea's "a one hop related attribute reads the far entity" case is the spec's own case:
 	// the colour is not a property of the quest, it is the name of the zone
 	// one hop away.
 	//
@@ -124,7 +124,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAnAmbiguousHopIsMarkedRatherThanSilentlyPicked is why the hop is
+	// TestProjectArea's "an ambiguous hop is marked rather than silently picked" case is why the hop is
 	// detected rather than assumed. A quest in two zones has no one zone
 	// colour, and silently painting it with the first would produce a map
 	// that is wrong in a way nobody can see.
@@ -172,7 +172,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestIncludeFieldsReturnsTheWholePayloadAndTheDefaultDoesNot asserts the
+	// TestProjectArea's "include fields returns the whole payload and the default does not" case asserts the
 	// token-discipline rule both ways, because only the pair says anything: a
 	// run that always returned the payload passes the first half alone, and
 	// one that never returned it passes the second.
@@ -203,7 +203,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAProjectedFieldOfAnUndeclaredKeyIsRefusedAtResolution belongs to
+	// TestProjectArea's "a projected field of an undeclared key is refused at resolution" case belongs to
 	// Task 4's pass and is asserted here because this is the task that makes
 	// a projection reachable at all. A colour source nothing declares is a
 	// typo, and a typo answered with a picture in one flat colour is the
@@ -234,7 +234,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAProjectedFieldDeclaredOnOneOfSeveralTypesIsAllowed states the rule
+	// TestProjectArea's "a projected field declared on one of several types is allowed" case states the rule
 	// that separates a projection from a predicate, because the two read the
 	// same document syntax and mean different things.
 	//
@@ -264,7 +264,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestARelatedHopWithoutATypeReadsEveryNeighbour pins the optional half
+	// TestProjectArea's "a related hop without a type reads every neighbour" case pins the optional half
 	// of the hop: `type` narrows the far side, and leaving it out is a hop
 	// over every entity the relation reaches rather than a refusal.
 	//
@@ -291,7 +291,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestARelatedHopReadsItsDirection is the arm a same-direction fixture
+	// TestProjectArea's "a related hop reads its direction" case is the arm a same-direction fixture
 	// cannot tell apart. takes_place_in runs quest -> zone, so the hop is
 	// answered `out` from the quest and answered by nothing `in`.
 	t.Run("a related hop reads its direction", func(t *testing.T) {
@@ -321,7 +321,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeLabelComesFromTheRelation fills the last field of the
+	// TestProjectArea's "an edge label comes from the relation" case fills the last field of the
 	// envelope that had nothing behind it. label_from names a field the
 	// relation type declares, or @type for the relation type's key.
 	t.Run("an edge label comes from the relation", func(t *testing.T) {
@@ -352,7 +352,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeLabelOfAnUndeclaredKeyIsRefused is the same refusal the node
+	// TestProjectArea's "an edge label of an undeclared key is refused" case is the same refusal the node
 	// side gets, at the position the caller wrote it.
 	t.Run("an edge label of an undeclared key is refused", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -383,13 +383,13 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAProjectionSlotIsALateralJoinAheadOfItsNestedSelect asserts the
+	// TestProjectArea's "a projection slot is a lateral join ahead of its nested select" case asserts the
 	// emitted shape rather than the answer, because the answer cannot tell a
 	// LEFT join from an inner one that happened to match every row of this
 	// fixture, and because the project-filter guard's one known blind spot is
 	// a filter written *after* a nested SELECT in the same block. The three
 	// filters this join carries are all ahead of its own subquery, and
-	// TestEveryTableReferenceIsProjectFiltered is what watches them.
+	// TestCompileArea's "every table reference is project filtered" case is what watches them.
 	t.Run("a projection slot is a lateral join ahead of its nested select", func(t *testing.T) {
 		g, _ := a.games(t)
 		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -421,7 +421,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestProjectFieldsCarriesExactlyTheKeysItNames is the middle setting
+	// TestProjectArea's "project fields carries exactly the keys it names" case is the middle setting
 	// between "no payload" and "the whole payload", and the one the spec's
 	// §5.5 recommends: a picture that needs one field per node should pay for
 	// one field per node.
@@ -456,7 +456,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAProjectedFieldsKeyOfAnUndeclaredKeyIsRefused is the same refusal
+	// TestProjectArea's "a projected fields key of an undeclared key is refused" case is the same refusal
 	// the attribute slots get, at the entry the caller wrote.
 	t.Run("a projected fields key of an undeclared key is refused", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -474,7 +474,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestARelatedHopDoesNotColourWithAnInvalidEntity is the hop's half of
+	// TestProjectArea's "a related hop does not colour with an invalid entity" case is the hop's half of
 	// the rule the rest of the compiler already follows: a picture that
 	// excludes rows the metamodel flagged as no longer fitting their schema
 	// should not be coloured by one either. The control is the same query
@@ -509,7 +509,7 @@ func TestProjectArea(t *testing.T) {
 		}
 	})
 
-	// TestAReciprocalPairIsOneFarEntityNotTwo is the shape the ambiguity flag
+	// TestProjectArea's "a reciprocal pair is one far entity not two" case is the shape the ambiguity flag
 	// shipped wrong: `direction: "any"` anchors on
 	// `(rel.source_id = e.id OR rel.target_id = e.id)`, so **a relation type
 	// declared in both directions between the same two entities matches

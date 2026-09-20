@@ -113,7 +113,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestARendererParameterItDoesNotDeclareIsRefused is the reason
+	// TestRenderersArea's "a renderer parameter it does not declare is refused" case is the reason
 	// renderer_params is not a free jsonb blob in practice: a typo'd
 	// rank_dircetion that is stored, returned and silently ignored forever is
 	// the most expensive shape of bug this sub-project has, and the refusal
@@ -139,7 +139,7 @@ func TestRenderersArea(t *testing.T) {
 			ErrQueryInvalid, "/renderer_params/axis_field", `is not a parameter "layered" takes`)
 	})
 
-	// TestNestedRefusesAQueryWithNoContainmentEdges carries its positive
+	// TestRenderersArea's "nested refuses a query with no containment edges" case carries its positive
 	// control in the same test: a refusal that always fired would pass
 	// without one, and the control is a query that *does* draw the relation
 	// contain_via names.
@@ -198,7 +198,7 @@ func TestRenderersArea(t *testing.T) {
 			ErrQueryInvalid, "/renderer_params/axis_field", "must be lower_snake_case")
 	})
 
-	// TestAnAxisDeclaredTwoWaysIsTwoAxes is the failure one step along from
+	// TestRenderersArea's "an axis declared two ways is two axes" case is the failure one step along from
 	// the type check: number and enum are each admitted, so a scope holding
 	// one of each passes "is it number or enum" while having no single axis
 	// to draw. The fixture declares min_level as a number on quest and as an
@@ -223,7 +223,7 @@ func TestRenderersArea(t *testing.T) {
 			"an enum axis is ordered by its declared options")
 	})
 
-	// TestATimelineSpanHasBothEndsOnOneAxis pins the Requires closure that
+	// TestRenderersArea's "a timeline span has both ends on one axis" case pins the Requires closure that
 	// compares the two ends of a span: a number start with an enum end is two
 	// axes, and one of them would be placed arbitrarily.
 	t.Run("a timeline span has both ends on one axis", func(t *testing.T) {
@@ -256,7 +256,7 @@ func TestRenderersArea(t *testing.T) {
 				"enum over [low, high]")
 	})
 
-	// TestAFieldKeyParameterNamesAFieldTheSavedQueryCarries is this file's
+	// TestRenderersArea's "a field key parameter names a field the saved query carries" case is this file's
 	// third rule — a requirement is judged against the *saved* query — applied
 	// to every parameter that names a declared field key, and not only to the
 	// one it was first written on.
@@ -314,7 +314,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestAnAxisSomeTypeInScopeDoesNotDeclareIsRefused is requireDeclaredAs's
+	// TestRenderersArea's "an axis some type in scope does not declare is refused" case is requireDeclaredAs's
 	// own doc comment, which for one round said the code refused this and did
 	// not. Declaring the key as a different type on a second type is the rare
 	// mistake; drawing two types and remembering the fields of one of them is
@@ -353,7 +353,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryBadColumnComesBackWithItsIndex is three assertions the list
+	// TestRenderersArea's "every bad column comes back with its index" case is three assertions the list
 	// shape needs and no scalar parameter does: every bad column is reported,
 	// each at its own index, and the *code* of the answer does not depend on
 	// the order the columns were written in. The last is the one that matters
@@ -417,7 +417,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestSnapIsReadInManualModeAndRefusedInFields is the "read by nothing"
+	// TestRenderersArea's "snap is read in manual mode and refused in fields" case is the "read by nothing"
 	// rule on the last map parameter that is still a renderer parameter.
 	//
 	// **The background knobs used to be tested here and are not renderer
@@ -428,7 +428,7 @@ func TestRenderersArea(t *testing.T) {
 	// refuses another game's image, and the ON DELETE SET NULL that detaches
 	// a deleted one), the parameters are gone, and the same rule is applied
 	// to the columns by assets.go's SetBackground:
-	// TestABackgroundKnobWithNoBackgroundIsRefused is where that half of
+	// TestAssetsArea's "a background knob with no background is refused" case is where that half of
 	// this test went.
 	t.Run("snap is read in manual mode and refused in fields", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -445,7 +445,7 @@ func TestRenderersArea(t *testing.T) {
 			"is the grid a dragged node lands on")
 	})
 
-	// TestABackgroundIsNotARendererParameter pins the correction above from
+	// TestRenderersArea's "a background is not a renderer parameter" case pins the correction above from
 	// the other side: the three names are refused as unknown parameters, so
 	// an agent that read a stale table and sent one is told, rather than
 	// having a background silently stored where nothing reads it.
@@ -489,7 +489,7 @@ func TestRenderersArea(t *testing.T) {
 			ErrRendererRequirements, "/renderer_params/x_field", `no field "x" is declared`)
 	})
 
-	// TestMapAsksForTheCoordinatesItsModeReads pins the two halves of the
+	// TestRenderersArea's "map asks for the coordinates its mode reads" case pins the two halves of the
 	// mode switch: a coordinate field is required in fields mode and read by
 	// nothing in manual mode, and a parameter read by nothing is this
 	// sub-project's most-repeated defect.
@@ -519,7 +519,7 @@ func TestRenderersArea(t *testing.T) {
 			`is read by nothing when coordinate_source is "manual"`)
 	})
 
-	// TestLayeredNeedsTheEdgesItRanksBy is the requirement addressed at the
+	// TestRenderersArea's "layered needs the edges it ranks by" case is the requirement addressed at the
 	// renderer rather than at a parameter: no one argument is to blame.
 	t.Run("layered needs the edges it ranks by", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -535,7 +535,7 @@ func TestRenderersArea(t *testing.T) {
 			"ranks nodes by the edges between them and this query draws no edges")
 	})
 
-	// TestGraphRefusesEdgeLabelsNoEdgeCarries pins the one boolean in this
+	// TestRenderersArea's "graph refuses edge labels no edge carries" case pins the one boolean in this
 	// catalogue that asks the query for something: edge_labels over a query
 	// that labels nothing draws nothing and says nothing.
 	t.Run("graph refuses edge labels no edge carries", func(t *testing.T) {
@@ -555,7 +555,7 @@ func TestRenderersArea(t *testing.T) {
 			"no edges[] entry declares label_from")
 	})
 
-	// TestASlotParameterNamesASlotTheQueryDeclares pins the split this
+	// TestRenderersArea's "a slot parameter names a slot the query declares" case pins the split this
 	// catalogue makes for a channel: a renderer names a *slot*, because the
 	// query already decides what a slot reads — including the one hop to a
 	// neighbour, which no renderer can take for itself.
@@ -583,7 +583,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestATableColumnIsSomethingTheEnvelopeCarries is the contract in its
+	// TestRenderersArea's "a table column is something the envelope carries" case is the contract in its
 	// purest form: a renderer consumes the envelope, so a column naming a
 	// field the run will not carry is a blank column in a saved view.
 	t.Run("a table column is something the envelope carries", func(t *testing.T) {
@@ -629,7 +629,7 @@ func TestRenderersArea(t *testing.T) {
 			`names the field "difficulty" and this query does not carry it`)
 	})
 
-	// TestAShapeProblemIsAnsweredBeforeARequirement pins the ordering of the
+	// TestRenderersArea's "a shape problem is answered before a requirement" case pins the ordering of the
 	// two codes. They cannot travel in one error — a QueryError carries one
 	// code — and answering the requirement first would tell an agent its
 	// query is wrong when what is wrong is its typing.
@@ -651,7 +651,7 @@ func TestRenderersArea(t *testing.T) {
 			ErrRendererRequirements, "/renderer_params/axis_field", `no field "no_such_field"`)
 	})
 
-	// TestEveryProblemOfOneClassComesBackAtOnce is this package's standing
+	// TestRenderersArea's "every problem of one class comes back at once" case is this package's standing
 	// rule applied here: an agent fixing three parameters should learn about
 	// three, not discover them one call apart.
 	t.Run("every problem of one class comes back at once", func(t *testing.T) {
@@ -719,7 +719,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestARendererIsJudgedAgainstAResolvedQuery refuses the nil that would
+	// TestRenderersArea's "a renderer is judged against a resolved query" case refuses the nil that would
 	// otherwise make every requirement in this file silently pass. A check
 	// that cannot see the query is not a check.
 	t.Run("a renderer is judged against a resolved query", func(t *testing.T) {
@@ -733,7 +733,7 @@ func TestRenderersArea(t *testing.T) {
 			"is not a renderer this catalogue has")
 	})
 
-	// TestATableDoesNotRefuseAQueryThatDrawsEdges pins a deliberate
+	// TestRenderersArea's "a table does not refuse a query that draws edges" case pins a deliberate
 	// non-refusal, which is worth a test for the same reason a refusal is:
 	// the next reader will ask why the "reads nothing" rule that refuses
 	// map's x_field does not refuse a table's edges. Because one envelope
@@ -745,7 +745,7 @@ func TestRenderersArea(t *testing.T) {
 			resolveFor(t, g, chainQuery)))
 	})
 
-	// TestARendererIsJudgedAgainstAWholeResolvedQuery is the nil check one
+	// TestRenderersArea's "a renderer is judged against a whole resolved query" case is the nil check one
 	// step along: a *Resolved is exported, a Go caller can build one by hand,
 	// and a missing Query or Catalogue panics rather than refusing.
 	t.Run("a renderer is judged against a whole resolved query", func(t *testing.T) {
@@ -764,7 +764,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryDeclaredParameterIsCheckedNotJustStored is the assertion
+	// TestRenderersArea's "every declared parameter is checked not just stored" case is the assertion
 	// behind this file's first rule. renderer_params is a free jsonb blob on
 	// the wire; a parameter declared here and judged by nothing would be
 	// stored, returned and ignored forever, which is the failure this whole
@@ -807,7 +807,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestAParameterKindCannotBeHalfAdded is the reason the kinds are a table
+	// TestRenderersArea's "a parameter kind cannot be half added" case is the reason the kinds are a table
 	// rather than a switch, stated as an assertion, and it is bidirectional
 	// for the reason the operator table's own guard is: a kind used by a
 	// parameter and missing from the checkers is a parameter production
@@ -854,7 +854,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryRequirementIsDocumentedAndEveryDocHasARequirement is the guard
+	// TestRenderersArea's "every requirement is documented and every doc has a requirement" case is the guard
 	// F6 asks for, and it is bidirectional for the reason every other guard
 	// over this table is.
 	//
@@ -904,7 +904,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestAParameterNameCarriesOneKindAcrossTheCatalogue is the guard over the
+	// TestRenderersArea's "a parameter name carries one kind across the catalogue" case is the guard over the
 	// one thing the per-renderer tables cannot see. `group_by` is a projection
 	// slot on graph and on table; if one of them were changed to text, the
 	// description would print two kinds under one prose line, and a misspelt
@@ -951,7 +951,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEnumParameterDeclaresItsValuesAndNothingElseDoes keeps Values and
+	// TestRenderersArea's "an enum parameter declares its values and nothing else does" case keeps Values and
 	// kindEnum in step in both directions: values on a parameter of another
 	// kind are read by nothing, and an enum with none admits nothing at all.
 	t.Run("an enum parameter declares its values and nothing else does", func(t *testing.T) {
@@ -969,7 +969,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryRequiredParameterIsRefusedWhenMissing drives the Required flag
+	// TestRenderersArea's "every required parameter is refused when missing" case drives the Required flag
 	// itself, which is otherwise a boolean read by one line nobody exercises.
 	t.Run("every required parameter is refused when missing", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -995,7 +995,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryRendererDeclaresItsParametersAndTheDescriptionIsGeneratedFromThem
+	// TestRenderersArea's "every renderer declares its parameters and the description is generated from them" case
 	// is the guard over the prose an agent reads. Task 15's tool description
 	// is built from this catalogue, so the two must not be able to disagree:
 	// a renderer added with no parameters ships an undocumented knob, a
@@ -1093,7 +1093,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestAnUntypedStepSwitchesOffTheFieldChecks records, as an assertion,
+	// TestRenderersArea's "an untyped step switches off the field checks" case records, as an assertion,
 	// the permission Task 9 wrote up: a traverse step with no to_type reaches
 	// entities of any type, so no schema applies and no field key can be
 	// judged — for a renderer parameter exactly as for a projection. The
@@ -1131,7 +1131,7 @@ func TestRenderersArea(t *testing.T) {
 			"is declared list<text> on quest and this parameter needs number and enum")
 	})
 
-	// TestAnOptionlessEnumIsNoAxisEvenIfTheSchemaColumnHoldsOne closes the
+	// TestRenderersArea's "an optionless enum is no axis even if the schema column holds one" case closes the
 	// gap between "refused at upsert" and "true". metamodel.Schema.Validate
 	// refuses an enum with no options, which made "an enum axis is ordered by
 	// its options" unreachable through the API rather than a rule the axis
@@ -1153,7 +1153,7 @@ func TestRenderersArea(t *testing.T) {
 			"is an enum declared on quest with no options")
 	})
 
-	// TestEveryTypeNamingParameterKindIsARecordedReference is the both-arms
+	// TestRenderersArea's "every type naming parameter kind is a recorded reference" case is the both-arms
 	// guard for typeNamingKinds, which two things have to agree on: the refs
 	// a save writes, and the resolution a run performs. A kind in one and not
 	// the other is a parameter whose type deletion reports nothing and whose
@@ -1187,7 +1187,7 @@ func TestRenderersArea(t *testing.T) {
 		}
 	})
 
-	// TestTheRendererDescriptionNamesNothingOnlyThisRepositoryKnows keeps
+	// TestRenderersArea's "the renderer description names nothing only this repository knows" case keeps
 	// the catalogue's prose readable by its actual audience.
 	//
 	// `map`'s Doc said the coordinates were "the ones designers dragged
@@ -1223,7 +1223,7 @@ func TestRenderersArea(t *testing.T) {
 }
 
 // wrongValueFor is one value guaranteed to be refused for each kind, so
-// that TestEveryDeclaredParameterIsCheckedNotJustStored can drive every
+// that TestRenderersArea's "every declared parameter is checked not just stored" case can drive every
 // declared parameter through the checker its kind names.
 var wrongValueFor = map[ParamKind]any{
 	kindBool:         "yes",

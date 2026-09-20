@@ -51,7 +51,7 @@ func TestCompileExtraArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas is the refusal a
+	// TestCompileExtraArea's "an edge predicate admits only the builtins a relation has" case is the refusal a
 	// relation's missing columns need. A relation has an id, a type, two
 	// endpoints, its declared fields, its validity flag and its timestamps —
 	// 0004_metamodel.sql plus 0009 — so @name and @key compile to columns
@@ -98,7 +98,7 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeEntrysRelationTypeIsResolvedAndListed pins that the
+	// TestCompileExtraArea's "an edge entrys relation type is resolved and listed" case pins that the
 	// via/between spelling of an edges entry goes through the same resolution
 	// every other type key does — so a key this game does not have is a
 	// refusal with a pointer, and a key it does have is a dependency Task 12
@@ -129,7 +129,7 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestAMisspelledTypeNameIsRefusedRatherThanDrawnAsNothing is the
+	// TestCompileExtraArea's "a misspelled type name is refused rather than drawn as nothing" case is the
 	// decision Task 4 left to the compiler: @type is compared against the id
 	// a row actually holds, and a key this game does not declare is a
 	// refusal, not a picture with nothing in it.
@@ -162,7 +162,7 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestAMultiHopStepEmitsARecursionRatherThanASecondJoin replaces the
+	// TestCompileExtraArea's "a multi hop step emits a recursion rather than a second join" case replaces the
 	// refusal this build carried until the walk arrived. The refusal existed
 	// so that a depth-3 question could not be answered with a depth-1 answer
 	// and no error; what keeps that from happening now is that the step is
@@ -207,7 +207,7 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeEntryNamingASelectorIsRefused: a selector walks no relation,
+	// TestCompileExtraArea's "an edge entry naming a selector is refused" case: a selector walks no relation,
 	// so there is nothing for the entry to draw and an empty edge set would
 	// say so in silence.
 	t.Run("an edge entry naming a selector is refused", func(t *testing.T) {
@@ -221,7 +221,7 @@ func TestCompileExtraArea(t *testing.T) {
 		oneProblem(t, err, "/edges/0/from_step", "walks no relations")
 	})
 
-	// TestAGlobPatternMapsItsWildcardsAndEscapesEverythingElse pins the
+	// TestCompileExtraArea's "a glob pattern maps its wildcards and escapes everything else" case pins the
 	// operator table's promise for `matches`: `*` and `?` are the only
 	// metacharacters, and a per-cent or an underscore the caller wrote is a
 	// literal. The previous emitter escaped the caller's characters and then
@@ -248,7 +248,7 @@ func TestCompileExtraArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeEntrysEmptyDirectionIsFilledOnceAndRefusedAfter closes the
+	// TestCompileExtraArea's "an edge entrys empty direction is filled once and refused after" case closes the
 	// asymmetry a step and an edge entry used to have: a step refused an
 	// empty direction while an edge entry read it as "out" in a switch arm of
 	// its own. Now applyDefaults fills both, and the compiler refuses what is

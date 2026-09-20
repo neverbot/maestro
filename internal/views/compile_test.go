@@ -31,7 +31,7 @@ func TestCompileArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestNoCallerValueEverReachesTheStatementText is the injection question,
+	// TestCompileArea's "no caller value ever reaches the statement text" case is the injection question,
 	// answered by construction rather than by care. Every string the caller
 	// controls is a distinctive sentinel; none may appear in the SQL.
 	t.Run("no caller value ever reaches the statement text", func(t *testing.T) {
@@ -60,7 +60,7 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestTheProjectFilterGuardSeesTheShapesItMustSee tests the guard rather
+	// TestCompileArea's "the project filter guard sees the shapes it must see" case tests the guard rather
 	// than the compiler, because a guard is only worth what it can see and
 	// this one has been broken by review three times — twice by a shape it
 	// did not match, once by a placeholder prefix. Every case below is a
@@ -153,7 +153,7 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryTableReferenceIsProjectFiltered walks the emitted SQL rather
+	// TestCompileArea's "every table reference is project filtered" case walks the emitted SQL rather
 	// than one query's behaviour, so a clause added by a later task cannot
 	// quietly drop the filter.
 	//
@@ -172,7 +172,7 @@ func TestCompileArea(t *testing.T) {
 	// filters on an entity_type_id resolved in *this* game, the step on a
 	// relation_type_id and a to_type resolved the same way, the between arm
 	// on its own relation_type_id, and the join-backs join to rows those
-	// filters already isolated. So `TestARunFromAnotherGameSeesNothing`
+	// filters already isolated. So `TestExecuteArea's "a run from another game sees nothing" case`
 	// cannot fail on a lost project filter under any shape the compiler emits
 	// today — the filters are defence in depth against the shapes Tasks 7, 8
 	// and 9 add, and this test is what defends them.
@@ -233,7 +233,7 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestTheWorkedExamplesCompileToTheseStatements freezes the emitted SQL.
+	// TestCompileArea's "the worked examples compile to these statements" case freezes the emitted SQL.
 	// A golden file is what makes a change to the emitter a diff a reviewer
 	// reads rather than a behaviour they infer — and the ids are already $n
 	// by construction, because every value the compiler handles is a bind
@@ -244,8 +244,8 @@ func TestCompileArea(t *testing.T) {
 	// in no other test — the selector's project filter, a step's invalid-row
 	// exclusion and its destination-type filter — so regenerating rather than
 	// reading the diff erased three guarantees in one keystroke. Each now has
-	// a test of its own (TestEveryTableReferenceIsProjectFiltered and
-	// TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows), but the next
+	// a test of its own (TestCompileArea's "every table reference is project filtered" case and
+	// TestExecuteArea's "a step draws only its destination type and only valid rows" case), but the next
 	// clause a task adds arrives here first and unaccompanied, which is why
 	// the failure message says read the diff before it names the flag.
 	t.Run("the worked examples compile to these statements", func(t *testing.T) {
@@ -275,11 +275,11 @@ func TestCompileArea(t *testing.T) {
 		}
 	})
 
-	// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere is the
+	// TestCompileArea's "the only string to fragment conversions are the ones named here" case is the
 	// construction half of the injection answer, and the half a behavioural
 	// test cannot give.
 	//
-	// TestNoCallerValueEverReachesTheStatementText proves that the queries it
+	// TestCompileArea's "no caller value ever reaches the statement text" case proves that the queries it
 	// compiles put nothing in the text; it cannot prove that a query nobody
 	// wrote will not. What can is the type: a `string` variable does not
 	// convert to frag implicitly, so the only way to spell a caller's value
@@ -546,7 +546,7 @@ func parenBody(s string) (string, bool) {
 
 // projectFilterProblems is the guard itself, factored out of the test
 // that runs it over the compiler's real output so that
-// TestTheProjectFilterGuardSeesTheShapesItMustSee can run it over the
+// TestCompileArea's "the project filter guard sees the shapes it must see" case can run it over the
 // shapes that used to slip past. It returns one message per reference it
 // cannot see as filtered — plus one per lateral whose nesting would put a
 // filter where it cannot see it at all — and how many times each table

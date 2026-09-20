@@ -73,7 +73,7 @@ type Service struct {
 // transport can reach the report through is this one. The event is the
 // metamodel's own, published by the metamodel's own code for a change it
 // made; what a nil hub bought was silence, not a boundary.
-// TestRemovingATypeThroughTheViewsReportStillAnnouncesIt pins it.
+// TestStaleArea's "removing a type through the views report still announces it" case pins it.
 func New(pool *pgxpool.Pool, hub *realtime.Hub) *Service {
 	return &Service{pool: pool, q: dbq.New(pool), meta: metamodel.New(pool, hub), hub: hub}
 }

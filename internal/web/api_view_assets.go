@@ -47,7 +47,7 @@ import (
 //
 // The protection is unchanged either way — nothing here reads more than
 // eight megabytes and one byte off the socket, whichever object stops
-// it. internal/views' TestAnOversizeAssetIsRefusedBeforeItIsRead counts
+// it. internal/views' TestAssetsArea's "an oversize asset is refused before it is read" case counts
 // the bytes; TestAnOversizeUploadIsRefusedOverTheWire asserts that the
 // refusal reaches a browser as a 400 naming /bytes.
 //

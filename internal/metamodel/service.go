@@ -151,7 +151,7 @@ func decodeFields(raw []byte) (map[string]any, error) {
 // column prefix along. Both prefixes are named in actorColumns, in one
 // place, so a third table cannot fall out of step by being written
 // somewhere else.
-// TestTheUploaderIsRecordedAndAForeignTokenIsRefused (internal/views) is
+// TestAssetsArea's "the uploader is recorded and a foreign token is refused" case (internal/views) is
 // what caught it.
 //
 // **author_* is in the list too, and completing the list one prefix at a

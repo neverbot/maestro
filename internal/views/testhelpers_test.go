@@ -98,7 +98,7 @@ func (g *game) seed(t *testing.T) {
 	rank := metamodel.Field{Key: "rank", Type: metamodel.FieldEnum,
 		Options: []string{"common", "rare", "epic"}}
 	// difficulty carries declared bounds, which min_level deliberately does
-	// not: TestADeclaredRangeDoesNotRefuseAComparisonOutsideIt needs a
+	// not: TestResolveArea's "a declared range does not refuse a comparison outside it" case needs a
 	// field whose range a query can legally ask outside of, and a fixture
 	// where no field declares one cannot tell the two rules apart.
 	low, high := 1.0, 10.0
@@ -106,8 +106,8 @@ func (g *game) seed(t *testing.T) {
 		Min: &low, Max: &high}
 	// region and faction exist so a step can reach two types that declare
 	// the *same* field key two different ways, which is the case
-	// TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration and
-	// TestEnumOptionsAreComparedAsASetNotASequence need and no other
+	// TestResolveArea's "a field declared two ways names each type with its own declaration" case and
+	// TestResolveArea's "enum options are compared as a set not a sequence" case need and no other
 	// fixture type provides:
 	//
 	//   - region declares min_level as an enum where quest declares it a
@@ -117,7 +117,7 @@ func (g *game) seed(t *testing.T) {
 	//     a value legal on one really is illegal on the other.
 	//
 	// Neither declares min_level absent-but-comparable on a type already
-	// used by TestAFieldMustBeDeclaredTheSameWayOnEveryTypeAStepReaches,
+	// used by TestResolveArea's "a field must be declared the same way on every type a step reaches" case,
 	// which still leans on zone declaring nothing.
 	regionLevel := metamodel.Field{Key: "min_level", Type: metamodel.FieldEnum,
 		Options: []string{"low", "high"}}
@@ -139,7 +139,7 @@ func (g *game) seed(t *testing.T) {
 		// database folds. It is the only type here whose *stored* spelling
 		// is not already folded, so it is the only one that can tell
 		// whether the catalogue folds on the way in as well as on the way
-		// out: TestACatalogueFoldsCaseOnBothSides asks for it in lower
+		// out: TestResolveArea's "a catalogue folds case on both sides" case asks for it in lower
 		// case.
 		{"Boss", "Boss", "Bosses", nil},
 	} {

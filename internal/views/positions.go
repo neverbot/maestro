@@ -27,7 +27,7 @@ import (
 // draws that is sub-project 5's question.
 //
 // That claim is a claim about behaviour, so it is asserted rather than
-// promised: TestTheLayoutModeChangesNothingTheServerAnswers saves one
+// promised: TestPositionsArea's "the layout mode changes nothing the server answers" case saves one
 // view under each of the three modes and requires the positions this
 // package hands back to be identical in all three. A comment saying the
 // server honours a mode it never sees is this project's first defect in
@@ -110,7 +110,7 @@ type EntityAddress struct {
 //
 // UpdatedAt is when the node was last moved, and it is the one field
 // here nothing renders. It is what lets a caller — and
-// TestRunningAViewNeverRewritesPositions — tell "this arrangement is
+// TestPositionsArea's "running a view never rewrites positions" case — tell "this arrangement is
 // untouched" from "somebody re-dragged it to the same spot", which is
 // the property that lets a query be edited without losing an afternoon
 // of map work.
@@ -229,7 +229,7 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 			// green test run (views.sql says what it was). The guard
 			// itself is load-bearing and is asserted by driving the
 			// statement directly, in
-			// TestPositionsOfAnotherGameAreNotReachable.
+			// TestPositionsArea's "positions of another game are not reachable" case.
 			if written == 0 {
 				return fmt.Errorf("write %s: the stored position belongs to another game",
 					pointer("positions", i))
@@ -266,7 +266,7 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 // was resolved before the arguments were judged, so a call naming a
 // missing view *and* a malformed address heard about the view, while the
 // same pair on SetPositions heard about the address. Now both answer the
-// argument first, and TestAPositionCallRefusesItsArgumentsInTheSameOrder
+// argument first, and TestPositionsArea's "a position call refuses its arguments in the same order" case
 // pins that they agree.
 //
 // **The list is capped at MaxPositions, exactly as a write is**, and for
@@ -276,7 +276,7 @@ func (s *Service) SetPositions(ctx context.Context, projectID uuid.UUID, viewKey
 // before the cap existed: fifty thousand addresses took 24.6 s and
 // returned success. The cap is answered here, before a single address is
 // resolved, which is what
-// TestAnEmptyOrOversizeClearIsRefused asserts by naming entities that do
+// TestPositionsArea's "an empty or oversize clear is refused" case asserts by naming entities that do
 // not exist.
 //
 // An address that names no entity of this game is refused exactly as it

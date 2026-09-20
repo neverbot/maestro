@@ -415,7 +415,7 @@ func TestUpsertEntityTypeRefusesAKeyThatDiffersOnlyByCase(t *testing.T) {
 	}
 }
 
-// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale pins the only job
+// TestViewsArea's "a respelling is named even when the version is also stale" case pins the only job
 // left to the spelling check in the locked pre-read.
 //
 // Correction 15 made the post-write check the actual refusal, and it

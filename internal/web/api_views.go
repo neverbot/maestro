@@ -263,7 +263,7 @@ type RendererOutput struct {
 //
 // `values` is present for an enum and absent for every other kind, which
 // is the catalogue's own rule
-// (TestAnEnumParameterDeclaresItsValuesAndNothingElseDoes) carried onto
+// (TestRenderersArea's "an enum parameter declares its values and nothing else does" case) carried onto
 // the wire rather than restated: a control that offered spellings for a
 // number would compose a document views.upsert refuses.
 type RendererParamOutput struct {

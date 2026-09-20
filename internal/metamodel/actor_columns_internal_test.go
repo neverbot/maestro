@@ -33,7 +33,7 @@ import (
 // requires a write path per table, three of which do not exist yet, and
 // the thing under test is the name scan and not the database's
 // willingness to refuse — which the per-domain tests
-// (TestTheUploaderIsRecordedAndAForeignTokenIsRefused,
+// (TestAssetsArea's "the uploader is recorded and a foreign token is refused" case,
 // TestADocumentWrittenWithAnotherGamesTokenIsRefusedAsSuch) already
 // drive end to end.
 func TestEveryCompositeTokenKeyIsNamedInActorColumns(t *testing.T) {

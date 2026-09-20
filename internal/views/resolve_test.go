@@ -36,7 +36,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAKeyFromAnotherGameDoesNotResolve is the isolation test, with its
+	// TestResolveArea's "a key from another game does not resolve" case is the isolation test, with its
 	// positive control in the same test so an empty answer cannot pass it.
 	t.Run("a key from another game does not resolve", func(t *testing.T) {
 		g, other := a.games(t)
@@ -62,7 +62,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestARelationTypeFromAnotherGameDoesNotResolve is the same isolation
+	// TestResolveArea's "a relation type from another game does not resolve" case is the same isolation
 	// assertion one step along: relation types are loaded by a second
 	// statement, and a project filter missing from that one alone would let
 	// every test above pass.
@@ -105,7 +105,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEnumValueOutsideItsOptionsIsRefusedRatherThanEmpty is the failure
+	// TestResolveArea's "an enum value outside its options is refused rather than empty" case is the failure
 	// mode the spec calls the most expensive one in a query language whose
 	// author is not in the room.
 	t.Run("an enum value outside its options is refused rather than empty", func(t *testing.T) {
@@ -155,7 +155,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAParameterDefaultIsCoercedToItsDeclaredType pins the other half of
+	// TestResolveArea's "a parameter default is coerced to its declared type" case pins the other half of
 	// the parameter pass: a default is a value like any other, and one that
 	// does not fit its declaration is refused at its own pointer rather than
 	// stored and coerced by whatever reads it later.
@@ -186,7 +186,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestResolutionListsEveryTypeReferenceWithItsPointer is what Task 11
+	// TestResolveArea's "resolution lists every type reference with its pointer" case is what Task 11
 	// writes into view_refs and what Task 12's staleness report reads back.
 	t.Run("resolution lists every type reference with its pointer", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -222,7 +222,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAReferenceThatDoesNotResolveIsStillListedWithItsKey is the half of
+	// TestResolveArea's "a reference that does not resolve is still listed with its key" case is the half of
 	// the dependency list Task 12 depends on and the test above cannot see:
 	// a ref survives with its key and its pointer and a nil id, which is what
 	// lets a stale view say which part of itself broke rather than only that
@@ -283,7 +283,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAStepWithoutAToTypeAdmitsOnlyBuiltins pins the claim resolve.go's
+	// TestResolveArea's "a step without a to type admits only builtins" case pins the claim resolve.go's
 	// own comment makes about an open step: it reaches entities of any type,
 	// so no declared field key can be compared there, and the refusal says
 	// that rather than blaming a type the caller never named.
@@ -309,7 +309,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAFieldMustBeDeclaredTheSameWayOnEveryTypeAStepReaches is the
+	// TestResolveArea's "a field must be declared the same way on every type a step reaches" case is the
 	// multi-type case the single-schema shortcut gets wrong in both
 	// directions: a field declared on one of two reached types would compile
 	// to a comparison that silently matches nothing on the other, and a key
@@ -339,7 +339,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestADeclaredRangeDoesNotRefuseAComparisonOutsideIt is the one place
+	// TestResolveArea's "a declared range does not refuse a comparison outside it" case is the one place
 	// this pass deliberately does not take the metamodel's whole judgement.
 	// A stored value may sit outside its field's declared range — the
 	// metamodel flags such an entity invalid and leaves the value in place —
@@ -363,7 +363,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryProblemInOneQueryIsReportedInOnePass is the property the
+	// TestResolveArea's "every problem in one query is reported in one pass" case is the property the
 	// refusal shape exists for: an agent writing against an unfamiliar game
 	// gets every mistake at once instead of one per round trip.
 	t.Run("every problem in one query is reported in one pass", func(t *testing.T) {
@@ -387,7 +387,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAStepDeeperThanTheQueryAllowsIsRefused pins the one bound this pass
+	// TestResolveArea's "a step deeper than the query allows is refused" case pins the one bound this pass
 	// applies that ParseQuery cannot: a step's own depth is only judgeable
 	// against the query's max_depth, which may itself be an override.
 	t.Run("a step deeper than the query allows is refused", func(t *testing.T) {
@@ -413,7 +413,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestResolutionTakesTheQuerysLimitsAndDefaultsTheRest pins the constants
+	// TestResolveArea's "resolution takes the querys limits and defaults the rest" case pins the constants
 	// Task 3 shipped unread: the compiler reads these three numbers and
 	// nothing else decides them.
 	t.Run("resolution takes the querys limits and defaults the rest", func(t *testing.T) {
@@ -436,7 +436,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestACatalogueFromAnotherGameIsRefused is the isolation assertion the
+	// TestResolveArea's "a catalogue from another game is refused" case is the isolation assertion the
 	// two above cannot make: they pair a catalogue with the game it was read
 	// for, and every message they check comes from a *lookup* missing a key.
 	// A catalogue with no identity resolves a query meant for another game
@@ -479,7 +479,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration pins the
+	// TestResolveArea's "a field declared two ways names each type with its own declaration" case pins the
 	// half of the multi-type rule the not-declared-everywhere test cannot
 	// see: which type is named beside which declaration. Pairing the first
 	// declaring type's name with the second type's declaration is a message
@@ -531,7 +531,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestEnumOptionsAreComparedAsASetNotASequence is the same defect class
+	// TestResolveArea's "enum options are compared as a set not a sequence" case is the same defect class
 	// as the declared range: a rule that refuses a query with no ambiguity in
 	// it. Two types declaring the same options in a different order admit
 	// exactly the same values, and the refusal's own justification — a value
@@ -559,7 +559,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAParameterCannotFeedAnEnumOrAListField records a limit of the
+	// TestResolveArea's "a parameter cannot feed an enum or a list field" case records a limit of the
 	// language rather than a mistake in a document: a parameter is one of
 	// three scalars, the check is strict equality on the declared type, and
 	// so no parameter can ever feed a field declared enum or list<text>. The
@@ -593,7 +593,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestAHandBuiltOperandOfTheWrongShapeIsRefused covers the third arm of
+	// TestResolveArea's "a hand built operand of the wrong shape is refused" case covers the third arm of
 	// the value switch. Its two neighbours guard, and for a reason that
 	// applies to it word for word: ResolveAgainst is exported and a Query a
 	// Go caller built by hand has been through no parse pass, so the shape
@@ -638,7 +638,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestACatalogueFoldsCaseOnBothSides pins the claim Catalogue's comment
+	// TestResolveArea's "a catalogue folds case on both sides" case pins the claim Catalogue's comment
 	// makes: the database folds these keys, so the catalogue folds them on
 	// the way in and the lookup folds them on the way out. Folding one side
 	// and not the other refuses a spelling the write path accepted.
@@ -681,7 +681,7 @@ func TestResolveArea(t *testing.T) {
 		}
 	})
 
-	// TestProblemsAreReportedInDocumentOrderNotPointerOrder pins the order
+	// TestResolveArea's "problems are reported in document order not pointer order" case pins the order
 	// this pass reports in. Sorting by pointer string reads /from/10 before
 	// /from/2, and a designer reading a list that jumps about cannot tell
 	// where in their document to start.

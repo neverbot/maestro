@@ -113,7 +113,7 @@ func (s *Service) UpsertEntityType(ctx context.Context, projectID uuid.UUID, in 
 			// act on — the message naming both spellings — rather than
 			// "current version is N", which would send it to retry with a
 			// version refused again for the same reason.
-			// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale pins it.
+			// TestViewsArea's "a respelling is named even when the version is also stale" case pins it.
 			if existing.Key != in.Key {
 				return keyRespellingError("key", in.Key, existing.Key)
 			}

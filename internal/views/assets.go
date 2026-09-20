@@ -39,7 +39,7 @@ import (
 // Content-Type or from the filename, and the width and height are
 // decoded from the image header rather than accepted as arguments. A
 // filename check is exactly what an SVG carrying a script walks past:
-// TestAnSVGIsRefusedWhateverItCallsItself sends an SVG's bytes with a
+// TestAssetsArea's "an SVG is refused whatever it calls itself" case sends an SVG's bytes with a
 // PNG's Content-Type and a .png name.
 //
 // **SVG is refused, and refused by an allowlist rather than by naming
@@ -93,7 +93,7 @@ import (
 //     byte that would have tripped it -- and removed, which left this
 //     sentence describing code that is not there.
 //     api_view_assets.go's header carries the whole argument.
-//     TestAnOversizeAssetIsRefusedBeforeItIsRead counts the bytes this
+//     TestAssetsArea's "an oversize asset is refused before it is read" case counts the bytes this
 //     package pulls from the reader, because "refused" and "refused
 //     before it was read" are different claims and only one of them is
 //     worth making.
@@ -208,7 +208,7 @@ const (
 //
 // Width, Height and Mime are decoded and sniffed values, not arguments,
 // which is why views.list_assets returns them and why
-// TestWidthAndHeightAreDecodedAndReadBack reads them back through this
+// TestAssetsArea's "width and height are decoded and read back" case reads them back through this
 // struct: a column filled by a decoder nobody ever reads is a decoder
 // nobody can prove ran.
 type Asset struct {
@@ -731,7 +731,7 @@ func assetFilenameProblems(filename string) []metamodel.FieldError {
 // image. Reading one byte past is what makes "too big" observable, and
 // it is the most this ever holds -- a caller streaming four gigabytes is
 // refused having buffered 8 MB and one byte, not four gigabytes.
-// TestAnOversizeAssetIsRefusedBeforeItIsRead counts what this pulls from
+// TestAssetsArea's "an oversize asset is refused before it is read" case counts what this pulls from
 // the reader, because "refused" and "refused before it was read" are
 // different claims.
 func readBounded(body io.Reader) ([]byte, error) {
@@ -786,8 +786,8 @@ var (
 // **It is never told what to expect.** No Content-Type, no filename, no
 // caller argument reaches it, which is why an SVG labelled image/png and
 // named world-map.png is refused: the only thing consulted is the front
-// of the file. TestTheMimeIsSniffedNotTrusted and
-// TestAnSVGIsRefusedWhateverItCallsItself are the two halves of that.
+// of the file. TestAssetsArea's "the mime is sniffed not trusted" case and
+// TestAssetsArea's "an SVG is refused whatever it calls itself" case are the two halves of that.
 func sniffedMime(raw []byte) string {
 	switch {
 	case bytes.HasPrefix(raw, magicPNG):

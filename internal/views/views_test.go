@@ -43,7 +43,7 @@ func TestViewsArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestAViewIsReadBackWithEveryFieldItWasSavedWith is the read-back that
+	// TestViewsArea's "a view is read back with every field it was saved with" case is the read-back that
 	// catches a write-only column.
 	//
 	// It is not a formality: `relations.fields` was write-only for a whole
@@ -129,7 +129,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheDefaultsAViewIsStoredWithAreTheColumnsOwn pins that a caller
+	// TestViewsArea's "the defaults a view is stored with are the columns own" case pins that a caller
 	// who says nothing about layout gets the mode and the seed 0008_views.sql
 	// declares, rather than an empty string that the CHECK would refuse and a
 	// seed of zero that would draw a different diagram from the default.
@@ -149,7 +149,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestUpsertRoundTripsWithoutASeed is the positive control for the
+	// TestViewsArea's "upsert round trips without a seed" case is the positive control for the
 	// column migration 0012 dropped: an ordinary create-then-read, over the
 	// upsert statement that no longer names a seed, still stores and returns
 	// everything a view is made of.
@@ -178,7 +178,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestASecondUpsertMustCarryTheStoredVersion pins the compare-and-set
+	// TestViewsArea's "a second upsert must carry the stored version" case pins the compare-and-set
 	// from the caller's side: no version at all against an existing view is
 	// a conflict rather than an overwrite, a stale one is a conflict naming
 	// the version to merge onto, and the right one lands and bumps.
@@ -229,7 +229,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheReportedCurrentViewVersionIsTheOneTheWriteWouldHaveMet pins the
+	// TestViewsArea's "the reported current view version is the one the write would have met" case pins the
 	// FOR UPDATE on GetViewByKeyForUpdate.
 	//
 	// Deleting the lock leaves every other test in this file green: the
@@ -291,7 +291,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheGuardedUpsertIsWhatRefusesACreationThatRacedAnother reaches the
+	// TestViewsArea's "the guarded upsert is what refuses a creation that raced another" case reaches the
 	// path the locked read cannot: on a creation there is nothing to lock, so
 	// the guard on the DO UPDATE is the only thing between the loser of the
 	// race and a silent overwrite.
@@ -348,7 +348,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestARespeltViewKeyIsRefusedRatherThanRewritingTheStoredOne pins that
+	// TestViewsArea's "a respelt view key is refused rather than rewriting the stored one" case pins that
 	// keys are matched without regard to case and the first spelling stands:
 	// the key is the handle a designer bookmarks and an agent re-seeds
 	// against, and a second spelling is a rewrite of it rather than a new
@@ -377,7 +377,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryTypeAQueryNamesGetsARefAtItsPointer pins the dependency index
+	// TestViewsArea's "every type a query names gets a ref at its pointer" case pins the dependency index
 	// the whole view_refs table exists for: one row per reference, carrying
 	// the kind, the key as the query spells it, the resolved id and the
 	// pointer that addresses it.
@@ -424,7 +424,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheRefsAreRewrittenWithTheQueryTheyIndex is the second half of the
+	// TestViewsArea's "the refs are rewritten with the query they index" case is the second half of the
 	// same invariant: an edit that drops a reference drops its row, so the
 	// index never describes a query that is no longer stored.
 	t.Run("the refs are rewritten with the query they index", func(t *testing.T) {
@@ -448,7 +448,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestARefusedUpsertLeavesTheRefsOfTheQueryThatIsStored is the placement
+	// TestViewsArea's "a refused upsert leaves the refs of the query that is stored" case is the placement
 	// half of "the refs are rewritten in the same transaction". They are
 	// written after the compare-and-set and inside it, so a write the guard
 	// refuses leaves the index describing the query that is actually
@@ -476,7 +476,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAQueryThatDoesNotResolveIsRefusedAndNothingIsStored is why the
+	// TestViewsArea's "a query that does not resolve is refused and nothing is stored" case is why the
 	// stored document is the one resolution returned rather than the one
 	// ParseQuery returned. The document below parses — it is structurally a
 	// query — and names a type this game does not declare, which only
@@ -499,7 +499,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestARendererThatCannotDrawTheQueryIsRefusedAtSaveTime is the reason
+	// TestViewsArea's "a renderer that cannot draw the query is refused at save time" case is the reason
 	// this call reaches CheckRenderer at all: a view that saves and then
 	// cannot be drawn is the failure the renderer catalogue exists to
 	// prevent, and save time is the only moment at which anybody is there to
@@ -542,7 +542,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestARendererParameterIsJudgedAgainstTheQueryItIsSavedWith reaches the
+	// TestViewsArea's "a renderer parameter is judged against the query it is saved with" case reaches the
 	// half of the catalogue a Requires cannot: a parameter whose value is
 	// well formed and names something this query does not carry.
 	t.Run("a renderer parameter is judged against the query it is saved with", func(t *testing.T) {
@@ -569,7 +569,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAViewsOwnArgumentsAreRefusedBeforePostgresSeesThem covers the four
+	// TestViewsArea's "a views own arguments are refused before postgres sees them" case covers the four
 	// the row carries besides its query. Each of them is a caller's argument
 	// at its own path, and each would otherwise reach the caller as an
 	// untyped server fault — a CHECK violation (SQLSTATE 23514) for the
@@ -628,7 +628,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAViewsProseIsCappedInCharactersNotBytes pins the unit of the two
+	// TestViewsArea's "a views prose is capped in characters not bytes" case pins the unit of the two
 	// caps, which their numbers alone do not.
 	//
 	// The constants match internal/metamodel's deliberately, so that a
@@ -684,7 +684,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestEveryProblemWithAViewsArgumentsIsReportedInOnePass: an agent whose
+	// TestViewsArea's "every problem with a views arguments is reported in one pass" case: an agent whose
 	// name and layout mode are both wrong fixes both in one round trip.
 	t.Run("every problem with a views arguments is reported in one pass", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -708,7 +708,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAViewsOwnArgumentsAreAnsweredBeforeItsQuery pins the order of the
+	// TestViewsArea's "a views own arguments are answered before its query" case pins the order of the
 	// four passes. A caller whose name is empty and whose query names nothing
 	// this game has hears about the name: every later pass needs a document
 	// that parsed, and one error carries one code.
@@ -722,7 +722,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestReadingAnotherGamesViewIsNotFound is the isolation test, and it is
+	// TestViewsArea's "reading another games view is not found" case is the isolation test, and it is
 	// why newGame seeds two games with the same vocabulary: with one game,
 	// every project filter in views.sql could be deleted and nothing here
 	// would notice.
@@ -759,7 +759,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestRemovingAViewTakesItsRefsAndAnswersTheSecondCallWithNotFound.
+	// TestViewsArea's "removing a view takes its refs and answers the second call with not found" case.
 	t.Run("removing a view takes its refs and answers the second call with not found", func(t *testing.T) {
 		g, _ := a.games(t)
 		ctx := context.Background()
@@ -786,7 +786,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestRemovingAnotherGamesViewIsNotFound: the delete is addressed by id,
+	// TestViewsArea's "removing another games view is not found" case: the delete is addressed by id,
 	// and an id alone is not authority.
 	t.Run("removing another games view is not found", func(t *testing.T) {
 		azeroth, outland := a.games(t)
@@ -803,7 +803,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAnOrdinaryUpsertLeavesABackgroundStanding pins the decision
+	// TestViewsArea's "an ordinary upsert leaves a background standing" case pins the decision
 	// UpsertView's SET list makes by omission, which nothing else asserts.
 	//
 	// The three background columns are deliberately not in the statement's
@@ -883,7 +883,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestViewsDependingOnATypeAreFoundByIdWithTheirPointers pins the lookup
+	// TestViewsArea's "views depending on a type are found by id with their pointers" case pins the lookup
 	// ON DELETE SET NULL exists to serve: which views a type holds up, and
 	// where in each query, as one indexed query rather than a scan over every
 	// stored document.
@@ -1002,7 +1002,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAViewWrittenByAnotherGamesTokenIsRefused covers the database's own
+	// TestViewsArea's "a view written by another games token is refused" case covers the database's own
 	// backstop over the audit columns, the half of them a read-back cannot
 	// see.
 	//
@@ -1047,7 +1047,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestViewEventsReachEveryMemberOfTheGameIncludingAgents pins the gating
+	// TestViewsArea's "view events reach every member of the game including agents" case pins the gating
 	// events.go argues: MinRole empty, HumanOnly false. The two subscribers
 	// here are the ones a wrong decision would silently cut out — a viewer,
 	// excluded by any MinRole above viewer, and a token caller, excluded by
@@ -1087,7 +1087,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestNoViewEventIsPublishedWhenARefusedWriteRollsBack is the ordinary
+	// TestViewsArea's "no view event is published when a refused write rolls back" case is the ordinary
 	// half: a write refused inside the transaction announces nothing.
 	t.Run("no view event is published when a refused write rolls back", func(t *testing.T) {
 		g, _ := a.games(t)
@@ -1109,7 +1109,7 @@ func TestViewsArea(t *testing.T) {
 		requireNothing(t, sub, "the write was refused")
 	})
 
-	// TestTheViewQueriesAddressingARowByIdAreScopedToTheProject goes at the
+	// TestViewsArea's "the view queries addressing a row by id are scoped to the project" case goes at the
 	// generated statements directly, because the service cannot reach the
 	// hole they would leave.
 	//
@@ -1182,7 +1182,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestARespellingIsNamedEvenWhenTheVersionIsAlsoStale is what makes the
+	// TestViewsArea's "a respelling is named even when the version is also stale" case is what makes the
 	// locked read's spelling check load-bearing, and it is the only thing
 	// that does.
 	//
@@ -1211,7 +1211,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestACreationRacingACreatorUnderAnotherSpellingIsToldTheSpelling
+	// TestViewsArea's "a creation racing a creator under another spelling is told the spelling" case
 	// stages a creation losing to a creation under another spelling, and
 	// pins that the loser is told the stored spelling rather than silently
 	// overwriting the winner's row.
@@ -1226,7 +1226,7 @@ func TestViewsArea(t *testing.T) {
 	// That caller is now turned away at the locked read: a version claim
 	// against a row that is not there is a not_found saying the row was
 	// removed, not a creation (metamodel.RemovedError), and
-	// TestAViewUpdateThatLostToACommittedRemovalIsToldTheViewIsGone is where
+	// TestViewsArea's "a view update that lost to a committed removal is told the view is gone" case is where
 	// that is asserted. So the post-write check became unreachable and went;
 	// what stays is this race with the claim dropped, which is the shape a
 	// seeding agent actually meets, and which conflictOnViewKey answers.
@@ -1278,7 +1278,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestAViewUpdateThatLostToACommittedRemovalIsToldTheViewIsGone is this
+	// TestViewsArea's "a view update that lost to a committed removal is told the view is gone" case is this
 	// package's half of a rule that lives in two places at once, and it
 	// races the state rather than producing it sequentially.
 	//
@@ -1350,7 +1350,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestZeroIsACreationClaimAndNotAClaimAboutARow is the exemption the
+	// TestViewsArea's "zero is a creation claim and not a claim about a row" case is the exemption the
 	// rule above has to carry, and without it every creation over the MCP
 	// and REST surfaces would be refused.
 	//
@@ -1381,7 +1381,7 @@ func TestViewsArea(t *testing.T) {
 		}
 	})
 
-	// TestARemovalThatLostItsRaceAnnouncesNothing pins the arm that reads
+	// TestViewsArea's "a removal that lost its race announces nothing" case pins the arm that reads
 	// how many rows the delete actually removed.
 	//
 	// RemoveView resolves the key first and deletes by id, so between those

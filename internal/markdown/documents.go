@@ -93,7 +93,7 @@ type WriteInput struct {
 // The whole compare-and-set happens in SQL: UpsertDocument's DO UPDATE
 // is guarded by the caller's expected version, so two writers cannot
 // both read version 1 and both succeed. The test that actually pins
-// that guard is TestTheGuardedUpsertIsWhatRefusesACreationThatRacedAnother,
+// that guard is TestViewsArea's "the guarded upsert is what refuses a creation that raced another" case,
 // which stages the overlap rather than hoping two goroutines produce
 // one: unstaged, the locked read below finds the committed row first and
 // refuses in Go, leaving the SQL guard untouched — `=` widened to `>=`
@@ -332,7 +332,7 @@ func (s *Service) writeWith(ctx context.Context, q *dbq.Queries, projectID uuid.
 		// above and this statement another writer created or advanced
 		// the row. Reachable on the creation path, where there was
 		// nothing to lock
-		// (TestTheGuardedUpsertIsWhatRefusesACreationThatRacedAnother).
+		// (TestViewsArea's "the guarded upsert is what refuses a creation that raced another" case).
 		return dbq.Document{}, s.conflictAfterFailedUpsert(ctx, q, projectID, in)
 	}
 	if err != nil {

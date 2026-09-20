@@ -28,7 +28,7 @@ import (
 // catalogue description rather than over a list retyped here: that text
 // is produced from the table and from nothing else, and
 // internal/views' own
-// TestEveryRendererDeclaresItsParametersAndTheDescriptionIsGeneratedFromThem
+// TestRenderersArea's "every renderer declares its parameters and the description is generated from them" case
 // holds it against the table in both directions. Reading it is reading
 // the catalogue.
 

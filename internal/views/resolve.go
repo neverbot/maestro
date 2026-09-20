@@ -38,7 +38,7 @@ const (
 // Keys are folded to lower case in the maps because the database folds
 // them: entity_types_key_key is UNIQUE (project_id, lower(key)). The
 // *stored* spelling is kept on the row, which is what a rename diagnostic
-// compares against. TestACatalogueFoldsCaseOnBothSides pins both sides of
+// compares against. TestResolveArea's "a catalogue folds case on both sides" case pins both sides of
 // that folding.
 //
 // **It carries the id of the game it was read for**, and every entry
@@ -49,7 +49,7 @@ const (
 // resolved against another game's catalogue would come back with that
 // game's type ids, and Task 12 would compare a saved view against the
 // wrong game's vocabulary and answer "not stale".
-// TestACatalogueFromAnotherGameIsRefused pins it.
+// TestResolveArea's "a catalogue from another game is refused" case pins it.
 type Catalogue struct {
 	ProjectID     uuid.UUID
 	EntityTypes   map[string]dbq.EntityType
@@ -113,7 +113,7 @@ func (s *Service) LoadCatalogue(ctx context.Context, projectID uuid.UUID) (*Cata
 // Pointer are filled and ID is nil. That is the whole point of the list —
 // a stale view has to be able to say *which part of itself* broke, and a
 // pointer plus the key the document spells is exactly that.
-// TestAReferenceThatDoesNotResolveIsStillListedWithItsKey pins it.
+// TestResolveArea's "a reference that does not resolve is still listed with its key" case pins it.
 type TypeRef struct {
 	Kind    string // KindEntityType or KindRelationType
 	Key     string // as the query spells it
@@ -156,7 +156,7 @@ type ResolvedStep struct {
 // is a second place that can forget the project filter, and a reference
 // the compiler resolved privately would be missing from Refs, so
 // deleting a relation type a view draws edges with would report the view
-// as fine. TestAnEdgeEntrysRelationTypeIsResolvedAndListed pins both
+// as fine. TestCompileExtraArea's "an edge entrys relation type is resolved and listed" case pins both
 // halves.
 type ResolvedEdge struct {
 	Spec            *EdgeSpec
@@ -242,20 +242,20 @@ type ResolvedLimits struct {
 //
 // **Every lookup it makes is scoped to the caller's game**, because the
 // only catalogue it can see is the one LoadCatalogue read for that
-// project. TestAKeyFromAnotherGameDoesNotResolve and
-// TestARelationTypeFromAnotherGameDoesNotResolve pin both statements,
+// project. TestResolveArea's "a key from another game does not resolve" case and
+// TestResolveArea's "a relation type from another game does not resolve" case pin both statements,
 // each with a positive control in the same test.
 //
 // It collects every problem in one pass. An agent writing a five-step
 // traversal against an unfamiliar game gets all five mistakes at once;
-// TestEveryProblemInOneQueryIsReportedInOnePass pins it.
+// TestResolveArea's "every problem in one query is reported in one pass" case pins it.
 //
 // The problems come back in **document order**, because the pass walks
 // the document in that order and nothing sorts them afterwards. Sorting
 // by pointer string is what an earlier version did, and it reads
 // /from/10 before /from/2 — a list that jumps about in a query long
 // enough for the order to matter.
-// TestProblemsAreReportedInDocumentOrderNotPointerOrder pins it.
+// TestResolveArea's "problems are reported in document order not pointer order" case pins it.
 func (s *Service) Resolve(ctx context.Context, projectID uuid.UUID, q *Query) (*Resolved, error) {
 	cat, err := s.LoadCatalogue(ctx, projectID)
 	if err != nil {
@@ -435,7 +435,7 @@ func resolveInto(cat *Catalogue, q *Query, st *staleness) (*Resolved, []metamode
 		// predicate on it can only name built-ins: no schema is common to
 		// every type it could land on. fieldScope says exactly that
 		// instead of blaming a type the caller never named —
-		// TestAStepWithoutAToTypeAdmitsOnlyBuiltins pins the wording.
+		// TestResolveArea's "a step without a to type admits only builtins" case pins the wording.
 		nodeScope := fieldScope{
 			subject: "the entity types this step reaches",
 			open:    len(step.ToType) == 0,
@@ -530,9 +530,9 @@ func resolveInto(cat *Catalogue, q *Query, st *staleness) (*Resolved, []metamode
 // types compiles to a comparison that silently matches nothing on the
 // other, and a key declared number on one type and enum on another is
 // coerced against whichever happened to be listed first.
-// TestAFieldMustBeDeclaredTheSameWayOnEveryTypeAStepReaches pins the
+// TestResolveArea's "a field must be declared the same way on every type a step reaches" case pins the
 // not-declared-everywhere direction;
-// TestAFieldDeclaredTwoWaysNamesEachTypeWithItsOwnDeclaration pins the
+// TestResolveArea's "a field declared two ways names each type with its own declaration" case pins the
 // other one, and pins that each type is named beside its own declaration
 // in both the type and the enum-options message.
 type fieldScope struct {
@@ -557,7 +557,7 @@ type fieldScope struct {
 	// an edge holds. Leaving it refused would have meant a designer could
 	// draw "the quests that no longer fit" and not "the edges that no
 	// longer fit" — a flag visible on half the graph.
-	// TestAnEdgePredicateAdmitsOnlyTheBuiltinsARelationHas pins the
+	// TestCompileExtraArea's "an edge predicate admits only the builtins a relation has" case pins the
 	// refusal that remains, with @type, @created_at and @invalid as its
 	// controls.
 	edge bool
@@ -651,7 +651,7 @@ func (sc fieldScope) field(key string) (metamodel.Field, error) {
 // stays, and min, max and required are still allowed to diverge: what a
 // comparison needs is that the same value means the same thing on every
 // type in scope, which identical type plus identical option set gives.
-// TestEnumOptionsAreComparedAsASetNotASequence pins it.
+// TestResolveArea's "enum options are compared as a set not a sequence" case pins it.
 func sameOptions(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -863,7 +863,7 @@ func resolvePredicate(scope fieldScope, paramTypes map[string]metamodel.FieldTyp
 // no mistake at all. An enum's options are kept, and the asymmetry is the
 // point: a value outside them is a misspelling the refusal can name,
 // while a number outside a range is a legitimate question.
-// TestADeclaredRangeDoesNotRefuseAComparisonOutsideIt pins both halves.
+// TestResolveArea's "a declared range does not refuse a comparison outside it" case pins both halves.
 func coerceOperand(typ metamodel.FieldType, declared metamodel.Field, raw any) (any, error) {
 	if typ == TypeTimestamp {
 		s, ok := raw.(string)

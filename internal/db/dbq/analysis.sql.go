@@ -441,7 +441,8 @@ type ListOrphansPageRow struct {
 // own fields still fit its type's field_schema; it says nothing about
 // the row's endpoints, and endpoints are the only thing this statement
 // reads. Adding `AND r.invalid = false` below is the one-line "tidy"
-// TestAnEntityWhoseOnlyEdgeIsInvalidIsNotAnOrphan exists to make loud.
+// TestOrphans, in its "an entity whose only edge is invalid is not an
+// orphan" case, exists to make that loud.
 //
 // ignored_relation_types is the annotation types, and it is a
 // **subtraction** rather than a list of types to count, deliberately: an
@@ -887,7 +888,8 @@ type WriteRouteCheckRow struct {
 // read `checked` against content it never looked at. The value bound
 // here is the one check.go read **before** the walk began, which makes a
 // mid-check write leave the route `stale` rather than freshly green.
-// TestAWriteDuringACheckLeavesTheRouteStaleRatherThanFreshlyGreen is
+// TestCheck, in its "a write during a check leaves the route stale
+// rather than freshly green" case, is
 // that assertion.
 //
 // **version is not in the SET list.** A check is not an edit of the

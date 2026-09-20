@@ -141,7 +141,7 @@ func (s *Service) Validate(ctx context.Context, projectID uuid.UUID,
 // answer does not carry. **What it costs is that a caller wanting to
 // know what moved runs the view or opens it**, which is what the
 // diagnostics are for and where their pointers are useful.
-// TestTheStaleFlagAgreesWithWhatARunReports is what holds the two
+// TestValidateArea's "the stale flag agrees with what a run reports" case is what holds the two
 // together.
 //
 // **The renderer half is observed by nothing today, and it stays.**

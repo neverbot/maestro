@@ -93,8 +93,8 @@ type ResolvedHop struct {
 // the case worth refusing — a key nothing declares, which is a typo, and
 // a typo answered with a picture in one flat colour is the silent-empty
 // failure this language refuses everywhere else.
-// TestAProjectedFieldOfAnUndeclaredKeyIsRefusedAtResolution pins the
-// refusal and TestAProjectedFieldDeclaredOnOneOfSeveralTypesIsAllowed
+// TestProjectArea's "a projected field of an undeclared key is refused at resolution" case pins the
+// refusal and TestProjectArea's "a projected field declared on one of several types is allowed" case
 // pins the other side.
 type projectionScope struct {
 	// subject names what the schemas belong to, for the refusal message.
@@ -487,7 +487,7 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // **A LEFT join, not an inner one.** A node whose hop finds nothing keeps
 // its row; dropping it would silently narrow the picture to "the quests
 // that have a zone", which is a different query and one nobody asked for.
-// TestAOneHopRelatedAttributeReadsTheFarEntity is red under a plain JOIN
+// TestProjectArea's "a one hop related attribute reads the far entity" case is red under a plain JOIN
 // LATERAL, because the zoneless quest disappears.
 //
 // **LIMIT 1 with the count taken over the whole match set**, which is not
@@ -515,7 +515,7 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // lied: its anchor is `(rel.source_id = e.id OR rel.target_id = e.id)`,
 // so a relation type declared in **both** directions between the same
 // pair matched twice and flagged a node ambiguous with a single
-// candidate — see TestAReciprocalPairIsOneFarEntityNotTwo, and note that
+// candidate — see TestProjectArea's "a reciprocal pair is one far entity not two" case, and note that
 // `any` is the natural spelling for a symmetric type such as
 // `connects_to`. Two edges to one zone is not a colour a designer has to
 // resolve; a flag that fires where there is nothing to choose is one
@@ -529,7 +529,7 @@ func (c *compiler) attrValue(alias, typeAlias frag, attr string, ptr string) (fr
 // name would otherwise swap between runs.
 //
 // **Every project filter sits ahead of the subquery's own SELECT**, which
-// is a requirement of TestEveryTableReferenceIsProjectFiltered rather
+// is a requirement of TestCompileArea's "every table reference is project filtered" case rather
 // than a style: that guard splits the statement on the word SELECT, so a
 // filter written after a nested one lands in another block and is not
 // seen. There is no nested SELECT in here at all, and the three

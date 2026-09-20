@@ -13,7 +13,7 @@
 --     no parent, and a view id is a value a previous answer handed back,
 --     so nothing but the project filter keeps either inside one game.
 --     That includes GetViewByID: a view id in a caller's hand is not
---     authority to read it. TestReadingAnotherGamesViewIsNotFound pins
+--     authority to read it. TestViewsArea's "reading another games view is not found" case pins
 --     both, by key and by id, with a positive control in the same test.
 --   * On view_refs, the filter is defence in depth *for this package's
 --     own callers* and is load-bearing for anyone else's, which is a
@@ -28,7 +28,7 @@
 --     the composite key constrains what a row may *hold*, not which rows
 --     a DELETE may *match*, so DeleteViewRefs called with a foreign view
 --     id and this game's project id would clear another game's index.
---     TestTheViewQueriesAddressingARowByIdAreScopedToTheProject drives
+--     TestViewsArea's "the view queries addressing a row by id are scoped to the project" case drives
 --     these statements directly, because that is the only way to observe
 --     a filter every service path has already made redundant — a
 --     defence-in-depth claim is worth what the test behind it is worth.
@@ -83,7 +83,7 @@
 -- about a background would be saying "none". The same distinction
 -- markdown's WriteInput.Links draws with a pointer, drawn here by the
 -- column simply not being writable from this path.
--- TestAnOrdinaryUpsertLeavesABackgroundStanding writes a background
+-- TestViewsArea's "an ordinary upsert leaves a background standing" case writes a background
 -- directly and edits the view through this statement, which is what
 -- makes the decision above an assertion rather than a paragraph.
 INSERT INTO views (project_id, key, name, description, query, renderer, renderer_params,
@@ -121,7 +121,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg(
 -- edit is told to merge onto a version that is already stale by the time
 -- it retries. What the lock buys is not the refusal — the guarded DO
 -- UPDATE refuses on its own — but the *number* the caller is told to
--- merge onto: TestTheReportedCurrentViewVersionIsTheOneTheWriteWouldHaveMet
+-- merge onto: TestViewsArea's "the reported current view version is the one the write would have met" case
 -- pins exactly that.
 SELECT * FROM views
 WHERE project_id = sqlc.arg('project_id')::uuid AND lower(key) = lower(sqlc.arg('key')::text)
@@ -263,7 +263,7 @@ ORDER BY pointer;
 -- views.ViewsDependingOn takes a bare type id and resolves nothing
 -- inside the game first, so the isolation this statement enforces is the
 -- only isolation its own caller has.
--- TestViewsDependingOnATypeAreFoundByIdWithTheirPointers asks the other
+-- TestViewsArea's "views depending on a type are found by id with their pointers" case asks the other
 -- game about this game's type id, on both arms, with the positive
 -- control in the same test — the discrimination in the rest of that test
 -- comes from the two games' type ids differing, which passes either way.
@@ -307,7 +307,7 @@ ORDER BY v.name, v.id, r.pointer;
 -- the statement is execrows rather than exec: a guard that matches
 -- nothing updates nothing and reports zero, which Go turns into a
 -- refusal (positions.go) instead of the silent success a bare guard
--- would give. TestPositionsOfAnotherGameAreNotReachable drives both
+-- would give. TestPositionsArea's "positions of another game are not reachable" case drives both
 -- paths -- an entity with no stored position for the 23503, one with a
 -- stored position for the guard -- and reads the coordinates back.
 INSERT INTO view_positions (view_id, entity_id, project_id, x, y, pinned)
@@ -327,7 +327,7 @@ WHERE view_positions.project_id = excluded.project_id;
 -- A view id is a value a previous answer handed back, so nothing but
 -- that filter keeps this read inside one game; dropping it hands another
 -- game's positions to a caller holding a leaked view id, which
--- TestPositionsOfAnotherGameAreNotReachable asks for directly. The two
+-- TestPositionsArea's "positions of another game are not reachable" case asks for directly. The two
 -- join conditions -- e.project_id = p.project_id and
 -- et.project_id = e.project_id -- are implied by 0008_views.sql's and
 -- 0004_metamodel.sql's composite foreign keys and by the primary keys
@@ -385,7 +385,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid
 --
 -- mime, width and height are the *sniffed* mime and the *decoded*
 -- dimensions -- never the caller's Content-Type, filename or arguments;
--- assets.go is where that is decided and TestTheMimeIsSniffedNotTrusted
+-- assets.go is where that is decided and TestAssetsArea's "the mime is sniffed not trusted" case
 -- is what pins it. The table's CHECK on mime is a closed list that does
 -- not include SVG, and is the backstop for a write path that does not
 -- come through assets.go.
@@ -443,7 +443,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid;
 --
 -- **The project filter is the whole mechanism.** An asset has no key and
 -- names no parent, so nothing else scopes this read; without it a
--- caller lists every game's images. TestAssetsOfAnotherGameAreNotListed
+-- caller lists every game's images. TestAssetsArea's "assets of another game are not listed" case
 -- asks for it directly, with a positive control in the same test.
 --
 -- **bytes is not selected, deliberately.** The cap is 8 MB an asset, so
@@ -466,7 +466,7 @@ LIMIT sqlc.arg('limit')::int;
 -- The project filter is load-bearing for the reason GetViewByID's is: an
 -- id is a value a previous answer handed back and names no parent, so a
 -- leaked asset id would otherwise serve another game's world map to
--- anyone holding it. TestAnAssetOfAnotherGameIsNotServed pins it.
+-- anyone holding it. TestAssetsArea's "an asset of another game is not served" case pins it.
 SELECT * FROM view_assets
 WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 
@@ -491,7 +491,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 -- the placement of that action is exactly the kind of thing only a
 -- constraint pins, and a Go statement that quietly did the same work
 -- would leave a dropped SET NULL green.
--- TestDeletingAnAssetNullsTheBackgroundOfEveryViewUsingIt asserts the
+-- TestAssetsArea's "deleting an asset nulls the background of every view using it" case asserts the
 -- null the constraint writes and the two defaults this statement writes,
 -- which is why the division of labour is legible from the test.
 --
@@ -554,7 +554,7 @@ WHERE project_id = sqlc.arg('project_id')::uuid AND id = sqlc.arg('id')::uuid;
 -- refuses another game's *asset*: this statement's own WHERE cannot see
 -- that argument at all, so the constraint is the only thing standing
 -- between a leaked asset id and a cross-game image.
--- TestAnAssetOfAnotherGameCannotBecomeThisViewsBackground drives both,
+-- TestAssetsArea's "an asset of another game cannot become this views background" case drives both,
 -- through the service for the message and through this statement for the
 -- 23503, each with its positive control.
 --

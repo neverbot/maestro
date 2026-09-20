@@ -45,7 +45,7 @@ func TestListArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestAViewListingWalksEveryRowOnceInItsSortOrder pages a listing whose
+	// TestListArea's "a view listing walks every row once in its sort order" case pages a listing whose
 	// rows all share one name, three at a time, and asserts the walk sees
 	// each row exactly once and in the order the statement sorts by.
 	//
@@ -100,7 +100,7 @@ func TestListArea(t *testing.T) {
 		}
 	})
 
-	// TestTheRendererFilterNarrowsTheListingAndTheCursorGoesWithIt.
+	// TestListArea's "the renderer filter narrows the listing and the cursor goes with it" case.
 	//
 	// The second half is the one worth having: every filter of a listing
 	// shares one sort order, so a cursor carried from the unfiltered listing
@@ -149,7 +149,7 @@ func TestListArea(t *testing.T) {
 		}
 	})
 
-	// TestACursorFromAnotherGameIsRefusedByTheViewListing is the behavioural
+	// TestListArea's "a cursor from another game is refused by the view listing" case is the behavioural
 	// half of the fingerprint's project-id-first rule.
 	//
 	// It is deliberately taken with the *same* filter in both games, because
@@ -185,7 +185,7 @@ func TestListArea(t *testing.T) {
 		}
 	})
 
-	// TestTheViewListingFingerprintIsProjectIdFirstAndCarriesItsDomain is
+	// TestListArea's "the view listing fingerprint is project id first and carries its domain" case is
 	// the compositional half, asserting the exact ordered argument list.
 	//
 	// **The behavioural test can pass without the project id** whenever
@@ -213,7 +213,7 @@ func TestListArea(t *testing.T) {
 		}
 	})
 
-	// TestAViewListingIsScopedToItsOwnGame is the isolation half of the
+	// TestListArea's "a view listing is scoped to its own game" case is the isolation half of the
 	// listing: two games hold views under the same keys and the same names,
 	// and each listing answers with its own.
 	t.Run("a view listing is scoped to its own game", func(t *testing.T) {
@@ -241,7 +241,7 @@ func TestListArea(t *testing.T) {
 		}
 	})
 
-	// TestAMalformedViewCursorIsRefusedAsTheCallersOwnArgument: the sentence
+	// TestListArea's "a malformed view cursor is refused as the callers own argument" case: the sentence
 	// is internal/paging's, shared, and the type and the path are this
 	// domain's, so an agent that garbled a cursor is not told the server is
 	// broken.

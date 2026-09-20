@@ -407,7 +407,7 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 // `limit` off the query string and answers `next_cursor`. A client that
 // can page documents or entities must be able to page this the same way,
 // which is what the parameter *names* here are for — the service half
-// (TestTheAssetListingIsPagedAndItsCursorIsItsOwn) pins the keyset
+// (TestAssetsArea's "the asset listing is paged and its cursor is its own" case) pins the keyset
 // itself.
 func TestTheAssetListingPagesOverTheWire(t *testing.T) {
 	f := newAssetFixture(t)

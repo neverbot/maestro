@@ -21,7 +21,7 @@ func TestBoundsArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestEveryQueryRunsInAReadOnlyTransaction is what turns "the compiler
+	// TestBoundsArea's "every query runs in a read only transaction" case is what turns "the compiler
 	// only ever emits SELECT" from a property of the current code into a
 	// guarantee. The compiler is careful today; a transaction that refuses a
 	// write is careful in every task that adds a clause to it.
@@ -68,7 +68,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestATruncatedResultIsFlaggedNotErrored is the truncation half, and the
+	// TestBoundsArea's "a truncated result is flagged not errored" case is the truncation half, and the
 	// fixture is sized to distinguish a policy rather than to be convenient:
 	// twelve quests against a cap of ten separates "trimmed to the cap" from
 	// "returned whatever there was", which three against ten cannot.
@@ -98,7 +98,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestAnUntruncatedResultSaysSo is the control the test above needs.
+	// TestBoundsArea's "an untruncated result says so" case is the control the test above needs.
 	// Without it a Truncated.Nodes that was always true would pass, and the
 	// flag would be worth nothing.
 	t.Run("an untruncated result says so", func(t *testing.T) {
@@ -121,7 +121,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheNodeCapCountsNodesNotRows is the assertion the two tests above
+	// TestBoundsArea's "the node cap counts nodes not rows" case is the assertion the two tests above
 	// cannot make: both draw one set, where a row and a node are trivially
 	// the same thing.
 	//
@@ -174,7 +174,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEdgeResultIsTruncatedToo is the same mechanism at the other
+	// TestBoundsArea's "an edge result is truncated too" case is the same mechanism at the other
 	// collection point, which is a separate arm with a separate cap and would
 	// otherwise be held by nothing. Its control is in the same test: the same
 	// query at a cap of ten draws all three edges and is not flagged.
@@ -213,7 +213,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestStatsCountWhatCameBack pins the three numbers the first question
+	// TestBoundsArea's "stats count what came back" case pins the three numbers the first question
 	// about a slow view is answered with. The counts are asserted against a
 	// result whose contents the test also names, so a stats block computed
 	// from the wrong thing cannot agree with it by accident.
@@ -243,7 +243,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestATimedOutQueryIsRetryableAndSaysWhichBoundToLower settles the
+	// TestBoundsArea's "a timed out query is retryable and says which bound to lower" case settles the
 	// spec's query_timeout proposal: the code is `retryable`, because that is
 	// already what a cancelled statement maps to and a ninth code meaning the
 	// same thing helps nobody, and the *advice* is what gets completed.
@@ -298,7 +298,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheStatementBudgetIsClampedToItsHardCap holds the other half of
+	// TestBoundsArea's "the statement budget is clamped to its hard cap" case holds the other half of
 	// "the value that reaches statement_timeout is one this package computed
 	// from its own two constants": the knob exists, so the ceiling over it
 	// has to be asserted rather than assumed.
@@ -342,7 +342,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheBudgetPostgresHoldsIsTheOneThisPackageComputed is the assertion
+	// TestBoundsArea's "the budget postgres holds is the one this package computed" case is the assertion
 	// the clamp above cannot make: statementBudget is a pure function, and a
 	// pure function nobody calls is worth nothing.
 	//
@@ -413,7 +413,7 @@ func TestBoundsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheBoundsDoNotLeakOntoTheNextCaller is the pooled-connection half:
+	// TestBoundsArea's "the bounds do not leak onto the next caller" case is the pooled-connection half:
 	// the connection a run borrowed goes back to the pool carrying neither
 	// setting, and if it did not, every later write in this process would be
 	// refused with 25006 and every later query would inherit a millisecond.
@@ -472,10 +472,10 @@ func TestBoundsArea(t *testing.T) {
 		g.entity(t, "quest", "after-the-bounds", "After the bounds", nil)
 	})
 
-	// TestNoStatementTextIsAssembledOutsideTheCompiler closes the route the
+	// TestBoundsArea's "no statement text is assembled outside the compiler" case closes the route the
 	// frag guard cannot see.
 	//
-	// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere watches
+	// TestCompileArea's "the only string to fragment conversions are the ones named here" case watches
 	// conversions into the builder's fragment type, which is every statement
 	// the compiler emits — but this file executes SQL of its own, written as
 	// Go string literals that never become a frag, and a value concatenated

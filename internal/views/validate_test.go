@@ -14,7 +14,7 @@ func TestValidateArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestValidateAnswersWhatItLearnedRatherThanMerelyYes is the reason
+	// TestValidateArea's "validate answers what it learned rather than merely yes" case is the reason
 	// ValidateResult is not an empty struct: a validator whose success
 	// carries nothing tells a caller only that it may proceed.
 	//
@@ -44,7 +44,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestValidateRefusesWhatARunWouldRefuse is the loop views.validate
+	// TestValidateArea's "validate refuses what a run would refuse" case is the loop views.validate
 	// exists to close, and every case here is a refusal that reaches a
 	// different pass. A validator that stopped after one of them would tell
 	// an agent a document is fine and then have views.run refuse it, which
@@ -149,7 +149,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestValidateRefusesTheSameDocumentARunRefuses is the pair assertion
+	// TestValidateArea's "validate refuses the same document a run refuses" case is the pair assertion
 	// the table above cannot make on its own: the two calls must agree, or
 	// the loop closes on an answer the run does not honour. It drives the
 	// parameter case in particular, which is the one that reaches only the
@@ -182,7 +182,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestValidateStoresNothingAndRunsNothing is the other half of what the
+	// TestValidateArea's "validate stores nothing and runs nothing" case is the other half of what the
 	// tool promises. "Without saving" is the assertion that matters — an
 	// implementation that validated by saving and rolling back would leave a
 	// version number moved — and it is checked by asking for the view the
@@ -204,7 +204,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestTheStaleFlagAgreesWithWhatARunReports is the whole claim
+	// TestValidateArea's "the stale flag agrees with what a run reports" case is the whole claim
 	// StaleViews makes: the boolean is exact even though the pass never
 	// reads view_refs, because the dependency index changes *which*
 	// diagnostic a run gives and never whether there is one.
@@ -276,7 +276,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestADeletedAndRecreatedTypeIsNotStaleInTheListing is the flag's
+	// TestValidateArea's "a deleted and recreated type is not stale in the listing" case is the flag's
 	// negative control against the resolution order's step 2. It is separate
 	// from the test above because it needs a game whose type it can delete
 	// and re-declare, which the shared fixture's entities forbid.
@@ -321,7 +321,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestAParameterisedViewIsNotStale is the flag's other negative control,
+	// TestValidateArea's "a parameterised view is not stale" case is the flag's other negative control,
 	// and it is the one an implementation that reused runStored whole would
 	// fail. A view declaring a parameter with no default is refused by a run
 	// that omits the value — `param_unbound` — and nothing about the game
@@ -353,7 +353,7 @@ func TestValidateArea(t *testing.T) {
 		}
 	})
 
-	// TestStaleViewsIsEmptyRatherThanNilForAnEmptyPage keeps the caller from
+	// TestValidateArea's "stale views is empty rather than nil for an empty page" case keeps the caller from
 	// having to tell a missing flag from a false one on a page with no rows.
 	t.Run("stale views is empty rather than nil for an empty page", func(t *testing.T) {
 		g, _ := a.games(t)

@@ -136,7 +136,7 @@ type Stats struct {
 // reached nodes and edges the picture already holds. The alternative is
 // the silent loss this replaced, where content vanished with all three
 // flags false.
-// TestAWalkRowCapIsReportedRatherThanLosingContentSilently pins it, with
+// TestTraverseArea's "a walk row cap is reported rather than losing content silently" case pins it, with
 // the same fixture under a larger cap as the control.
 //
 // **An edge's endpoints are not guaranteed to be in Nodes.** The two caps
@@ -178,7 +178,7 @@ type Stats struct {
 //     So a false Depth on a query whose every step is one hop means "not
 //     measured", exactly as an all-false Truncated did before Task 8, and
 //     nothing but this paragraph says which — which is why
-//     TestTruncatedDepthIsFlagged observes the one-hop case rather than
+//     TestTraverseArea's "truncated depth is flagged" case observes the one-hop case rather than
 //     leaving it to the prose.
 //
 // The walk's own row cap cannot hide the evidence: the probe reads the
@@ -248,7 +248,7 @@ type RunRequest struct {
 	// is ever reported stale: a caller that sent on_stale with an inline
 	// document asked for a policy that cannot apply, and being told so is
 	// worth more than a knob that silently does nothing.
-	// TestOnStaleIsRefusedOnAnAdHocRunRatherThanIgnored pins it.
+	// TestStaleArea's "on stale is refused on an ad hoc run rather than ignored" case pins it.
 	OnStale string
 }
 
@@ -411,7 +411,7 @@ func (s *Service) execute(ctx context.Context, projectID uuid.UUID, resolved *Re
 				// and the ORDER BY on the entry's rank is what makes "first"
 				// mean the order the document declared rather than whatever
 				// Postgres happened to return.
-				// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
+				// TestExecuteArea's "a node in two sets comes back once under the first set that claimed it" case
 				// pins both halves, and says which of the two the ordering is.
 				if seenNode[*id] {
 					continue
@@ -623,7 +623,7 @@ func (s *Service) statementBudget() time.Duration {
 // **A read-only transaction** is what makes "the compiler only ever emits
 // SELECT" a guarantee instead of a property of the current code. The
 // compiler is careful; a transaction that refuses a write is careful
-// forever. TestEveryQueryRunsInAReadOnlyTransaction asserts the refusal
+// forever. TestBoundsArea's "every query runs in a read only transaction" case asserts the refusal
 // with SQLSTATE 25006.
 //
 // It is said twice, and the second saying is not the one the plan wrote.
@@ -650,7 +650,7 @@ func (s *Service) statementBudget() time.Duration {
 // this package's no-value-in-the-statement-text rule; set_config takes
 // its value as a parameter, so there is no exception to make. One
 // statement, one round trip, and
-// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere keeps
+// TestCompileArea's "the only string to fragment conversions are the ones named here" case keeps
 // watching a package where nothing formats a value into SQL at all.
 func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement string,
 	args []any, scan func(pgx.Rows) error) error {
@@ -704,7 +704,7 @@ func (s *Service) runInTx(ctx context.Context, timeout time.Duration, statement 
 	// read-only refusal below, a statement_timeout that fired before any
 	// row — leaves Err() nil until the rows are closed, so a scan that
 	// never iterated would return success on a statement the database
-	// refused. TestEveryQueryRunsInAReadOnlyTransaction is the test that
+	// refused. TestBoundsArea's "every query runs in a read only transaction" case is the test that
 	// found this; Close is idempotent, so the defer stays for the paths
 	// that return above.
 	rows.Close()

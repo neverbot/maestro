@@ -19,7 +19,7 @@ import (
 // — does not. `b.write(set.Name)` therefore does not compile, and turning
 // a caller's value into statement text requires spelling `frag(...)`,
 // which is one grep and one review comment away from being caught.
-// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere reads every
+// TestCompileArea's "the only string to fragment conversions are the ones named here" case reads every
 // non-test file of this package and refuses a conversion outside the five
 // helpers below, so the guard is a test rather than a habit.
 type frag string
@@ -34,7 +34,7 @@ type frag string
 // caller value in it is the injection this repository's only
 // runtime-built SQL could have, and the way to not have it is to make it
 // unspellable rather than to remember not to write it.
-// TestNoCallerValueEverReachesTheStatementText is the behavioural
+// TestCompileArea's "no caller value ever reaches the statement text" case is the behavioural
 // assertion; the frag type and its own test are the construction.
 type builder struct {
 	sql  sqlText
@@ -48,7 +48,7 @@ type builder struct {
 // value in the text with no frag conversion for a test to find. sqlText
 // exposes one appender, it takes a fragment, and the raw buffer is
 // reachable only as `.raw` — which
-// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere refuses
+// TestCompileArea's "the only string to fragment conversions are the ones named here" case refuses
 // outside this type's own two methods.
 type sqlText struct{ raw strings.Builder }
 
@@ -158,7 +158,7 @@ type compileOptions struct {
 // Compile turns a resolved query into one SELECT and its arguments.
 //
 // $1 is always the project id, in every CTE and every arm, and
-// TestEveryTableReferenceIsProjectFiltered asserts it as text.
+// TestCompileArea's "every table reference is project filtered" case asserts it as text.
 //
 // **The projection travels as one jsonb column**, built per node arm by
 // project.go: every slot the document asked for, plus the one hop a slot
@@ -235,7 +235,7 @@ func compileWith(r *Resolved, projectID uuid.UUID, opts compileOptions) (string,
 	// "which set does a node that appears in two of them belong to"
 	// answerable in Go without a second query, and the id is what keeps
 	// two runs of the same query in the same order.
-	// TestANodeInTwoSetsComesBackOnceUnderTheFirstSetThatClaimedIt
+	// TestExecuteArea's "a node in two sets comes back once under the first set that claimed it" case
 	// asserts this line as text, because deleting it leaves the
 	// behavioural half of that test green.
 	b.write(" e")
@@ -361,7 +361,7 @@ func (c *compiler) invalidFilterEdge(alias frag) frag {
 //
 // **The set name travels as a bind parameter**, not as SQL text, and so
 // do the keys — which is what makes
-// TestNoCallerValueEverReachesTheStatementText pass on a key that is
+// TestCompileArea's "no caller value ever reaches the statement text" case pass on a key that is
 // perfectly legal. The compiler cannot tell a legal key from a crafted
 // one and does not try.
 func (c *compiler) selector(i int) (frag, error) {
@@ -542,8 +542,8 @@ func walkDirection(i int, d string) (graph.Direction, error) {
 //     promises: "quests three steps up the prerequisite chain" does not
 //     stop at the zone in the middle.
 //
-// TestAnEdgeWhereFiltersTheHopsAWalkFollows and
-// TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows are the two sides.
+// TestTraverseArea's "an edge where filters the hops a walk follows" case and
+// TestTraverseArea's "a walk draws only its destination type and only valid rows" case are the two sides.
 //
 // **The depth is absolute**, counted from the seed selector rather than
 // from this step's own start, which is what makes Stats.MaxDepthReached

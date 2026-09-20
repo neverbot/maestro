@@ -56,7 +56,7 @@ func TestPositionsArea(t *testing.T) {
 	t.Parallel()
 	a := newArea(t)
 
-	// TestAPositionSurvivesAReload is this task's read-back, and `pinned` is
+	// TestPositionsArea's "a position survives a reload" case is this task's read-back, and `pinned` is
 	// the column it exists for.
 	//
 	// The plan names it as this task's write-only candidate: a column was
@@ -124,7 +124,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAPositionIsPinnedUnlessTheCallerSaysOtherwise pins the default at
+	// TestPositionsArea's "a position is pinned unless the caller says otherwise" case pins the default at
 	// the level a caller meets it.
 	//
 	// PositionInput.Pinned is a *bool because false is a value a caller may
@@ -151,7 +151,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestDeletingAnEntityDropsItsPositionAndKeepsTheView is the foreign
+	// TestPositionsArea's "deleting an entity drops its position and keeps the view" case is the foreign
 	// key's deliberate action, observed through the service rather than
 	// through the schema test that pins the constraint itself.
 	//
@@ -187,7 +187,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestPositionsArePerViewAndNotPerEntity is the core spec's own
+	// TestPositionsArea's "positions are per view and not per entity" case is the core spec's own
 	// requirement: the same zone sits at its real map coordinates in a World
 	// map view and wherever the algorithm put it in a Mage route view.
 	//
@@ -224,7 +224,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestANonFinitePositionIsRefusedWithItsIndex refuses the three doubles
+	// TestPositionsArea's "a non finite position is refused with its index" case refuses the three doubles
 	// a coordinate cannot be, at the caller's own path.
 	//
 	// Ahead of 0008_views.sql's CHECK, which is the backstop for a write
@@ -267,7 +267,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEmptyOrOversizePositionsCallIsRefused holds the two bounds on
+	// TestPositionsArea's "an empty or oversize positions call is refused" case holds the two bounds on
 	// the list itself.
 	//
 	// **Empty is refused rather than answered with success**, which is the
@@ -311,7 +311,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheSameEntityTwiceInOneCallIsRefused refuses two coordinates for
+	// TestPositionsArea's "the same entity twice in one call is refused" case refuses two coordinates for
 	// one node.
 	//
 	// Silently keeping the last would let the array's order decide where a
@@ -343,7 +343,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAPositionForAnEntityThisGameDoesNotHaveIsRefused names the
+	// TestPositionsArea's "a position for an entity this game does not have is refused" case names the
 	// position that is wrong, and tells a wrong type key from a wrong entity
 	// key apart.
 	//
@@ -381,7 +381,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestRunningAViewNeverRewritesPositions is what lets a query be edited,
+	// TestPositionsArea's "running a view never rewrites positions" case is what lets a query be edited,
 	// and a game grown, without losing an afternoon of map work.
 	//
 	// The run is executed twice with content added in between, and the
@@ -426,7 +426,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestTheLayoutModeChangesNothingTheServerAnswers is the assertion
+	// TestPositionsArea's "the layout mode changes nothing the server answers" case is the assertion
 	// behind positions.go's headline claim: no server code reads
 	// layout_mode beyond validating and returning it.
 	//
@@ -478,7 +478,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestClearingPositions holds the three shapes of a clear: every
+	// TestPositionsArea's "clearing positions" case holds the three shapes of a clear: every
 	// position of a view, the ones a caller names, and the empty list that is
 	// refused rather than read as either.
 	//
@@ -553,7 +553,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAPositionCallNamesTheViewItCannotFind: every one of the three
+	// TestPositionsArea's "a position call names the view it cannot find" case: every one of the three
 	// calls resolves the view by key, in this game, before it does anything
 	// else.
 	t.Run("a position call names the view it cannot find", func(t *testing.T) {
@@ -572,7 +572,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestPositionsOfAnotherGameAreNotReachable, with its positive control.
+	// TestPositionsArea's "positions of another game are not reachable" case, with its positive control.
 	//
 	// Both games seed the same keys, so nothing here discriminates by
 	// spelling: azeroth and outland each hold a view called "route" and a
@@ -583,7 +583,7 @@ func TestPositionsArea(t *testing.T) {
 	// service, because the service resolves the view by key inside the game
 	// first, which masks every filter under it — the only way to observe a
 	// filter a service path has already made redundant, exactly as
-	// TestTheViewQueriesAddressingARowByIdAreScopedToTheProject does for the
+	// TestViewsArea's "the view queries addressing a row by id are scoped to the project" case does for the
 	// view queries. UpsertViewPosition has no filter to drive: it is an
 	// INSERT, and its isolation is 0008_views.sql's two composite foreign
 	// keys, so it is asserted as the refusal they raise.
@@ -686,7 +686,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAPositionIsWrittenIntoTheViewItNames is the control the isolation
+	// TestPositionsArea's "a position is written into the view it names" case is the control the isolation
 	// test above needs and cannot carry: with two games holding the same
 	// keys, a call that wrote into the *other* game's view would be caught,
 	// but so would a call that wrote nothing at all. This one asserts the
@@ -710,11 +710,11 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestClearingOneViewLeavesAnotherViewsArrangementStanding is the clear
+	// TestPositionsArea's "clearing one view leaves another views arrangement standing" case is the clear
 	// path's half of the core spec's per-view requirement, and it was the
 	// missing half.
 	//
-	// TestPositionsArePerViewAndNotPerEntity asserts it for the *write*: two
+	// TestPositionsArea's "positions are per view and not per entity" case asserts it for the *write*: two
 	// views, one entity, two coordinates, neither disturbing the other.
 	// Nothing asserted it for the clear, and the comments on
 	// DeleteViewPositions and DeleteViewPosition call the view filter
@@ -777,8 +777,8 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAnEmptyOrOversizeClearIsRefused is the twin of
-	// TestAnEmptyOrOversizePositionsCallIsRefused, and the cap half of it
+	// TestPositionsArea's "an empty or oversize clear is refused" case is the twin of
+	// TestPositionsArea's "an empty or oversize positions call is refused" case, and the cap half of it
 	// was a bound stated in prose and absent from the code.
 	//
 	// ClearPositions' own comment said the list was "bounded by the same cap
@@ -818,7 +818,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAPositionCallRefusesItsArgumentsInTheSameOrder pins the one thing
+	// TestPositionsArea's "a position call refuses its arguments in the same order" case pins the one thing
 	// the two calls' doc comments both claim and only one of them did.
 	//
 	// Both say: the arguments this call carries, then the addresses they
@@ -856,7 +856,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestAPositionWritePublishesItsInvalidation is Task 15's decision,
+	// TestPositionsArea's "a position write publishes its invalidation" case is Task 15's decision,
 	// asserted rather than described: a drag reaches every subscriber a
 	// query edit reaches, because a browser holding a picture has no other
 	// way to learn the arrangement moved under it.
@@ -864,7 +864,7 @@ func TestPositionsArea(t *testing.T) {
 	// The two subscribers are the two a wrong gating would silently cut
 	// out — a viewer, excluded by any MinRole above viewer, and a token
 	// caller, excluded by HumanOnly regardless of role. They are the same
-	// pair TestViewEventsReachEveryMemberOfTheGameIncludingAgents uses for
+	// pair TestViewsArea's "view events reach every member of the game including agents" case uses for
 	// view.upserted, which is the claim: the gating of this kind *is* that
 	// one's, not a second decision that happens to agree today.
 	//
@@ -917,7 +917,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestNoPositionEventIsPublishedWhenTheWriteIsRefused is the control the
+	// TestPositionsArea's "no position event is published when the write is refused" case is the control the
 	// test above cannot be without: a publish placed before the write, or
 	// outside the transaction's error check, announces an arrangement that
 	// never landed, and every subscriber's reaction is to re-read a picture
@@ -970,7 +970,7 @@ func TestPositionsArea(t *testing.T) {
 		}
 	})
 
-	// TestASavedViewsRunCarriesItsArrangementAndAnAdHocOneDoesNot is the
+	// TestPositionsArea's "a saved views run carries its arrangement and an ad hoc one does not" case is the
 	// positions member of the run envelope, which Task 13 deferred to Task
 	// 15 on the ground that nothing read one before Task 16.
 	//

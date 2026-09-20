@@ -22,12 +22,46 @@ type game struct {
 	projectID uuid.UUID
 }
 
-// newGame builds that fixture. The hub is nil: nothing in this package's
-// own tests subscribes, and internal/web is where publication is
-// asserted end to end.
+// area is one throwaway database, shared by every claim asserted about
+// one area of this package.
+//
+// **The database is the expensive thing, and a project is not.** Every
+// test used to take its own: a hundred and eighteen databases for a
+// hundred and eighteen claims, each one a file copy of a migrated
+// template. Every query this package runs is scoped by project id, so
+// two projects in one database cannot see each other — which makes the
+// database shareable and the project the unit of isolation it already
+// was.
+type area struct {
+	pool *pgxpool.Pool
+}
+
+// newArea makes that database, once per test function.
+func newArea(t *testing.T) area {
+	t.Helper()
+	return area{pool: testutil.NewPool(t)}
+}
+
+// game gives one claim its own project inside the shared database.
+func (a area) game(t *testing.T) game {
+	t.Helper()
+	return gameIn(t, a.pool)
+}
+
+// newGame builds that fixture with a database of its own. It stays for
+// the claims that genuinely need one — anything that drops the database
+// or asserts over every project in it — and everything else goes
+// through an area.
+//
+// The hub is nil: nothing in this package's own tests subscribes, and
+// internal/web is where publication is asserted end to end.
 func newGame(t *testing.T) game {
 	t.Helper()
-	pool := testutil.NewPool(t)
+	return gameIn(t, testutil.NewPool(t))
+}
+
+func gameIn(t *testing.T, pool *pgxpool.Pool) game {
+	t.Helper()
 	slug := "azeroth-" + uuid.NewString()[:8]
 	var projectID uuid.UUID
 	if err := pool.QueryRow(context.Background(),

@@ -35,6 +35,17 @@ services:
 
   db:
     image: postgres:16
+    # **200, because the tests run here now.** The suite runs a thousand
+    # tests in parallel, each in a throwaway database of its own, and
+    # Postgres ships with a limit of 100 connections: past it the
+    # failure is `sorry, too many clients already` in whichever test
+    # happened to be unlucky, which reads as a broken test and is not.
+    #
+    # Durability is left alone on purpose. A test database would be
+    # faster with `fsync=off`, and this server also holds the games a
+    # person is designing; a crash that costs them those is not worth
+    # the seconds.
+    command: ["postgres", "-c", "max_connections=200"]
     # Mapped for psql from the host while developing. The defaults avoid
     # the ports a sibling stack and the test container already hold:
     # 8090 rather than 8080, and 5433 rather than 5432 or the 55432 the

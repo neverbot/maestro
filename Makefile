@@ -11,19 +11,43 @@ VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 # a current Go and reports that as typecheck errors across packages that
 # compile and vet cleanly, which is a confusing enough failure to pin
 # against rather than leave to a lucky day.
+# **Tests run against the development stack's Postgres**, in throwaway
+# databases of their own. There is no separate container for them any
+# more: one Postgres on a developer's laptop is enough, and a second one
+# was a thing to remember to start, to keep running and to explain.
+#
+# Nothing can collide. Development data lives in the database named
+# `maestro`; every test creates its own `maestro_test_<millis>_<id>` and
+# drops it, and the sweep below only ever touches that prefix. They are
+# separate databases inside one server, not two halves of one database.
+TEST_DATABASE_URL ?= postgres://maestro:maestro@localhost:$(MAESTRO_DB_HOST_PORT)/maestro?sslmode=disable
+MAESTRO_DB_HOST_PORT ?= 5433
+
 GOLANGCI_LINT_VERSION ?= v2.13.2
 SQLC_VERSION          ?= v1.31.1
 
 # Where `go install` drops binaries, inside CI and out.
 GOBIN ?= $(shell $(GO) env GOPATH)/bin
 
-.PHONY: build test fmt vet lint check run tools sqlc sqlc-check skill-check docs docs-check demo builder dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
+.PHONY: build test test-race fmt vet lint check run tools sqlc sqlc-check skill-check docs docs-check demo dev dev-down dev-logs dev-psql clean-test-dbs clean-docker
 
 build:
 	$(GO) build -ldflags "-X github.com/neverbot/maestro/internal/version.Version=$(VERSION)" -o bin/maestro ./cmd/maestro
 
+# **`-race` where goroutines are, not everywhere.** It was on the whole
+# suite and cost two thirds of the clock: 143s against 49s on the web
+# package alone. The packages below are the ones whose production code
+# actually runs goroutines, holds mutexes or moves values over channels
+# — the event hub, the rate limiters, the server's own lifecycle. The
+# rest insert a row and compare some JSON, and a race detector has
+# nothing to find there.
+RACE_PKGS ?= ./internal/realtime/... ./internal/identity/... ./internal/web/... ./cmd/maestro/...
+
 test:
-	$(GO) test -race ./...
+	TEST_DATABASE_URL=$(TEST_DATABASE_URL) $(GO) test ./...
+
+test-race:
+	TEST_DATABASE_URL=$(TEST_DATABASE_URL) $(GO) test -race $(RACE_PKGS)
 
 fmt:
 	gofmt -w .
@@ -64,6 +88,7 @@ check:
 	$(MAKE) skill-check
 	$(MAKE) docs-check
 	$(MAKE) test
+	$(MAKE) test-race
 
 # The documentation site: built from the readme, the skill bundle and the
 # generated design system, into a directory nothing commits. `docs-check`
@@ -151,23 +176,8 @@ demo:
 	  -database-url "postgres://maestro:maestro@localhost:$${MAESTRO_DB_HOST_PORT:-5433}/maestro?sslmode=disable" \
 	  -slug $${DEMO_SLUG:-demo}
 
-# **This project builds on its own builder, so its cache is its own.**
-# Docker's default builder holds one cache for every project on the
-# machine, and `docker builder prune` empties all of it: `clean-docker`
-# used to do exactly that, which made a target in this repository
-# reach into everybody else's work. A named builder is the only way
-# Docker offers to draw that line, so this creates one on first use and
-# every build and every prune below names it.
-BUILDER ?= maestro
-
-# builder creates it if it is not there, and says nothing when it is.
-.PHONY: builder
-builder:
-	@docker buildx inspect $(BUILDER) >/dev/null 2>&1 || \
-		docker buildx create --name $(BUILDER) --bootstrap >/dev/null
-
-dev: builder
-	BUILDX_BUILDER=$(BUILDER) docker compose up --build -d
+dev:
+	docker compose up --build -d
 	@# The rebuild leaves the image it replaced untagged, and an untagged
 	@# image keeps every layer it had. Fifteen rebuilds in an afternoon
 	@# was 4.4GB of build cache and 800MB of images that nothing could
@@ -189,27 +199,25 @@ dev-logs:
 # sweeps anything over an hour old at the start of the next run, so this
 # target is for the impatient and for a machine that is about to run out.
 #
-# Build cache: scoped to this project's own builder (see BUILDER above),
-# so this target empties what Maestro's own rebuilds left and nothing
-# else. The default builder's cache is shared by every project on the
-# machine and is not this repository's to empty.
+# The build cache is not here, and that is deliberate. Docker keeps one
+# cache for every project on this machine, so emptying it from a target
+# in this repository would reach into everybody else's work. Keeping a
+# builder of our own just to make it prunable was a second container to
+# maintain for the sake of a cleanup command, which is the tail wagging
+# the dog. If the machine needs that space back, `docker builder prune`
+# is one command and the person running it knows what it costs.
 clean-test-dbs:
-	@docker exec maestro-test-pg psql -U postgres -tAc \
+	@docker compose exec -T db psql -U maestro -d maestro -tAc \
 		"select datname from pg_database where datname like 'maestro_test\_%'" 2>/dev/null \
 		| while read db; do \
-			[ -n "$$db" ] && docker exec maestro-test-pg psql -U postgres -q \
+			[ -n "$$db" ] && docker compose exec -T db psql -U maestro -d maestro -q \
 				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null 2>&1; \
 		done; \
-		echo "test databases left: $$(docker exec maestro-test-pg psql -U postgres -tAc \
+		echo "test databases left: $$(docker compose exec -T db psql -U maestro -d maestro -tAc \
 			"select count(*) from pg_database where datname like 'maestro_test\_%'" 2>/dev/null)"
 
 clean-docker: clean-test-dbs
 	docker image prune -f --filter label=org.opencontainers.image.title=maestro
-	@docker buildx inspect $(BUILDER) >/dev/null 2>&1 \
-		&& docker builder prune -f --builder $(BUILDER) \
-		|| echo "no $(BUILDER) builder yet: nothing of this project's to prune"
-	@echo "this project's build cache:"
-	@docker buildx du --builder $(BUILDER) 2>/dev/null | tail -1 || true
 
 dev-psql:
 	docker compose exec db psql -U maestro -d maestro

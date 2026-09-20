@@ -231,6 +231,22 @@ func newDatabase(t *testing.T, migrated bool) (testURL, name string) {
 		t.Fatalf("create database %s: %v", name, err)
 	}
 
+	// **A throwaway database does not need its writes on disk.**
+	// `synchronous_commit` is settable per database, so this turns it
+	// off for the test's own and leaves the development database —
+	// which lives in this same server and holds games somebody is
+	// designing — fully durable. The whole suite runs here now, a
+	// thousand tests in parallel each committing a handful of rows, and
+	// waiting for the WAL to reach the platter on every one of them is
+	// the single most expensive thing the tests do.
+	//
+	// Crash-unsafe by construction and that is the point: the contents
+	// of this database do not outlive the test that made it.
+	//nolint:gosec // The identifier is this function's own generated name.
+	if _, err := adminDB.Exec(ctx, "ALTER DATABASE "+ident+" SET synchronous_commit = off"); err != nil {
+		t.Logf("relax durability on %s: %v", name, err)
+	}
+
 	// Register the drop immediately, before anything that can fail below.
 	// A failing migration must not leak the database it was about to test.
 	t.Cleanup(func() {
@@ -284,7 +300,12 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatalf("parse test database config: %v", err)
 	}
-	cfg.MaxConns = 4
+	// **Two, not four.** A test opens a pool, does its work in one
+	// goroutine and drops the database; the extra connections were
+	// never used and, now that a thousand tests run at once, they are
+	// the difference between fitting in the server's limit and failing
+	// with `sorry, too many clients already`.
+	cfg.MaxConns = 2
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

@@ -930,7 +930,17 @@ ul.catalogue .link-button {
  */
 ul.tokens {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  /* The name is capped so a long one does not park the fingerprint at
+     the far side of the list — the same reasoning, and the same shape,
+     as the catalogue's own name track. The slack falls to the third
+     column, which is prose about who minted it and reads fine ragged;
+     the control keeps the right edge. */
+  /* `fit-content()` bare, never inside `minmax()`: minmax does not
+     accept it, and a browser drops the whole declaration — which is how
+     this list came to render as a single column with every cell stacked
+     on the one under it, found by measuring it rather than by reading
+     it. The catalogue states its own track the same way. */
+  grid-template-columns: fit-content(22rem) auto 1fr auto;
   list-style: none;
   margin: var(--s4) 0 0;
   padding: 0;
@@ -941,13 +951,16 @@ ul.tokens .token {
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
+  /* `center`, for the reason the catalogue row states at length: the
+     row's height is the token rather than the sum of two paddings, so a
+     baseline alignment leaves the content at the top of a stretched
+     track with empty paper under it. */
   align-items: center;
-  gap: var(--s4);
-  /* The row height every list in this product uses, rather than a
-     padding that happened to look right: a token list beside a
-     catalogue is two lists, and two lists with different rhythms read
-     as two designs. */
-  min-height: var(--row-h);
+  column-gap: var(--s5);
+  /* Taller than a catalogue row, and on purpose: this row carries a
+     control, and `--row-h` leaves a 32px button 2px of air top and
+     bottom, which reads as a button wedged into a line of text. */
+  min-height: calc(var(--row-h) + var(--s2));
   padding: 0 var(--s3);
   border-bottom: 1px solid var(--line);
 }
@@ -965,20 +978,30 @@ ul.tokens .token-label {
   white-space: nowrap;
 }
 
-/* The state, where the control would be, so the column reads down the
-   list instead of jumping. */
-ul.tokens .token-state {
+/* The fingerprint is the catalogue's key in everything but name: mono,
+   muted, one word, and it never wraps. */
+ul.tokens .token-hint {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* **The last column ends where the list ends.** The control and the
+   word that replaces it on a revoked token both sit against the right
+   edge, so the column reads straight down the list instead of stepping
+   in and out with the length of the line before it. */
+ul.tokens .token-state,
+ul.tokens .token > button {
   justify-self: end;
+}
+
+ul.tokens .token-state {
   color: var(--muted);
 }
 
 ul.tokens .token-label {
   font-weight: 600;
-}
-
-ul.tokens .token-hint {
-  font-family: var(--mono);
-  color: var(--muted);
 }
 
 /* Armed, in the page's own DOM. control-styles.js already states this

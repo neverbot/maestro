@@ -262,6 +262,12 @@ export function tokenRow(doc, token, onRevoke) {
   // with its own name beside it.
   const revoke = doc.createElement("button");
   revoke.type = "button";
+  // **Ghost, not ink.** The Ink Button is this identity's *primary*
+  // action, one per screen; a row action wearing it made a list of three
+  // tokens the loudest thing on the page and shouted the one word nobody
+  // should press by accident. It goes danger-coloured when it is armed,
+  // which is the moment it is worth looking at.
+  revoke.className = "ghost";
   revoke.textContent = REVOKE;
   // `data-armed` is this product's word for a destructive control that
   // has asked once, and the colour comes with it: the sign-out in the

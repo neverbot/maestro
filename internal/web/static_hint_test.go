@@ -285,11 +285,39 @@ func TestEveryControlSaysSomethingWhenPointedAt(t *testing.T) {
 		}
 	}
 
+	// **A control that opts out of the fill must opt out in every
+	// state.** Everything in this product that can be pressed is a
+	// `button`, and the shared vocabulary fills a button with ink. A tab
+	// and a sentence-shaped control say `background: none` at rest — and
+	// a hover rule that forgets to say it again inherits the primary's
+	// fill, which is how the hovered tab came to render as a solid black
+	// box with an ink label invisible on it. Found in a screenshot,
+	// after a person said the colour was horrible: it was not a colour,
+	// it was the whole control.
+	for _, selector := range []string{".tabs .tab", ".link-button"} {
+		rest := ruleFor(styles, selector)
+		if !strings.Contains(rest, "background: none") {
+			continue
+		}
+		for _, state := range []string{":hover", ":active"} {
+			rule := ruleFor(styles, selector+state)
+			if rule == "" {
+				continue
+			}
+			if !strings.Contains(rule, "background") {
+				t.Errorf("%s says `background: none` at rest and %s does not say it again, so that "+
+					"state takes the primary button's ink fill:\n%s", selector, state, rule)
+			}
+		}
+	}
+
 	// The primary carries two channels, because one of them is a change
 	// of 1.18:1 that a person reported as no change at all.
 	primary := ruleFor(styles, "button:hover:not(:disabled)")
-	if !strings.Contains(primary, "box-shadow") {
-		t.Errorf("the primary button's hover is a fill change and nothing else:\n%s", primary)
+	if !strings.Contains(primary, "box-shadow: 0 0 0") {
+		t.Errorf("the primary button's hover has no halo, so it is a 1.18:1 fill change and "+
+			"nothing else — which is what a drop shadow under a dark button on a warm ground "+
+			"amounted to:\n%s", primary)
 	}
 }
 

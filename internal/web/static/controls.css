@@ -111,7 +111,14 @@ a.button {
    legible at any size and on any ground. */
 button:hover:not(:disabled) {
   background: var(--ink-hover);
-  box-shadow: var(--shadow-2);
+  /* **A ring on the paper, not a shadow under the button.** The fill
+     moving from --ink to --ink-hover is a 1.18:1 change, measured, and a
+     drop shadow beneath a dark control on a warm ground is nothing on
+     top of nothing: reported as "this button does not react" twice, the
+     second time after a fix that only looked like one in the computed
+     style. The halo is drawn beside the button, where there is paper to
+     contrast against. */
+  box-shadow: 0 0 0 3px var(--halo);
 }
 
 button:disabled {
@@ -178,6 +185,7 @@ button:disabled {
   background: var(--raised);
   border-color: var(--ink);
   color: var(--ink);
+  box-shadow: 0 0 0 3px var(--halo);
 }
 
 /* **The pressed state, which nothing in this product had.** `:active`
@@ -187,6 +195,7 @@ button:disabled {
    makes twice. The button settles onto the page: the shadow goes, which
    is a depth change and not a layout one — the identity's motion section
    forbids animating layout, and this animates nothing at all. */
+/* Pressed: the halo collapses and the control settles onto the page. */
 button:active:not(:disabled),
 a.button:active {
   box-shadow: none;

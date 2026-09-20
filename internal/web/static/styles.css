@@ -215,6 +215,15 @@
   --shadow-1: 0 1px 2px rgba(94, 72, 55, 0.12);
   --shadow-2: 0 2px 9px rgba(94, 72, 55, 0.14);
 
+  /* **The halo a control wears while the pointer is on it.** A soft drop
+     shadow under a dark button on a warm ground is invisible — measured
+     at a 1.18:1 fill change plus a 14% shadow, which is what "this
+     button does not react" meant when it was reported twice. A ring
+     *beside* the button sits on the paper, where there is contrast to
+     spend, and it is ink rather than the accent: the accent is the focus
+     ring's, and hover and focus must not answer alike. */
+  --halo: rgba(44, 34, 27, 0.22);
+
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
   --dur-state: 120ms;
 
@@ -264,6 +273,9 @@
     --paper: #1c1913;
     --ground: #13100b;
     --raised: #26221c;
+  --halo: rgba(231, 226, 217, 0.22);
+    /* Ink is the light one in the dark theme, so the halo is too. */
+    --halo: rgba(231, 226, 217, 0.22);
 
     --ink: #e7e2d9;
     --ink-hover: #faf6ef;
@@ -923,14 +935,35 @@ ul.catalogue .link-button {
    label and a line in the same muted stroke, so the shape a press will
    produce is visible before the press — and still clearly not the
    accent rule that marks the selected one. */
+/* **A tab answers with the line, because the line is what a tab is.**
+ *
+ * The selected tab is ink over a 2px rule in the accent. So the hover is
+ * that same shape, quieter: the label goes to ink and the rule appears
+ * in the muted stroke — the reader sees exactly where the selection will
+ * land before they press, and sees it as a tab rather than as something
+ * new arriving.
+ *
+ * It had a `--raised` fill, which was wrong twice over: a near-white
+ * block behind an uppercase label is a chip, a shape this product uses
+ * for a different job, and it appeared under the pointer with nothing in
+ * the identity to explain it. */
 .tabs .tab:hover {
   color: var(--ink);
-  background: var(--raised);
   border-bottom-color: var(--line-strong);
+  /* **A tab is a `button`, so it inherits the primary's fill unless it
+     says otherwise — in every state, not only at rest.** Dropping these
+     two lines painted the hovered tab solid ink with an ink label on
+     it: a black box where a word had been. Seen in a screenshot, which
+     is the only way it could have been seen. */
+  background: none;
+  box-shadow: none;
 }
 
+/* Pressed: the rule takes the accent it is about to keep. */
 .tabs .tab:active {
-  background: var(--ground);
+  border-bottom-color: var(--focus);
+  background: none;
+  box-shadow: none;
 }
 
 .tabs .tab[aria-selected="true"]:hover {

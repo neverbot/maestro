@@ -212,6 +212,15 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // that source in both directions. The refusals themselves stay the
 // server's, and internal/web/jstest/save_as_test.mjs asserts a taken key
 // is rendered exactly as it arrived.
+// mst-hint.js is the newest, and it holds **no Lit template** either:
+// it is a focusable trigger and a panel, built with createElement, and
+// the only string it renders is the sentence its caller hands it. So the
+// scan passes over it vacuously too, and the argument is that it carries
+// **no words of its own at all** — not a label, not a state, not a
+// fallback. What it shows is the caller's sentence, and the caller today
+// is pages/page.js's read-only notice, whose words are that module's and
+// are pinned there.
+//
 // control-styles.js joined the directory in the 2026-09-10 design pass
 // and is **not** a component: it defines no custom element and holds no
 // template. It is the one statement of what a button and a field look
@@ -227,6 +236,7 @@ func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
 		filepath.Join("static", "components", "mst-ground.js"),
+		filepath.Join("static", "components", "mst-hint.js"),
 		filepath.Join("static", "components", "mst-picker.js"),
 		filepath.Join("static", "components", "mst-save-as.js"),
 		filepath.Join("static", "components", "mst-table.js"),

@@ -26,6 +26,14 @@
 // Run directly: `node internal/web/jstest/game_switcher_test.mjs`.
 // internal/web/static_appjs_browser_test.go shells out to it too.
 
+
+// pages/page.js defines the read-only notice's hint component when it
+// loads, and a custom element's class needs these two globals to exist
+// before it is declared. Neither is what this file checks; they are here
+// so importing a page does not fail on the platform being absent.
+globalThis.HTMLElement ??= class {};
+globalThis.customElements ??= { define() {}, get: () => undefined };
+
 const ORIGIN = "http://localhost:8125";
 
 const AZEROTH = { id: "a1", slug: "azeroth", name: "Azeroth" };

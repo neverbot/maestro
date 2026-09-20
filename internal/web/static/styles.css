@@ -455,7 +455,14 @@ body {
   display: block;
 }
 
+/* **A row, so the things in it are not touching.** The notice and the
+   settings link were appended to this span one after the other with
+   nothing between them: the badge's dashed border ended exactly where
+   the link's first letter began, and the two read as one control. */
 .page-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s3);
   margin-left: auto;
   padding-bottom: 3px;
 }

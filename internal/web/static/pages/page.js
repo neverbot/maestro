@@ -21,6 +21,11 @@
 // module owns is *where a page is*, not what a page knows.
 
 import { fetchGames, fetchMe, goToLogin, rememberGame, renderHeader } from "../app.js";
+// Imported for its side effect, which is the custom element's
+// definition: every screen inside a game builds a read-only notice
+// through this module, so the element is defined wherever the notice can
+// appear rather than by each page remembering to ask for it.
+import "../components/mst-hint.js";
 import { client } from "../client.js";
 import { markTables } from "../rows.js";
 import { STATE_EMPTY, negativeState } from "../state.js";
@@ -530,11 +535,24 @@ export function readOnlyNotice(doc, role, what) {
   const note = doc.createElement("span");
   note.className = "read-only";
   note.textContent = READ_ONLY_LABEL;
-  // The detail is a title rather than a second line: the head is a row a
+  // The detail is a hint rather than a second line: the head is a row a
   // page title shares, and a sentence there would push the content down
   // on every screen to say a thing that is true of all of them.
-  note.title = whoWrites(role, what);
-  return note;
+  //
+  // **It was a `title` attribute, and two words in a dashed border are
+  // not an explanation.** "Read-only" states a limitation and leaves
+  // whose and why to the reader; the browser's own tooltip answered
+  // after a second, in the operating system's chrome, and never at all
+  // to a keyboard. components/mst-hint.js is where that sentence goes
+  // now, and it is a shared component because this is not the only word
+  // in the product carrying one.
+  const hint = doc.createElement("mst-hint");
+  hint.setAttribute("text", whoWrites(role, what));
+  // The notice sits at the right edge of the page head, so the panel
+  // hangs from its right edge rather than off the page.
+  hint.setAttribute("align", "end");
+  hint.append(note);
+  return hint;
 }
 
 // setReadOnly puts the notice in the shell's page head, which every

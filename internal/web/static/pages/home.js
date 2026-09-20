@@ -288,7 +288,14 @@ async function catalogueLane(doc, slug, client, summaryEl) {
 }
 
 // SETTINGS_LABEL is the link, and OWNER is the one role that gets it.
-export const SETTINGS_LABEL = "Settings";
+//
+// **"Game settings", not "Settings".** The link sits in a game's page
+// head, one word from the game's own name, and a designer reading it
+// there took it for the application's settings — the account, the
+// instance, the theme. What it opens is this game's name and address,
+// and nothing else in the product is called settings, so the word is
+// free to say which.
+export const SETTINGS_LABEL = "Game settings";
 const OWNER = "owner";
 
 export function offerSettings(doc, slug, role) {

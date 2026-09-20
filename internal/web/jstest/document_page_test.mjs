@@ -17,6 +17,14 @@
 // Run directly: `node internal/web/jstest/document_page_test.mjs`.
 // internal/web/static_appjs_browser_test.go shells out to it too.
 
+
+// pages/page.js defines the read-only notice's hint component when it
+// loads, and a custom element's class needs these two globals to exist
+// before it is declared. Neither is what this file checks; they are here
+// so importing a page does not fail on the platform being absent.
+globalThis.HTMLElement ??= class {};
+globalThis.customElements ??= { define() {}, get: () => undefined };
+
 const ORIGIN = "http://localhost:8124";
 const GAME = { id: "1e9d6b0c-4f7a-4a9e-8a5b-2c1d3e4f5a6b", slug: "azeroth", name: "Azeroth" };
 const ANA = "3f0a1b2c-4d5e-6f70-8192-a3b4c5d6e7f8";
@@ -37,7 +45,6 @@ function fakeElement(tag = "div") {
   const el = {
     tagName: tag,
     className: "",
-    textContent: "",
     innerHTML: "",
     value: "",
     href: "",
@@ -109,6 +116,25 @@ function fakeElement(tag = "div") {
       this.hiddenWrites++;
     },
   });
+  // **Setting `textContent` clears the children and reading it walks
+  // them**, as the real DOM does and as this directory's other stub
+  // already did. A plain string field reads the empty string off any
+  // element whose text is in its children — which is every element a
+  // component was put inside, the read-only notice's hint among them —
+  // and an assertion about what a screen says then passes on silence.
+  el._text = "";
+  Object.defineProperty(el, "textContent", {
+    enumerable: true,
+    get() {
+      if (this._text !== "") return this._text;
+      return this.children.map((child) => child.textContent ?? "").join("");
+    },
+    set(value) {
+      this._text = String(value);
+      this.children = [];
+    },
+  });
+
   return el;
 }
 

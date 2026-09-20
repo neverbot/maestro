@@ -18,6 +18,14 @@
 
 import { readFileSync } from "node:fs";
 
+// pages/page.js defines the read-only notice's hint component when it
+// loads, and a custom element's class needs these two globals to exist
+// before it is declared. Neither is what this file checks; they are here
+// so importing a page does not fail on the platform being absent.
+globalThis.HTMLElement ??= class {};
+globalThis.customElements ??= { define() {}, get: () => undefined };
+
+
 const ORIGIN = "http://localhost:8124";
 
 function fail(message) {

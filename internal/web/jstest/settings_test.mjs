@@ -74,6 +74,7 @@ const IDS = [
   "copy-token",
   "copy-snippet",
   "tokens",
+  "tokens-whose",
   "tokens-empty",
   "tokens-error",
 ];
@@ -81,7 +82,7 @@ const IDS = [
 // mount builds the shell's holes and a client that records what it was
 // asked for. The document is the strict stub: it cannot parse markup and
 // it refuses innerHTML in both directions.
-function mount({ tokens = [], hash = "" } = {}) {
+function mount({ tokens = [], hash = "", scope = "own" } = {}) {
   const elements = {};
   for (const id of IDS) {
     elements[id] = dom.document.createElement("div");
@@ -122,7 +123,7 @@ function mount({ tokens = [], hash = "" } = {}) {
   const client = {
     async listTokens() {
       calls.push(["listTokens"]);
-      return { ok: true, result: { tokens } };
+      return { ok: true, result: { tokens, scope } };
     },
     async createToken(label) {
       calls.push(["createToken", label]);
@@ -357,6 +358,65 @@ check("mintingAsksTheServerAndShowsWhatItAnswered", async () => {
     "what the server minted was not shown",
   );
   assertEqual(world.elements["token-label"].value, "", "the field kept the label of a token already minted");
+});
+
+// --- Whose keys ------------------------------------------------------
+//
+// The same listing answers two questions, and the screen has to say
+// which one it is showing: a list that silently means "yours" to one
+// reader and "everybody's" to another is a list somebody revokes the
+// wrong row from.
+
+check("aMemberIsToldTheseAreTheirOwnKeys", async () => {
+  const world = mount({ tokens: [{ id: "t1", label: "my laptop", token_hint: "a1b2", mine: true }] });
+  await settings.agentsTab(world.opened, "editor");
+  assertEqual(
+    world.elements["tokens-whose"].textContent,
+    settings.YOUR_KEYS,
+    "a member is not told whose keys the list holds",
+  );
+});
+
+check("anOwnerIsToldTheyAreLookingAtEveryKeyInTheGame", async () => {
+  const world = mount({
+    scope: "game",
+    tokens: [
+      { id: "t1", label: "mine", token_hint: "a1b2", mine: true },
+      { id: "t2", label: "theirs", token_hint: "c3d4", minted_by: "Designer", mine: false },
+    ],
+  });
+  await settings.agentsTab(world.opened, "owner");
+  assertEqual(
+    world.elements["tokens-whose"].textContent,
+    settings.EVERY_KEY,
+    "an owner is not told they are seeing the whole game's keys",
+  );
+  const rows = world.elements.tokens.children;
+  assertEqual(rows.length, 2, "the owner's list is not showing both keys");
+  for (const row of rows) {
+    assert(
+      row.childNodes.some((child) => child.tagName === "button"),
+      "an owner is not offered the control on every key in their own game",
+    );
+  }
+});
+
+// A key that is not yours carries no control at all, and says whose it
+// is where the control would be — the row keeps its four cells, so the
+// column still reads straight down the list.
+check("somebodyElsesKeyOffersNoControl", () => {
+  const row = settings.tokenRow(
+    dom.document,
+    { id: "t2", label: "their runner", token_hint: "c3d4", minted_by: "Designer", mine: false },
+    async () => {},
+    false,
+  );
+  assert(
+    !row.childNodes.some((child) => child.tagName === "button"),
+    "a key belonging to somebody else is offered a revoke",
+  );
+  assert(row.textContent.includes(settings.NOT_YOURS), "nothing says whose key it is");
+  assertEqual(row.childNodes.length, 4, "the row lost a cell and stopped lining up");
 });
 
 // --- The tabs ---------------------------------------------------------

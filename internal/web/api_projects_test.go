@@ -356,58 +356,178 @@ func TestViewerCannotCreateToken(t *testing.T) {
 	}
 }
 
-func TestViewerCanRevokeToken(t *testing.T) {
+// TestATokenIsRevokedByThePersonWhoMadeIt is the rule that replaced
+// "any member may revoke any token", which shipped and was wrong: a
+// viewer could stop another designer's agent mid-session over a route
+// nothing in the interface even called.
+//
+// A key belongs to the person who created it. They retire it, and so
+// does the game's owner — a leaked key has to be stoppable by somebody
+// who is still here — and nobody else.
+//
+// A bare assertion on the status would pass even if the handler never
+// called RevokeAPIToken at all, so the token is minted over HTTP,
+// revoked over HTTP, and then used against a real route, which must
+// refuse it.
+func TestATokenIsRevokedByThePersonWhoMadeIt(t *testing.T) {
 	t.Parallel()
-	// Revocation only ever removes access, so a viewer who can see a
-	// leaked token in the listing may kill it — unlike creation, which
-	// grants standing the viewer does not have.
-	//
-	// A bare assertion on the 204 status would pass even if the handler
-	// never called RevokeAPIToken at all — mint over HTTP, revoke over
-	// HTTP, then use the bearer value against a real route and require it
-	// to actually stop authenticating.
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
-	viewer, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "viewer@example.test", DisplayName: "Viewer", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
+	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "other@example.test", DisplayName: "Other", Password: "password12345"})
 	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
-	if _, err := projSvc.SetRole(ctx, viewer.ID, project.ID, "viewer"); err != nil {
-		t.Fatalf("SetRole: %v", err)
+	for _, member := range []struct {
+		id   uuid.UUID
+		role string
+	}{{editor.ID, "editor"}, {other.ID, "editor"}} {
+		if _, err := projSvc.SetRole(ctx, member.id, project.ID, member.role); err != nil {
+			t.Fatalf("SetRole: %v", err)
+		}
 	}
+
+	mint := func(cookie *http.Cookie, label string) (string, string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens",
+			strings.NewReader(`{"label":"`+label+`"}`))
+		req.AddCookie(cookie)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create token: status = %d, want 201: %s", rec.Code, rec.Body.String())
+		}
+		var created struct {
+			ID    string `json:"id"`
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+			t.Fatalf("decode create: %v", err)
+		}
+		return created.ID, created.Token
+	}
+	revoke := func(cookie *http.Cookie, id string) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/tokens/"+id, nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	editorCookie := loginAs(t, srv, "editor@example.test")
+	otherCookie := loginAs(t, srv, "other@example.test")
 	ownerCookie := loginAs(t, srv, "owner@example.test")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/games/"+project.Slug+"/tokens", strings.NewReader(`{"label":"agent"}`))
-	createReq.AddCookie(ownerCookie)
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	srv.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("create token: status = %d, want 201: %s", createRec.Code, createRec.Body.String())
-	}
-	var created struct {
-		ID    string `json:"id"`
-		Token string `json:"token"`
-	}
-	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create: %v", err)
-	}
+	mine, mineValue := mint(editorCookie, "my laptop")
 
-	viewerCookie := loginAs(t, srv, "viewer@example.test")
-	revokeReq := httptest.NewRequest(http.MethodDelete, "/api/games/"+project.Slug+"/tokens/"+created.ID, nil)
-	revokeReq.AddCookie(viewerCookie)
-	revokeRec := httptest.NewRecorder()
-	srv.ServeHTTP(revokeRec, revokeReq)
-	if revokeRec.Code != http.StatusNoContent {
-		t.Fatalf("revoke: status = %d, want 204: %s", revokeRec.Code, revokeRec.Body.String())
+	// Somebody else's is refused, and the key still works afterwards:
+	// a refusal that quietly revoked anyway would pass a status check.
+	if code := revoke(otherCookie, mine); code != http.StatusForbidden {
+		t.Fatalf("another member revoking this key: status = %d, want 403", code)
 	}
-
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
-	meReq.Header.Set("Authorization", "Bearer "+created.Token)
+	meReq.Header.Set("Authorization", "Bearer "+mineValue)
 	meRec := httptest.NewRecorder()
+	srv.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("a refused revoke killed the key anyway: /api/me = %d, want 200", meRec.Code)
+	}
+
+	// Its owner retires it, and it stops authenticating.
+	if code := revoke(editorCookie, mine); code != http.StatusNoContent {
+		t.Fatalf("revoking my own key: status = %d, want 204", code)
+	}
+	meRec = httptest.NewRecorder()
+	srv.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/me", nil))
+	meReq = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+mineValue)
+	meRec = httptest.NewRecorder()
 	srv.ServeHTTP(meRec, meReq)
 	if meRec.Code != http.StatusUnauthorized {
 		t.Fatalf("revoked token still authenticates: status = %d, want 401", meRec.Code)
+	}
+
+	// And the game's owner may retire anybody's.
+	theirs, theirsValue := mint(otherCookie, "their runner")
+	if code := revoke(ownerCookie, theirs); code != http.StatusNoContent {
+		t.Fatalf("the owner revoking a member's key: status = %d, want 204", code)
+	}
+	meReq = httptest.NewRequest(http.MethodGet, "/api/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+theirsValue)
+	meRec = httptest.NewRecorder()
+	srv.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusUnauthorized {
+		t.Fatalf("the owner's revoke did not take: status = %d, want 401", meRec.Code)
+	}
+}
+
+// TestTheListingShowsYourOwnKeysAndSaysSo is the other half: the same
+// route answers two different questions and the answer says which.
+func TestTheListingShowsYourOwnKeysAndSaysSo(t *testing.T) {
+	t.Parallel()
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	editor, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if _, err := projSvc.SetRole(ctx, editor.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: owner.ID, Label: "the owner's"}); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	if _, _, err := ids.CreateAPIToken(ctx, identity.CreateAPITokenRequest{ProjectID: project.ID, UserID: editor.ID, Label: "the editor's"}); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	read := func(email string) (string, []map[string]any) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/tokens", nil)
+		req.AddCookie(loginAs(t, srv, email))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list tokens as %s: status = %d", email, rec.Code)
+		}
+		var body struct {
+			Scope  string           `json:"scope"`
+			Tokens []map[string]any `json:"tokens"`
+		}
+		if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+			t.Fatalf("decode listing: %v", err)
+		}
+		return body.Scope, body.Tokens
+	}
+
+	scope, tokens := read("editor@example.test")
+	if scope != "own" {
+		t.Errorf("an editor is told the listing is %q, want \"own\"", scope)
+	}
+	if len(tokens) != 1 || tokens[0]["label"] != "the editor's" {
+		t.Fatalf("an editor sees %+v, want only their own key", tokens)
+	}
+	if tokens[0]["mine"] != true {
+		t.Errorf("the editor's own key is not marked as theirs: %+v", tokens[0])
+	}
+
+	scope, tokens = read("owner@example.test")
+	if scope != "game" {
+		t.Errorf("the owner is told the listing is %q, want \"game\"", scope)
+	}
+	if len(tokens) != 2 {
+		t.Fatalf("the owner sees %d keys, want every key in the game", len(tokens))
+	}
+	mine := 0
+	for _, token := range tokens {
+		if token["mine"] == true {
+			mine++
+		}
+	}
+	if mine != 1 {
+		t.Errorf("the owner's listing marks %d keys as theirs, want exactly 1", mine)
 	}
 }
 

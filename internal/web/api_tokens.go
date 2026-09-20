@@ -93,9 +93,26 @@ type apiTokenResponse struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
+	// Mine says this row is the caller's own key, which is what decides
+	// whether they may revoke it. It is the *server's* answer and not a
+	// comparison the screen makes for itself: the rule about who may
+	// revoke lives in one place, and a client that re-derived it would
+	// be a second copy of it, one release away from disagreeing.
+	Mine bool `json:"mine"`
 }
 
-func apiTokenResponseFrom(t identity.APITokenSummary) apiTokenResponse {
+// tokenScope says which question the listing answered, because the same
+// route answers two and a reader has to be told which.
+//
+// A person sees their own keys. The game's owner, and an instance admin,
+// see every key in the game — somebody has to be able to stop a leaked
+// one, and that somebody is whoever owns the game.
+const (
+	tokenScopeOwn  = "own"
+	tokenScopeGame = "game"
+)
+
+func apiTokenResponseFrom(t identity.APITokenSummary, callerID uuid.UUID) apiTokenResponse {
 	return apiTokenResponse{
 		ID:         t.ID,
 		Label:      t.Label,
@@ -104,7 +121,19 @@ func apiTokenResponseFrom(t identity.APITokenSummary) apiTokenResponse {
 		CreatedAt:  t.CreatedAt,
 		LastUsedAt: t.LastUsedAt,
 		RevokedAt:  t.RevokedAt,
+		Mine:       t.UserID == callerID,
 	}
+}
+
+// seesEveryToken is the one rule, written once: the game's owner and an
+// instance admin see and may revoke every key in the game; everybody
+// else sees and may revoke their own.
+//
+// **An instance admin is included because an instance has to be
+// governable**: a person who has left the company still has an agent
+// with a key, and the owner of that game may have left with them.
+func seesEveryToken(caller Caller, scope ProjectScope) bool {
+	return caller.IsAdmin || roles.AtLeast(roles.Role(scope.Role), roles.Owner)
 }
 
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request, caller Caller, scope ProjectScope) {
@@ -116,11 +145,27 @@ func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request, caller
 		writeUnmappedError(w, r, err, "list api tokens failed", "could not list tokens", "project_id", scope.ProjectID)
 		return
 	}
-	tokens := make([]apiTokenResponse, len(rows))
-	for i, row := range rows {
-		tokens[i] = apiTokenResponseFrom(row)
+	// **A token is one person's key.** Listing every key in the game to
+	// every member was how this shipped, and it meant a viewer could
+	// read — and, until this change, revoke — the key another designer's
+	// agent was working through. The filter is here rather than in the
+	// query because a game holds a handful of these and the rule is a
+	// web-layer rule about a caller, not a property of the table.
+	everyone := seesEveryToken(caller, scope)
+	tokens := make([]apiTokenResponse, 0, len(rows))
+	for _, row := range rows {
+		if !everyone && row.UserID != caller.UserID {
+			continue
+		}
+		tokens = append(tokens, apiTokenResponseFrom(row, caller.UserID))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens})
+	// The scope travels with the answer so the screen can say which of
+	// the two lists it is showing, in words, above it.
+	listScope := tokenScopeOwn
+	if everyone {
+		listScope = tokenScopeGame
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tokens": tokens, "scope": listScope})
 }
 
 // handleRevokeToken revokes one token by id, scoped to scope.ProjectID.
@@ -142,6 +187,33 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, calle
 	if err != nil {
 		writeError(w, http.StatusNotFound, errCodeNotFound, "no such token")
 		return
+	}
+	// **Whose key is this?** Revoking somebody else's was open to every
+	// member, so a viewer could stop another designer's agent
+	// mid-session. It is the person who created a key who retires it —
+	// and the game's owner or an instance admin, because a leaked key
+	// has to be stoppable by somebody who is still here.
+	//
+	// The lookup is the listing, which is a handful of rows: a token id
+	// that names no row of this game falls through to the call below and
+	// keeps its no-op answer, unchanged, for the reason that convention
+	// exists.
+	if !seesEveryToken(caller, scope) {
+		rows, err := s.opts.Identity.ListAPITokens(r.Context(), scope.ProjectID)
+		if err != nil {
+			writeUnmappedError(w, r, err, "list api tokens failed", "could not revoke the token",
+				"project_id", scope.ProjectID, "token_id", tokenID)
+			return
+		}
+		for _, row := range rows {
+			if row.ID != tokenID || row.UserID == caller.UserID {
+				continue
+			}
+			writeError(w, http.StatusForbidden, errCodeForbidden,
+				"that token belongs to somebody else; it is revoked by the person who created it "+
+					"or by this game's owner")
+			return
+		}
 	}
 	if err := s.opts.Identity.RevokeAPIToken(r.Context(), identity.RevokeAPITokenRequest{ProjectID: scope.ProjectID, TokenID: tokenID}); err != nil {
 		writeUnmappedError(w, r, err, "revoke api token failed", "could not revoke the token",

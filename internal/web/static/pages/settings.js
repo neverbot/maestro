@@ -200,6 +200,24 @@ export const TOKEN_ONCE =
   "Copy this now. This is the only time this token is shown; if it is lost, create another and " +
   "revoke this one.";
 
+// **Whose keys these are, said above them.** The same listing answers
+// two questions — your own, or every key in this game because you own it
+// — and a list that silently means two different things is a list
+// somebody revokes the wrong row from. The server decides which of the
+// two it answered and says so; this only spells it.
+export const SCOPE_OWN = "own";
+export const SCOPE_GAME = "game";
+export const YOUR_KEYS =
+  "These are your own tokens. Everybody in this game has their own, and only the person who " +
+  "created one can retire it.";
+export const EVERY_KEY =
+  "You own this game, so this is every token in it, whoever created it — and you can retire any " +
+  "of them.";
+
+export function whoseTokens(scope) {
+  return scope === SCOPE_GAME ? EVERY_KEY : YOUR_KEYS;
+}
+
 export const NO_TOKENS_HEADING = "No tokens yet";
 export const NO_TOKENS_SENTENCE =
   "A token is how an agent reaches this game. Every agent, and every machine an agent runs on, " +
@@ -215,6 +233,9 @@ export const COPIED = "Copied";
 export const REVOKE = "Revoke";
 export const REVOKED = "revoked";
 export const REVOKE_CONFIRM = "Revoke this token?";
+// What a row says where its control would be when the key is somebody
+// else's. It is not an apology and not an error: it is who holds it.
+export const NOT_YOURS = "theirs";
 
 // A row of the token list.
 //
@@ -224,7 +245,7 @@ export const REVOKE_CONFIRM = "Revoke this token?";
 // is a table row a screen reader reads as data; a list of tokens with an
 // action each is a list. What it shares with a catalogue is the
 // vocabulary, not the markup.
-export function tokenRow(doc, token, onRevoke) {
+export function tokenRow(doc, token, onRevoke, mayRevoke) {
   const item = doc.createElement("li");
   item.className = "token";
 
@@ -245,13 +266,14 @@ export function tokenRow(doc, token, onRevoke) {
   by.textContent = token.minted_by ? "created by " + token.minted_by : "";
   item.append(by);
 
-  // **Four cells, always.** A revoked row that simply left the control
-  // out shortened itself by a column and stopped lining up with the rows
-  // above it; the word goes where the button would be.
-  if (token.revoked_at) {
+  // **Four cells, always.** A row with no control — revoked, or
+  // somebody else's on a screen that lists the whole game — shortened
+  // itself by a column and stopped lining up with the rows above it; the
+  // word goes where the button would be.
+  if (token.revoked_at || mayRevoke === false) {
     const state = doc.createElement("span");
     state.className = "token-state";
-    state.textContent = REVOKED;
+    state.textContent = token.revoked_at ? REVOKED : NOT_YOURS;
     item.append(state);
     return item;
   }
@@ -369,8 +391,15 @@ export async function agentsTab(opened, role) {
       return;
     }
     const tokens = Array.isArray(answer.result.tokens) ? answer.result.tokens : [];
+    const scope = String(answer.result.scope ?? SCOPE_OWN);
+    say(doc.getElementById("tokens-whose"), whoseTokens(scope));
     if (listEl) {
-      listEl.replaceChildren(...tokens.map((token) => tokenRow(doc, token, revoke)));
+      // **Who may retire which is the server's answer, not a rule this
+      // screen re-derives.** A row carries `mine`; the whole-game
+      // listing belongs to somebody who may retire any of them.
+      listEl.replaceChildren(
+        ...tokens.map((token) => tokenRow(doc, token, revoke, scope === SCOPE_GAME || token.mine === true)),
+      );
       listEl.hidden = tokens.length === 0;
     }
     // Through fillState, like every other empty-state hole in the

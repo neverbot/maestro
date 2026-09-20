@@ -27,33 +27,367 @@ func compileOf(t *testing.T, g *game, doc string) (string, []any) {
 	return sql, args
 }
 
-// TestNoCallerValueEverReachesTheStatementText is the injection question,
-// answered by construction rather than by care. Every string the caller
-// controls is a distinctive sentinel; none may appear in the SQL.
-func TestNoCallerValueEverReachesTheStatementText(t *testing.T) {
-	g, _ := newGame(t)
-	// The sentinels have to be legal for the document to resolve, so they
-	// are the seeded keys themselves — which is the strongest form of the
-	// test: even a *valid* key must travel as a bind parameter, because
-	// the compiler cannot tell a valid key from a crafted one.
-	// The document walks as well as selects, because the walk's text is
-	// written by internal/graph rather than by this package's builder:
-	// the seed, the edge predicate and every bound the walk carries reach
-	// that text through builder.adopt, and this is what says none of them
-	// carries a caller's value.
-	sql, args := compileOf(t, g, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q",
-		"where":{"field":"rank","op":"eq","value":"rare"}}],
-		"traverse":[{"from":"q","via":"requires","direction":"out","to_type":"quest",
-		             "depth":{"min":1,"max":3},"as":"chain",
-		             "edge_where":{"field":"@type","op":"eq","value":"requires"}}]}`)
-	for _, sentinel := range []string{"hogger", "rare", "quest", "min_level", "requires", "chain"} {
-		if strings.Contains(sql, sentinel) {
-			t.Errorf("the caller value %q reached the statement text:\n%s", sentinel, sql)
+func TestCompileArea(t *testing.T) {
+	t.Parallel()
+	a := newArea(t)
+
+	// TestNoCallerValueEverReachesTheStatementText is the injection question,
+	// answered by construction rather than by care. Every string the caller
+	// controls is a distinctive sentinel; none may appear in the SQL.
+	t.Run("no caller value ever reaches the statement text", func(t *testing.T) {
+		g, _ := a.games(t)
+		// The sentinels have to be legal for the document to resolve, so they
+		// are the seeded keys themselves — which is the strongest form of the
+		// test: even a *valid* key must travel as a bind parameter, because
+		// the compiler cannot tell a valid key from a crafted one.
+		// The document walks as well as selects, because the walk's text is
+		// written by internal/graph rather than by this package's builder:
+		// the seed, the edge predicate and every bound the walk carries reach
+		// that text through builder.adopt, and this is what says none of them
+		// carries a caller's value.
+		sql, args := compileOf(t, g, `{"v":1,"from":[{"type":"quest","keys":["hogger"],"as":"q",
+			"where":{"field":"rank","op":"eq","value":"rare"}}],
+			"traverse":[{"from":"q","via":"requires","direction":"out","to_type":"quest",
+			             "depth":{"min":1,"max":3},"as":"chain",
+			             "edge_where":{"field":"@type","op":"eq","value":"requires"}}]}`)
+		for _, sentinel := range []string{"hogger", "rare", "quest", "min_level", "requires", "chain"} {
+			if strings.Contains(sql, sentinel) {
+				t.Errorf("the caller value %q reached the statement text:\n%s", sentinel, sql)
+			}
 		}
-	}
-	if len(args) < 3 {
-		t.Fatalf("the values must have gone somewhere: %d bind arguments", len(args))
-	}
+		if len(args) < 3 {
+			t.Fatalf("the values must have gone somewhere: %d bind arguments", len(args))
+		}
+	})
+
+	// TestTheProjectFilterGuardSeesTheShapesItMustSee tests the guard rather
+	// than the compiler, because a guard is only worth what it can see and
+	// this one has been broken by review three times — twice by a shape it
+	// did not match, once by a placeholder prefix. Every case below is a
+	// statement the guard used to pass in silence.
+	t.Run("the project filter guard sees the shapes it must see", func(t *testing.T) {
+		for _, c := range []struct {
+			name, sql string
+			want      bool
+		}{
+			{"no alias", "SELECT 1 FROM relations\n)", true},
+			{"comma-joined list, first table unaliased",
+				"SELECT 1 FROM entities, relations r WHERE r.project_id = $1", true},
+			{"comma-joined list, both aliased",
+				"SELECT 1 FROM entities e, relations r WHERE e.project_id = $1 AND r.project_id = $1",
+				true},
+			{"quoted table name", `SELECT 1 FROM "relations" q WHERE true`, true},
+			// The prefix: $1 is the head of $18, so an arbitrary argument read
+			// as the project id.
+			{"a placeholder $1 is only the prefix of",
+				"SELECT 1 FROM relations r WHERE r.project_id = $18", true},
+			{"an alias $1 is the suffix of another's filter",
+				"SELECT 1 FROM relations r JOIN entities far ON far.project_id = $1", true},
+			// And the controls, which have to pass or the cases above prove
+			// nothing but that the guard rejects everything.
+			{"filtered", "SELECT 1 FROM relations r WHERE r.project_id = $1", false},
+			{"quoted and filtered", `SELECT 1 FROM "relations" q WHERE q.project_id = $1`, false},
+			{"a lateral join, which is Task 9's shape",
+				"SELECT 1 FROM entities e\n" +
+					"JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1 " +
+					"AND e.project_id = $1\n" +
+					"LEFT JOIN LATERAL (SELECT 1 FROM relations r WHERE r.project_id = $1) x ON true",
+				false},
+			// **Known over-strictness, pinned rather than left to be
+			// discovered.** The scan splits on the word SELECT, so a filter
+			// written *after* a nested SELECT in the same block lands in the
+			// next block and is not seen. Nothing this compiler emits is
+			// shaped that way — every project filter it writes sits in the
+			// JOIN or the WHERE that introduces the table, ahead of any
+			// subquery — and the failure is loud, which is the side of the
+			// trade a guard belongs on. Task 9's lateral joins have to keep
+			// the filter ahead of the nested SELECT, as the case above does.
+			{"a filter written after a nested SELECT is not seen",
+				"SELECT 1 FROM entities e\nWHERE EXISTS (SELECT 1) AND e.project_id = $1", true},
+			// **And the laterals that would put a filter there.** The case
+			// above is over-strict rather than silent — it reports — and so
+			// were all of these before flatLateralProblems: what changes is
+			// *what the failure says*. The first is the query Task 13 writes
+			// if its positions lateral nests, with every table filtered and
+			// every filter after the nested SELECT; without this check it
+			// failed as "relations is read without rel.project_id = $1",
+			// which is a false accusation the reader has to disprove.
+			{"a lateral with a nested SELECT hides the filters written after it",
+				"SELECT 1 FROM entities e\nWHERE e.project_id = $1\n" +
+					"LEFT JOIN LATERAL (SELECT 1 FROM relations r\n" +
+					"WHERE EXISTS (SELECT 1) AND r.project_id = $1) x ON true", true},
+			{"a lateral with a lowercase nested select is caught too",
+				"LEFT JOIN LATERAL (SELECT 1 FROM relations r " +
+					"WHERE r.project_id = $1 AND r.id IN (select 1)) x ON true", true},
+			{"a lateral whose paren never closes is an error, not a pass",
+				"LEFT JOIN LATERAL (SELECT 1 FROM relations r WHERE r.project_id = $1", true},
+			// The rest of the regexp, looked at rather than assumed: a table
+			// name with no right-hand boundary. `entities_archive` matches the
+			// `entities` alternative, and what follows is not whitespace, so
+			// the alias group captures nothing and the reference is reported
+			// as unaliased. Loud and wrong-for-the-right-reason beats silent,
+			// and this pins which of the two it is.
+			{"a longer identifier sharing a table's prefix is reported, not skipped",
+				"SELECT 1 FROM entities_archive a WHERE a.project_id = $1", true},
+			// Case, which is the other thing the regexp does not say out loud:
+			// tableReference is `(?i)` throughout, so its alias group matches
+			// an uppercase alias too, and aliasKeywords is consulted uppercased
+			// — a keyword is caught in any case. filteredOn, however, is
+			// case-*sensitive*, while Postgres folds an unquoted identifier. So
+			// an alias and its filter spelt differently is reported even though
+			// the SQL is correct. That is over-strictness, which is loud and is
+			// the side of the trade a guard belongs on; it is pinned here so it
+			// is a known cost rather than a surprise.
+			{"an uppercase alias filtered the same way is seen",
+				"SELECT 1 FROM relations Rel WHERE Rel.project_id = $1", false},
+			{"an alias and its filter spelt in different cases is reported, though Postgres folds",
+				"SELECT 1 FROM relations Rel WHERE rel.project_id = $1", true},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				problems, _ := projectFilterProblems(c.sql)
+				if got := len(problems) > 0; got != c.want {
+					t.Errorf("the guard reports %d problem(s) on %q, want a problem: %v\n%v",
+						len(problems), c.sql, c.want, problems)
+				}
+			})
+		}
+	})
+
+	// TestEveryTableReferenceIsProjectFiltered walks the emitted SQL rather
+	// than one query's behaviour, so a clause added by a later task cannot
+	// quietly drop the filter.
+	//
+	// **It asserts per table reference, not per block.** Asking whether
+	// `project_id = $1` appears *somewhere* in a block passes with a filter
+	// deleted, because another table in the same block still carries one: the
+	// entity-type join's filter can be removed from nodeUnion and a
+	// block-level check stays green. So each reference's own alias has to
+	// appear filtered, and all four project-scoped tables have to be
+	// exercised by the query below — the earlier vacuity check named two of
+	// them, which left entity_types and relation_types outside the test
+	// entirely.
+	//
+	// **Why this text test is the only real guard.** Every project filter
+	// this compiler emits is, in the current build, redundant: the selector
+	// filters on an entity_type_id resolved in *this* game, the step on a
+	// relation_type_id and a to_type resolved the same way, the between arm
+	// on its own relation_type_id, and the join-backs join to rows those
+	// filters already isolated. So `TestARunFromAnotherGameSeesNothing`
+	// cannot fail on a lost project filter under any shape the compiler emits
+	// today — the filters are defence in depth against the shapes Tasks 7, 8
+	// and 9 add, and this test is what defends them.
+	t.Run("every table reference is project filtered", func(t *testing.T) {
+		g, _ := a.games(t)
+		// The query carries a **multi-hop** step as well as a one-hop one,
+		// because the recursion internal/graph emits is the first shape in
+		// this package whose project filters are not redundant: a one-hop step
+		// finds its rows by an id resolved in this game, and a walk finds them
+		// by walking. Its three filters — the anchor's, the relation's and the
+		// far entity's — are counted here like every other.
+		// It also carries a **one-hop related attribute**, because Task 9's
+		// LEFT JOIN LATERAL is the second shape in this package whose project
+		// filters are not redundant in the same way the rest are: it is
+		// anchored on the node's own id and reads relations and entities
+		// directly. Its three references are counted here like every other.
+		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
+			"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"},
+			            {"from":"q","via":"requires","direction":"out","to_type":"quest",
+			             "depth":{"min":1,"max":3},"as":"chain"}],
+			"edges":[{"from_step":"c"},{"from_step":"chain"},
+			         {"via":"requires","between":["q","q"]}],
+			"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
+			                                  "type":"zone","attr":"@type"}}}}`)
+		problems, seen := projectFilterProblems(sql)
+		for _, problem := range problems {
+			t.Error(problem)
+		}
+		for _, table := range projectScopedTables {
+			if seen[table] == 0 {
+				t.Errorf("the query above reads no %s, so nothing above asserted a filter on it; "+
+					"the assertion is vacuous for that table:\n%s", table, sql)
+			}
+		}
+	})
+
+	t.Run("a typed predicate guards its cast by jsonb type", func(t *testing.T) {
+		g, _ := a.games(t)
+		sql, _ := compileOf(t, g,
+			`{"v":1,"from":[{"type":"quest","where":{"field":"min_level","op":"between","value":[20,30]}}]}`)
+		if !strings.Contains(sql, "jsonb_typeof") {
+			t.Fatalf("a number predicate must guard its cast with jsonb_typeof:\n%s", sql)
+		}
+		if !strings.Contains(sql, "::numeric") {
+			t.Fatalf("a number predicate must compare numerically:\n%s", sql)
+		}
+	})
+
+	t.Run("invalid rows are excluded unless asked for", func(t *testing.T) {
+		g, _ := a.games(t)
+		sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest"}]}`)
+		if !strings.Contains(sql, "invalid = false") {
+			t.Fatalf("invalid rows must be excluded by default:\n%s", sql)
+		}
+		sql, _ = compileOf(t, g, `{"v":1,"from":[{"type":"quest"}],"include_invalid":true}`)
+		if strings.Contains(sql, "invalid = false") {
+			t.Fatalf("include_invalid must lift the filter:\n%s", sql)
+		}
+	})
+
+	// TestTheWorkedExamplesCompileToTheseStatements freezes the emitted SQL.
+	// A golden file is what makes a change to the emitter a diff a reviewer
+	// reads rather than a behaviour they infer — and the ids are already $n
+	// by construction, because every value the compiler handles is a bind
+	// parameter.
+	//
+	// **These files are load-bearing, not a convenience, and -update is not
+	// how a failure is resolved.** Three invariants used to be red here and
+	// in no other test — the selector's project filter, a step's invalid-row
+	// exclusion and its destination-type filter — so regenerating rather than
+	// reading the diff erased three guarantees in one keystroke. Each now has
+	// a test of its own (TestEveryTableReferenceIsProjectFiltered and
+	// TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows), but the next
+	// clause a task adds arrives here first and unaccompanied, which is why
+	// the failure message says read the diff before it names the flag.
+	t.Run("the worked examples compile to these statements", func(t *testing.T) {
+		g, _ := a.games(t)
+		for _, example := range workedExamples {
+			t.Run(example.name, func(t *testing.T) {
+				sql, _ := compileOf(t, g, example.query)
+				path := filepath.Join("testdata", example.name+".sql")
+				if *updateGolden {
+					if err := os.WriteFile(path, []byte(sql+"\n"), 0o644); err != nil {
+						t.Fatalf("write %s: %v", path, err)
+					}
+					return
+				}
+				want, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read %s (run go test -run TestTheWorkedExamplesCompileToTheseStatements -update): %v", path, err)
+				}
+				if got := sql + "\n"; got != string(want) {
+					t.Errorf("the emitted statement changed. **Read this diff before you "+
+						"regenerate it.** -update makes any change to the emitter agree with "+
+						"itself, including a filter that was dropped: this file is the only "+
+						"place a clause no other test names is visible.\n"+
+						"--- want ---\n%s\n--- got ---\n%s", want, got)
+				}
+			})
+		}
+	})
+
+	// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere is the
+	// construction half of the injection answer, and the half a behavioural
+	// test cannot give.
+	//
+	// TestNoCallerValueEverReachesTheStatementText proves that the queries it
+	// compiles put nothing in the text; it cannot prove that a query nobody
+	// wrote will not. What can is the type: a `string` variable does not
+	// convert to frag implicitly, so the only way to spell a caller's value
+	// into a statement is an explicit `frag(...)`. This test reads the whole
+	// package's syntax tree and refuses that conversion outside the four
+	// helpers that build placeholders, names and formats from things a
+	// caller cannot reach, plus the one that adopts internal/graph's own
+	// statement.
+	//
+	// **It reads every non-test file in the package, not compile.go alone**,
+	// and it closes the four routes a one-file walk over function bodies
+	// left open, each of which compiled and left the suite green:
+	//
+	//  1. a conversion in another file of this package — frag is unexported
+	//     but package-scoped, so predicate.go could spell one;
+	//  2. no conversion at all — the builder's buffer used to be a bare
+	//     strings.Builder, so `b.sql.WriteString(v)` needed no frag; the
+	//     sqlText wrapper is what closes this one by construction, and the
+	//     `.raw` check below is what keeps the wrapper honest;
+	//  3. a parenthesised conversion, `(frag)(v)`, whose call function is not
+	//     an *ast.Ident;
+	//  4. a local type alias, `type t = frag`, whose conversions do not
+	//     mention frag at all.
+	//
+	// The walk is over each declaration rather than over function bodies, so
+	// a package-level variable's initialiser — or a function literal assigned
+	// to one — is scanned too.
+	t.Run("the only string to fragment conversions are the ones named here", func(t *testing.T) {
+		allowed := map[string]bool{
+			"bind":      true, // "$3" from an argument count
+			"sprintf":   true, // a fragment format over fragment arguments
+			"joinFrags": true, // fragments joined by a fragment
+			"cteName":   true, // a constant prefix and an int
+			// The one route by which text this package did not write becomes
+			// statement text: internal/graph's own walk, spliced in. It takes
+			// a graph.Walk rather than a string, so what it converts is
+			// WalkCTE's output and nothing else — see builder.adopt.
+			"adopt": true,
+		}
+		// The two methods of sqlText, which are the only code that may touch
+		// the raw strings.Builder underneath a statement.
+		bufferHolders := map[string]bool{"append": true, "String": true}
+
+		found := 0
+		for _, file := range packageFiles(t) {
+			parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
+			if err != nil {
+				t.Fatalf("parse %s: %v", file, err)
+			}
+			// Route 4: an alias or a defined type over frag would give a
+			// second spelling of the conversion, which the walk below does
+			// not know to look for. There is no legitimate one.
+			for _, decl := range parsed.Decls {
+				gen, ok := decl.(*ast.GenDecl)
+				if !ok || gen.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range gen.Specs {
+					ts := spec.(*ast.TypeSpec)
+					if ident, ok := unparen(ts.Type).(*ast.Ident); ok && ident.Name == "frag" {
+						t.Errorf("%s declares %q over frag: a second name for the conversion is a "+
+							"second route for a caller's value into the statement text",
+							file, ts.Name.Name)
+					}
+				}
+			}
+			for _, decl := range parsed.Decls {
+				where := "a package-level declaration in " + file
+				if fn, ok := decl.(*ast.FuncDecl); ok {
+					where = fn.Name.Name
+				}
+				ast.Inspect(decl, func(n ast.Node) bool {
+					if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "raw" {
+						// Route 2: writing to the statement's buffer directly
+						// needs no frag conversion at all.
+						if !bufferHolders[where] {
+							t.Errorf("%s reaches a statement's raw buffer; only %v may, and a "+
+								"strings.Builder takes a plain string", where,
+								sortedNames(bufferHolders))
+						}
+						return true
+					}
+					call, ok := n.(*ast.CallExpr)
+					if !ok || len(call.Args) != 1 {
+						return true
+					}
+					// Route 3: (frag)(v) is a conversion whose Fun is an
+					// *ast.ParenExpr rather than an *ast.Ident.
+					ident, ok := unparen(call.Fun).(*ast.Ident)
+					if !ok || ident.Name != "frag" {
+						return true
+					}
+					found++
+					if !allowed[where] {
+						t.Errorf("%s converts a string to statement text; only %v may, and a "+
+							"caller's value has no other route into the SQL", where,
+							sortedNames(allowed))
+					}
+					return true
+				})
+			}
+		}
+		if found != len(allowed) {
+			t.Fatalf("expected one conversion in each of %v, found %d — if a helper stopped "+
+				"converting, this test is no longer watching what it names",
+				sortedNames(allowed), found)
+		}
+	})
 }
 
 // projectScopedTables are the four tables this compiler reads that carry
@@ -254,180 +588,6 @@ func projectFilterProblems(sql string) ([]string, map[string]int) {
 	return problems, seen
 }
 
-// TestTheProjectFilterGuardSeesTheShapesItMustSee tests the guard rather
-// than the compiler, because a guard is only worth what it can see and
-// this one has been broken by review three times — twice by a shape it
-// did not match, once by a placeholder prefix. Every case below is a
-// statement the guard used to pass in silence.
-func TestTheProjectFilterGuardSeesTheShapesItMustSee(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name, sql string
-		want      bool
-	}{
-		{"no alias", "SELECT 1 FROM relations\n)", true},
-		{"comma-joined list, first table unaliased",
-			"SELECT 1 FROM entities, relations r WHERE r.project_id = $1", true},
-		{"comma-joined list, both aliased",
-			"SELECT 1 FROM entities e, relations r WHERE e.project_id = $1 AND r.project_id = $1",
-			true},
-		{"quoted table name", `SELECT 1 FROM "relations" q WHERE true`, true},
-		// The prefix: $1 is the head of $18, so an arbitrary argument read
-		// as the project id.
-		{"a placeholder $1 is only the prefix of",
-			"SELECT 1 FROM relations r WHERE r.project_id = $18", true},
-		{"an alias $1 is the suffix of another's filter",
-			"SELECT 1 FROM relations r JOIN entities far ON far.project_id = $1", true},
-		// And the controls, which have to pass or the cases above prove
-		// nothing but that the guard rejects everything.
-		{"filtered", "SELECT 1 FROM relations r WHERE r.project_id = $1", false},
-		{"quoted and filtered", `SELECT 1 FROM "relations" q WHERE q.project_id = $1`, false},
-		{"a lateral join, which is Task 9's shape",
-			"SELECT 1 FROM entities e\n" +
-				"JOIN entity_types et ON et.id = e.entity_type_id AND et.project_id = $1 " +
-				"AND e.project_id = $1\n" +
-				"LEFT JOIN LATERAL (SELECT 1 FROM relations r WHERE r.project_id = $1) x ON true",
-			false},
-		// **Known over-strictness, pinned rather than left to be
-		// discovered.** The scan splits on the word SELECT, so a filter
-		// written *after* a nested SELECT in the same block lands in the
-		// next block and is not seen. Nothing this compiler emits is
-		// shaped that way — every project filter it writes sits in the
-		// JOIN or the WHERE that introduces the table, ahead of any
-		// subquery — and the failure is loud, which is the side of the
-		// trade a guard belongs on. Task 9's lateral joins have to keep
-		// the filter ahead of the nested SELECT, as the case above does.
-		{"a filter written after a nested SELECT is not seen",
-			"SELECT 1 FROM entities e\nWHERE EXISTS (SELECT 1) AND e.project_id = $1", true},
-		// **And the laterals that would put a filter there.** The case
-		// above is over-strict rather than silent — it reports — and so
-		// were all of these before flatLateralProblems: what changes is
-		// *what the failure says*. The first is the query Task 13 writes
-		// if its positions lateral nests, with every table filtered and
-		// every filter after the nested SELECT; without this check it
-		// failed as "relations is read without rel.project_id = $1",
-		// which is a false accusation the reader has to disprove.
-		{"a lateral with a nested SELECT hides the filters written after it",
-			"SELECT 1 FROM entities e\nWHERE e.project_id = $1\n" +
-				"LEFT JOIN LATERAL (SELECT 1 FROM relations r\n" +
-				"WHERE EXISTS (SELECT 1) AND r.project_id = $1) x ON true", true},
-		{"a lateral with a lowercase nested select is caught too",
-			"LEFT JOIN LATERAL (SELECT 1 FROM relations r " +
-				"WHERE r.project_id = $1 AND r.id IN (select 1)) x ON true", true},
-		{"a lateral whose paren never closes is an error, not a pass",
-			"LEFT JOIN LATERAL (SELECT 1 FROM relations r WHERE r.project_id = $1", true},
-		// The rest of the regexp, looked at rather than assumed: a table
-		// name with no right-hand boundary. `entities_archive` matches the
-		// `entities` alternative, and what follows is not whitespace, so
-		// the alias group captures nothing and the reference is reported
-		// as unaliased. Loud and wrong-for-the-right-reason beats silent,
-		// and this pins which of the two it is.
-		{"a longer identifier sharing a table's prefix is reported, not skipped",
-			"SELECT 1 FROM entities_archive a WHERE a.project_id = $1", true},
-		// Case, which is the other thing the regexp does not say out loud:
-		// tableReference is `(?i)` throughout, so its alias group matches
-		// an uppercase alias too, and aliasKeywords is consulted uppercased
-		// — a keyword is caught in any case. filteredOn, however, is
-		// case-*sensitive*, while Postgres folds an unquoted identifier. So
-		// an alias and its filter spelt differently is reported even though
-		// the SQL is correct. That is over-strictness, which is loud and is
-		// the side of the trade a guard belongs on; it is pinned here so it
-		// is a known cost rather than a surprise.
-		{"an uppercase alias filtered the same way is seen",
-			"SELECT 1 FROM relations Rel WHERE Rel.project_id = $1", false},
-		{"an alias and its filter spelt in different cases is reported, though Postgres folds",
-			"SELECT 1 FROM relations Rel WHERE rel.project_id = $1", true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			problems, _ := projectFilterProblems(c.sql)
-			if got := len(problems) > 0; got != c.want {
-				t.Errorf("the guard reports %d problem(s) on %q, want a problem: %v\n%v",
-					len(problems), c.sql, c.want, problems)
-			}
-		})
-	}
-}
-
-// TestEveryTableReferenceIsProjectFiltered walks the emitted SQL rather
-// than one query's behaviour, so a clause added by a later task cannot
-// quietly drop the filter.
-//
-// **It asserts per table reference, not per block.** Asking whether
-// `project_id = $1` appears *somewhere* in a block passes with a filter
-// deleted, because another table in the same block still carries one: the
-// entity-type join's filter can be removed from nodeUnion and a
-// block-level check stays green. So each reference's own alias has to
-// appear filtered, and all four project-scoped tables have to be
-// exercised by the query below — the earlier vacuity check named two of
-// them, which left entity_types and relation_types outside the test
-// entirely.
-//
-// **Why this text test is the only real guard.** Every project filter
-// this compiler emits is, in the current build, redundant: the selector
-// filters on an entity_type_id resolved in *this* game, the step on a
-// relation_type_id and a to_type resolved the same way, the between arm
-// on its own relation_type_id, and the join-backs join to rows those
-// filters already isolated. So `TestARunFromAnotherGameSeesNothing`
-// cannot fail on a lost project filter under any shape the compiler emits
-// today — the filters are defence in depth against the shapes Tasks 7, 8
-// and 9 add, and this test is what defends them.
-func TestEveryTableReferenceIsProjectFiltered(t *testing.T) {
-	g, _ := newGame(t)
-	// The query carries a **multi-hop** step as well as a one-hop one,
-	// because the recursion internal/graph emits is the first shape in
-	// this package whose project filters are not redundant: a one-hop step
-	// finds its rows by an id resolved in this game, and a walk finds them
-	// by walking. Its three filters — the anchor's, the relation's and the
-	// far entity's — are counted here like every other.
-	// It also carries a **one-hop related attribute**, because Task 9's
-	// LEFT JOIN LATERAL is the second shape in this package whose project
-	// filters are not redundant in the same way the rest are: it is
-	// anchored on the node's own id and reads relations and entities
-	// directly. Its three references are counted here like every other.
-	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest","as":"q"}],
-		"traverse":[{"from":"q","via":"available_to","direction":"out","to_type":"class","as":"c"},
-		            {"from":"q","via":"requires","direction":"out","to_type":"quest",
-		             "depth":{"min":1,"max":3},"as":"chain"}],
-		"edges":[{"from_step":"c"},{"from_step":"chain"},
-		         {"via":"requires","between":["q","q"]}],
-		"project":{"color_by":{"related":{"via":"takes_place_in","direction":"out",
-		                                  "type":"zone","attr":"@type"}}}}`)
-	problems, seen := projectFilterProblems(sql)
-	for _, problem := range problems {
-		t.Error(problem)
-	}
-	for _, table := range projectScopedTables {
-		if seen[table] == 0 {
-			t.Errorf("the query above reads no %s, so nothing above asserted a filter on it; "+
-				"the assertion is vacuous for that table:\n%s", table, sql)
-		}
-	}
-}
-
-func TestATypedPredicateGuardsItsCastByJsonbType(t *testing.T) {
-	g, _ := newGame(t)
-	sql, _ := compileOf(t, g,
-		`{"v":1,"from":[{"type":"quest","where":{"field":"min_level","op":"between","value":[20,30]}}]}`)
-	if !strings.Contains(sql, "jsonb_typeof") {
-		t.Fatalf("a number predicate must guard its cast with jsonb_typeof:\n%s", sql)
-	}
-	if !strings.Contains(sql, "::numeric") {
-		t.Fatalf("a number predicate must compare numerically:\n%s", sql)
-	}
-}
-
-func TestInvalidRowsAreExcludedUnlessAskedFor(t *testing.T) {
-	g, _ := newGame(t)
-	sql, _ := compileOf(t, g, `{"v":1,"from":[{"type":"quest"}]}`)
-	if !strings.Contains(sql, "invalid = false") {
-		t.Fatalf("invalid rows must be excluded by default:\n%s", sql)
-	}
-	sql, _ = compileOf(t, g, `{"v":1,"from":[{"type":"quest"}],"include_invalid":true}`)
-	if strings.Contains(sql, "invalid = false") {
-		t.Fatalf("include_invalid must lift the filter:\n%s", sql)
-	}
-}
-
 // workedExamples are the spec's §3 examples, as far as this game's
 // vocabulary can express them.
 //
@@ -503,162 +663,6 @@ var workedExamples = []struct {
 }
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden statements in testdata")
-
-// TestTheWorkedExamplesCompileToTheseStatements freezes the emitted SQL.
-// A golden file is what makes a change to the emitter a diff a reviewer
-// reads rather than a behaviour they infer — and the ids are already $n
-// by construction, because every value the compiler handles is a bind
-// parameter.
-//
-// **These files are load-bearing, not a convenience, and -update is not
-// how a failure is resolved.** Three invariants used to be red here and
-// in no other test — the selector's project filter, a step's invalid-row
-// exclusion and its destination-type filter — so regenerating rather than
-// reading the diff erased three guarantees in one keystroke. Each now has
-// a test of its own (TestEveryTableReferenceIsProjectFiltered and
-// TestAStepDrawsOnlyItsDestinationTypeAndOnlyValidRows), but the next
-// clause a task adds arrives here first and unaccompanied, which is why
-// the failure message says read the diff before it names the flag.
-func TestTheWorkedExamplesCompileToTheseStatements(t *testing.T) {
-	g, _ := newGame(t)
-	for _, example := range workedExamples {
-		t.Run(example.name, func(t *testing.T) {
-			sql, _ := compileOf(t, g, example.query)
-			path := filepath.Join("testdata", example.name+".sql")
-			if *updateGolden {
-				if err := os.WriteFile(path, []byte(sql+"\n"), 0o644); err != nil {
-					t.Fatalf("write %s: %v", path, err)
-				}
-				return
-			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s (run go test -run TestTheWorkedExamplesCompileToTheseStatements -update): %v", path, err)
-			}
-			if got := sql + "\n"; got != string(want) {
-				t.Errorf("the emitted statement changed. **Read this diff before you "+
-					"regenerate it.** -update makes any change to the emitter agree with "+
-					"itself, including a filter that was dropped: this file is the only "+
-					"place a clause no other test names is visible.\n"+
-					"--- want ---\n%s\n--- got ---\n%s", want, got)
-			}
-		})
-	}
-}
-
-// TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere is the
-// construction half of the injection answer, and the half a behavioural
-// test cannot give.
-//
-// TestNoCallerValueEverReachesTheStatementText proves that the queries it
-// compiles put nothing in the text; it cannot prove that a query nobody
-// wrote will not. What can is the type: a `string` variable does not
-// convert to frag implicitly, so the only way to spell a caller's value
-// into a statement is an explicit `frag(...)`. This test reads the whole
-// package's syntax tree and refuses that conversion outside the four
-// helpers that build placeholders, names and formats from things a
-// caller cannot reach, plus the one that adopts internal/graph's own
-// statement.
-//
-// **It reads every non-test file in the package, not compile.go alone**,
-// and it closes the four routes a one-file walk over function bodies
-// left open, each of which compiled and left the suite green:
-//
-//  1. a conversion in another file of this package — frag is unexported
-//     but package-scoped, so predicate.go could spell one;
-//  2. no conversion at all — the builder's buffer used to be a bare
-//     strings.Builder, so `b.sql.WriteString(v)` needed no frag; the
-//     sqlText wrapper is what closes this one by construction, and the
-//     `.raw` check below is what keeps the wrapper honest;
-//  3. a parenthesised conversion, `(frag)(v)`, whose call function is not
-//     an *ast.Ident;
-//  4. a local type alias, `type t = frag`, whose conversions do not
-//     mention frag at all.
-//
-// The walk is over each declaration rather than over function bodies, so
-// a package-level variable's initialiser — or a function literal assigned
-// to one — is scanned too.
-func TestTheOnlyStringToFragmentConversionsAreTheOnesNamedHere(t *testing.T) {
-	allowed := map[string]bool{
-		"bind":      true, // "$3" from an argument count
-		"sprintf":   true, // a fragment format over fragment arguments
-		"joinFrags": true, // fragments joined by a fragment
-		"cteName":   true, // a constant prefix and an int
-		// The one route by which text this package did not write becomes
-		// statement text: internal/graph's own walk, spliced in. It takes
-		// a graph.Walk rather than a string, so what it converts is
-		// WalkCTE's output and nothing else — see builder.adopt.
-		"adopt": true,
-	}
-	// The two methods of sqlText, which are the only code that may touch
-	// the raw strings.Builder underneath a statement.
-	bufferHolders := map[string]bool{"append": true, "String": true}
-
-	found := 0
-	for _, file := range packageFiles(t) {
-		parsed, err := parser.ParseFile(token.NewFileSet(), file, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", file, err)
-		}
-		// Route 4: an alias or a defined type over frag would give a
-		// second spelling of the conversion, which the walk below does
-		// not know to look for. There is no legitimate one.
-		for _, decl := range parsed.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				ts := spec.(*ast.TypeSpec)
-				if ident, ok := unparen(ts.Type).(*ast.Ident); ok && ident.Name == "frag" {
-					t.Errorf("%s declares %q over frag: a second name for the conversion is a "+
-						"second route for a caller's value into the statement text",
-						file, ts.Name.Name)
-				}
-			}
-		}
-		for _, decl := range parsed.Decls {
-			where := "a package-level declaration in " + file
-			if fn, ok := decl.(*ast.FuncDecl); ok {
-				where = fn.Name.Name
-			}
-			ast.Inspect(decl, func(n ast.Node) bool {
-				if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "raw" {
-					// Route 2: writing to the statement's buffer directly
-					// needs no frag conversion at all.
-					if !bufferHolders[where] {
-						t.Errorf("%s reaches a statement's raw buffer; only %v may, and a "+
-							"strings.Builder takes a plain string", where,
-							sortedNames(bufferHolders))
-					}
-					return true
-				}
-				call, ok := n.(*ast.CallExpr)
-				if !ok || len(call.Args) != 1 {
-					return true
-				}
-				// Route 3: (frag)(v) is a conversion whose Fun is an
-				// *ast.ParenExpr rather than an *ast.Ident.
-				ident, ok := unparen(call.Fun).(*ast.Ident)
-				if !ok || ident.Name != "frag" {
-					return true
-				}
-				found++
-				if !allowed[where] {
-					t.Errorf("%s converts a string to statement text; only %v may, and a "+
-						"caller's value has no other route into the SQL", where,
-						sortedNames(allowed))
-				}
-				return true
-			})
-		}
-	}
-	if found != len(allowed) {
-		t.Fatalf("expected one conversion in each of %v, found %d — if a helper stopped "+
-			"converting, this test is no longer watching what it names",
-			sortedNames(allowed), found)
-	}
-}
 
 // packageFiles is every non-test Go file of this package, which is the
 // unit the guard above has to hold over: frag is unexported, and

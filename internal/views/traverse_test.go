@@ -62,223 +62,556 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// TestAMultiHopStepReachesTransitively is the feature: a step with a
-// depth greater than one walks the relation, and the *fourth* quest is
-// the assertion. Without the negative half the test passes against an
-// unbounded walk, which is the failure mode a depth bound exists to
-// prevent.
-func TestAMultiHopStepReachesTransitively(t *testing.T) {
-	g, _ := newGame(t)
-	chainOfQuests(t, g)
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["c1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":3},"as":"chain"}],
-		"nodes":[{"set":"chain"}]}`)
-	want := []string{"c2", "c3", "c4"}
-	if got := sortedKeysOf(res); !equalStrings(got, want) {
-		t.Fatalf("a three-hop walk reaches %v, got %v", want, got)
-	}
-	// The fourth ancestor is one hop past the bound. It is reachable, it
-	// is of the right type, and nothing but the depth bound keeps it out.
-	for _, n := range res.Nodes {
-		if n.Key == "c5" {
-			t.Fatalf("c5 is four hops away and the step asked for three")
-		}
-	}
-	if res.Stats.MaxDepthReached != 3 {
-		t.Errorf("the deepest node came back at three hops, stats say %d",
-			res.Stats.MaxDepthReached)
-	}
-}
+func TestTraverseArea(t *testing.T) {
+	t.Parallel()
+	a := newArea(t)
 
-// TestACycleInContentIsDrawnRatherThanHung is why the walk lives in
-// internal/graph. A prerequisite cycle is content the core spec
-// deliberately allows — the analysis engine exists to report it — so a
-// view of it must come back, with the edge that closes it, rather than
-// spin until the statement budget cancels it.
-func TestACycleInContentIsDrawnRatherThanHung(t *testing.T) {
-	g, _ := newGame(t)
-	for _, key := range []string{"x", "y", "z"} {
-		g.entity(t, "quest", key, "Cycle "+key, nil)
-	}
-	g.relate(t, "requires", "quest", "x", "quest", "y")
-	g.relate(t, "requires", "quest", "y", "quest", "z")
-	g.relate(t, "requires", "quest", "z", "quest", "x")
-
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["x"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":12},"as":"chain"}],
-		"nodes":[{"set":"start"},{"set":"chain"}],
-		"edges":[{"from_step":"chain"}],
-		"limits":{"max_depth":12}}`)
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"x", "y", "z"}) {
-		t.Fatalf("the three quests of the cycle come back once each, got %v", got)
-	}
-	// Three edges, and the third is the one that closes the cycle: an
-	// earlier shape of the walk suppressed exactly that row, so the one
-	// thing a designer needs to see about a prerequisite cycle was the one
-	// thing no picture could show.
-	if len(res.Edges) != 3 {
-		t.Fatalf("a three-cycle has three edges, got %d", len(res.Edges))
-	}
-	closing := false
-	byID := map[uuid.UUID]string{}
-	for _, n := range res.Nodes {
-		byID[n.ID] = n.Key
-	}
-	for _, e := range res.Edges {
-		if byID[e.Source] == "z" && byID[e.Target] == "x" {
-			closing = true
+	// TestAMultiHopStepReachesTransitively is the feature: a step with a
+	// depth greater than one walks the relation, and the *fourth* quest is
+	// the assertion. Without the negative half the test passes against an
+	// unbounded walk, which is the failure mode a depth bound exists to
+	// prevent.
+	t.Run("a multi hop step reaches transitively", func(t *testing.T) {
+		g, _ := a.games(t)
+		chainOfQuests(t, g)
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["c1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":3},"as":"chain"}],
+			"nodes":[{"set":"chain"}]}`)
+		want := []string{"c2", "c3", "c4"}
+		if got := sortedKeysOf(res); !equalStrings(got, want) {
+			t.Fatalf("a three-hop walk reaches %v, got %v", want, got)
 		}
-	}
-	if !closing {
-		t.Errorf("the edge that closes the cycle (z requires x) must be drawn")
-	}
-	// x is the seed and is two hops from nothing: it is claimed by the
-	// `start` entry at depth 0, and z, at two, is the furthest node the
-	// picture holds. The closing hop onto x at depth 3 is an edge, not a
-	// third distance to the same quest.
-	if res.Stats.MaxDepthReached != 2 {
-		t.Errorf("z is the furthest node at two hops and x is the seed at none, stats say %d",
-			res.Stats.MaxDepthReached)
-	}
-	// **The counts alone do not see the path guard**, and this is where
-	// that is said. The plan's own mutation for this test — break the
-	// guard and watch it hang — neither hangs nor fails: the depth bound
-	// terminates the walk on its own, the node and edge sets are
-	// deduplicated, and the depth stat survives too because a node kept at
-	// two distances keeps the shorter. What is left is this flag. Without
-	// the guard the cycle is re-entered once per level to the bound and
-	// past it, so a whole picture is reported partial — and that is the
-	// assertion the guard is red under.
+		// The fourth ancestor is one hop past the bound. It is reachable, it
+		// is of the right type, and nothing but the depth bound keeps it out.
+		for _, n := range res.Nodes {
+			if n.Key == "c5" {
+				t.Fatalf("c5 is four hops away and the step asked for three")
+			}
+		}
+		if res.Stats.MaxDepthReached != 3 {
+			t.Errorf("the deepest node came back at three hops, stats say %d",
+				res.Stats.MaxDepthReached)
+		}
+	})
+
+	// TestACycleInContentIsDrawnRatherThanHung is why the walk lives in
+	// internal/graph. A prerequisite cycle is content the core spec
+	// deliberately allows — the analysis engine exists to report it — so a
+	// view of it must come back, with the edge that closes it, rather than
+	// spin until the statement budget cancels it.
+	t.Run("a cycle in content is drawn rather than hung", func(t *testing.T) {
+		g, _ := a.games(t)
+		for _, key := range []string{"x", "y", "z"} {
+			g.entity(t, "quest", key, "Cycle "+key, nil)
+		}
+		g.relate(t, "requires", "quest", "x", "quest", "y")
+		g.relate(t, "requires", "quest", "y", "quest", "z")
+		g.relate(t, "requires", "quest", "z", "quest", "x")
+
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["x"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":12},"as":"chain"}],
+			"nodes":[{"set":"start"},{"set":"chain"}],
+			"edges":[{"from_step":"chain"}],
+			"limits":{"max_depth":12}}`)
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"x", "y", "z"}) {
+			t.Fatalf("the three quests of the cycle come back once each, got %v", got)
+		}
+		// Three edges, and the third is the one that closes the cycle: an
+		// earlier shape of the walk suppressed exactly that row, so the one
+		// thing a designer needs to see about a prerequisite cycle was the one
+		// thing no picture could show.
+		if len(res.Edges) != 3 {
+			t.Fatalf("a three-cycle has three edges, got %d", len(res.Edges))
+		}
+		closing := false
+		byID := map[uuid.UUID]string{}
+		for _, n := range res.Nodes {
+			byID[n.ID] = n.Key
+		}
+		for _, e := range res.Edges {
+			if byID[e.Source] == "z" && byID[e.Target] == "x" {
+				closing = true
+			}
+		}
+		if !closing {
+			t.Errorf("the edge that closes the cycle (z requires x) must be drawn")
+		}
+		// x is the seed and is two hops from nothing: it is claimed by the
+		// `start` entry at depth 0, and z, at two, is the furthest node the
+		// picture holds. The closing hop onto x at depth 3 is an edge, not a
+		// third distance to the same quest.
+		if res.Stats.MaxDepthReached != 2 {
+			t.Errorf("z is the furthest node at two hops and x is the seed at none, stats say %d",
+				res.Stats.MaxDepthReached)
+		}
+		// **The counts alone do not see the path guard**, and this is where
+		// that is said. The plan's own mutation for this test — break the
+		// guard and watch it hang — neither hangs nor fails: the depth bound
+		// terminates the walk on its own, the node and edge sets are
+		// deduplicated, and the depth stat survives too because a node kept at
+		// two distances keeps the shorter. What is left is this flag. Without
+		// the guard the cycle is re-entered once per level to the bound and
+		// past it, so a whole picture is reported partial — and that is the
+		// assertion the guard is red under.
+		//
+		// **It is a general detector, and it borrows its specificity from
+		// internal/graph.** "The walk went deeper than it should have" is
+		// what this flag says, and a mutation to the depth ceiling fires it
+		// too, so it does not name the path guard on its own. The test that
+		// does is
+		// TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt in
+		// internal/graph, whose row count is the guard's own signature —
+		// eleven rows for a three-node cycle against four. This assertion is
+		// the views-level half: it says the defect is visible in the
+		// envelope a designer reads, not that it is the only thing that could
+		// have caused it.
+		if res.Truncated.Depth {
+			t.Errorf("the whole cycle is drawn and there is nothing past it, so this picture " +
+				"is not depth-truncated")
+		}
+	})
+
+	// TestMinDepthDropsTheNearHops is the views-level half of the bound
+	// internal/graph applies after walking. The control at min 1 in the same
+	// test is what makes the negative half mean "dropped" rather than "never
+	// reached".
+	t.Run("min depth drops the near hops", func(t *testing.T) {
+		g, _ := a.games(t)
+		chainOfQuests(t, g)
+		doc := `{"v":1,
+			"from":[{"type":"quest","keys":["c1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":%d,"max":3},"as":"chain"}],
+			"nodes":[{"set":"chain"}]}`
+
+		near := runQuery(t, g, fmt.Sprintf(doc, 1))
+		if got := sortedKeysOf(near); !equalStrings(got, []string{"c2", "c3", "c4"}) {
+			t.Fatalf("control: at min depth 1 the parent is reachable, got %v", got)
+		}
+		far := runQuery(t, g, fmt.Sprintf(doc, 2))
+		if got := sortedKeysOf(far); !equalStrings(got, []string{"c3", "c4"}) {
+			t.Fatalf("at min depth 2 the parent is walked through and not returned, got %v", got)
+		}
+	})
+
+	// TestDirectionAnyWalksBothWaysWithoutDoubling is the views-level
+	// counterpart of internal/graph's own direction test, over real content:
+	// from the middle of the chain, `any` reaches both ways, and each quest
+	// comes back once.
+	t.Run("direction any walks both ways without doubling", func(t *testing.T) {
+		g, _ := a.games(t)
+		chainOfQuests(t, g)
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["c3"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"any",
+			             "depth":{"min":1,"max":2},"as":"around"}],
+			"nodes":[{"set":"around"}],
+			"edges":[{"from_step":"around"}]}`)
+		// Two hops in both directions from c3 is c1, c2, c4 and c5 — the
+		// whole chain but c3 itself, which the min depth of 1 drops.
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"c1", "c2", "c4", "c5"}) {
+			t.Fatalf("`any` walks both ways two hops, got %v", got)
+		}
+		// Four edges, not eight: every edge of the chain is traversed once
+		// from each end under `any`, and a walk that emitted one arm per
+		// direction would hand each of them back twice.
+		if len(res.Edges) != 4 {
+			t.Fatalf("the four edges of the chain are drawn once each, got %d", len(res.Edges))
+		}
+	})
+
+	// TestTruncatedDepthIsFlagged is the field Task 7 shipped false with a
+	// "not measured" note, measured.
 	//
-	// **It is a general detector, and it borrows its specificity from
-	// internal/graph.** "The walk went deeper than it should have" is
-	// what this flag says, and a mutation to the depth ceiling fires it
-	// too, so it does not name the path guard on its own. The test that
-	// does is
-	// TestAWalkOverACycleReturnsEachNodeOnceAndTheClosingEdgeWithIt in
-	// internal/graph, whose row count is the guard's own signature —
-	// eleven rows for a three-node cycle against four. This assertion is
-	// the views-level half: it says the defect is visible in the
-	// envelope a designer reads, not that it is the only thing that could
-	// have caused it.
-	if res.Truncated.Depth {
-		t.Errorf("the whole cycle is drawn and there is nothing past it, so this picture " +
-			"is not depth-truncated")
-	}
-}
+	// It is measured the way every other truncation flag in this package is:
+	// the walk is asked for one hop *more* than the step wants, the extra hop
+	// is dropped before the picture is built, and its existence is the flag.
+	// The control in the same test is a chain that ends exactly at the bound,
+	// which is the case an inferred flag ("the deepest node is at max depth")
+	// gets wrong.
+	t.Run("truncated depth is flagged", func(t *testing.T) {
+		g, _ := a.games(t)
+		chainOfQuests(t, g)
+		doc := `{"v":1,
+			"from":[{"type":"quest","keys":["c1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":%d},"as":"chain"}],
+			"nodes":[{"set":"chain"}]}`
 
-// TestMinDepthDropsTheNearHops is the views-level half of the bound
-// internal/graph applies after walking. The control at min 1 in the same
-// test is what makes the negative half mean "dropped" rather than "never
-// reached".
-func TestMinDepthDropsTheNearHops(t *testing.T) {
-	g, _ := newGame(t)
-	chainOfQuests(t, g)
-	doc := `{"v":1,
-		"from":[{"type":"quest","keys":["c1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":%d,"max":3},"as":"chain"}],
-		"nodes":[{"set":"chain"}]}`
+		cut := runQuery(t, g, fmt.Sprintf(doc, 2))
+		if !cut.Truncated.Depth {
+			t.Errorf("the chain runs two hops past the bound and the flag says it did not")
+		}
+		if got := sortedKeysOf(cut); !equalStrings(got, []string{"c2", "c3"}) {
+			t.Errorf("the hop past the bound must be dropped, not drawn: %v", got)
+		}
+		// The control: four hops reaches the end of the chain exactly, so
+		// there is nothing past the bound and the flag must stay false. This
+		// is the assertion that separates a measured flag from "the deepest
+		// node sits at max_depth", which would report a whole picture partial.
+		whole := runQuery(t, g, fmt.Sprintf(doc, 4))
+		if whole.Truncated.Depth {
+			t.Errorf("the chain ends exactly at the bound, so nothing was cut off: %+v",
+				whole.Truncated)
+		}
+		if got := sortedKeysOf(whole); !equalStrings(got, []string{"c2", "c3", "c4", "c5"}) {
+			t.Errorf("control: four hops reaches the whole chain, got %v", got)
+		}
+		// And a query with no walk in it at all must not claim a depth it
+		// never measured.
+		if flat := runQuery(t, g, `{"v":1,"from":[{"type":"quest"}]}`); flat.Truncated.Depth {
+			t.Errorf("a query with no traversal cannot be depth-truncated")
+		}
+		// **A one-hop step is the other unmeasured case, and it is observed
+		// here rather than left to the prose.** Truncated.Depth documents
+		// that a step asking for exactly one hop is a neighbour query and is
+		// not probed, so its false means "not measured" — indistinguishable
+		// from the measured false above, and the meaning is now per step. A
+		// test that covered only the no-traversal query left the one-hop rule
+		// asserted by nothing, so removing the `depth > 1` condition that
+		// routes a step through the walk would change this flag and no test
+		// would say so.
+		hop := runQuery(t, g, fmt.Sprintf(doc, 1))
+		if got := sortedKeysOf(hop); !equalStrings(got, []string{"c2"}) {
+			t.Fatalf("control: one hop from c1 is c2, got %v", got)
+		}
+		if hop.Truncated.Depth {
+			t.Errorf("a one-hop step is not probed, so it cannot report a depth truncation; "+
+				"c3, c4 and c5 lie past it and the flag stays false: %+v", hop.Truncated)
+		}
+	})
 
-	near := runQuery(t, g, fmt.Sprintf(doc, 1))
-	if got := sortedKeysOf(near); !equalStrings(got, []string{"c2", "c3", "c4"}) {
-		t.Fatalf("control: at min depth 1 the parent is reachable, got %v", got)
-	}
-	far := runQuery(t, g, fmt.Sprintf(doc, 2))
-	if got := sortedKeysOf(far); !equalStrings(got, []string{"c3", "c4"}) {
-		t.Fatalf("at min depth 2 the parent is walked through and not returned, got %v", got)
-	}
-}
+	// TestACompletePictureOfADenseGraphIsNotDepthTruncated is the honest
+	// half of Truncated.Depth.
+	//
+	// The probe asks whether there is a node **or an edge** past the bound
+	// that the walk does not already hold within it. The weaker question —
+	// "did the recursion produce a row past the bound" — is true of every
+	// dense or cyclic graph at every bound, because a clique of six has
+	// simple paths of every length up to five and they reach nothing new.
+	// The whole graph came back, all six quests and all fifteen relations,
+	// and the designer was told their picture had been cut short.
+	//
+	// The negative half is in the same test and is what keeps the fix from
+	// being "never flag a dense graph": a chain hung off the clique puts a
+	// genuinely unreachable quest one hop past the bound, and that must
+	// flag while the deeper paths through the clique still do not.
+	t.Run("a complete picture of a dense graph is not depth truncated", func(t *testing.T) {
+		g, _ := a.games(t)
+		keys := clique(t, g, "k", 6)
+		// A tail: k6 -> t1 -> t2 -> t3 -> t4, so t4 is five hops from k1 and
+		// nothing shorter reaches it.
+		prev := keys[len(keys)-1]
+		for i := 1; i <= 4; i++ {
+			key := fmt.Sprintf("t%d", i)
+			g.entity(t, "quest", key, key, nil)
+			g.relate(t, "requires", "quest", prev, "quest", key)
+			prev = key
+		}
+		doc := `{"v":1,
+			"from":[{"type":"quest","keys":["k1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"any",
+			             "depth":{"min":1,"max":%d},"as":"w"}],
+			"nodes":[{"set":"start"},{"set":"w"}],
+			"edges":[{"from_step":"w"}],
+			"limits":{"max_depth":12}}`
 
-// TestDirectionAnyWalksBothWaysWithoutDoubling is the views-level
-// counterpart of internal/graph's own direction test, over real content:
-// from the middle of the chain, `any` reaches both ways, and each quest
-// comes back once.
-func TestDirectionAnyWalksBothWaysWithoutDoubling(t *testing.T) {
-	g, _ := newGame(t)
-	chainOfQuests(t, g)
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["c3"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"any",
-		             "depth":{"min":1,"max":2},"as":"around"}],
-		"nodes":[{"set":"around"}],
-		"edges":[{"from_step":"around"}]}`)
-	// Two hops in both directions from c3 is c1, c2, c4 and c5 — the
-	// whole chain but c3 itself, which the min depth of 1 drops.
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"c1", "c2", "c4", "c5"}) {
-		t.Fatalf("`any` walks both ways two hops, got %v", got)
-	}
-	// Four edges, not eight: every edge of the chain is traversed once
-	// from each end under `any`, and a walk that emitted one arm per
-	// direction would hand each of them back twice.
-	if len(res.Edges) != 4 {
-		t.Fatalf("the four edges of the chain are drawn once each, got %d", len(res.Edges))
-	}
-}
+		// Four hops: t4 is one hop further and nothing else is missing.
+		cut := runQuery(t, g, fmt.Sprintf(doc, 4))
+		if !cut.Truncated.Depth {
+			t.Errorf("t4 is five hops from k1 and the bound is four, so the picture is "+
+				"genuinely cut short: %+v", cut.Truncated)
+		}
+		if got := sortedKeysOf(cut); equalStrings(got, []string{}) {
+			t.Fatalf("control: the four-hop picture must not be empty")
+		}
 
-// TestTruncatedDepthIsFlagged is the field Task 7 shipped false with a
-// "not measured" note, measured.
-//
-// It is measured the way every other truncation flag in this package is:
-// the walk is asked for one hop *more* than the step wants, the extra hop
-// is dropped before the picture is built, and its existence is the flag.
-// The control in the same test is a chain that ends exactly at the bound,
-// which is the case an inferred flag ("the deepest node is at max depth")
-// gets wrong.
-func TestTruncatedDepthIsFlagged(t *testing.T) {
-	g, _ := newGame(t)
-	chainOfQuests(t, g)
-	doc := `{"v":1,
-		"from":[{"type":"quest","keys":["c1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":%d},"as":"chain"}],
-		"nodes":[{"set":"chain"}]}`
+		// Five hops: the whole graph — ten quests, and every one of the
+		// clique's fifteen relations plus the tail's four. Deeper simple
+		// paths still exist in their thousands and reach nothing new.
+		whole := runQuery(t, g, fmt.Sprintf(doc, 5))
+		want := []string{"k1", "k2", "k3", "k4", "k5", "k6", "t1", "t2", "t3", "t4"}
+		if got := sortedKeysOf(whole); !equalStrings(got, want) {
+			t.Fatalf("five hops reaches the whole graph, got %v", got)
+		}
+		if len(whole.Edges) != 19 {
+			t.Fatalf("the whole graph is fifteen clique edges and four tail edges, got %d",
+				len(whole.Edges))
+		}
+		if whole.Truncated.Depth {
+			t.Errorf("every node and every edge is drawn, so nothing is past the bound that "+
+				"the picture does not hold; the deeper paths through the clique reach "+
+				"nothing new: %+v", whole.Truncated)
+		}
+	})
 
-	cut := runQuery(t, g, fmt.Sprintf(doc, 2))
-	if !cut.Truncated.Depth {
-		t.Errorf("the chain runs two hops past the bound and the flag says it did not")
-	}
-	if got := sortedKeysOf(cut); !equalStrings(got, []string{"c2", "c3"}) {
-		t.Errorf("the hop past the bound must be dropped, not drawn: %v", got)
-	}
-	// The control: four hops reaches the end of the chain exactly, so
-	// there is nothing past the bound and the flag must stay false. This
-	// is the assertion that separates a measured flag from "the deepest
-	// node sits at max_depth", which would report a whole picture partial.
-	whole := runQuery(t, g, fmt.Sprintf(doc, 4))
-	if whole.Truncated.Depth {
-		t.Errorf("the chain ends exactly at the bound, so nothing was cut off: %+v",
-			whole.Truncated)
-	}
-	if got := sortedKeysOf(whole); !equalStrings(got, []string{"c2", "c3", "c4", "c5"}) {
-		t.Errorf("control: four hops reaches the whole chain, got %v", got)
-	}
-	// And a query with no walk in it at all must not claim a depth it
-	// never measured.
-	if flat := runQuery(t, g, `{"v":1,"from":[{"type":"quest"}]}`); flat.Truncated.Depth {
-		t.Errorf("a query with no traversal cannot be depth-truncated")
-	}
-	// **A one-hop step is the other unmeasured case, and it is observed
-	// here rather than left to the prose.** Truncated.Depth documents
-	// that a step asking for exactly one hop is a neighbour query and is
-	// not probed, so its false means "not measured" — indistinguishable
-	// from the measured false above, and the meaning is now per step. A
-	// test that covered only the no-traversal query left the one-hop rule
-	// asserted by nothing, so removing the `depth > 1` condition that
-	// routes a step through the walk would change this flag and no test
-	// would say so.
-	hop := runQuery(t, g, fmt.Sprintf(doc, 1))
-	if got := sortedKeysOf(hop); !equalStrings(got, []string{"c2"}) {
-		t.Fatalf("control: one hop from c1 is c2, got %v", got)
-	}
-	if hop.Truncated.Depth {
-		t.Errorf("a one-hop step is not probed, so it cannot report a depth truncation; "+
-			"c3, c4 and c5 lie past it and the flag stays false: %+v", hop.Truncated)
-	}
+	// TestAWalkRowCapIsReportedRatherThanLosingContentSilently is the
+	// walk's own row cap, read.
+	//
+	// internal/graph caps a walk at MaxRows rows and emits LIMIT MaxRows + 1
+	// so that the caller can tell a full walk from a truncated one. A walk
+	// row is one **edge traversal**, so four times max_nodes rows collapse to
+	// far fewer than max_nodes nodes on a dense graph, and the node cap and
+	// the edge cap both stay unfired while relations disappear from the
+	// picture. Before this was read, the fixture below lost two of its
+	// twenty-two edges at max_nodes 8, got all of them back at 9, and
+	// reported {false false} for the element flags either way — silent
+	// content loss, which this plan calls its worst failure mode.
+	//
+	// The control at a large cap is what makes the flag mean "the walk was
+	// cut" rather than "this fixture is dense".
+	t.Run("a walk row cap is reported rather than losing content silently", func(t *testing.T) {
+		g, _ := a.games(t)
+		// a hangs off a seven-clique, so a walk from a spends its rows inside
+		// the clique: twenty-two relations, and 4 x 8 = 32 traversals is not
+		// enough of them.
+		keys := clique(t, g, "n", 7)
+		g.entity(t, "quest", "a", "A", nil)
+		g.relate(t, "requires", "quest", "a", "quest", keys[0])
+		doc := `{"v":1,
+			"from":[{"type":"quest","keys":["a"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"any",
+			             "depth":{"min":1,"max":4},"as":"w"}],
+			"nodes":[{"set":"w"}],
+			"edges":[{"from_step":"w"}],
+			"limits":{"max_nodes":%d,"max_edges":1000,"max_depth":12}}`
+
+		// The control first, because it is what says the cap is the only
+		// difference: with room for every traversal the picture is whole and
+		// nothing is flagged.
+		whole := runQuery(t, g, fmt.Sprintf(doc, 5000))
+		if len(whole.Edges) != 22 {
+			t.Fatalf("control: the whole graph is twenty-two relations, got %d", len(whole.Edges))
+		}
+		if whole.Truncated.Nodes || whole.Truncated.Edges || whole.Truncated.Depth {
+			t.Fatalf("control: nothing is truncated at max_nodes 5000: %+v", whole.Truncated)
+		}
+
+		// And the cut: fewer edges than the graph holds, with neither cap
+		// reached — twenty-two relations is well under max_edges 1000, and
+		// the eight nodes are under max_nodes 8.
+		cut := runQuery(t, g, fmt.Sprintf(doc, 8))
+		if len(cut.Edges) >= 22 {
+			t.Fatalf("the walk's row cap must cut this picture for the flag to be about "+
+				"anything; got %d edges", len(cut.Edges))
+		}
+		if len(cut.Nodes) > 8 || len(cut.Edges) > 1000 {
+			t.Fatalf("neither element cap may be the thing that fired: %d nodes, %d edges",
+				len(cut.Nodes), len(cut.Edges))
+		}
+		if !cut.Truncated.Nodes || !cut.Truncated.Edges {
+			t.Errorf("a walk that hit its row cap handed back fewer traversals than the graph "+
+				"holds, and both element flags say so: %+v", cut.Truncated)
+		}
+	})
+
+	// TestAWalkCTEsBindsAreRenumberedIntoTheOuterStatement is the test the
+	// renumbering owes. graph.WalkCTE numbers its own arguments from $1 and
+	// the compiler splices them into a statement that already has some, so a
+	// renumbering that is off by one does not fail — it compares the right
+	// column against the wrong value, and the wrong quest comes back with no
+	// error at all.
+	//
+	// The query carries a predicate bound *before* the walk (the selector's
+	// key) and one bound *after* it (the step's own where), with the walk's
+	// four arguments in between.
+	t.Run("a walk CT es binds are renumbered into the outer statement", func(t *testing.T) {
+		g, _ := a.games(t)
+		chainOfQuests(t, g)
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["c1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "to_type":"quest","depth":{"min":1,"max":3},"as":"chain",
+			             "where":{"field":"min_level","op":"gte","value":30}}],
+			"nodes":[{"set":"chain"}]}`)
+		// c2 is one hop away and fails the predicate; c5 passes it and is out
+		// of depth. Both halves have to hold at once, which is what a
+		// misnumbered bind breaks.
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"c3", "c4"}) {
+			t.Fatalf("the selector's key and the step's own predicate must both be answered "+
+				"against the value they were bound with, got %v", got)
+		}
+	})
+
+	// TestAnEdgeWhereFiltersTheHopsAWalkFollows is the views-level half of
+	// internal/graph's EdgePredicate placement: a condition on the relation
+	// prunes the recursion, so a quest reachable only through an excluded
+	// edge is not reached — rather than reached and then filtered out of the
+	// picture, which is what applying it to the walk's output would do.
+	t.Run("an edge where filters the hops a walk follows", func(t *testing.T) {
+		g, _ := a.games(t)
+		for _, key := range []string{"e1", "e2", "e3"} {
+			g.entity(t, "quest", key, "Edge "+key, nil)
+		}
+		g.relate(t, "requires", "quest", "e1", "quest", "e2")
+		g.relate(t, "Guards", "quest", "e2", "quest", "e3")
+
+		doc := `{"v":1,
+			"from":[{"type":"quest","keys":["e1"],"as":"start"}],
+			"traverse":[{"from":"start","via":["requires","guards"],"direction":"out",
+			             "depth":{"min":1,"max":3},"as":"chain"%s}],
+			"nodes":[{"set":"chain"}]}`
+
+		both := runQuery(t, g, fmt.Sprintf(doc, ""))
+		if got := sortedKeysOf(both); !equalStrings(got, []string{"e2", "e3"}) {
+			t.Fatalf("control: following both relation types reaches e3, got %v", got)
+		}
+		only := runQuery(t, g, fmt.Sprintf(doc,
+			`,"edge_where":{"field":"@type","op":"eq","value":"requires"}`))
+		if got := sortedKeysOf(only); !equalStrings(got, []string{"e2"}) {
+			t.Fatalf("e3 is reachable only over the excluded edge, so an edge_where applied to "+
+				"the walk's recursion must not reach it at all, got %v", got)
+		}
+	})
+
+	// TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows is the multi-hop
+	// half of the filters a one-hop step already applies. They are applied to
+	// the walk's *output* — a quest of the wrong type is walked through and
+	// not drawn — which is the difference between them and edge_where above,
+	// and it is asserted here rather than assumed: the zone in the middle of
+	// this fixture is what a walk that filtered its recursion by to_type
+	// could not walk past.
+	t.Run("a walk draws only its destination type and only valid rows", func(t *testing.T) {
+		g, _ := a.games(t)
+		ctx := context.Background()
+		g.entity(t, "quest", "t1", "Through 1", nil)
+		g.entity(t, "zone", "middle", "The Middle", nil)
+		g.entity(t, "quest", "t2", "Through 2", nil)
+		g.entity(t, "quest", "t3", "Through 3", nil)
+		// A relation type constrains neither of its endpoints, so `requires`
+		// legitimately runs quest -> zone -> quest here.
+		g.relate(t, "requires", "quest", "t1", "zone", "middle")
+		g.relate(t, "requires", "zone", "middle", "quest", "t2")
+		g.relate(t, "requires", "quest", "t2", "quest", "t3")
+		if _, err := g.pool.Exec(ctx,
+			`UPDATE entities SET invalid = true WHERE project_id = $1 AND key = 't3'`,
+			g.projectID); err != nil {
+			t.Fatalf("flag t3 invalid: %v", err)
+		}
+
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["t1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out","to_type":"quest",
+			             "depth":{"min":1,"max":3},"as":"chain"}],
+			"nodes":[{"set":"chain"}]}`)
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"t2"}) {
+			t.Fatalf("the walk passes through the zone to reach t2, draws neither the zone nor "+
+				"the invalid t3, got %v", got)
+		}
+		// The two controls: the zone is reachable and is drawn when the step
+		// asks for it, and t3 is drawn when the query asks for invalid rows.
+		// Without them "got only t2" is also what a broken walk returns.
+		open := runQuery(t, g, `{"v":1,"include_invalid":true,
+			"from":[{"type":"quest","keys":["t1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":3},"as":"chain"}],
+			"nodes":[{"set":"chain"}]}`)
+		if got := sortedKeysOf(open); !equalStrings(got, []string{"middle", "t2", "t3"}) {
+			t.Fatalf("control: with no to_type and include_invalid the walk draws all three, got %v", got)
+		}
+	})
+
+	// TestMaxDepthReachedIsWhatTheWalkReachedNotWhatItAskedFor is the
+	// arithmetic Task 6 shipped, replaced.
+	//
+	// A set's depth used to be its source set's depth plus the step's
+	// *declared* max, which is exact only while every step is one hop: a
+	// walk that asked for four and found two would have reported four, and a
+	// designer reading "max_depth_reached: 4" would conclude the bound was
+	// binding when it was not — the same over-report the node cap was fixed
+	// for. The depth now travels on the row.
+	t.Run("max depth reached is what the walk reached not what it asked for", func(t *testing.T) {
+		g, _ := a.games(t)
+		g.entity(t, "quest", "m1", "Middle 1", nil)
+		g.entity(t, "quest", "m2", "Middle 2", nil)
+		g.relate(t, "requires", "quest", "m1", "quest", "m2")
+
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["m1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":4},"as":"chain"}],
+			"nodes":[{"set":"chain"}]}`)
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"m2"}) {
+			t.Fatalf("the chain is one hop long, got %v", got)
+		}
+		if res.Stats.MaxDepthReached != 1 {
+			t.Errorf("the walk asked for four hops and found one; stats say %d",
+				res.Stats.MaxDepthReached)
+		}
+	})
+
+	// TestAWalkFromAWalkCountsItsDepthFromTheSeed is the case the depth
+	// column exists for. A step reading from another step starts at whatever
+	// depth its own seed row sits at, and internal/graph counts from its own
+	// anchor — so the seed row's depth is added back, per row, through the
+	// path the walk carries. A picture of a chain would otherwise report
+	// every node past the second step as one or two hops away.
+	t.Run("a walk from a walk counts its depth from the seed", func(t *testing.T) {
+		g, _ := a.games(t)
+		chainOfQuests(t, g)
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["c1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":2},"as":"first"},
+			            {"from":"first","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":2},"as":"second"}],
+			"nodes":[{"set":"second"}],
+			"limits":{"max_depth":4}}`)
+		// The second walk starts from c2 and c3 and reaches c3, c4 and c5.
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"c3", "c4", "c5"}) {
+			t.Fatalf("a walk from a walk reaches the rest of the chain, got %v", got)
+		}
+		// c5 is four hops from the seed: two through the first walk, two more
+		// through the second. Counted from the second walk's own anchor it
+		// would be two.
+		if res.Stats.MaxDepthReached != 4 {
+			t.Errorf("the deepest node is four hops from the seed selector, stats say %d",
+				res.Stats.MaxDepthReached)
+		}
+	})
+
+	// TestAWalkFromASetThatReachedANodeTwiceCountsTheShorterPath is why the
+	// from-set is grouped by id before a walk's depth is added back to it.
+	//
+	// One row of a step is one edge traversal, so a set can hold the same
+	// quest at two depths — here d3, reached from d1 directly and through d2.
+	// Joined ungrouped, the walk that reads from it would produce one row per
+	// spelling of its seed, and the deeper spelling would be reported as the
+	// depth the picture reached. The seed's depth is its *shortest* path, and
+	// the grouping is what makes that a single number.
+	t.Run("a walk from a set that reached a node twice counts the shorter path", func(t *testing.T) {
+		g, _ := a.games(t)
+		for _, key := range []string{"d1", "d2", "d3", "d4"} {
+			g.entity(t, "quest", key, "Diamond "+key, nil)
+		}
+		g.relate(t, "requires", "quest", "d1", "quest", "d2")
+		g.relate(t, "requires", "quest", "d2", "quest", "d3")
+		g.relate(t, "requires", "quest", "d1", "quest", "d3")
+		g.relate(t, "requires", "quest", "d3", "quest", "d4")
+
+		res := runQuery(t, g, `{"v":1,
+			"from":[{"type":"quest","keys":["d1"],"as":"start"}],
+			"traverse":[{"from":"start","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":2},"as":"first"},
+			            {"from":"first","via":"requires","direction":"out",
+			             "depth":{"min":1,"max":1},"as":"second"}],
+			"nodes":[{"set":"second"}],
+			"limits":{"max_depth":4}}`)
+		if got := sortedKeysOf(res); !equalStrings(got, []string{"d3", "d4"}) {
+			t.Fatalf("the second walk reaches d3 (from d2) and d4 (from d3), got %v", got)
+		}
+		// d4 is two hops from the seed the short way (d1 -> d3 -> d4) and
+		// three the long way. The picture reports the graph's distance, not
+		// the longest spelling of it that happened to be walked.
+		if res.Stats.MaxDepthReached != 2 {
+			t.Errorf("the deepest node is two hops from the seed, stats say %d",
+				res.Stats.MaxDepthReached)
+		}
+	})
 }
 
 // clique seeds n quests with every pair related, keyed by prefix, and
@@ -300,130 +633,6 @@ func clique(t *testing.T, g *game, prefix string, n int) []string {
 		}
 	}
 	return keys
-}
-
-// TestACompletePictureOfADenseGraphIsNotDepthTruncated is the honest
-// half of Truncated.Depth.
-//
-// The probe asks whether there is a node **or an edge** past the bound
-// that the walk does not already hold within it. The weaker question —
-// "did the recursion produce a row past the bound" — is true of every
-// dense or cyclic graph at every bound, because a clique of six has
-// simple paths of every length up to five and they reach nothing new.
-// The whole graph came back, all six quests and all fifteen relations,
-// and the designer was told their picture had been cut short.
-//
-// The negative half is in the same test and is what keeps the fix from
-// being "never flag a dense graph": a chain hung off the clique puts a
-// genuinely unreachable quest one hop past the bound, and that must
-// flag while the deeper paths through the clique still do not.
-func TestACompletePictureOfADenseGraphIsNotDepthTruncated(t *testing.T) {
-	g, _ := newGame(t)
-	keys := clique(t, g, "k", 6)
-	// A tail: k6 -> t1 -> t2 -> t3 -> t4, so t4 is five hops from k1 and
-	// nothing shorter reaches it.
-	prev := keys[len(keys)-1]
-	for i := 1; i <= 4; i++ {
-		key := fmt.Sprintf("t%d", i)
-		g.entity(t, "quest", key, key, nil)
-		g.relate(t, "requires", "quest", prev, "quest", key)
-		prev = key
-	}
-	doc := `{"v":1,
-		"from":[{"type":"quest","keys":["k1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"any",
-		             "depth":{"min":1,"max":%d},"as":"w"}],
-		"nodes":[{"set":"start"},{"set":"w"}],
-		"edges":[{"from_step":"w"}],
-		"limits":{"max_depth":12}}`
-
-	// Four hops: t4 is one hop further and nothing else is missing.
-	cut := runQuery(t, g, fmt.Sprintf(doc, 4))
-	if !cut.Truncated.Depth {
-		t.Errorf("t4 is five hops from k1 and the bound is four, so the picture is "+
-			"genuinely cut short: %+v", cut.Truncated)
-	}
-	if got := sortedKeysOf(cut); equalStrings(got, []string{}) {
-		t.Fatalf("control: the four-hop picture must not be empty")
-	}
-
-	// Five hops: the whole graph — ten quests, and every one of the
-	// clique's fifteen relations plus the tail's four. Deeper simple
-	// paths still exist in their thousands and reach nothing new.
-	whole := runQuery(t, g, fmt.Sprintf(doc, 5))
-	want := []string{"k1", "k2", "k3", "k4", "k5", "k6", "t1", "t2", "t3", "t4"}
-	if got := sortedKeysOf(whole); !equalStrings(got, want) {
-		t.Fatalf("five hops reaches the whole graph, got %v", got)
-	}
-	if len(whole.Edges) != 19 {
-		t.Fatalf("the whole graph is fifteen clique edges and four tail edges, got %d",
-			len(whole.Edges))
-	}
-	if whole.Truncated.Depth {
-		t.Errorf("every node and every edge is drawn, so nothing is past the bound that "+
-			"the picture does not hold; the deeper paths through the clique reach "+
-			"nothing new: %+v", whole.Truncated)
-	}
-}
-
-// TestAWalkRowCapIsReportedRatherThanLosingContentSilently is the
-// walk's own row cap, read.
-//
-// internal/graph caps a walk at MaxRows rows and emits LIMIT MaxRows + 1
-// so that the caller can tell a full walk from a truncated one. A walk
-// row is one **edge traversal**, so four times max_nodes rows collapse to
-// far fewer than max_nodes nodes on a dense graph, and the node cap and
-// the edge cap both stay unfired while relations disappear from the
-// picture. Before this was read, the fixture below lost two of its
-// twenty-two edges at max_nodes 8, got all of them back at 9, and
-// reported {false false} for the element flags either way — silent
-// content loss, which this plan calls its worst failure mode.
-//
-// The control at a large cap is what makes the flag mean "the walk was
-// cut" rather than "this fixture is dense".
-func TestAWalkRowCapIsReportedRatherThanLosingContentSilently(t *testing.T) {
-	g, _ := newGame(t)
-	// a hangs off a seven-clique, so a walk from a spends its rows inside
-	// the clique: twenty-two relations, and 4 x 8 = 32 traversals is not
-	// enough of them.
-	keys := clique(t, g, "n", 7)
-	g.entity(t, "quest", "a", "A", nil)
-	g.relate(t, "requires", "quest", "a", "quest", keys[0])
-	doc := `{"v":1,
-		"from":[{"type":"quest","keys":["a"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"any",
-		             "depth":{"min":1,"max":4},"as":"w"}],
-		"nodes":[{"set":"w"}],
-		"edges":[{"from_step":"w"}],
-		"limits":{"max_nodes":%d,"max_edges":1000,"max_depth":12}}`
-
-	// The control first, because it is what says the cap is the only
-	// difference: with room for every traversal the picture is whole and
-	// nothing is flagged.
-	whole := runQuery(t, g, fmt.Sprintf(doc, 5000))
-	if len(whole.Edges) != 22 {
-		t.Fatalf("control: the whole graph is twenty-two relations, got %d", len(whole.Edges))
-	}
-	if whole.Truncated.Nodes || whole.Truncated.Edges || whole.Truncated.Depth {
-		t.Fatalf("control: nothing is truncated at max_nodes 5000: %+v", whole.Truncated)
-	}
-
-	// And the cut: fewer edges than the graph holds, with neither cap
-	// reached — twenty-two relations is well under max_edges 1000, and
-	// the eight nodes are under max_nodes 8.
-	cut := runQuery(t, g, fmt.Sprintf(doc, 8))
-	if len(cut.Edges) >= 22 {
-		t.Fatalf("the walk's row cap must cut this picture for the flag to be about "+
-			"anything; got %d edges", len(cut.Edges))
-	}
-	if len(cut.Nodes) > 8 || len(cut.Edges) > 1000 {
-		t.Fatalf("neither element cap may be the thing that fired: %d nodes, %d edges",
-			len(cut.Nodes), len(cut.Edges))
-	}
-	if !cut.Truncated.Nodes || !cut.Truncated.Edges {
-		t.Errorf("a walk that hit its row cap handed back fewer traversals than the graph "+
-			"holds, and both element flags say so: %+v", cut.Truncated)
-	}
 }
 
 // TestAWalkStaysInsideOneGame is the isolation test, and it has to forge
@@ -531,209 +740,5 @@ func TestAWalkStaysInsideOneGame(t *testing.T) {
 		if !mine[e.Source] || !mine[e.Target] {
 			t.Errorf("an edge of this picture has an endpoint in another game: %+v", e)
 		}
-	}
-}
-
-// TestAWalkCTEsBindsAreRenumberedIntoTheOuterStatement is the test the
-// renumbering owes. graph.WalkCTE numbers its own arguments from $1 and
-// the compiler splices them into a statement that already has some, so a
-// renumbering that is off by one does not fail — it compares the right
-// column against the wrong value, and the wrong quest comes back with no
-// error at all.
-//
-// The query carries a predicate bound *before* the walk (the selector's
-// key) and one bound *after* it (the step's own where), with the walk's
-// four arguments in between.
-func TestAWalkCTEsBindsAreRenumberedIntoTheOuterStatement(t *testing.T) {
-	g, _ := newGame(t)
-	chainOfQuests(t, g)
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["c1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "to_type":"quest","depth":{"min":1,"max":3},"as":"chain",
-		             "where":{"field":"min_level","op":"gte","value":30}}],
-		"nodes":[{"set":"chain"}]}`)
-	// c2 is one hop away and fails the predicate; c5 passes it and is out
-	// of depth. Both halves have to hold at once, which is what a
-	// misnumbered bind breaks.
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"c3", "c4"}) {
-		t.Fatalf("the selector's key and the step's own predicate must both be answered "+
-			"against the value they were bound with, got %v", got)
-	}
-}
-
-// TestAnEdgeWhereFiltersTheHopsAWalkFollows is the views-level half of
-// internal/graph's EdgePredicate placement: a condition on the relation
-// prunes the recursion, so a quest reachable only through an excluded
-// edge is not reached — rather than reached and then filtered out of the
-// picture, which is what applying it to the walk's output would do.
-func TestAnEdgeWhereFiltersTheHopsAWalkFollows(t *testing.T) {
-	g, _ := newGame(t)
-	for _, key := range []string{"e1", "e2", "e3"} {
-		g.entity(t, "quest", key, "Edge "+key, nil)
-	}
-	g.relate(t, "requires", "quest", "e1", "quest", "e2")
-	g.relate(t, "Guards", "quest", "e2", "quest", "e3")
-
-	doc := `{"v":1,
-		"from":[{"type":"quest","keys":["e1"],"as":"start"}],
-		"traverse":[{"from":"start","via":["requires","guards"],"direction":"out",
-		             "depth":{"min":1,"max":3},"as":"chain"%s}],
-		"nodes":[{"set":"chain"}]}`
-
-	both := runQuery(t, g, fmt.Sprintf(doc, ""))
-	if got := sortedKeysOf(both); !equalStrings(got, []string{"e2", "e3"}) {
-		t.Fatalf("control: following both relation types reaches e3, got %v", got)
-	}
-	only := runQuery(t, g, fmt.Sprintf(doc,
-		`,"edge_where":{"field":"@type","op":"eq","value":"requires"}`))
-	if got := sortedKeysOf(only); !equalStrings(got, []string{"e2"}) {
-		t.Fatalf("e3 is reachable only over the excluded edge, so an edge_where applied to "+
-			"the walk's recursion must not reach it at all, got %v", got)
-	}
-}
-
-// TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows is the multi-hop
-// half of the filters a one-hop step already applies. They are applied to
-// the walk's *output* — a quest of the wrong type is walked through and
-// not drawn — which is the difference between them and edge_where above,
-// and it is asserted here rather than assumed: the zone in the middle of
-// this fixture is what a walk that filtered its recursion by to_type
-// could not walk past.
-func TestAWalkDrawsOnlyItsDestinationTypeAndOnlyValidRows(t *testing.T) {
-	g, _ := newGame(t)
-	ctx := context.Background()
-	g.entity(t, "quest", "t1", "Through 1", nil)
-	g.entity(t, "zone", "middle", "The Middle", nil)
-	g.entity(t, "quest", "t2", "Through 2", nil)
-	g.entity(t, "quest", "t3", "Through 3", nil)
-	// A relation type constrains neither of its endpoints, so `requires`
-	// legitimately runs quest -> zone -> quest here.
-	g.relate(t, "requires", "quest", "t1", "zone", "middle")
-	g.relate(t, "requires", "zone", "middle", "quest", "t2")
-	g.relate(t, "requires", "quest", "t2", "quest", "t3")
-	if _, err := g.pool.Exec(ctx,
-		`UPDATE entities SET invalid = true WHERE project_id = $1 AND key = 't3'`,
-		g.projectID); err != nil {
-		t.Fatalf("flag t3 invalid: %v", err)
-	}
-
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["t1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out","to_type":"quest",
-		             "depth":{"min":1,"max":3},"as":"chain"}],
-		"nodes":[{"set":"chain"}]}`)
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"t2"}) {
-		t.Fatalf("the walk passes through the zone to reach t2, draws neither the zone nor "+
-			"the invalid t3, got %v", got)
-	}
-	// The two controls: the zone is reachable and is drawn when the step
-	// asks for it, and t3 is drawn when the query asks for invalid rows.
-	// Without them "got only t2" is also what a broken walk returns.
-	open := runQuery(t, g, `{"v":1,"include_invalid":true,
-		"from":[{"type":"quest","keys":["t1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":3},"as":"chain"}],
-		"nodes":[{"set":"chain"}]}`)
-	if got := sortedKeysOf(open); !equalStrings(got, []string{"middle", "t2", "t3"}) {
-		t.Fatalf("control: with no to_type and include_invalid the walk draws all three, got %v", got)
-	}
-}
-
-// TestMaxDepthReachedIsWhatTheWalkReachedNotWhatItAskedFor is the
-// arithmetic Task 6 shipped, replaced.
-//
-// A set's depth used to be its source set's depth plus the step's
-// *declared* max, which is exact only while every step is one hop: a
-// walk that asked for four and found two would have reported four, and a
-// designer reading "max_depth_reached: 4" would conclude the bound was
-// binding when it was not — the same over-report the node cap was fixed
-// for. The depth now travels on the row.
-func TestMaxDepthReachedIsWhatTheWalkReachedNotWhatItAskedFor(t *testing.T) {
-	g, _ := newGame(t)
-	g.entity(t, "quest", "m1", "Middle 1", nil)
-	g.entity(t, "quest", "m2", "Middle 2", nil)
-	g.relate(t, "requires", "quest", "m1", "quest", "m2")
-
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["m1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":4},"as":"chain"}],
-		"nodes":[{"set":"chain"}]}`)
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"m2"}) {
-		t.Fatalf("the chain is one hop long, got %v", got)
-	}
-	if res.Stats.MaxDepthReached != 1 {
-		t.Errorf("the walk asked for four hops and found one; stats say %d",
-			res.Stats.MaxDepthReached)
-	}
-}
-
-// TestAWalkFromAWalkCountsItsDepthFromTheSeed is the case the depth
-// column exists for. A step reading from another step starts at whatever
-// depth its own seed row sits at, and internal/graph counts from its own
-// anchor — so the seed row's depth is added back, per row, through the
-// path the walk carries. A picture of a chain would otherwise report
-// every node past the second step as one or two hops away.
-func TestAWalkFromAWalkCountsItsDepthFromTheSeed(t *testing.T) {
-	g, _ := newGame(t)
-	chainOfQuests(t, g)
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["c1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":2},"as":"first"},
-		            {"from":"first","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":2},"as":"second"}],
-		"nodes":[{"set":"second"}],
-		"limits":{"max_depth":4}}`)
-	// The second walk starts from c2 and c3 and reaches c3, c4 and c5.
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"c3", "c4", "c5"}) {
-		t.Fatalf("a walk from a walk reaches the rest of the chain, got %v", got)
-	}
-	// c5 is four hops from the seed: two through the first walk, two more
-	// through the second. Counted from the second walk's own anchor it
-	// would be two.
-	if res.Stats.MaxDepthReached != 4 {
-		t.Errorf("the deepest node is four hops from the seed selector, stats say %d",
-			res.Stats.MaxDepthReached)
-	}
-}
-
-// TestAWalkFromASetThatReachedANodeTwiceCountsTheShorterPath is why the
-// from-set is grouped by id before a walk's depth is added back to it.
-//
-// One row of a step is one edge traversal, so a set can hold the same
-// quest at two depths — here d3, reached from d1 directly and through d2.
-// Joined ungrouped, the walk that reads from it would produce one row per
-// spelling of its seed, and the deeper spelling would be reported as the
-// depth the picture reached. The seed's depth is its *shortest* path, and
-// the grouping is what makes that a single number.
-func TestAWalkFromASetThatReachedANodeTwiceCountsTheShorterPath(t *testing.T) {
-	g, _ := newGame(t)
-	for _, key := range []string{"d1", "d2", "d3", "d4"} {
-		g.entity(t, "quest", key, "Diamond "+key, nil)
-	}
-	g.relate(t, "requires", "quest", "d1", "quest", "d2")
-	g.relate(t, "requires", "quest", "d2", "quest", "d3")
-	g.relate(t, "requires", "quest", "d1", "quest", "d3")
-	g.relate(t, "requires", "quest", "d3", "quest", "d4")
-
-	res := runQuery(t, g, `{"v":1,
-		"from":[{"type":"quest","keys":["d1"],"as":"start"}],
-		"traverse":[{"from":"start","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":2},"as":"first"},
-		            {"from":"first","via":"requires","direction":"out",
-		             "depth":{"min":1,"max":1},"as":"second"}],
-		"nodes":[{"set":"second"}],
-		"limits":{"max_depth":4}}`)
-	if got := sortedKeysOf(res); !equalStrings(got, []string{"d3", "d4"}) {
-		t.Fatalf("the second walk reaches d3 (from d2) and d4 (from d3), got %v", got)
-	}
-	// d4 is two hops from the seed the short way (d1 -> d3 -> d4) and
-	// three the long way. The picture reports the graph's distance, not
-	// the longest spelling of it that happened to be walked.
-	if res.Stats.MaxDepthReached != 2 {
-		t.Errorf("the deepest node is two hops from the seed, stats say %d",
-			res.Stats.MaxDepthReached)
 	}
 }

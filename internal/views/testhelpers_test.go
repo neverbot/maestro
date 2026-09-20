@@ -23,18 +23,54 @@ type game struct {
 	projectID uuid.UUID
 }
 
-// newGame seeds classes, quests and zones with the relations the spec's
+// area is one database shared by every claim in a test file.
+//
+// The unit of isolation in this package is the project, not the
+// database: every query, view and position is scoped by project_id, and
+// the pair of games below exists precisely so a missing scope shows up.
+// So a claim needs its own *games*, which cost a few writes, and not its
+// own *database*, which costs a migrated template copy and a connection
+// pool. One area per file, a fresh pair of games per claim.
+//
+// A claim that changes the schema — the ALTER TABLE ones that install a
+// constraint to make a commit fail — still takes its own database
+// through newGame: that alteration is not scoped by project and would be
+// seen by every other claim sharing the area.
+type area struct{ pool *pgxpool.Pool }
+
+func newArea(t *testing.T) area {
+	t.Helper()
+	return area{pool: testutil.NewPool(t)}
+}
+
+// games seeds a fresh pair of games inside the area's database.
+func (a area) games(t *testing.T) (*game, *game) {
+	t.Helper()
+	return gamesIn(t, a.pool)
+}
+
+// newGame gives one claim a database of its own.
+func newGame(t *testing.T) (*game, *game) {
+	t.Helper()
+	return gamesIn(t, testutil.NewPool(t))
+}
+
+// gamesIn seeds classes, quests and zones with the relations the spec's
 // §3.1 example walks: available_to (quest -> class), requires
 // (quest -> quest), takes_place_in (quest -> zone).
 //
-// It seeds **two** games, in one database, and returns both. The second
-// is not decoration: every isolation test in this package needs a second
-// game with the same keys in it, and a fixture that seeds one game lets a
-// missing project filter pass every test in the file.
-func newGame(t *testing.T) (*game, *game) {
+// It seeds **two** games and returns both. The second is not decoration:
+// every isolation test in this package needs a second game with the same
+// keys in it, and a fixture that seeds one game lets a missing project
+// filter pass every test in the file.
+func gamesIn(t *testing.T, pool *pgxpool.Pool) (*game, *game) {
 	t.Helper()
-	pool := testutil.NewPool(t)
+	// The slugs carry a suffix because a database now holds many pairs
+	// and the column is unique; the names are still the two the fixture
+	// has always used, because the tests read like the spec's example.
+	suffix := "-" + uuid.NewString()[:8]
 	build := func(slug string) *game {
+		slug += suffix
 		ctx := context.Background()
 		var projectID uuid.UUID
 		if err := pool.QueryRow(ctx,

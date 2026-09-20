@@ -15,5 +15,6 @@ import "testing"
 // in the module, dead at the call site* is this repository's most
 // repeated defect, and a write is the shape it takes.
 func TestEditingAFieldValue(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/field_edit_test.mjs")
 }

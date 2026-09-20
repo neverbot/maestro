@@ -288,6 +288,7 @@ func transcriptFailure(result *mcp.CallToolResult) string {
 // can succeed while a declared type is never seeded, which is a worked
 // example with a dead branch.
 func TestGenreTranscriptsApply(t *testing.T) {
+	t.Parallel()
 	paths := transcriptPaths(t)
 	f := newTranscriptFixture(t, paths)
 	for _, name := range paths {
@@ -307,6 +308,7 @@ func TestGenreTranscriptsApply(t *testing.T) {
 // leaves flagged rows behind teaches a game shape the product itself
 // considers broken.
 func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
+	t.Parallel()
 	paths := transcriptPaths(t)
 	f := newTranscriptFixture(t, paths)
 	for _, name := range paths {
@@ -388,6 +390,7 @@ func TestEveryDeclaredTypeInATranscriptIsPopulated(t *testing.T) {
 // assertion above would still pass, because every assertion above only
 // ever looks at games that were meant to be full.
 func TestATranscriptWritesOnlyToItsOwnGame(t *testing.T) {
+	t.Parallel()
 	paths := transcriptPaths(t)
 	f := newTranscriptFixture(t, paths)
 
@@ -427,6 +430,7 @@ func TestATranscriptWritesOnlyToItsOwnGame(t *testing.T) {
 // through the same path and its refusal is read, in a sub-test that is
 // expected to fail and is run with its own recovery.
 func TestTheTranscriptRunnerReportsAFailedCall(t *testing.T) {
+	t.Parallel()
 	paths := transcriptPaths(t)
 	f := newTranscriptFixture(t, paths)
 	session := connectMCP(t, f.baseURL, f.witness)

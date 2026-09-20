@@ -55,6 +55,7 @@ var htmlSinks = regexp.MustCompile(`\.innerHTML\s*=|\.outerHTML\s*=|\.insertAdja
 // widening the one place in internal/web/static where a string becomes
 // markup.
 func TestTheDocumentScriptHasExactlyOneHTMLSink(t *testing.T) {
+	t.Parallel()
 	source := docScriptSource(t)
 	found := htmlSinks.FindAllString(source, -1)
 	if len(found) != 1 {
@@ -78,6 +79,7 @@ func TestTheDocumentScriptHasExactlyOneHTMLSink(t *testing.T) {
 // document title or a version message would pass the test above and be
 // exactly the stored-XSS this whole arrangement exists to prevent.
 func TestTheDocumentScriptsHTMLSinkIsOnlyFedByARenderedView(t *testing.T) {
+	t.Parallel()
 	source := docScriptSource(t)
 	calls := regexp.MustCompile(`setRenderedHTML\(([^)]*)\)`).FindAllStringSubmatch(source, -1)
 	// One declaration plus the call sites; the declaration's argument
@@ -121,6 +123,7 @@ func TestTheDocumentScriptsHTMLSinkIsOnlyFedByARenderedView(t *testing.T) {
 // would look like a document with no history rather than like a broken
 // page.
 func TestTheDocumentPageDeclaresEveryElementItsScriptLooksUp(t *testing.T) {
+	t.Parallel()
 	source := docScriptSource(t)
 	shell := documentPageSource(t)
 	ids := regexp.MustCompile(`getElementById\("([^"]+)"\)`).FindAllStringSubmatch(source, -1)
@@ -141,6 +144,7 @@ func TestTheDocumentPageDeclaresEveryElementItsScriptLooksUp(t *testing.T) {
 // into static/pages/home.js, and a test that kept reading app.js would
 // have gone on passing over a file that no longer contains the lane.
 func TestTheGamePageDeclaresTheDocumentsElementsItsScriptLooksUp(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile("static/game.html")
 	if err != nil {
 		t.Fatalf("read static/game.html: %v", err)
@@ -177,6 +181,7 @@ func homeScriptSource(t *testing.T) string {
 // through an HTTP response: GET /summary carries the role, and the
 // branch is taken in the browser.
 func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
+	t.Parallel()
 	// The sentence moved with the page in Task 15, into
 	// static/pages/page.js's `whoWrites` — one function for both prose
 	// and vocabulary, because "who may do this" is one rule with two
@@ -224,6 +229,7 @@ func TestNeitherProseEmptyStateOffersAViewerAWrite(t *testing.T) {
 // however long the network takes — and would leave all of them on screen
 // forever if the request never answered.
 func TestTheDocumentPageShipsItsSectionsHidden(t *testing.T) {
+	t.Parallel()
 	shell := documentPageSource(t)
 	for _, id := range []string{
 		"doc-error", "doc-body", "doc-content", "doc-entities-empty",

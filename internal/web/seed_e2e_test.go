@@ -665,6 +665,7 @@ func (s *seeded) listAll(t *testing.T, in web.EntitiesListInput) []web.EntityOut
 // game and several of them depend on the state the one before left, so
 // none of them may be made parallel.
 func TestSeedARacingGameEndToEnd(t *testing.T) {
+	t.Parallel()
 	s := seedRacingGame(t)
 	ctx := context.Background()
 

@@ -30,6 +30,7 @@ import (
 //     reservation of a different size is still a jump, just a smaller
 //     one.
 func TestTheDrawingsHoleIsReservedBeforeItArrives(t *testing.T) {
+	t.Parallel()
 	styles, err := os.ReadFile("static/styles.css")
 	if err != nil {
 		t.Fatalf("read styles.css: %v", err)

@@ -209,6 +209,7 @@ var rendererModules = []struct {
 // does not have is the other half of the same mistake and would be a
 // picture nobody can save.
 func TestEveryRendererInTheCatalogueHasAModule(t *testing.T) {
+	t.Parallel()
 	withModule := map[string]bool{}
 	for _, entry := range rendererModules {
 		withModule[entry.renderer] = true
@@ -238,6 +239,7 @@ func TestEveryRendererInTheCatalogueHasAModule(t *testing.T) {
 // control with no parameter is a document the server will refuse, and a
 // parameter with no control is a knob the interface silently ignores.
 func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
+	t.Parallel()
 	for _, entry := range rendererModules {
 		t.Run(entry.renderer, func(t *testing.T) {
 			source := renderModule(t, entry.module)
@@ -312,6 +314,7 @@ func TestARenderersControlsAreTheCataloguesParameters(t *testing.T) {
 // with a message about a value the interface itself put there. The
 // admitted spellings are as much a part of the contract as the key is.
 func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
+	t.Parallel()
 	description := views.RendererDescription()
 	checked := 0
 	for _, entry := range rendererModules {
@@ -352,6 +355,7 @@ func TestAnEnumControlOffersTheSpellingsTheCatalogueAdmits(t *testing.T) {
 // agent and never the kind; retyping the phrases here would be a third
 // spelling of the same table.
 func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
+	t.Parallel()
 	kinds := controlKinds(t)
 	checked := 0
 	for _, entry := range rendererModules {
@@ -397,6 +401,7 @@ func TestAControlDeclaresTheKindTheCatalogueDeclares(t *testing.T) {
 // every renderer's parameters into one list, would make the join above
 // pass on any module ever written.
 func TestTheCatalogueParameterScanReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	fixture := strings.Join([]string{
 		"The renderer catalogue. Preamble that names nothing.",
 		"",

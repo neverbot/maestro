@@ -27,6 +27,7 @@ import (
 // Mutation: rename `new-invite` back to `invite` in admin.html and this
 // fails naming the shell and the id.
 func TestNoShellStealsAnIdAppJSBindsAtModuleScope(t *testing.T) {
+	t.Parallel()
 	source, err := os.ReadFile("static/app.js")
 	if err != nil {
 		t.Fatalf("read app.js: %v", err)

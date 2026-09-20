@@ -31,6 +31,7 @@ import (
 // `static/pages/assets.js` and this test fails naming the page, the key
 // it reads and the keys the handler writes.
 func TestListingKeysPagesReadAreKeysHandlersWrite(t *testing.T) {
+	t.Parallel()
 	// Each entry: the page module, the Go file whose handler answers it,
 	// and the reads that must be backed by a written key. A page listing
 	// nothing belongs in neither column.

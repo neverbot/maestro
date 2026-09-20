@@ -18,6 +18,7 @@ import (
 // test would fail loudly instead of quietly passing — a request that
 // completes normally is the proof the lookup was never attempted.
 func TestPublicPathsSkipAuthentication(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 
 	for _, path := range []string{"/static/styles.css", "/login", "/g/some-slug", "/api/config"} {
@@ -45,6 +46,7 @@ func TestPublicPathsSkipAuthentication(t *testing.T) {
 // each of these is deterministic and needs no URL decoding to reason
 // about.
 func TestIsPublicPath(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"/static/styles.css": true,
 		"/static/":           true,

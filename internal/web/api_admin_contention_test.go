@@ -38,6 +38,7 @@ func newAdminContentionServer(t *testing.T) (*web.Server, *identity.Service, *pr
 }
 
 func TestAGameDeletionDeadlockedByAContentWriteIsRetryable(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, mm, pool := newAdminContentionServer(t)
 	ctx := context.Background()
 

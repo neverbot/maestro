@@ -53,6 +53,7 @@ func runJSTest(t *testing.T, script string) {
 // (internal/web/jstest/invite_redemption_test.mjs has the harness and
 // its own doc comment).
 func TestInviteFormSendsCapturedToken(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/invite_redemption_test.mjs")
 }
@@ -74,6 +75,7 @@ func TestInviteFormSendsCapturedToken(t *testing.T) {
 // with each payload, and its own doc comment for why a regex fix alone
 // would not be trusted here again.
 func TestSafeReturnPathRejectsOffOriginBypasses(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/safe_return_path_test.mjs")
 }
@@ -103,6 +105,7 @@ func TestSafeReturnPathRejectsOffOriginBypasses(t *testing.T) {
 // broken product. The two halves of the shortcut are held there too: it
 // still fires at "/" and never at /games.
 func TestYouCanReachAnotherGameFromInsideOne(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/game_switcher_test.mjs")
 }
@@ -137,6 +140,7 @@ func TestYouCanReachAnotherGameFromInsideOne(t *testing.T) {
 // leaving the server's own message and no catalogue, and one summary
 // call — are the four checks at the end of the new harness.
 func TestThePageModulesRenderTheirRoutes(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/pages_test.mjs")
 }
@@ -154,6 +158,7 @@ func TestThePageModulesRenderTheirRoutes(t *testing.T) {
 // plausible blank — are properties of the page, not of any route, so no
 // Go test against internal/web/api_docs.go can see one of them.
 func TestTheDocumentPageRendersADocument(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/document_page_test.mjs")
 }
@@ -178,6 +183,7 @@ func TestTheDocumentPageRendersADocument(t *testing.T) {
 // apart — and TestThePaletteModuleAndTheStylesheetAgreeOnEight is the
 // seam that stops the two halves drifting.
 func TestPaletteRules(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/palette_test.mjs")
 }
@@ -198,6 +204,7 @@ func TestPaletteRules(t *testing.T) {
 // detail Task 6 depends on entirely and a minor version could withdraw
 // without a word.
 func TestTheVendoredRuntimeLoads(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/vendor_modules_test.mjs")
 }
@@ -224,6 +231,7 @@ func TestTheVendoredRuntimeLoads(t *testing.T) {
 // test could see at runtime either: that no string literal in the module
 // is a sentence, and that no other module of ours fetches at all.
 func TestTheDataClientRules(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/client_test.mjs")
 }
@@ -250,6 +258,7 @@ func TestTheDataClientRules(t *testing.T) {
 // internal/web/static_frame_test.go holds the half no harness can see:
 // that the component painting all of this writes none of the words.
 func TestTheViewFrame(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/frame_test.mjs")
 }
@@ -290,6 +299,7 @@ func TestTheViewFrame(t *testing.T) {
 // internal/web/static_frame_test.go holds that the component writes none
 // of the twin's words.
 func TestTheTextTwin(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/twin_test.mjs")
 }
@@ -343,6 +353,7 @@ func TestTheTextTwin(t *testing.T) {
 // position is read back in is the one internal/views.Position actually
 // marshals to.
 func TestLayoutComposition(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/layout_test.mjs")
 }
@@ -391,6 +402,7 @@ func TestLayoutComposition(t *testing.T) {
 // re-enters the HTML parser, and that the emitter's contract cannot
 // become one.
 func TestTheCanvas(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/canvas_test.mjs")
 }
@@ -437,6 +449,7 @@ func TestTheCanvas(t *testing.T) {
 // is a stub whose terminus is outside its group's enclosure — which is
 // why an enclosure is a hairline and not a filled panel.
 func TestTheGraphRenderer(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_graph_test.mjs")
 }
@@ -479,6 +492,7 @@ func TestTheGraphRenderer(t *testing.T) {
 // draws; and the twin and the picture agree about every node and edge of
 // one answer.
 func TestTheLayeredRenderer(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_layered_test.mjs")
 }
@@ -522,6 +536,7 @@ func TestTheLayeredRenderer(t *testing.T) {
 // are deliberately allowed to differ — and the arithmetic that joins
 // them says exactly how.
 func TestTheNestedRenderer(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_nested_test.mjs")
 }
@@ -568,6 +583,7 @@ func TestTheNestedRenderer(t *testing.T) {
 // that lines plus loops plus off-map plus stubs is exactly the twin's
 // edge count.
 func TestTheMapRenderer(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_map_test.mjs")
 }
@@ -615,6 +631,7 @@ func TestTheMapRenderer(t *testing.T) {
 // columns the view declared in its order, a pager over the rows already
 // here, and no edges.
 func TestTheTableRenderer(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_table_test.mjs")
 }
@@ -658,6 +675,7 @@ func TestTheTableRenderer(t *testing.T) {
 // stack, which is the control that keeps the first assertion from
 // passing over a renderer that stacked by arrival order.
 func TestTheTimelineRenderer(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/render_timeline_test.mjs")
 }
@@ -708,6 +726,7 @@ func TestTheTimelineRenderer(t *testing.T) {
 // that the three refusals the picker states before a file is chosen are
 // the ones internal/views will really apply.
 func TestTheTwoWrites(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/writes_test.mjs")
 }
@@ -743,6 +762,7 @@ func TestTheTwoWrites(t *testing.T) {
 // yet", that the dialog is mounted outside the frame's aria-hidden
 // wrapper, and that the renderer catalogue route serves the whole table.
 func TestSaveAs(t *testing.T) {
+	t.Parallel()
 	nodeOrSkip(t)
 	runJSTest(t, "jstest/save_as_test.mjs")
 }

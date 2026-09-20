@@ -34,6 +34,7 @@ func appScriptSource(t *testing.T) string {
 // (the page still renders, just now executes whatever a game name
 // contains) unless this test catches it first.
 func TestAppScriptNeverWritesRawHTML(t *testing.T) {
+	t.Parallel()
 	source := appScriptSource(t)
 	// Matched as actual usage (an assignment or a call), not as a bare
 	// word: app.js's own comments say "never innerHTML" at each call site
@@ -57,6 +58,7 @@ func TestAppScriptNeverWritesRawHTML(t *testing.T) {
 // showing up the next time someone loses access to a game and gets
 // bounced toward it anyway.
 func TestLastVisitedRedirectIsCorroboratedBeforeItFires(t *testing.T) {
+	t.Parallel()
 	source := appScriptSource(t)
 	guard := regexp.MustCompile(
 		`if \(remembered && games\.some\(\(game\) => game\.slug === remembered\)\) \{\s*\n\s*window\.location\.href = `,
@@ -83,6 +85,7 @@ func TestLastVisitedRedirectIsCorroboratedBeforeItFires(t *testing.T) {
 // call site, so a second page cannot start remembering a slug it never
 // checked.
 func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
+	t.Parallel()
 	const callSite = "rememberGame(slug);"
 	// The declaration ("export function rememberGame(slug) {") ends in a
 	// brace, not a semicolon, so it is not counted as a call — a plain
@@ -150,6 +153,7 @@ func TestRememberGameIsOnlyCalledAfterCorroboration(t *testing.T) {
 var handsOverTheGameList = regexp.MustCompile(`renderHeader\(\{[^}]*\bgames:`)
 
 func TestEveryPageInsideAGameGivesItsHeaderTheGameList(t *testing.T) {
+	t.Parallel()
 	// The two shells a person can be inside a game on: every page under
 	// /g/{slug} except the reading view starts at openGame (page.js), and
 	// the reading view is doc.js.

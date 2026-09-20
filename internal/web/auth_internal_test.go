@@ -16,6 +16,7 @@ import "testing"
 // each handler's own test's job. What this refuses to let drift silently
 // is the spelling a client parses.
 func TestErrorCodeValuesArePinned(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		got  string

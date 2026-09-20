@@ -17,6 +17,7 @@ import (
 // caller is not thrown out of the very request that changed it), and
 // revokes every other session of the account.
 func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
@@ -90,6 +91,7 @@ func TestChangePasswordRotatesHashKeepsCallerLoggedInAndRevokesOtherSessions(t *
 // pin of this task's own attacker model: a live session alone must never
 // be enough to rotate the password.
 func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "stolen@example.test", DisplayName: "Stolen", Password: "password12345"}); err != nil {
@@ -119,6 +121,7 @@ func TestChangePasswordRejectsWrongCurrentPassword(t *testing.T) {
 }
 
 func TestChangePasswordRejectsSamePassword(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "sameone@example.test", DisplayName: "Same One", Password: "password12345"}); err != nil {
@@ -138,6 +141,7 @@ func TestChangePasswordRejectsSamePassword(t *testing.T) {
 }
 
 func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "weak@example.test", DisplayName: "Weak", Password: "password12345"}); err != nil {
@@ -161,6 +165,7 @@ func TestChangePasswordRejectsWeakNewPassword(t *testing.T) {
 // an agent scoped to a project's content, not a person with a password
 // of their own.
 func TestChangePasswordRejectsTokenCaller(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -188,6 +193,7 @@ func TestChangePasswordRejectsTokenCaller(t *testing.T) {
 // choice: ten wrong guesses against one account exhaust that account's
 // budget, independent of a second account's own budget staying untouched.
 func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "victim@example.test", DisplayName: "Victim", Password: "password12345"}); err != nil {
@@ -243,6 +249,7 @@ func TestChangePasswordIsRateLimitedPerAccount(t *testing.T) {
 // regardless of how many prior wrong guesses spent the wrong-guess
 // budget.
 func TestChangePasswordSucceedsWithCorrectPasswordEvenAfterWrongGuessBudgetExhausted(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"}); err != nil {
@@ -279,6 +286,7 @@ func TestChangePasswordSucceedsWithCorrectPasswordEvenAfterWrongGuessBudgetExhau
 // gates entry before any password is checked, so a flood of requests —
 // even ones that would otherwise succeed — is eventually capped.
 func TestChangePasswordFloodLimiterBoundsRepeatedAttemptsRegardlessOfCorrectness(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "flooded@example.test", DisplayName: "Flooded", Password: "password12345"}); err != nil {

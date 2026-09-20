@@ -16,5 +16,6 @@ import "testing"
 // hand-written query fails, and a picker that could be misspelled would
 // be a longer way to fail the same way.
 func TestThePicker(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/picker_test.mjs")
 }

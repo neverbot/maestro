@@ -40,6 +40,7 @@ func loginAs(t *testing.T, srv *web.Server, email string) *http.Cookie {
 }
 
 func TestListGamesOnlyShowsMemberships(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -73,6 +74,7 @@ func TestListGamesOnlyShowsMemberships(t *testing.T) {
 }
 
 func TestListGamesRejectsTokenCaller(t *testing.T) {
+	t.Parallel()
 	// A token caller's user may belong to other games its token knows
 	// nothing about; ListForUser has no way to filter those out by
 	// project, so this endpoint is human-only rather than risking a token
@@ -98,6 +100,7 @@ func TestListGamesRejectsTokenCaller(t *testing.T) {
 }
 
 func TestCreateGameRejectsTokenCaller(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -121,6 +124,7 @@ func TestCreateGameRejectsTokenCaller(t *testing.T) {
 }
 
 func TestCreateGameRejectsInvalidSlugAsBadRequest(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	_, _ = ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -139,6 +143,7 @@ func TestCreateGameRejectsInvalidSlugAsBadRequest(t *testing.T) {
 }
 
 func TestRootRedirectsToTheOnlyGame(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -173,6 +178,7 @@ func TestRootRedirectsToTheOnlyGame(t *testing.T) {
 }
 
 func TestRootShowsPickerWithTwoGames(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -196,6 +202,7 @@ func TestRootShowsPickerWithTwoGames(t *testing.T) {
 }
 
 func TestRootShowsPickerWithNoGames(t *testing.T) {
+	t.Parallel()
 	// A brand-new user with no memberships yet must not error out on /;
 	// the picker (or its empty state) is what renders, not a crash on
 	// games[0] with no elements.
@@ -215,6 +222,7 @@ func TestRootShowsPickerWithNoGames(t *testing.T) {
 }
 
 func TestRootRedirectsAnonymousToLogin(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -229,6 +237,7 @@ func TestRootRedirectsAnonymousToLogin(t *testing.T) {
 }
 
 func TestTokenCreationRequiresMembership(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -255,6 +264,7 @@ func TestTokenCreationRequiresMembership(t *testing.T) {
 }
 
 func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -319,6 +329,7 @@ func TestTokenIsReturnedOnceOnCreation(t *testing.T) {
 }
 
 func TestViewerCannotCreateToken(t *testing.T) {
+	t.Parallel()
 	// A token grants an agent whatever standing its project binding
 	// carries; letting a read-only viewer mint one would hand out a
 	// credential wider than the viewer's own role.
@@ -346,6 +357,7 @@ func TestViewerCannotCreateToken(t *testing.T) {
 }
 
 func TestViewerCanRevokeToken(t *testing.T) {
+	t.Parallel()
 	// Revocation only ever removes access, so a viewer who can see a
 	// leaked token in the listing may kill it — unlike creation, which
 	// grants standing the viewer does not have.
@@ -406,6 +418,7 @@ func TestViewerCanRevokeToken(t *testing.T) {
 // game probe whether some other token id belongs to a different project.
 // This must never be "fixed" into a lookup-then-404.
 func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -436,6 +449,7 @@ func TestRevokingAnUnknownOrForeignTokenIsANoop(t *testing.T) {
 }
 
 func TestTokenEndpointsRejectTokenCaller(t *testing.T) {
+	t.Parallel()
 	// Managing credentials — minting, listing or revoking tokens — is a
 	// human action; an agent authenticating with a token is not entitled
 	// to manage other tokens in its own project, itself included.
@@ -460,6 +474,7 @@ func TestTokenEndpointsRejectTokenCaller(t *testing.T) {
 }
 
 func TestListMembersRequiresMembership(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -484,6 +499,7 @@ func TestListMembersRequiresMembership(t *testing.T) {
 }
 
 func TestListMembersNeverLeaksEmail(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -505,6 +521,7 @@ func TestListMembersNeverLeaksEmail(t *testing.T) {
 }
 
 func TestOnlyOwnerCanChangeRole(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -550,6 +567,7 @@ func TestOnlyOwnerCanChangeRole(t *testing.T) {
 // empty body would leave the owner who just demoted someone with no way
 // to know which of that person's agents just stopped working.
 func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -586,6 +604,7 @@ func TestChangeRoleDemotionReportsRevokedTokenLabels(t *testing.T) {
 }
 
 func TestChangeRoleOnSoleOwnerReportsLastOwner(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -615,6 +634,7 @@ func TestChangeRoleOnSoleOwnerReportsLastOwner(t *testing.T) {
 }
 
 func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -671,6 +691,7 @@ func TestMemberCanRemoveSelfButNotSoleOwner(t *testing.T) {
 // game must see which agents just stopped working, by label, not just a
 // bare success.
 func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -714,6 +735,7 @@ func TestRemoveMemberReportsRevokedTokenLabels(t *testing.T) {
 }
 
 func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -740,6 +762,7 @@ func TestNonOwnerCannotRemoveAnotherMember(t *testing.T) {
 }
 
 func TestTokenCallerCannotManageMembers(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -778,6 +801,7 @@ func TestTokenCallerCannotManageMembers(t *testing.T) {
 // the same connection string testutil.NewPool already migrated — is
 // closed before the request, so only the RoleOf lookup fails.
 func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)
@@ -819,6 +843,7 @@ func TestProjectScopeLookupFailureIsInternalErrorNotForbidden(t *testing.T) {
 // reported back, unlike handleRemoveMember and handleChangeRole, and
 // for why ?confirm is required at all.
 func TestOwnerCanDeleteGame(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -846,6 +871,7 @@ func TestOwnerCanDeleteGame(t *testing.T) {
 // mismatched one are both refused with 400, and neither refusal deletes
 // anything.
 func TestDeleteGameRequiresMatchingConfirmSlug(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -883,6 +909,7 @@ func TestDeleteGameRequiresMatchingConfirmSlug(t *testing.T) {
 // non-owner: 403, not 404, since a member already has standing to know
 // the game exists.
 func TestNonOwnerCannotDeleteGame(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -913,6 +940,7 @@ func TestNonOwnerCannotDeleteGame(t *testing.T) {
 // boundary applies here too: an agent's token is scoped to a game's
 // content, never to deciding whether the game itself keeps existing.
 func TestTokenCallerCannotDeleteGame(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -941,6 +969,7 @@ func TestTokenCallerCannotDeleteGame(t *testing.T) {
 // AND a fabricated id, comparing both status and body: a status-only
 // comparison would miss a leak hiding in the message text alone.
 func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -998,6 +1027,7 @@ func TestNonMemberCannotDeleteGameAndLearnsNothing(t *testing.T) {
 // a deleted game cannot tell deletion apart from ordinary revocation:
 // the same 401 either way, once the token row itself is gone.
 func TestDeletingGameRevokesItsTokens(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -1039,6 +1069,7 @@ func TestDeletingGameRevokesItsTokens(t *testing.T) {
 // already-departed caller sees, not a 404 or 500 that would distinguish
 // "used to exist" from "never did".
 func TestDeletingGameTwiceIsIdempotent(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -1101,6 +1132,7 @@ func patchGame(t *testing.T, srv http.Handler, cookie *http.Cookie, slug, body s
 // stops resolving**. Nothing forwards it, by decision — see
 // projects.Update — so this asserts the break rather than tolerating it.
 func TestUpdateGameChangesTheNameAndTheAddress(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -1137,6 +1169,7 @@ func TestUpdateGameChangesTheNameAndTheAddress(t *testing.T) {
 // refuses one. The person named it, so the refusal is about something
 // they know.
 func TestUpdateGameRefusesATakenAddress(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -1162,6 +1195,7 @@ func TestUpdateGameRefusesATakenAddress(t *testing.T) {
 // address breaks every link into it for everybody, which is the owner's
 // call in the same way deleting it is.
 func TestOnlyAnOwnerChangesAGamesSettings(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 

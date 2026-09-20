@@ -48,6 +48,7 @@ import (
 // lie one layer up — the caller is told its write succeeded *as sent*,
 // and it was not.
 func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	ctx := context.Background()
 
@@ -133,6 +134,7 @@ func TestNoSurfaceAcceptsALayoutSeed(t *testing.T) {
 // be a property of the input or of the output, so an agent inspecting
 // the tool rather than reading its prose learns the same thing.
 func TestTheViewToolDescriptionNamesNoSeed(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	ctx := context.Background()
 	httpSrv := httptest.NewServer(f.srv)
@@ -206,6 +208,7 @@ func schemaHasProperty(t *testing.T, schema any, name string) bool {
 // taken and then reversed, and the two test names in this file and in
 // internal/views spell the thing they are about.
 func TestNoSourceFileNamesALayoutSeed(t *testing.T) {
+	t.Parallel()
 	root := seedGrepRoot(t)
 	var offenders []string
 	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
@@ -310,6 +313,7 @@ func seedGrepRoot(t *testing.T) string {
 // encoding/json gives no type to, so this is also the test that would
 // see that parse break.
 func TestARequestBodyWithAnUnknownMemberIsRefusedByName(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 
 	rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{

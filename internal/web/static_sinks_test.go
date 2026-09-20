@@ -119,6 +119,7 @@ func scanForHTMLSinks(t *testing.T) (scanned []string, offences []string) {
 // asset under internal/web/static rather than naming any of them, so a
 // file added tomorrow is scanned on the day it lands.
 func TestNoStaticAssetWritesRawHTMLOutsideTheOneAllowedSink(t *testing.T) {
+	t.Parallel()
 	scanned, offences := scanForHTMLSinks(t)
 
 	// A guard that silently scanned nothing would pass forever. Four
@@ -146,6 +147,7 @@ func TestNoStaticAssetWritesRawHTMLOutsideTheOneAllowedSink(t *testing.T) {
 // the skipped subtree was not empty (a skip that skips nothing would
 // make the second assertion pass for the wrong reason).
 func TestTheSinkPerimeterCoversEveryOwnModule(t *testing.T) {
+	t.Parallel()
 	scanned, _ := scanForHTMLSinks(t)
 	seen := map[string]bool{}
 	for _, path := range scanned {

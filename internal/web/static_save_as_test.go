@@ -64,6 +64,7 @@ func readModule(t *testing.T, path string) string {
 // source read is the only join available and it is a real one: it fails
 // on a rule changed there and left alone here.
 func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
+	t.Parallel()
 	module := readModule(t, saveAsModule)
 	keys := readModule(t, "../metamodel/keys.go")
 
@@ -129,6 +130,7 @@ func TestTheSaveAsDialogStatesTheKeyRuleTheServerWillApply(t *testing.T) {
 // all would be refused as a conflict with a sentence about versions that
 // a designer who is creating a view cannot act on.
 func TestTheSaveAsDialogClaimsTheKeyIsFree(t *testing.T) {
+	t.Parallel()
 	client := readModule(t, "static/client.js")
 	viewsSource := readModule(t, "../views/views.go")
 
@@ -175,6 +177,7 @@ func TestTheSaveAsDialogClaimsTheKeyIsFree(t *testing.T) {
 // *where the hole is*, because a stub has no shadow DOM and no slot.
 // That is this test's half.
 func TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper(t *testing.T) {
+	t.Parallel()
 	shell := readModule(t, "static/view.html")
 	page := readModule(t, "static/pages/view.js")
 
@@ -209,6 +212,7 @@ func TestTheSaveAsDialogIsMountedOutsideTheDrawingsHiddenWrapper(t *testing.T) {
 // as nobody counted, and a route serving a name the catalogue does not
 // hold would offer a designer a renderer views.upsert refuses.
 func TestTheRendererCatalogueRouteServesTheWholeTable(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	rec := f.call(t, f.cookie, http.MethodGet, f.path("/views/renderers"), nil)
 	if rec.Code != http.StatusOK {

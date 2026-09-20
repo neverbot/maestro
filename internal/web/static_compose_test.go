@@ -18,6 +18,7 @@ import (
 // a validate diagnostic land on the line of the sentence that caused it
 // rather than in a box at the bottom of the page.
 func TestComposingAQuery(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/compose_test.mjs")
 }
 
@@ -38,6 +39,7 @@ func TestComposingAQuery(t *testing.T) {
 // Resolution needs a game, and what is being checked here is the
 // emitter's output rather than the vocabulary the pickers supplied.
 func TestEveryDocumentTheBuilderEmitsParses(t *testing.T) {
+	t.Parallel()
 	out, err := exec.Command("node", "jstest/compose_test.mjs", "--emit").Output()
 	if err != nil {
 		t.Fatalf("running the emitter harness: %v", err)

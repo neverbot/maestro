@@ -123,6 +123,7 @@ func componentFiles(t *testing.T) []string {
 }
 
 func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
+	t.Parallel()
 	for _, path := range componentFiles(t) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -221,6 +222,7 @@ func TestEveryComponentSpeaksOnlyItsModelsWords(t *testing.T) {
 // nothing to read in it, and naming it here as a component would be
 // claiming an argument it does not need.
 func TestTheComponentScanReadsEveryComponent(t *testing.T) {
+	t.Parallel()
 	found := componentFiles(t)
 	want := []string{
 		filepath.Join("static", "components", "mst-canvas.js"),
@@ -248,6 +250,7 @@ func TestTheComponentScanReadsEveryComponent(t *testing.T) {
 // failure mode this repository has hit twice: a guard that audits
 // itself.
 func TestTheTemplateTextScanReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	speaks := "const label = html`<div class=\"footer\">complete picture</div>`;"
 	if got := scanTemplateText(speaks); len(got) != 1 || got[0] != "complete picture" {
 		t.Errorf("the scan missed a hard-coded sentence: %q", got)
@@ -310,6 +313,7 @@ var hidesASlot = regexp.MustCompile("(?s)aria-hidden=\"true\"[^`]*<slot")
 // slot again. A slot's contents are somebody else's, and hiding them is
 // a decision about elements this file has never seen.
 func TestNoComponentHidesASlotFromAssistiveTechnology(t *testing.T) {
+	t.Parallel()
 	scanned := 0
 	for _, path := range componentFiles(t) {
 		raw, err := os.ReadFile(path)
@@ -336,6 +340,7 @@ func TestNoComponentHidesASlotFromAssistiveTechnology(t *testing.T) {
 // both directions: a pattern that matched nothing would pass the test
 // above on the very source it was written against.
 func TestTheSlotHidingScanReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	for name, planted := range map[string]string{
 		"the shape that shipped": "return html`<div class=\"canvas\" aria-hidden=\"true\"><slot></slot></div>`;",
 		"the attribute last":     "html`<div><span aria-hidden=\"true\"></span><slot></slot></div>`",

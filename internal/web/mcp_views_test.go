@@ -148,6 +148,7 @@ func int32Of(v int32) *int32 { return &v }
 // All of them are set to non-default values, because a field that takes
 // the default cannot tell a stored value from a hard-wired one.
 func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 
@@ -215,6 +216,7 @@ func TestAViewIsReadBackThroughTheToolsWithEveryFieldItWasSavedWith(t *testing.T
 // fixture where every node is pinned cannot tell a stored flag from a
 // hard-wired one.
 func TestPositionsAreWrittenAndReadBackThroughTheTools(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", questsQuery, "graph")
@@ -307,6 +309,7 @@ func TestPositionsAreWrittenAndReadBackThroughTheTools(t *testing.T) {
 // a second projection of those columns — the domain's own test cannot
 // see it.
 func TestAnAssetIsReadBackThroughTheToolWithItsDecodedShape(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	id := f.upload(t, f.game)
 
@@ -344,6 +347,7 @@ func TestAnAssetIsReadBackThroughTheToolWithItsDecodedShape(t *testing.T) {
 // Run resolves one that arrived in the call — and a scope check on one
 // path says nothing about the other.
 func TestEveryViewsToolRefusesAnotherGamesToken(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	// A view in the *other* game, so every call below names something
@@ -450,6 +454,7 @@ func TestEveryViewsToolRefusesAnotherGamesToken(t *testing.T) {
 // of MCPDeps.Views: a server built without one still starts, and
 // tools/list simply does not carry the ten.
 func TestTheViewsToolsAreAbsentWithoutAViewsService(t *testing.T) {
+	t.Parallel()
 	srv := web.NewServer(web.Options{
 		Version: "test", Config: testConfig(),
 		Identity: identity.New(nil, config.Config{}), Projects: projects.New(nil),
@@ -519,6 +524,7 @@ func positionsOf(t *testing.T, run map[string]any) []map[string]any {
 // the caller did not ask for and say nothing, which is the silent-wrong-
 // answer failure the whole sub-project is built to refuse.
 func TestARunNamesEitherASavedViewOrAQueryAndNeverBoth(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", questsQuery, "graph")
@@ -554,6 +560,7 @@ func TestARunNamesEitherASavedViewOrAQueryAndNeverBoth(t *testing.T) {
 // the two apart: absent means an inline query, empty means a saved view
 // nobody has arranged yet.
 func TestAnInlineRunCarriesNoPositionsMemberAndASavedOneAlwaysDoes(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", questsQuery, "graph")
@@ -602,6 +609,7 @@ func TestAnInlineRunCarriesNoPositionsMemberAndASavedOneAlwaysDoes(t *testing.T)
 // internal/views for the renderer text; the tools' own prose is written
 // here and had never been swept.
 func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	descriptions := f.srv.ToolDescriptionsForTest()
 
@@ -733,6 +741,7 @@ func TestTheViewsToolDescriptionsAreGeneratedRatherThanRestated(t *testing.T) {
 // unmarshalled into is allocated on the way, so that fixture cannot see
 // this at all.
 func TestAViewWithNoRendererParametersReadsBackAsAnObjectAndNotNull(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "plain", questsQuery, "graph")
@@ -758,6 +767,7 @@ func TestAViewWithNoRendererParametersReadsBackAsAnObjectAndNotNull(t *testing.T
 // whether or not anything computes it, so a fixture with no stale view
 // in it cannot tell a working flag from a hard-wired false.
 func TestTheListingFlagsAStaleViewAndNotAHealthyOne(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "healthy", questsQuery, "graph")
@@ -813,6 +823,7 @@ func TestTheListingFlagsAStaleViewAndNotAHealthyOne(t *testing.T) {
 // refused — so an answer cannot pass here by being empty, and the
 // policy is what makes the difference rather than the query.
 func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", `{"v":1,"from":[{"type":"quest","as":"q"}],
@@ -868,6 +879,7 @@ func TestARunCarriesItsStalePolicyAndReportsWhatItPruned(t *testing.T) {
 // control — a test asserting only the presence would pass against a
 // transport that hard-wired the flag on.
 func TestARunCarriesItsIncludeFieldsFlag(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", questsQuery, "graph")
@@ -918,6 +930,7 @@ func TestARunCarriesItsIncludeFieldsFlag(t *testing.T) {
 // which is what makes this a test of the binding rather than of the
 // catalogue.
 func TestValidateJudgesTheRendererAndTheParametersTheCallSent(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 
@@ -967,6 +980,7 @@ func TestValidateJudgesTheRendererAndTheParametersTheCallSent(t *testing.T) {
 // that this surface hands it the caller's own, so an upsert by an agent
 // was free to land with no attribution at all.
 func TestAnUpsertRecordsTheCallerWhoMadeIt(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", questsQuery, "graph")
@@ -997,6 +1011,7 @@ func TestAnUpsertRecordsTheCallerWhoMadeIt(t *testing.T) {
 // the game and the filter it was issued for" is a wire claim with no
 // wire test.
 func TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "one", questsQuery, "graph")
@@ -1058,6 +1073,7 @@ func TestTheViewListingFiltersByRendererAndPagesOnBothSurfaces(t *testing.T) {
 // have been handed the whole listing, and the next_cursor it sent back
 // would have been ignored in silence.
 func TestTheAssetListingToolPagesWithItsOwnCursor(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	all := map[string]bool{}
@@ -1113,6 +1129,7 @@ func TestTheAssetListingToolPagesWithItsOwnCursor(t *testing.T) {
 // false left the web suite green, so an agent could not have told a
 // deletion from a refusal.
 func TestRemovingAViewSaysSoAndThenTheViewIsGone(t *testing.T) {
+	t.Parallel()
 	f := newViewsFixture(t)
 	ctx := context.Background()
 	f.save(t, "route", questsQuery, "graph")

@@ -75,6 +75,7 @@ var (
 // mst-ground shipped in: a file input reporting `border: 0px none` on a
 // screen whose stylesheet had said otherwise for the whole build.
 func TestEveryShadowRootAdoptsTheSharedControls(t *testing.T) {
+	t.Parallel()
 	var missing []string
 	for name, body := range componentSources(t) {
 		if name == sharedControlSheet {
@@ -111,6 +112,7 @@ var bareControlRuleRE = regexp.MustCompile(`(?m)^\s*(button|input|select|textare
 // margins, which is how a control ends up nearly right on one screen and
 // bevelled on the next.
 func TestNoComponentRestatesTheControlVocabulary(t *testing.T) {
+	t.Parallel()
 	for name, body := range componentSources(t) {
 		if name == sharedControlSheet {
 			continue
@@ -130,6 +132,7 @@ func TestNoComponentRestatesTheControlVocabulary(t *testing.T) {
 // that now dresses every control in the product. A literal here would be
 // a colour with no theme and no guard.
 func TestTheSharedControlSheetSpellsNoColour(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile(filepath.Join(".", componentDir, sharedControlSheet))
 	if err != nil {
 		t.Fatalf("read %s: %v", sharedControlSheet, err)
@@ -153,6 +156,7 @@ func TestTheSharedControlSheetSpellsNoColour(t *testing.T) {
 // docs/design.md rather than repeating it — a guard that hard-coded
 // 0.95rem would go on passing the day the system says something else.
 func TestTheProseRoleIsSetAtTheSizeTheSystemStates(t *testing.T) {
+	t.Parallel()
 	system, err := os.ReadFile(filepath.Join("..", "..", "docs", "design.md"))
 	if err != nil {
 		t.Fatalf("read docs/design.md: %v", err)

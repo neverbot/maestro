@@ -118,6 +118,7 @@ func newMetamodelFixture(t *testing.T) metamodelFixture {
 }
 
 func TestMCPTypesUpsertAndList(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -167,6 +168,7 @@ func TestMCPTypesUpsertAndList(t *testing.T) {
 // rather than an arm here; that is exactly why this asserts the code an
 // agent reads rather than the Go type.
 func TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -197,6 +199,7 @@ func TestAVersionClaimAgainstAMissingRowIsNotFoundOnTheWire(t *testing.T) {
 // will now meet not_found on exactly the rows a designer removed. A rule
 // an agent cannot read is a rule an agent trips over.
 func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	descriptions := f.srv.ToolDescriptionsForTest()
 	for _, tool := range []string{
@@ -229,6 +232,7 @@ func TestEveryToolThatTakesAVersionSaysWhatAClaimMeans(t *testing.T) {
 // the same diagnostic and must not have to find the explanation under
 // only one of the two names.
 func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	descriptions := f.srv.ToolDescriptionsForTest()
 	for _, tool := range []string{"types.rename", "relation_types.rename"} {
@@ -263,6 +267,7 @@ func TestTheRenameToolsSayWhatARenameDoesNotDo(t *testing.T) {
 // most recent additions and were added here in the same change that
 // added them to the surface, which is what this table is for.
 func TestMCPToolsRefuseAnotherGame(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -402,6 +407,7 @@ func TestMCPToolsRefuseAnotherGame(t *testing.T) {
 }
 
 func TestMCPEntitiesUpsertBulkReportsFailuresAndWhatLanded(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -438,6 +444,7 @@ func TestMCPEntitiesUpsertBulkReportsFailuresAndWhatLanded(t *testing.T) {
 // writes. metamodel.EntityInput carries an Actor; EntityItemInput does
 // not, and actorOf builds one from the authenticated caller.
 func TestMCPEntitiesUpsertRecordsTheCallersOwnToken(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -469,6 +476,7 @@ func TestMCPEntitiesUpsertRecordsTheCallersOwnToken(t *testing.T) {
 // an internal error — the rule the metamodel applies to every other
 // caller-supplied value.
 func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -532,6 +540,7 @@ func TestMCPMalformedIDIsTheCallersOwnArgument(t *testing.T) {
 // validation against the reflected Go types, output validation against
 // the hand-written schemas, and JSON marshalling of every uuid.
 func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -694,6 +703,7 @@ func TestMCPMetamodelToolsAreServedOverTheRealTransport(t *testing.T) {
 // vocabulary survives the transport: an agent reads a code, not prose,
 // and each of these has a different recovery.
 func TestMCPMetamodelErrorsCarryTheirOwnCode(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -829,6 +839,7 @@ func callOK(t *testing.T, session *mcp.ClientSession, name string, args map[stri
 // refusal is the right call; this test pins that the schema now says so
 // too, and that omitting the field cannot produce a listing.
 func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -970,6 +981,7 @@ func TestTheTraversalPagesAndItsDirectionIsRequiredOnTheWire(t *testing.T) {
 // name_match values on the wire ever disagree — either a hit marked
 // false sorting before one marked true, or the reverse.
 func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -1054,6 +1066,7 @@ func TestMCPSearchNameMatchAgreesWithTheOrderItExplains(t *testing.T) {
 // should see it — rather than discovering it in another package's
 // golden file, or not at all.
 func TestTheDomainTypesOnTheWireCarryExactlyTheseKeys(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		value any
@@ -1165,6 +1178,7 @@ func seedOneEdge(t *testing.T, f metamodelFixture) (source, target uuid.UUID) {
 // (type_key, key, name) ref each endpoint was written with, alongside
 // the ids a removal still addresses them by.
 func TestRelationsListNamesBothEndpointsByRef(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	sourceID, targetID := seedOneEdge(t, f)
@@ -1197,6 +1211,7 @@ func TestRelationsListNamesBothEndpointsByRef(t *testing.T) {
 // does not mention. The output schemas here are hand-written, so nothing
 // but a test connects them to the struct they describe.
 func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -1305,6 +1320,7 @@ func TestTheServedRelationsListSchemaAdvertisesTheEndpointRefs(t *testing.T) {
 // has just narrowed a schema has to be able to ask what it broke, on
 // both tables, with the same argument name.
 func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedOneEdge(t, f)
@@ -1380,6 +1396,7 @@ func TestRelationsListFindsTheEdgesASchemaEditBroke(t *testing.T) {
 // cannot show an edge's values, which is what the views sub-project
 // renders from.
 func TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	sourceID, targetID := seedOneEdge(t, f)
@@ -1449,6 +1466,7 @@ func TestAnEdgesFieldsAreReadableOnBothToolsThatReturnAnEdge(t *testing.T) {
 // tool passes the domain's own distinction through rather than
 // flattening all of them onto "not found".
 func TestRelationsGetNamesWhichPieceOfAnAddressIsWrong(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedOneEdge(t, f)
@@ -1510,6 +1528,7 @@ func TestRelationsGetNamesWhichPieceOfAnAddressIsWrong(t *testing.T) {
 // describe — and relations.list's description claimed an agent could
 // read an edge's own fields through it a whole task before it could.
 func TestTheServedEdgeSchemasAdvertiseAnEdgesFields(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()

@@ -19,5 +19,6 @@ import "testing"
 // that was meant to prove it. A Go test over the API would have passed
 // through all three.
 func TestTheAnalysisReportsSentences(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/analysis_report_test.mjs")
 }

@@ -87,6 +87,7 @@ func openTokenStream(t *testing.T, ts *httptest.Server, gameSlug, token string) 
 // for the concurrent-reordering hazard that forces a client to refetch
 // instead of trusting a role carried on the wire.
 func TestChangeRolePublishesMemberUpdated(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -137,6 +138,7 @@ func TestChangeRolePublishesMemberUpdated(t *testing.T) {
 // /api/games/{game}/members/{user}: MinRole empty, same reasoning as
 // eventMemberUpdated.
 func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -187,6 +189,7 @@ func TestRemoveMemberPublishesMemberRemoved(t *testing.T) {
 // comment (publish.go) for why it carries no payload beyond the signal
 // itself and why MinRole is empty.
 func TestDeleteGamePublishesGameDeleted(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -231,6 +234,7 @@ func TestDeleteGamePublishesGameDeleted(t *testing.T) {
 // this test triggers afterward, not token.minted — a filtered event, not
 // merely a delayed one.
 func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -293,6 +297,7 @@ func TestCreateTokenPublishesTokenMintedAboveViewerOnly(t *testing.T) {
 // TestCreateTokenPublishesTokenMintedAboveViewerOnly's revoke
 // counterpart.
 func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -340,6 +345,7 @@ func TestRevokeTokenPublishesTokenRevokedAboveViewerOnly(t *testing.T) {
 // (below owner) never receives it, matching handleListProjectInvites'
 // own owner-only gate on the REST read side.
 func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -413,6 +419,7 @@ func TestCreateProjectInvitePublishesInviteCreatedOwnerOnly(t *testing.T) {
 // stream's first actually-received event is the ungated game.deleted
 // that follows — not delayed, filtered.
 func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -500,6 +507,7 @@ func TestTokenCallerStreamNeverReceivesHumanOnlyEvents(t *testing.T) {
 // counterpart — eventInviteRevoked had no test at all before this task's
 // second review round.
 func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -576,6 +584,7 @@ func TestRevokeProjectInvitePublishesInviteRevoked(t *testing.T) {
 // invite) once identity.RedeemInvite reports the project id it granted
 // membership in.
 func TestRedeemInviteViaRegisterPublishesMemberUpdatedAndInviteRedeemed(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 

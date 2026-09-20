@@ -27,6 +27,7 @@ func stubOptions(version string) Options {
 }
 
 func TestHealthz(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions(""))
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -48,6 +49,7 @@ func TestHealthz(t *testing.T) {
 // DB-backed identity service and lives in auth_test.go's
 // TestVersionReturnsBuildVersionToAnAuthenticatedCaller instead.
 func TestVersionRequiresAuthentication(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test-build"))
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
 	rec := httptest.NewRecorder()
@@ -59,6 +61,7 @@ func TestVersionRequiresAuthentication(t *testing.T) {
 }
 
 func TestNotFound(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions(""))
 	req := httptest.NewRequest(http.MethodGet, "/nope", nil)
 	rec := httptest.NewRecorder()
@@ -70,6 +73,7 @@ func TestNotFound(t *testing.T) {
 }
 
 func TestHealthzMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions(""))
 	req := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -85,6 +89,7 @@ func TestHealthzMethodNotAllowed(t *testing.T) {
 // successfully right up until the first request that dereferences a nil
 // *identity.Service.
 func TestNewServerPanicsWithoutIdentity(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Fatal("NewServer did not panic with a nil Identity service")
@@ -94,6 +99,7 @@ func TestNewServerPanicsWithoutIdentity(t *testing.T) {
 }
 
 func TestNewServerPanicsWithoutProjects(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Fatal("NewServer did not panic with a nil Projects service")
@@ -113,6 +119,7 @@ func TestNewServerPanicsWithoutProjects(t *testing.T) {
 // registerProjectRoute — turning "someone might forget" into a failing
 // test instead of a comment nobody re-reads.
 func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
+	t.Parallel()
 	s := NewServer(stubOptions("test"))
 
 	if len(s.projectScopedPatterns) == 0 {
@@ -152,6 +159,7 @@ func TestEveryGameScopedRouteGoesThroughRequireProject(t *testing.T) {
 // not game content is added to notContent here, deliberately, in the
 // same commit that registers it.
 func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
+	t.Parallel()
 	s := NewServer(stubOptions("test"))
 
 	content := map[string]bool{}
@@ -210,6 +218,7 @@ func TestEveryContentRouteIsRegisteredAsContent(t *testing.T) {
 // refuses direct registration — buys the same property at the price of
 // indirection in the thing this file is trying to keep readable.
 func TestOnlyRouteTouchesTheMux(t *testing.T) {
+	t.Parallel()
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read package directory: %v", err)
@@ -251,6 +260,7 @@ func TestOnlyRouteTouchesTheMux(t *testing.T) {
 // the default arm is unreachable through a request — which is exactly
 // why it needs pinning here rather than through one.
 func TestStatusForCodeDefaultsToUnprocessable(t *testing.T) {
+	t.Parallel()
 	for code, want := range map[string]int{
 		errCodeInvalidInput:    http.StatusBadRequest,
 		errCodeScopeViolation:  http.StatusForbidden,

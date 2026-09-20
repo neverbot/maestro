@@ -41,6 +41,7 @@ func loginAsAdmin(t *testing.T, adjust func(*config.Config)) (*web.Server, *iden
 // still mint a usable invite for its second human, with no game needing
 // to exist first.
 func TestAdminCanCreateAccountOnlyInvite(t *testing.T) {
+	t.Parallel()
 	srv, _, _, cookie := loginAsAdmin(t, nil)
 
 	body := strings.NewReader(`{"email":"newcomer@example.test"}`)
@@ -111,6 +112,7 @@ func TestAdminCanCreateAccountOnlyInvite(t *testing.T) {
 // ordinary member, even an owner of their own game, has no standing over
 // the instance-wide invite surface.
 func TestNonAdminCannotCreateAccountOnlyInvite(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"}); err != nil {
@@ -134,6 +136,7 @@ func TestNonAdminCannotCreateAccountOnlyInvite(t *testing.T) {
 // session and has no business anywhere on this surface, admin-minted or
 // not.
 func TestTokenCallerCannotManageInstanceInvites(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -163,6 +166,7 @@ func TestTokenCallerCannotManageInstanceInvites(t *testing.T) {
 // admin who has no membership in some other game must never see that
 // game's pending invites through the instance-wide listing.
 func TestInstanceInviteListingExcludesProjectBound(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, cookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
 	admin, err := ids.Authenticate(ctx, "admin@example.test", "password12345")
@@ -228,6 +232,7 @@ func TestInstanceInviteListingExcludesProjectBound(t *testing.T) {
 // TestRevokeInviteIgnoresProjectBound: DELETE /api/invites/{id} must be a
 // no-op against a project-bound invite's id, never actually revoking it.
 func TestRevokeInstanceInviteIgnoresProjectBound(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, cookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
 	other, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -257,6 +262,7 @@ func TestRevokeInstanceInviteIgnoresProjectBound(t *testing.T) {
 // surface end to end: an owner mints an invite bound to their own game
 // and a role, and it appears in that game's own listing.
 func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -349,6 +355,7 @@ func TestOwnerCanCreateAndListProjectInvite(t *testing.T) {
 // also has the power to grant owner and this package gates the whole
 // endpoint, not a per-request role check.
 func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -394,6 +401,7 @@ func TestEditorCannotCreateOrListOrRevokeProjectInvite(t *testing.T) {
 // an owner may mint an invite that grants owner, since only an owner ever
 // reaches this handler at all.
 func TestOwnerCanInviteAsOwner(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -427,6 +435,7 @@ func TestOwnerCanInviteAsOwner(t *testing.T) {
 // ever pushes expires_at into the past, so without an explicit flag the
 // two are indistinguishable in the listing until the next prune.
 func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	founder, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "founder@example.test", DisplayName: "Founder", Password: "password12345"})
@@ -535,6 +544,7 @@ func TestProjectInviteListingAttributesCreatorAndFlagsRevoked(t *testing.T) {
 // not exist, or belongs to a different game, is a silent 204, never a
 // 404 that would let an owner of one game probe another's invite ids.
 func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -574,6 +584,7 @@ func TestRevokingAnUnknownOrForeignProjectInviteIsANoop(t *testing.T) {
 // the GET, which left create and revoke's own non-member handling
 // unpinned.
 func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -621,6 +632,7 @@ func TestNonMemberCannotSeeOrTouchProjectInvites(t *testing.T) {
 // TestProjectInviteCreationRejectsInvalidRole exercises
 // identity.ErrInviteRequestInvalid's HTTP mapping.
 func TestProjectInviteCreationRejectsInvalidRole(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})

@@ -81,6 +81,7 @@ func requireDomainFieldError(t *testing.T, err error, wantPath, wantMessage stri
 // direct-function test of the domain cannot see: the empty slices on the
 // wire, and the refusals arriving as MCP errors.
 func TestARepairPassAnswersOverTheToolSurface(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedRepairable(t, f.deps.Metamodel, f.game)
@@ -150,6 +151,7 @@ func TestARepairPassAnswersOverTheToolSurface(t *testing.T) {
 // one core each (entitiesRepair, relationsRepair), and a mirror that was
 // never called is a mirror that compiles.
 func TestTheRESTMirrorRepairsToo(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	seedRepairable(t, f.mm, f.game)
 
@@ -196,6 +198,7 @@ func TestTheRESTMirrorRepairsToo(t *testing.T) {
 // wire. A wire type that grows a field silently is a decision nobody
 // made.
 func TestTheRepairWireTypesCarryExactlyTheseKeys(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		value any
@@ -243,6 +246,7 @@ func TestTheRepairWireTypesCarryExactlyTheseKeys(t *testing.T) {
 // a URL is told the same thing, as its own argument and not as a slow
 // success.
 func TestAnOverLargeBatchIsRefusedOnBothSurfaces(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 

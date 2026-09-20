@@ -287,6 +287,7 @@ func TestTheInstallDescriptorURLIsFetchable(t *testing.T) {
 // mechanism; two fields carrying one fact from two sources is the defect
 // this repository spent a sub-project removing.
 func TestWhoamiReportsTheVersionSkillInstallServes(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()

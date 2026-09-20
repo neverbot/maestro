@@ -90,6 +90,7 @@ func scanForUnsafeDirectives(t *testing.T) (scanned []string, offences []string)
 }
 
 func TestNoOwnModuleReachesForARawHTMLDirective(t *testing.T) {
+	t.Parallel()
 	scanned, offences := scanForUnsafeDirectives(t)
 	if len(scanned) == 0 {
 		t.Fatal("scanned no module under internal/web/static: a walk that reads nothing guards nothing")
@@ -111,6 +112,7 @@ func TestNoOwnModuleReachesForARawHTMLDirective(t *testing.T) {
 // which matters because this file's own doc comment names every
 // spelling it looks for, and mst-twin.js's names the property.
 func TestTheRawDirectiveScanReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	planted := `import { unsafeHTML } from "lit/directives/unsafe-html.js";`
 	if !unsafeDirectiveRE.MatchString(planted) {
 		t.Errorf("the scan missed a planted directive import: %q", planted)

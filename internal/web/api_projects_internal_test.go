@@ -38,6 +38,7 @@ import (
 // scope requireProject resolved a moment earlier, against a project
 // deleted in the gap.
 func TestDeleteGameMapsProjectNotFoundTo404(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
 		SessionTTL: 24 * time.Hour,

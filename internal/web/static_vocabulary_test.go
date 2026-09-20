@@ -69,6 +69,7 @@ var emptyStateHole = regexp.MustCompile(`<(\w+)([^>]*\bid="[\w-]*(?:-empty|-miss
 // reading. A hole that is empty on screen is visible; markup that is
 // present and wrong is not.
 func TestEveryEmptyStateIsAHoleAndNotAShape(t *testing.T) {
+	t.Parallel()
 	var offences []string
 	for name, body := range shellSources(t) {
 		for _, found := range emptyStateHole.FindAllStringSubmatch(body, -1) {
@@ -109,6 +110,7 @@ var holeID = regexp.MustCompile(`\bid="([\w-]*(?:-empty|-miss))"`)
 // looks like. This is the project's "a mechanism nothing reads is a lie"
 // rule pointed at its own fix.
 func TestEveryNegativeStateHoleIsFilledBySomething(t *testing.T) {
+	t.Parallel()
 	modules, err := filepath.Glob("static/**/*.js")
 	if err != nil {
 		t.Fatalf("glob modules: %v", err)
@@ -178,6 +180,7 @@ var controlsTheStylesheetMustDress = []string{"button", "input", "select"}
 // It asserts a rule exists, not that it is right: what a control looks
 // like is a design decision and this is a check that one was made.
 func TestTheStylesheetDressesEveryLightDomControl(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "styles.css"))
 	if err != nil {
 		t.Fatalf("read styles.css: %v", err)

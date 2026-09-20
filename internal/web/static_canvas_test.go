@@ -140,6 +140,7 @@ func scanForSVGHazards(t *testing.T) (scanned []string, offences []string) {
 }
 
 func TestNoOwnModuleNamesAScriptableSVGElement(t *testing.T) {
+	t.Parallel()
 	scanned, offences := scanForSVGHazards(t)
 	if len(scanned) == 0 {
 		t.Fatal("scanned no module under internal/web/static: a walk that reads nothing guards nothing")
@@ -160,6 +161,7 @@ func TestNoOwnModuleNamesAScriptableSVGElement(t *testing.T) {
 // emitter is contractually allowed to build, which is the list a future
 // renderer would grow rather than a call it would write.
 func TestTheEmitterContractNamesNoScriptableElement(t *testing.T) {
+	t.Parallel()
 	elements := markElements(t)
 	if len(elements) == 0 {
 		t.Fatal("read no element out of render/scene.js's MARK_ELEMENTS: a contract nobody could read guards nothing")
@@ -202,6 +204,7 @@ func markElements(t *testing.T) []string {
 // on any file at all, which is the failure this repository has hit
 // twice: a guard that audits itself.
 func TestTheSVGHazardScanReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	for name, planted := range map[string]string{
 		"a foreign object":    `const box = doc.createElementNS(SVG_NS, "foreignObject");`,
 		"a script element":    `const s = doc.createElementNS(SVG_NS, "script");`,

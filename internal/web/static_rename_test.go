@@ -17,5 +17,6 @@ import "testing"
 // `answer.ok` as "it landed" showed the typed name over a row the server
 // had kept. Measured in a browser first, then pinned here.
 func TestTheFirstHumanWrite(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/rename_test.mjs")
 }

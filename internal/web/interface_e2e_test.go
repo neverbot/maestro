@@ -313,6 +313,7 @@ const interfaceRepairedQuery = `{
 // re-seed nine times or share state between tests that claim to be
 // independent.
 func TestTheInterfaceEndToEnd(t *testing.T) {
+	t.Parallel()
 	w := newInterfaceWorld(t)
 
 	// --- Step 2: the game page's own data, by slug ---------------------
@@ -672,6 +673,7 @@ func shippedAsset(t *testing.T, name string) string {
 // TestTheRenderersLegendReachesTheFrame closes the first defect: four
 // renderers built a legend and the product drew none of it.
 func TestTheRenderersLegendReachesTheFrame(t *testing.T) {
+	t.Parallel()
 	page := shippedAsset(t, "pages/view.js")
 	if !regexp.MustCompile(`(?m)^\s*legend: scene && scene\.legend`).MatchString(page) {
 		t.Error("pages/view.js does not hand the scene's legend to frameFor: " +
@@ -707,6 +709,7 @@ func TestTheRenderersLegendReachesTheFrame(t *testing.T) {
 // that auto-places a node new to a saved arrangement read
 // `options.layout`, and the call site passed none.
 func TestTheMapRendererIsGivenAComposition(t *testing.T) {
+	t.Parallel()
 	page := shippedAsset(t, "pages/view.js")
 	if !strings.Contains(page, "layout: mapComposition(envelope, options.row, params)") {
 		t.Error("the SCENES entry for `map` no longer passes a composition: without one, " +
@@ -733,6 +736,7 @@ func TestTheMapRendererIsGivenAComposition(t *testing.T) {
 // the harness cannot see — that the listener is on the frame, which
 // survives a redraw, and not on the twin, which does not.
 func TestTheTwinsSelectionHasAListener(t *testing.T) {
+	t.Parallel()
 	page := shippedAsset(t, "pages/view.js")
 	if !strings.Contains(page, "state.frame.addEventListener(SELECT_EVENT,") {
 		t.Error("nothing listens for the twin's mst-select event: a keyboard reader can move through " +

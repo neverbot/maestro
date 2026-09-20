@@ -108,6 +108,7 @@ func isColour(value string) bool {
 // directions: a colour added to :root and forgotten in the dark block
 // fails, and so does the reverse.
 func TestEveryTokenIsDeclaredInBothThemes(t *testing.T) {
+	t.Parallel()
 	light, dark := themeTokens(t)
 
 	var missing []string
@@ -237,6 +238,7 @@ func references(t *testing.T) map[string][]string {
 // in a later task lands with that task; an exemption here would be the
 // hiding place every unread token in the future would use.
 func TestEveryDeclaredTokenIsUsed(t *testing.T) {
+	t.Parallel()
 	light, _ := themeTokens(t)
 	used := references(t)
 
@@ -258,6 +260,7 @@ func TestEveryDeclaredTokenIsUsed(t *testing.T) {
 // nothing declares resolves to nothing at all, silently, in every
 // browser.
 func TestEveryUsedTokenIsDeclared(t *testing.T) {
+	t.Parallel()
 	light, _ := themeTokens(t)
 	var undeclared []string
 	for name, paths := range references(t) {
@@ -289,6 +292,7 @@ func uniq(in []string) []string {
 // wrong reason: prose keeps an orphan token alive, and an example in a
 // doc comment invents a token nothing declares.
 func TestATokenNamedOnlyInACommentIsNotAUse(t *testing.T) {
+	t.Parallel()
 	src := "/* var(--only-in-a-block-comment) */\n" +
 		"// var(--only-in-a-line-comment)\n" +
 		"<!-- var(--only-in-an-html-comment) -->\n" +
@@ -445,6 +449,7 @@ func (th theme) colour(t *testing.T, name string) rgb {
 // interface actually puts on screen to WCAG AA for body text, in both
 // themes. 4.5:1 and not 3:1: none of these five is large text.
 func TestTextContrastMeetsWCAG(t *testing.T) {
+	t.Parallel()
 	pairs := [][2]string{
 		{"--ink", "--paper"},
 		{"--ink", "--ground"},
@@ -481,6 +486,7 @@ func TestTextContrastMeetsWCAG(t *testing.T) {
 // Mutation: lighten any light hue back toward its old value, or point
 // labelOn at --ink, and this fails naming the hue and the ratio.
 func TestANodesNameIsLegibleOnItsOwnFill(t *testing.T) {
+	t.Parallel()
 	for _, th := range themes(t) {
 		label := th.colour(t, "--paper")
 		for i := 1; i <= dataSlots; i++ {
@@ -500,6 +506,7 @@ func TestANodesNameIsLegibleOnItsOwnFill(t *testing.T) {
 // in palette.js with this file left alone would leave a green guard over
 // an unreadable diagram.
 func TestTheLabelOnAHueIsTheTokenTheGuardMeasures(t *testing.T) {
+	t.Parallel()
 	source, err := os.ReadFile("static/palette.js")
 	if err != nil {
 		t.Fatalf("read palette.js: %v", err)
@@ -524,6 +531,7 @@ func TestTheLabelOnAHueIsTheTokenTheGuardMeasures(t *testing.T) {
 // would be lost. Any stroke that carries meaning uses --line-strong and
 // is guarded here.
 func TestMeaningfulOutlinesMeetThreeToOne(t *testing.T) {
+	t.Parallel()
 	for _, th := range themes(t) {
 		names := []string{"--line-strong"}
 		for i := 1; i <= dataSlots; i++ {
@@ -561,6 +569,7 @@ const minSeparation = 20.0
 // deuteranopia; this asserts all 28 pairs, in three vision models, in
 // two themes — 168 distances.
 func TestTheDataHuesSeparateUnderDeuteranopiaAndProtanopia(t *testing.T) {
+	t.Parallel()
 	vision := []struct {
 		name string
 		of   func(rgb) rgb
@@ -596,6 +605,7 @@ func TestTheDataHuesSeparateUnderDeuteranopiaAndProtanopia(t *testing.T) {
 // never be reachable — and the two guards above would each still pass,
 // because each only sees its own half.
 func TestThePaletteModuleAndTheStylesheetAgreeOnEight(t *testing.T) {
+	t.Parallel()
 	light, _ := themeTokens(t)
 	declared := 0
 	for name := range light {
@@ -655,6 +665,7 @@ var diffRuleRE = regexp.MustCompile(`(?s)(\.diff[a-z-]*)\s*\{([^}]*)\}`)
 // paint. `transparent` and `currentColor` are keywords rather than
 // values and are not colours this test has anything to check.
 func TestNoRuleSpellsAColourLiterally(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", stylesheetPath, err)
@@ -695,6 +706,7 @@ func TestNoRuleSpellsAColourLiterally(t *testing.T) {
 // and never with --danger, --focus or one of the eight data hues, so
 // re-admitting a hue there means re-arguing it and not editing a line.
 func TestTheDiffReadsNoChromaticToken(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", stylesheetPath, err)
@@ -737,6 +749,7 @@ func TestTheDiffReadsNoChromaticToken(t *testing.T) {
 // hue here next: 81.4 in normal vision, 23.0 under deuteranopia and 7.4
 // under protanopia, against this floor of 20.
 func TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies(t *testing.T) {
+	t.Parallel()
 	vision := []struct {
 		name string
 		of   func(rgb) rgb
@@ -770,6 +783,7 @@ func TestTheDiffsTwoSpellingsSeparateUnderBothDichromacies(t *testing.T) {
 // and is therefore held to WCAG 1.4.11's 3:1 rather than exempted as
 // decoration: it is one of the four things telling added from removed.
 func TestTheDiffsGroundsAndItsGutterAreLegible(t *testing.T) {
+	t.Parallel()
 	text := [][2]string{
 		{"--ink", "--ground"},   // an added line, on its fill
 		{"--muted", "--paper"},  // a removed line, on the page
@@ -809,6 +823,7 @@ func TestTheDiffsGroundsAndItsGutterAreLegible(t *testing.T) {
 // selector. It is a weak check over a property with no runtime
 // signature, and that is exactly when this repository writes one.
 func TestTheDiffsGutterOutranksItsOwnDefault(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(stylesheetPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", stylesheetPath, err)
@@ -913,6 +928,7 @@ func statedDarkColours(t *testing.T) map[string]string {
 // reader has to check by hand; the colour table is machine-checkable, so
 // it is checked.
 func TestTheDesignDocumentAndTheStylesheetAgreeOnEveryColour(t *testing.T) {
+	t.Parallel()
 	light, dark := themeTokens(t)
 
 	var wrong []string

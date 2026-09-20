@@ -22,6 +22,7 @@ import (
 // never satisfy requireScope for any project id, not even the zero
 // value. MCPGamesGet and MCPGamesList both build on this.
 func TestRequireScopeRefusesASessionCaller(t *testing.T) {
+	t.Parallel()
 	caller := newSessionCaller(uuid.New(), false)
 	if err := requireScope(caller, uuid.New()); err == nil {
 		t.Fatal("requireScope must refuse a session caller, which has no project of its own")
@@ -32,6 +33,7 @@ func TestRequireScopeRefusesASessionCaller(t *testing.T) {
 // protect at the unit level, without a database: an admin's token is
 // still refused for any project other than the one it is bound to.
 func TestRequireScopeIgnoresAdmin(t *testing.T) {
+	t.Parallel()
 	mine, theirs := uuid.New(), uuid.New()
 	caller := newTokenCaller(uuid.New(), true, uuid.New(), mine)
 
@@ -49,6 +51,7 @@ func TestRequireScopeIgnoresAdmin(t *testing.T) {
 // anonymous prober learns nothing about the protocol version or the tool
 // list by hitting this route with no credential.
 func TestMCPHandlerRefusesAnUnauthenticatedRequest(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	rec := httptest.NewRecorder()
@@ -69,6 +72,7 @@ func TestMCPHandlerRefusesAnUnauthenticatedRequest(t *testing.T) {
 // context here, bypassing authenticate entirely, so this test does not
 // need a database to exercise the gate.
 func TestMCPHandlerRefusesASessionCaller(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	caller := newSessionCaller(uuid.New(), false)
 	ctx := context.WithValue(context.Background(), callerKey{}, caller)
@@ -93,6 +97,7 @@ func TestMCPHandlerRefusesASessionCaller(t *testing.T) {
 // database error is still internal_error — because a mapping that
 // answered "retryable" to everything would pass a one-case test.
 func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
+	t.Parallel()
 	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())
 
 	for _, tc := range []struct {
@@ -150,6 +155,7 @@ func TestMCPErrorForReportsContentionAsRetryable(t *testing.T) {
 // (internal/metamodel), because the two switches state the same
 // ordering for the same reason and a change to one is a change to both.
 func TestADomainCodeOutranksAContentionSQLSTATE(t *testing.T) {
+	t.Parallel()
 	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())
 
 	for _, tc := range []struct {

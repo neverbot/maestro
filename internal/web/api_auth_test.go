@@ -41,6 +41,7 @@ func domainOpenConfig(cfg *config.Config) {
 }
 
 func TestLoginSetsSessionCookieAndLogoutClearsIt(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
@@ -97,6 +98,7 @@ func TestLoginSetsSessionCookieAndLogoutClearsIt(t *testing.T) {
 }
 
 func TestLogoutWithoutCookieIsNoContent(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	rec := httptest.NewRecorder()
@@ -107,6 +109,7 @@ func TestLogoutWithoutCookieIsNoContent(t *testing.T) {
 }
 
 func TestLoginWithWrongPasswordIsUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -122,6 +125,7 @@ func TestLoginWithWrongPasswordIsUnauthorized(t *testing.T) {
 }
 
 func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
+	t.Parallel()
 	// A designer typing the wrong password and a designer typing an email
 	// that has no account must be indistinguishable: otherwise the
 	// endpoint becomes an account-enumeration oracle.
@@ -168,6 +172,7 @@ func TestLoginWithUnknownEmailIsUnauthorizedWithSameBody(t *testing.T) {
 // TestDatabaseErrorDuringSessionAuthenticationIsInternalError already
 // uses for the authentication middleware (auth_test.go).
 func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)
@@ -224,6 +229,7 @@ func TestLoginWithDatabaseFailureIsInternalErrorNotUnauthorized(t *testing.T) {
 }
 
 func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {
+	t.Parallel()
 	// Rejected before either rate limiter is ever touched: an empty
 	// normalized key would otherwise give every anonymous probe a single
 	// shared "" bucket to spend against.
@@ -237,6 +243,7 @@ func TestLoginWithEmptyEmailIsBadRequest(t *testing.T) {
 }
 
 func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
@@ -284,6 +291,7 @@ func TestLoginIsRateLimitedPerNormalizedEmail(t *testing.T) {
 }
 
 func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
+	t.Parallel()
 	// The friendly side of loginIPLimiter: a burst of failed attempts
 	// against one account must not, by itself, block a *different*
 	// account logging in correctly from the same source IP — the IP
@@ -327,6 +335,7 @@ func TestLoginIPLimiterDoesNotBlockOtherAccountsUntilExhausted(t *testing.T) {
 }
 
 func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
+	t.Parallel()
 	// The hostile side of the same property: an attacker who knows (or
 	// guesses) several addresses at one studio and spreads failed
 	// attempts across them, staying under each account's own 10/min cap,
@@ -374,6 +383,7 @@ func TestLoginIPLimiterBlocksAcrossAccountsWhenExhausted(t *testing.T) {
 }
 
 func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
@@ -391,6 +401,7 @@ func TestSuccessfulLoginDoesNotSpendRateLimitBudget(t *testing.T) {
 }
 
 func TestRegisterIsRejectedInInviteOnlyMode(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
@@ -402,6 +413,7 @@ func TestRegisterIsRejectedInInviteOnlyMode(t *testing.T) {
 }
 
 func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
@@ -423,6 +435,7 @@ func TestRegisterSucceedsInDomainOpenMode(t *testing.T) {
 }
 
 func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
+	t.Parallel()
 	// The counterpart to TestRegisterSucceedsInDomainOpenMode: with a real
 	// allowlist in place (see domainOpenConfig's own doc comment on why
 	// the earlier version of these tests never actually exercised this),
@@ -445,6 +458,7 @@ func TestRegisterWithOffDomainEmailInDomainOpenModeIsForbidden(t *testing.T) {
 }
 
 func TestRegisterWithTakenEmailInDomainOpenModeIsConflict(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
@@ -462,6 +476,7 @@ func TestRegisterWithTakenEmailInDomainOpenModeIsConflict(t *testing.T) {
 }
 
 func TestRegisterWithInvalidEmailIsUnprocessable(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"a","display_name":"New","password":"password12345"}`)
 	rec := httptest.NewRecorder()
@@ -472,6 +487,7 @@ func TestRegisterWithInvalidEmailIsUnprocessable(t *testing.T) {
 }
 
 func TestRegisterWithEmptyDisplayNameIsUnprocessable(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"","password":"password12345"}`)
 	rec := httptest.NewRecorder()
@@ -489,6 +505,7 @@ func TestRegisterWithEmptyDisplayNameIsUnprocessable(t *testing.T) {
 }
 
 func TestRegisterWithShortPasswordIsUnprocessable(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServerWithConfig(t, domainOpenConfig)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"short"}`)
 	rec := httptest.NewRecorder()
@@ -506,6 +523,7 @@ func TestRegisterWithShortPasswordIsUnprocessable(t *testing.T) {
 }
 
 func TestRegisterWithInviteTokenWinsOverInviteOnlyMode(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	token, _, err := ids.CreateInvite(ctx, identity.InviteRequest{})
@@ -523,6 +541,7 @@ func TestRegisterWithInviteTokenWinsOverInviteOnlyMode(t *testing.T) {
 }
 
 func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
+	t.Parallel()
 	// The invite branch is checked before the mode branch regardless of
 	// which mode is configured: domain_open must not change which branch
 	// runs, only what happens when no token is given at all.
@@ -551,6 +570,7 @@ func TestRegisterWithInviteTokenWinsOverDomainOpenMode(t *testing.T) {
 // mapped to the generic "invite is not valid" — a designer's account
 // could never be granted a second game at all.
 func TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	existing, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "existing@example.test", DisplayName: "Existing", Password: "password12345"})
@@ -611,6 +631,7 @@ func TestRegisterWithInviteTokenAndLiveSessionGrantsExistingAccountMembership(t 
 // not grant membership to whichever account happens to be logged in when
 // the link is clicked.
 func TestRegisterWithInviteTokenAndLiveSessionRejectsBoundInviteForAnotherEmail(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "bystander@example.test", DisplayName: "Bystander", Password: "password12345"}); err != nil {
@@ -639,6 +660,7 @@ func TestRegisterWithInviteTokenAndLiveSessionRejectsBoundInviteForAnotherEmail(
 // that an account-only invite has nothing to grant an account that
 // already exists.
 func TestRegisterWithInviteTokenAndLiveSessionRejectsAccountOnlyInvite(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "already-has-account@example.test", DisplayName: "Already", Password: "password12345"}); err != nil {
@@ -700,6 +722,7 @@ func createTestProjectForRegisterTest(t *testing.T, srv *web.Server, cookie *htt
 }
 
 func TestRegisterWithOffDomainUnboundInviteIsForbidden(t *testing.T) {
+	t.Parallel()
 	// An *unbound* invite (no email attached at creation) only ever said
 	// "whoever holds this link gets in" — it names no domain, so
 	// ALLOWED_EMAIL_DOMAINS is still the only statement anyone has made
@@ -732,6 +755,7 @@ func TestRegisterWithOffDomainUnboundInviteIsForbidden(t *testing.T) {
 }
 
 func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
+	t.Parallel()
 	// A *bound* invite is different: the admin typed this exact address
 	// when they created it, which is the actual contractor case this
 	// fix (Task 11's third review pass) preserves. CreateInvite itself
@@ -780,6 +804,7 @@ func TestRegisterWithOffDomainBoundInviteSucceeds(t *testing.T) {
 }
 
 func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"invited@example.test","display_name":"Invited","password":"password12345","invite_token":"not-a-real-token"}`)
 	rec := httptest.NewRecorder()
@@ -814,6 +839,7 @@ func TestRegisterWithInvalidInviteTokenIsForbidden(t *testing.T) {
 // judged against Postgres' — is fixed in identity.sql rather than
 // papered over here.
 func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
+	t.Parallel()
 	srv, ids, _, pool := newTestServerWithPool(t)
 	ctx := context.Background()
 	token, invite, err := ids.CreateInvite(ctx, identity.InviteRequest{})
@@ -843,6 +869,7 @@ func TestRegisterWithExpiredInviteReportsExpired(t *testing.T) {
 }
 
 func TestDoubleRedemptionOverHTTPFailsTheSecondTime(t *testing.T) {
+	t.Parallel()
 	// The single most likely real-world failure per Task 11's second
 	// review pass: an invite link pasted into a shared channel gets
 	// clicked twice. The second attempt — whether from the same person
@@ -879,6 +906,7 @@ func TestDoubleRedemptionOverHTTPFailsTheSecondTime(t *testing.T) {
 }
 
 func TestInviteRedemptionIsRateLimitedByIPNotByToken(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 
 	attempt := func(remoteAddr string) int {
@@ -908,6 +936,7 @@ func TestInviteRedemptionIsRateLimitedByIPNotByToken(t *testing.T) {
 }
 
 func TestRegisterInDomainOpenModeIsRateLimitedByIP(t *testing.T) {
+	t.Parallel()
 	// Item 2 of Task 11's second review pass: the self-service
 	// (domain_open) branch reaches identity.CreateUser — a full argon2
 	// derivation, plus an account-existence oracle via 201/409/403/422 —
@@ -935,6 +964,7 @@ func TestRegisterInDomainOpenModeIsRateLimitedByIP(t *testing.T) {
 }
 
 func TestOversizedRegisterBodyIsRejectedWith413(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	huge := strings.Repeat("a", 1<<20) // 1 MiB, far past the 16KiB bound.
 	req := jsonRequest(http.MethodPost, "/api/auth/register", `{"email":"new@example.test","display_name":"New","password":"`+huge+`"}`)
@@ -946,6 +976,7 @@ func TestOversizedRegisterBodyIsRejectedWith413(t *testing.T) {
 }
 
 func TestLoginRejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := jsonRequest(http.MethodPost, "/api/auth/login", `{not json`)
 	rec := httptest.NewRecorder()
@@ -956,6 +987,7 @@ func TestLoginRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestLoginRejectsNonJSONContentType(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`email=x&password=y`))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -967,6 +999,7 @@ func TestLoginRejectsNonJSONContentType(t *testing.T) {
 }
 
 func TestLoginRejectsMissingContentType(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"email":"a@b.test","password":"password12345"}`))
 	rec := httptest.NewRecorder()
@@ -977,6 +1010,7 @@ func TestLoginRejectsMissingContentType(t *testing.T) {
 }
 
 func TestClientIPIgnoresXForwardedForByDefault(t *testing.T) {
+	t.Parallel()
 	// TrustedProxyCount defaults to zero (a directly exposed instance):
 	// X-Forwarded-For must be ignored entirely, so every request sharing
 	// the real RemoteAddr shares one rate-limit bucket regardless of
@@ -1006,6 +1040,7 @@ func TestClientIPIgnoresXForwardedForByDefault(t *testing.T) {
 }
 
 func TestClientIPHonorsXForwardedForBehindTrustedProxy(t *testing.T) {
+	t.Parallel()
 	// With TRUSTED_PROXY_COUNT=1, the rightmost X-Forwarded-For entry is
 	// the real client — even though every request here shares the same
 	// RemoteAddr (the proxy itself), distinct claimed clients must get
@@ -1040,6 +1075,7 @@ func TestClientIPHonorsXForwardedForBehindTrustedProxy(t *testing.T) {
 }
 
 func TestSessionCookieNotSecureOverForwardedProtoWithoutTrustedProxy(t *testing.T) {
+	t.Parallel()
 	// The counterpart to the clientIP tests above, for the other header
 	// this instance only trusts once TrustedProxyCount says a proxy is
 	// really there: with the default of zero, a claimed
@@ -1068,6 +1104,7 @@ func TestSessionCookieNotSecureOverForwardedProtoWithoutTrustedProxy(t *testing.
 }
 
 func TestSessionCookieSecureOverForwardedProtoBehindTrustedProxy(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServerWithConfig(t, func(cfg *config.Config) {
 		cfg.TrustedProxyCount = 1
 	})
@@ -1099,6 +1136,7 @@ func TestSessionCookieSecureOverForwardedProtoBehindTrustedProxy(t *testing.T) {
 }
 
 func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	if _, err := ids.CreateUser(context.Background(), identity.CreateUserRequest{Email: "designer@example.test", DisplayName: "Designer", Password: "password12345"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -1132,6 +1170,7 @@ func TestLoginResponseNeverLeaksPasswordHash(t *testing.T) {
 // Mutation: drop the `unknownMembers` call in decodeJSONBodyLimit and
 // this fails with one field where it wants three.
 func TestARefusalNamesEveryUnknownMemberAtOnce(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 
 	req := jsonRequest(http.MethodPost, "/api/auth/login",

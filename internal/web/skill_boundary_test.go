@@ -150,6 +150,7 @@ const repoRoot = "../.."
 // matched substrings would be switched off by the first contributor who
 // hit `request`. Both failure modes are named here, with a case each.
 func TestNoGenreVocabularyInServerCode(t *testing.T) {
+	t.Parallel()
 	mustHit := map[string]string{
 		"questCount":       "quest",
 		"Zone":             "zone",
@@ -207,6 +208,7 @@ func TestNoGenreVocabularyInServerCode(t *testing.T) {
 // file — and TestNoGenreVocabularyInServerCode would still pass, having
 // found nothing in a repository it never read.
 func TestTheGenreScannerReadsAWholeFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	source := "package fixture\n\n" +
 		"// the dungeon handler, in a comment: not a hit, and see the scanner's own note\n" +

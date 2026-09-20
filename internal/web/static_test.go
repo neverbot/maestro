@@ -14,6 +14,7 @@ import (
 )
 
 func TestLoginPageIsServed(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	rec := httptest.NewRecorder()
@@ -31,6 +32,7 @@ func TestLoginPageIsServed(t *testing.T) {
 }
 
 func TestStylesheetIsServed(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/static/styles.css", nil)
 	rec := httptest.NewRecorder()
@@ -45,6 +47,7 @@ func TestStylesheetIsServed(t *testing.T) {
 }
 
 func TestAppScriptIsServed(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/static/app.js", nil)
 	rec := httptest.NewRecorder()
@@ -65,6 +68,7 @@ func TestAppScriptIsServed(t *testing.T) {
 // cannot reach, still gets the shell; app.js is what discovers, from GET
 // /api/games, whether the caller can actually reach it.
 func TestGamePageIsServedForAnySlug(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/g/does-not-exist", nil)
 	rec := httptest.NewRecorder()
@@ -91,6 +95,7 @@ func TestGamePageIsServedForAnySlug(t *testing.T) {
 // it travels in the query string (see internal/web/api_docs.go's header),
 // so this route never sees it.
 func TestDocumentPageIsServedForAnySlug(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/g/does-not-exist/doc?path=lore%2Fduskwood", nil)
 	rec := httptest.NewRecorder()
@@ -112,6 +117,7 @@ func TestDocumentPageIsServedForAnySlug(t *testing.T) {
 // the only one allowed to write markup — see
 // TestTheDocumentScriptHasExactlyOneHTMLSink.
 func TestDocumentScriptIsServed(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/static/doc.js", nil)
 	rec := httptest.NewRecorder()
@@ -126,6 +132,7 @@ func TestDocumentScriptIsServed(t *testing.T) {
 }
 
 func TestUnknownStaticAssetIsNotFound(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/static/does-not-exist.js", nil)
 	rec := httptest.NewRecorder()
@@ -144,6 +151,7 @@ func TestUnknownStaticAssetIsNotFound(t *testing.T) {
 // never goes through it. staticFileServer (static.go) 404s any request
 // under /static/ ending in .html for exactly this reason.
 func TestStaticDoesNotServeHTMLShellsAgain(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	for _, name := range []string{"index.html", "login.html", "game.html", "document.html"} {
 		req := httptest.NewRequest(http.MethodGet, "/static/"+name, nil)
@@ -165,6 +173,7 @@ func TestStaticDoesNotServeHTMLShellsAgain(t *testing.T) {
 // server serves — the login form included — was embeddable cross-origin
 // until it was added.
 func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -210,6 +219,7 @@ func TestSecurityHeadersArePresentOnEveryResponse(t *testing.T) {
 // static.go for the hashes it computed, because a test that asked the
 // code under test for its own answer would agree with any answer.
 func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -274,6 +284,7 @@ func TestThePolicyAdmitsEveryShellsImportMap(t *testing.T) {
 // only when `adoptedStyleSheets` is missing, which no browser this
 // product targets is.
 func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
+	t.Parallel()
 	forbidden := []struct {
 		pattern *regexp.Regexp
 		why     string
@@ -351,6 +362,7 @@ func TestNoShippedAssetCarriesInlineStyleThePolicyBlocks(t *testing.T) {
 // argument backgroundOf is actually given and asserts the page assigns
 // that same expression from backgroundAssetFor.
 func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
 	if err != nil {
 		t.Fatalf("read view.js: %v", err)
@@ -400,6 +412,7 @@ func TestTheViewPageResolvesAGroundBeforeItDrawsOne(t *testing.T) {
 // driven from four angles by internal/web/jstest/pages_test.mjs, and all
 // four passed while nothing called it.
 func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
 	if err != nil {
 		t.Fatalf("read view.js: %v", err)
@@ -431,6 +444,7 @@ func TestTheViewPageResolvesAnAxisBeforeItDrawsOne(t *testing.T) {
 // config.Config landing on this response by reflex is exactly the drift
 // this test exists to catch.
 func TestConfigEndpointIsPublicAndMinimal(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	rec := httptest.NewRecorder()

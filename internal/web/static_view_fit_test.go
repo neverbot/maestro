@@ -27,6 +27,7 @@ import (
 // Mutation: move the `fitAfterLayout` call back into `drawPicture`, or
 // above `applyWidth` in the `finally`, and this fails.
 func TestTheViewIsFittedAfterItsWidthIsApplied(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("static/pages/view.js")
 	if err != nil {
 		t.Fatalf("read view.js: %v", err)

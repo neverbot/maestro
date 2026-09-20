@@ -113,6 +113,7 @@ var restatementFixtures = []struct {
 // bundle and over the fixtures above in the same test, so a scanner that
 // has stopped scanning cannot present itself as a clean bundle.
 func TestTheBundleRestatesNoToolDescription(t *testing.T) {
+	t.Parallel()
 	registered := web.NewToolReferenceServer().ToolDescriptionsForTest()
 	if len(registered) < 40 {
 		t.Fatalf("this server registered %d tools; the scan below would be against a table "+
@@ -186,6 +187,7 @@ func TestTheBundleRestatesNoToolDescription(t *testing.T) {
 // the first draft of a guard of this shape in this repository matched by
 // substring and reported seven false positives.
 func TestEveryClaimMarkerIsLiveAndBounded(t *testing.T) {
+	t.Parallel()
 	registered := map[string]string{"entities.upsert": "Write entities in bulk."}
 	markers := web.ClaimMarkersForTest()
 	if len(markers) == 0 {
@@ -224,6 +226,7 @@ func TestEveryClaimMarkerIsLiveAndBounded(t *testing.T) {
 // must pass and the second must fail. That is the whole claim of this
 // sub-project, asserted rather than promised.
 func TestAQuoteIsCheckedAgainstTheDescriptionItClaimsToCopy(t *testing.T) {
+	t.Parallel()
 	page := "> **From `entities.upsert`'s own description:**\n" +
 		"> It accepts at most 500 items in one call and refuses a larger\n" +
 		"> batch rather than clamping it."
@@ -267,6 +270,7 @@ func TestAQuoteIsCheckedAgainstTheDescriptionItClaimsToCopy(t *testing.T) {
 // guards in this repository's history: a name matched by substring,
 // where one alias contains another.
 func TestTheToolMatcherReadsWholeTokens(t *testing.T) {
+	t.Parallel()
 	registered := map[string]string{
 		"views.list": "…", "views.list_assets": "…", "entities.get": "…",
 	}
@@ -292,6 +296,7 @@ func TestTheToolMatcherReadsWholeTokens(t *testing.T) {
 // would make the guard blind: a dot inside a tool name, an
 // abbreviation, and a sentence wrapped across lines.
 func TestTheSentenceSplitterIsPrecise(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		in   string
@@ -330,6 +335,7 @@ func TestTheSentenceSplitterIsPrecise(t *testing.T) {
 // A genre transcript is authored text: a claim restated in a `_comment`
 // is a claim, and a guard that only reads markdown would never see it.
 func TestTheScannerReadsTranscriptStrings(t *testing.T) {
+	t.Parallel()
 	registered := map[string]string{"entities.upsert": "Write entities in bulk."}
 	body := []byte(`{"_comment": "entities.upsert accepts at most 500 items.", "steps": []}`)
 	sentences, err := web.ScanJSONForTest("genres/fixture.json", body)
@@ -362,6 +368,7 @@ func TestTheScannerReadsTranscriptStrings(t *testing.T) {
 // rule mechanical. A page that mentions an analysis tool before any
 // analysis tool is registered is a failing build, not a review comment.
 func TestNoBundlePageNamesAnUnregisteredTool(t *testing.T) {
+	t.Parallel()
 	registered := web.NewToolReferenceServer().ToolDescriptionsForTest()
 
 	tokens, err := web.BundleToolTokensForTest(skill.Files())
@@ -435,6 +442,7 @@ var notYetTaughtOutsideTheIndex []string
 // tool is reachable from the bundle at all (through the index), and pins
 // exactly which ones are reachable *only* from the index.
 func TestEveryRegisteredToolIsRoutedFromTheBundle(t *testing.T) {
+	t.Parallel()
 	registered := web.NewToolReferenceServer().ToolDescriptionsForTest()
 	// Mentions, not dotted tokens. `whoami` and `search` are registered
 	// tools with no dot in their names, and a routing guard built on the

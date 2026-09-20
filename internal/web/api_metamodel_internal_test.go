@@ -34,6 +34,7 @@ import (
 // directly is what stops the next divergence being written down as a
 // twin as well.
 func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	caller := newTokenCaller(uuid.New(), false, uuid.New(), uuid.New())
 
@@ -128,6 +129,7 @@ func TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor(t *testing.T) {
 // only the first, telling a designer to keep resending something that
 // will never succeed.
 func TestTheRetryableAdviceIsTheSameOnBothSurfaces(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	rec := httptest.NewRecorder()
 	srv.writeDomainError(rec, httptest.NewRequest(http.MethodGet, "/api/games/x/entities", nil),
@@ -203,6 +205,7 @@ func detailsOfResult(t *testing.T, result *mcp.CallToolResult) map[string]any {
 // all four onto one code, which would lose the distinction the four
 // exist for.
 func TestEveryViewsSentinelHasAWireCode(t *testing.T) {
+	t.Parallel()
 	want := map[string]string{
 		views.CodeQueryInvalid:         errCodeQueryInvalid,
 		views.CodeRendererRequirements: errCodeRendererRequirements,
@@ -238,6 +241,7 @@ func TestEveryViewsSentinelHasAWireCode(t *testing.T) {
 // codes are compared by TestWriteDomainErrorIsTheRESTTwinOfMCPErrorFor,
 // whose table names all four.
 func TestEveryViewsSentinelHasARESTStatus(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	want := map[string]int{
 		views.CodeQueryInvalid:         http.StatusBadRequest,
@@ -272,6 +276,7 @@ func TestEveryViewsSentinelHasARESTStatus(t *testing.T) {
 // only if fieldDetails reads *views.QueryError — which it did not until
 // this task, because every other error it knew carried a Go field name.
 func TestAQueryRefusalPublishesItsPointersOnBothSurfaces(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	err := &views.QueryError{Code: views.CodeQueryInvalid, Fields: []metamodel.FieldError{
 		{Path: "/traverse/0/via/0", Message: `no relation type "avilable_to" in this game`},
@@ -312,6 +317,7 @@ func TestAQueryRefusalPublishesItsPointersOnBothSurfaces(t *testing.T) {
 // and the was/now pair — and the two are different readers rather than
 // two spellings of one thing (staleDetails argues it).
 func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	err := &views.QueryError{
 		Code: views.CodeQueryStale,
@@ -384,6 +390,7 @@ func TestAStaleViewCarriesItsDiagnosticsBesideItsFields(t *testing.T) {
 // lower are the only thing that helps once resending has stopped
 // working.
 func TestATimedOutViewKeepsItsAdviceOnBothSurfaces(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	timeout := &views.TimeoutError{
 		Budget: 5 * time.Second,

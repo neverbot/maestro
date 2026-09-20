@@ -44,6 +44,7 @@ func decodeMCPError(t *testing.T, result *mcp.CallToolResult) map[string]any {
 // conflict — the one failure a re-read and a retry resolve — would
 // otherwise arrive as the code meaning "give up".
 func TestEveryMarkdownDomainErrorHasAWireCode(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		err  error
@@ -83,6 +84,7 @@ func TestEveryMarkdownDomainErrorHasAWireCode(t *testing.T) {
 // twin, and a conflict this domain produces has to reach a designer in a
 // browser as 409 version_conflict, not 500.
 func TestAMarkdownConflictIsAConflictOnBothSurfaces(t *testing.T) {
+	t.Parallel()
 	srv := NewServer(stubOptions("test"))
 	rec := httptest.NewRecorder()
 	srv.writeDomainError(rec, httptest.NewRequest(http.MethodPut, "/api/games/x/documents/lore", nil),
@@ -110,6 +112,7 @@ func TestAMarkdownConflictIsAConflictOnBothSurfaces(t *testing.T) {
 // payload, because an agent merging prose needs the text as a field and
 // not inside a sentence.
 func TestAConflictCarriesTheBodyAsDataRatherThanProse(t *testing.T) {
+	t.Parallel()
 	body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.write", Caller{},
 		&markdown.ConflictError{Current: 3, Include: true, Title: "T", BodyMD: "two\n"}))
 	details, ok := body["details"].(map[string]any)
@@ -131,6 +134,7 @@ func TestAConflictCarriesTheBodyAsDataRatherThanProse(t *testing.T) {
 // "version 4" would re-read, get not_found, and have two refusals with
 // nothing connecting them.
 func TestAConflictOnADeletedDocumentSaysSoOnTheWire(t *testing.T) {
+	t.Parallel()
 	body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.write", Caller{},
 		&markdown.ConflictError{Current: 4, Deleted: true}))
 	details, ok := body["details"].(map[string]any)
@@ -159,6 +163,7 @@ func TestAConflictOnADeletedDocumentSaysSoOnTheWire(t *testing.T) {
 // This one drives the error through both mappers, so either arm
 // regressing to nil details fails it.
 func TestANamedMissPublishesItsPath(t *testing.T) {
+	t.Parallel()
 	missing := &markdown.MissingError{Path: "entity_key", Message: "no such quest"}
 
 	body := decodeMCPError(t, mcpErrorFor(context.Background(), "docs.links.add", Caller{}, missing))
@@ -208,6 +213,7 @@ func TestANamedMissPublishesItsPath(t *testing.T) {
 // argument at all. "There were no field problems" and "this kind of
 // error has no field problems" are different statements.
 func TestAPlainNotFoundCarriesNoFieldList(t *testing.T) {
+	t.Parallel()
 	body := decodeMCPError(t, mcpErrorFor(context.Background(), "entities.get", Caller{},
 		fmt.Errorf("no such entity: %w", metamodel.ErrNotFound)))
 	if body["error"] != errCodeNotFound {
@@ -233,6 +239,7 @@ func TestAPlainNotFoundCarriesNoFieldList(t *testing.T) {
 // one, which is the silent, destructive direction — and it is exactly
 // how `kind` broke once already, as a plain string with omitempty.
 func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType(t *testing.T) {
+	t.Parallel()
 	// The declaration itself, so a later edit cannot quietly drop the
 	// pointer or the tag and leave the decode cases passing for a
 	// different reason.
@@ -299,6 +306,7 @@ func TestOmittingLinksAndSendingAnEmptyArrayAreDifferentOnThisType(t *testing.T)
 // role would tell a caller otherwise with nothing to correct the belief.
 // docs.links.add keeps its role, and the two are not one shared shape.
 func TestTheRemoveToolsInputCarriesNoRole(t *testing.T) {
+	t.Parallel()
 	if _, ok := reflect.TypeOf(DocsLinkRemoveInput{}).FieldByName("Role"); ok {
 		t.Fatal("DocsLinkRemoveInput carries a Role that markdown.LinkRemove cannot read")
 	}

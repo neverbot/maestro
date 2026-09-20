@@ -178,6 +178,7 @@ func (f viewsRESTFixture) uploadAsset(t *testing.T, filename string) string {
 // REST mirror reaches the same cores, in the same order, and hands back
 // the same shapes.
 func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 
 	rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
@@ -332,6 +333,7 @@ func TestTheViewRoutesAreTheSameContractAsTheTools(t *testing.T) {
 // surface adds, and the pointer as data rather than inside prose a
 // client would have to parse.
 func TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	rec := f.call(t, f.cookie, http.MethodPost, f.path("/views/validate"), map[string]any{
 		"query": json.RawMessage(`{"v":1,"from":[{"type":"qeust"}]}`),
@@ -367,6 +369,7 @@ func TestAQueryRefusalOverRESTCarriesItsPointerAndItsCode(t *testing.T) {
 // api_views.go's header records as the cost of that spelling. So the
 // read a viewer must keep is the listing and the view itself.
 func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	ctx := context.Background()
 	viewer, err := f.ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -417,6 +420,7 @@ func TestAViewerRunsAViewAndCannotSaveOne(t *testing.T) {
 // subscribed with a cookie would stay green if somebody published a
 // view event that way and agents had silently stopped being told.
 func TestAViewEventReachesAViewerAndATokenAlike(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	ctx := context.Background()
 
@@ -544,6 +548,7 @@ func decodeInto(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 // second place for them to be dropped, and removing them from the
 // listing input left the whole suite green.
 func TestTheViewListingCarriesItsRendererAndCursorOverREST(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	for _, view := range []struct{ key, renderer string }{
 		{"one", "graph"}, {"two", "graph"}, {"atlas", "map"},
@@ -607,6 +612,7 @@ func TestTheViewListingCarriesItsRendererAndCursorOverREST(t *testing.T) {
 // lost track of which game it is editing is told so, rather than told
 // its write succeeded in the other one.
 func TestAStatedProjectDisagreeingWithTheURLIsRefusedOnEveryViewsWriteRoute(t *testing.T) {
+	t.Parallel()
 	f := newViewsRESTFixture(t)
 	if rec := f.call(t, f.cookie, http.MethodPost, f.path("/views"), map[string]any{
 		"key": "route", "name": "Route", "renderer": "graph",

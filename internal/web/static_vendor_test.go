@@ -135,6 +135,7 @@ func readVendorManifest(t *testing.T) vendorManifest {
 // release without its hash and size being updated in the same commit is
 // caught here, and only here.
 func TestVendoredFilesMatchTheirManifest(t *testing.T) {
+	t.Parallel()
 	manifest := readVendorManifest(t)
 
 	for _, entry := range manifest.Files {
@@ -196,6 +197,7 @@ func vendoredTreeFiles(t *testing.T) []string {
 // somebody remembered, and the budget is a sum over that list rather
 // than over what actually ships.
 func TestNoVendoredFileIsUnlisted(t *testing.T) {
+	t.Parallel()
 	manifest := readVendorManifest(t)
 
 	listed := map[string]bool{"manifest.json": true}
@@ -235,6 +237,7 @@ func TestNoVendoredFileIsUnlisted(t *testing.T) {
 // disagreement is TestVendoredFilesMatchTheirManifest's to report, and
 // this test stays true regardless of it.
 func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
+	t.Parallel()
 	manifest := readVendorManifest(t)
 
 	totals := map[string]int64{}
@@ -292,6 +295,7 @@ func TestTheVendoredPayloadIsUnderBudget(t *testing.T) {
 // a URL this repository does not vendor is either a 404 or, worse, a
 // third-party origin the CSP would refuse in silence.
 func TestEveryVendoredFontIsSwapped(t *testing.T) {
+	t.Parallel()
 	sheet, err := os.ReadFile(filepath.Join("static", "styles.css"))
 	if err != nil {
 		t.Fatalf("read styles.css: %v", err)
@@ -347,6 +351,7 @@ func TestEveryVendoredFontIsSwapped(t *testing.T) {
 // the second because a stale licence for a package that is no longer
 // vendored is a claim about code that is not here.
 func TestEveryVendoredPackageHasItsLicence(t *testing.T) {
+	t.Parallel()
 	manifest := readVendorManifest(t)
 
 	referenced := map[string]bool{}
@@ -508,6 +513,7 @@ func networkReachesIn(file, src string) []networkReach {
 // would keep working, which is what makes this a source guard rather
 // than something a runtime test would ever catch.
 func TestNoModuleFetchesFromTheNetwork(t *testing.T) {
+	t.Parallel()
 	read, reaches := scanForNetworkReach(t)
 	if len(read) == 0 {
 		t.Fatal("scanned no modules under internal/web/static: this test would pass on an empty tree")
@@ -541,6 +547,7 @@ func TestNoModuleFetchesFromTheNetwork(t *testing.T) {
 // that was supposed to turn it red left it green. Two spellings of the
 // same list is the price of one of them being able to judge the other.
 func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
+	t.Parallel()
 	isModule := func(p string) bool {
 		return strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".mjs")
 	}
@@ -599,6 +606,7 @@ func TestTheNetworkScanReadsEveryModuleIncludingTheVendoredOnes(t *testing.T) {
 // the code as well. So it is run over sources written to be caught, and
 // over one written not to be.
 func TestTheNetworkScanFlagsAFabricatedFetch(t *testing.T) {
+	t.Parallel()
 	caught := []struct {
 		name string
 		src  string
@@ -692,6 +700,7 @@ func shellImportMaps(t *testing.T) []shellMap {
 // page that 404s one module and renders three quarters of itself, which
 // looks like a rendering bug rather than a missing line of HTML.
 func TestTheImportMapIsIdenticalInEveryShell(t *testing.T) {
+	t.Parallel()
 	maps := shellImportMaps(t)
 	if len(maps) < 2 {
 		t.Fatalf("found %d shell(s): this comparison needs at least two to mean anything", len(maps))
@@ -730,6 +739,7 @@ func TestTheImportMapIsIdenticalInEveryShell(t *testing.T) {
 // habit; a shell that grows a module script in its head tomorrow is
 // exactly the case habit does not cover.
 func TestTheImportMapPrecedesEveryModuleScript(t *testing.T) {
+	t.Parallel()
 	for _, m := range shellImportMaps(t) {
 		raw, err := os.ReadFile(m.shell)
 		if err != nil {
@@ -751,6 +761,7 @@ func TestTheImportMapPrecedesEveryModuleScript(t *testing.T) {
 // at one vendored and later removed — would be a 404 discovered by a
 // designer rather than by a test.
 func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
+	t.Parallel()
 	manifest := readVendorManifest(t)
 	vendored := map[string]bool{}
 	for _, entry := range manifest.Files {
@@ -803,6 +814,7 @@ func TestEveryImportMapTargetIsAVendoredFile(t *testing.T) {
 // `application/octet-stream` and the page would fail with a console
 // error naming neither the map nor the file.
 func TestEveryImportMapTargetIsServedAsJavaScript(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 
 	// Every target of every shell, deduplicated: same reason as above.
@@ -838,6 +850,7 @@ func TestEveryImportMapTargetIsServedAsJavaScript(t *testing.T) {
 // bounds is where every future outbound URL would hide, so this pins
 // what it admits and — the half that matters — what it still refuses.
 func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
+	t.Parallel()
 	admitted := `export const SVG_NS = "http://www.w3.org/2000/svg";`
 	if !namespaceDeclaration.MatchString(admitted) {
 		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)
@@ -879,6 +892,7 @@ func TestTheNamespaceExemptionIsExactlyOneDeclaration(t *testing.T) {
 // admits, what it still refuses, and that the front end contains exactly
 // one line it applies to.
 func TestTheDocumentationExemptionIsExactlyOneDeclaration(t *testing.T) {
+	t.Parallel()
 	admitted := `export const SKILL_BUNDLE_HREF = "https://github.com/neverbot/maestro#the-skill-bundle";`
 	if !documentationLink.MatchString(admitted) {
 		t.Errorf("the exemption does not admit the declaration it exists for: %q", admitted)

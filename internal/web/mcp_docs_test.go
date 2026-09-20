@@ -63,6 +63,7 @@ const hoggerContent = "---\ntitle: The Fall of Hogger\n" +
 // rounds, because everything verified that writing worked and nothing
 // asked whether it could be read back.
 func TestEveryDocumentFieldSurvivesARoundTripThroughTheTools(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")
@@ -240,6 +241,7 @@ func TestEveryDocumentFieldSurvivesARoundTripThroughTheTools(t *testing.T) {
 // kind from an explicit empty one, and every body-only edit would have
 // erased the kind.
 func TestAnEditThatOmitsKindLeavesItAloneThroughTheTool(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -275,6 +277,7 @@ func TestAnEditThatOmitsKindLeavesItAloneThroughTheTool(t *testing.T) {
 // one: an ordinary edit that says nothing about links must not detach
 // them, and an explicit empty array must.
 func TestALinksArrayReplacesTheSetAndOmittingItPreservesIt(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")
@@ -313,6 +316,7 @@ func TestALinksArrayReplacesTheSetAndOmittingItPreservesIt(t *testing.T) {
 // code (addScopedTool's own doc comment records the exception), so it is
 // a pointer and the domain refuses a nil one.
 func TestADocsWriteWithoutAnExpectedVersionIsInvalidInputAtItsOwnPath(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -384,6 +388,7 @@ func assertInvalidInputAt(t *testing.T, err error, path string) {
 // names neither. "The join, from either side" is two questions, and a
 // caller naming both has not decided which it is asking.
 func TestAskingTheJoinFromBothSidesAtOnceIsInvalidInput(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -400,6 +405,7 @@ func TestAskingTheJoinFromBothSidesAtOnceIsInvalidInput(t *testing.T) {
 // docs.links.remove answer with the document's whole attachment set
 // after the change, so a caller sees what it did without a second call.
 func TestTheLinkToolsReadTheirOwnResultBack(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")
@@ -448,6 +454,7 @@ func TestTheLinkToolsReadTheirOwnResultBack(t *testing.T) {
 // that does not know about the argument is exactly the agent that most
 // needs the current body handed to it on a conflict.
 func TestIncludeCurrentDefaultsToTrueOnTheWireAndIsHonouredWhenFalse(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -495,6 +502,7 @@ func conflictDetails(t *testing.T, err error) map[string]any {
 // rune. The body is built out of three-byte runes so that the cut at
 // 2048 bytes falls mid-rune — 2048 is not a multiple of 3.
 func TestAHeadOnlyReadSaysHowMuchItLeftOut(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -548,6 +556,7 @@ func TestAHeadOnlyReadSaysHowMuchItLeftOut(t *testing.T) {
 // caller's own *token* is not bound to, which is the case requireScope
 // exists for — an instance admin gets no exemption either.
 func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -661,6 +670,7 @@ func TestEveryDocsToolRefusesAnotherGamesToken(t *testing.T) {
 // half of MCPDeps.Markdown: a server built without one still starts, and
 // tools/list simply does not carry the twelve.
 func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
 		SessionTTL: testConfig().SessionTTL,
@@ -723,6 +733,7 @@ func TestTheDocsToolsAreAbsentWithoutAMarkdownService(t *testing.T) {
 // fourth is the conflict, which echoed the body to merge onto and not
 // who wrote it.
 func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -860,6 +871,7 @@ func TestEveryAnswerSaysWhenADocumentChangedAndWhoChangedIt(t *testing.T) {
 // carried to the other side are what a client actually depends on, and
 // none of them is visible from the domain's own test.
 func TestTheLinkListingPagesOnBothSides(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -1006,6 +1018,7 @@ func firstLinkCursor(t *testing.T, session *mcp.ClientSession) string {
 // the batch's own answer is what a follow-up edit can be built from
 // without a read.
 func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -1119,6 +1132,7 @@ func TestTheBatchToolSeedsSeveralDocumentsInOneCall(t *testing.T) {
 // diff and a delete driven as an agent drives them, with every answer
 // read out of the JSON a client actually parses.
 func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -1310,6 +1324,7 @@ func TestTheDocsToolsAreServedOverTheRealTransport(t *testing.T) {
 // check addScopedTool makes, exercised at a docs tool so it is not only
 // the metamodel's that is covered.
 func TestADocsToolCallIsRefusedForAnotherGamesIDOverTheWire(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -1364,6 +1379,7 @@ func writeDoc(t *testing.T, f metamodelFixture, path, body string, links ...web.
 // one of them a tombstone, which is the smallest fixture in which each
 // of those four behaviours has an observably different wrong answer.
 func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")
@@ -1472,6 +1488,7 @@ func TestTheListingTellsTombstonesApartFiltersAndPages(t *testing.T) {
 // asserted it: every existing history assertion reads a document with
 // one or two versions and no limit, where a page can never fill.
 func TestAHistoryPageSaysWhenThereIsMore(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	writeDoc(t, f, "lore/hogger.md", "# One\n")
@@ -1516,6 +1533,7 @@ func TestAHistoryPageSaysWhenThereIsMore(t *testing.T) {
 // field: every other diff assertion compares small bodies, where coarse
 // is false either way.
 func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -1579,6 +1597,7 @@ func TestADiffTooLargeToCompareSaysCoarseOnTheWire(t *testing.T) {
 // the domain's own constants rather than typed out, so this cannot pass
 // against a description quoting a stale number.
 func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -1636,6 +1655,7 @@ func TestEveryBoundTheDocsToolsEnforceIsDisclosedWhereItBites(t *testing.T) {
 // its own half (TestLinksArea's "a deleted document is not an address for
 // links" case); this is the wire code an agent actually receives.
 func TestADeletedDocumentIsNotAnAddressForTheLinkTools(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedQuest(t, f, "wanted-hogger", "Wanted: Hogger")

@@ -14,6 +14,7 @@ import (
 // test: the bootstrap admin, and only the bootstrap admin, is no longer
 // the sole account that can ever hold instance-admin standing.
 func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
+	t.Parallel()
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@example.test", DisplayName: "Colleague", Password: "password12345"}); err != nil {
@@ -45,6 +46,7 @@ func TestAdminCanPromoteAnotherUserToAdmin(t *testing.T) {
 
 // TestNonAdminCannotPromoteAnyone mirrors TestNonAdminCannotCreateAccountOnlyInvite.
 func TestNonAdminCannotPromoteAnyone(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "plain@example.test", DisplayName: "Plain", Password: "password12345"}); err != nil {
@@ -68,6 +70,7 @@ func TestNonAdminCannotPromoteAnyone(t *testing.T) {
 
 // TestTokenCallerCannotSetAdmin mirrors TestTokenCallerCannotManageInstanceInvites.
 func TestTokenCallerCannotSetAdmin(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
@@ -94,6 +97,7 @@ func TestTokenCallerCannotSetAdmin(t *testing.T) {
 // TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse pins the guard
 // against a second party stranding the instance.
 func TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse(t *testing.T) {
+	t.Parallel()
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"admin@example.test","is_admin":false}`))
@@ -113,6 +117,7 @@ func TestAdminCannotDemoteTheLastAdminByDemotingSomeoneElse(t *testing.T) {
 // does not cover, since there the caller and the target are different
 // accounts. Here they are the same one.
 func TestLastAdminCannotDemoteThemselves(t *testing.T) {
+	t.Parallel()
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
 
 	meReq := httptest.NewRequest(http.MethodGet, "/api/me", nil)
@@ -146,6 +151,7 @@ func TestLastAdminCannotDemoteThemselves(t *testing.T) {
 // TestAdminCanDemoteAnotherAdminWhenOneRemains confirms the guard only
 // fires on the *last* admin, not on every demotion.
 func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
+	t.Parallel()
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
 	colleague, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "colleague@example.test", DisplayName: "Colleague", Password: "password12345"})
@@ -179,6 +185,7 @@ func TestAdminCanDemoteAnotherAdminWhenOneRemains(t *testing.T) {
 }
 
 func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
+	t.Parallel()
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{"email":"nobody@example.test","is_admin":true}`))
@@ -197,6 +204,7 @@ func TestSetAdminUnknownEmailIsNotFound(t *testing.T) {
 // as false (which would demote whoever the email named without the
 // caller ever having asked for that).
 func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
+	t.Parallel()
 	srv, ids, _, adminCookie := loginAsAdmin(t, nil)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "target@example.test", DisplayName: "Target", Password: "password12345"}); err != nil {
@@ -227,6 +235,7 @@ func TestSetAdminMissingIsAdminIsBadRequest(t *testing.T) {
 }
 
 func TestSetAdminEmptyBodyIsBadRequest(t *testing.T) {
+	t.Parallel()
 	srv, _, _, adminCookie := loginAsAdmin(t, nil)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/admins", strings.NewReader(`{}`))

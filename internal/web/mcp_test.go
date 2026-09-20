@@ -14,6 +14,7 @@ import (
 )
 
 func TestMCPWhoamiReportsTheTokenProject(t *testing.T) {
+	t.Parallel()
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -51,6 +52,7 @@ func TestMCPWhoamiReportsTheTokenProject(t *testing.T) {
 }
 
 func TestMCPGamesGetRefusesAnotherProject(t *testing.T) {
+	t.Parallel()
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -82,6 +84,7 @@ func TestMCPGamesGetRefusesAnotherProject(t *testing.T) {
 }
 
 func TestMCPGamesGetRefusesAnotherProjectForAdmins(t *testing.T) {
+	t.Parallel()
 	// This test needs a genuine admin. CreateUser can never mint one (Task
 	// 5, Correction 11), so it goes through BootstrapFirstAdmin exactly as
 	// production does, which means it needs its own config — testConfig()
@@ -125,6 +128,7 @@ func TestMCPGamesGetRefusesAnotherProjectForAdmins(t *testing.T) {
 }
 
 func TestMCPGamesListReturnsExactlyTheTokensOneGame(t *testing.T) {
+	t.Parallel()
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -165,6 +169,7 @@ func TestMCPGamesListReturnsExactlyTheTokensOneGame(t *testing.T) {
 }
 
 func TestMCPGamesGetReturnsTheCallersOwnGame(t *testing.T) {
+	t.Parallel()
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -213,6 +218,7 @@ func TestMCPGamesGetReturnsTheCallersOwnGame(t *testing.T) {
 // project id no database row will ever back, which no constructor this
 // package exports can produce.
 func TestMCPGamesGetReportsNotFoundForAMissingProject(t *testing.T) {
+	t.Parallel()
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -231,6 +237,7 @@ func TestMCPGamesGetReportsNotFoundForAMissingProject(t *testing.T) {
 }
 
 func TestCallerForTokenRejectsARevokedToken(t *testing.T) {
+	t.Parallel()
 	_, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 

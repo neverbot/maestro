@@ -50,6 +50,7 @@ const maxClientLiteral = 48
 // readers not to write prose here, is the thing this repository's
 // standing failure list calls a mechanism nothing reads.
 func TestTheDataClientComposesNoSentence(t *testing.T) {
+	t.Parallel()
 	literals := clientStringLiterals(t)
 	if len(literals) < 20 {
 		t.Fatalf("found only %d string literal(s) in %s: the scanner below is not reading the module, "+
@@ -82,6 +83,7 @@ func TestTheDataClientComposesNoSentence(t *testing.T) {
 // one in a comment, which must not be read as a literal — and asserts it
 // is found. A guard that cannot be made to fail is not a guard.
 func TestTheSentenceGuardReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	literals := clientStringLiterals(t)
 	seen := map[string]bool{}
 	for _, lit := range literals {
@@ -151,6 +153,7 @@ var modulesAllowedToFetch = map[string]string{
 // a module that stopped fetching cannot leave a permission behind for
 // the next one.
 func TestOnlyTheDataClientAndTheShippedBundleFetch(t *testing.T) {
+	t.Parallel()
 	found := map[string][]string{}
 	scanned := 0
 	err := filepath.WalkDir("static", func(path string, d os.DirEntry, err error) error {
@@ -223,6 +226,7 @@ var navigationSinks = regexp.MustCompile(
 // one event; this asserts the module has no way to navigate at all, for
 // any event, including ones added later.
 func TestTheDataClientNavigatesNothing(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(clientModule)
 	if err != nil {
 		t.Fatalf("read %s: %v", clientModule, err)

@@ -14,6 +14,7 @@ import (
 // (events.go) for why this policy is factored out into a pure function
 // specifically so it can be tested this way.
 func TestSSERecheckOutcome(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name             string
 		reason           string
@@ -45,6 +46,7 @@ func TestSSERecheckOutcome(t *testing.T) {
 // function's job to rule out structurally) still counts as a gap rather
 // than being silently accepted.
 func TestSSESawGap(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		lastSeq, seq uint64
@@ -72,6 +74,7 @@ func TestSSESawGap(t *testing.T) {
 // direction would defeat its own purpose — both a below-base and an
 // above-base result actually occur across enough samples.
 func TestJitteredSSEMaxLifetime(t *testing.T) {
+	t.Parallel()
 	const base = 5 * time.Minute
 	spread := time.Duration(float64(base) * sseLifetimeJitterFraction)
 	lo, hi := base-spread, base+spread

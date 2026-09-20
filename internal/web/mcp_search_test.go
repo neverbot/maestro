@@ -61,6 +61,7 @@ func ptrInt32Web(v int32) *int32 { return &v }
 // and a document hit carrying the way back to the entity it is attached
 // to.
 func TestSearchReturnsBothKindsInOneLabelledList(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -122,6 +123,7 @@ func TestSearchReturnsBothKindsInOneLabelledList(t *testing.T) {
 }
 
 func TestSearchNarrowsToOneKind(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -154,6 +156,7 @@ func TestSearchNarrowsToOneKind(t *testing.T) {
 // same for a fixture with one document, so a second document of another
 // kind is what makes the filter visible.
 func TestSearchNarrowsDocumentsByDocKind(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -186,6 +189,7 @@ func TestSearchNarrowsDocumentsByDocKind(t *testing.T) {
 // are the "answer a question the caller did not ask" cases: every one of
 // them would otherwise be a full, plausible answer to something else.
 func TestAnUnrecognisedSearchKindIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -246,6 +250,7 @@ func requireMCPFieldError(t *testing.T, err error, wantPath, wantMessage string)
 // is why the test also asserts the inversion, that the mentioning
 // entity carries the higher rank of the two.
 func TestSearchRanksANamedHitAboveAMentionAcrossKinds(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -321,6 +326,7 @@ func TestSearchRanksANamedHitAboveAMentionAcrossKinds(t *testing.T) {
 // written to produce, and that other test is what actually pins the
 // choice — this one only pins the narrower, same-kind case.
 func TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -374,6 +380,7 @@ func TestTwoHitsOfEqualRankKeepOneOrderAcrossIdenticalCalls(t *testing.T) {
 // and "the server sent no list" are different statements, and only the
 // marshalled JSON can tell them apart.
 func TestAnEmptySearchAnswerIsAnEmptyListAndNotNull(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -397,6 +404,7 @@ func TestAnEmptySearchAnswerIsAnEmptyListAndNotNull(t *testing.T) {
 // the same project id the entity one is, and a token bound to one game
 // finds neither the other game's entities nor its prose.
 func TestASearchNeverLeavesTheTokensGame(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -417,6 +425,7 @@ func TestASearchNeverLeavesTheTokensGame(t *testing.T) {
 // Every optional key is given a value, because the marshaller omits the
 // empty ones and a zero value would pin half the contract.
 func TestTheSearchWireTypesCarryExactlyTheseKeys(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		value any
@@ -460,6 +469,7 @@ func TestTheSearchWireTypesCarryExactlyTheseKeys(t *testing.T) {
 // (searchContent), and a mirror that was never called is a mirror that
 // compiles.
 func TestTheRESTMirrorAnswersWithTheSameLabelledHits(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 
@@ -518,6 +528,7 @@ func TestTheRESTMirrorAnswersWithTheSameLabelledHits(t *testing.T) {
 // prose. A Required list naming a key the document half does not send
 // fails here and nowhere else.
 func TestADocumentHitPassesTheToolsOwnOutputSchema(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -554,6 +565,7 @@ func TestADocumentHitPassesTheToolsOwnOutputSchema(t *testing.T) {
 // top of either side's — the entity ranks below the document here, and
 // a cut applied per side rather than after the merge would keep both.
 func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)
@@ -616,6 +628,7 @@ func TestAMergedAnswerIsCutAtTheLimitAndSaysSo(t *testing.T) {
 // tie-break orders — set by each query's own ORDER BY — must still hold
 // after the merge despite the full reversal above.
 func TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -697,6 +710,7 @@ func TestAFullReversalOfTheConcatenationStillKeepsBothTieBreaks(t *testing.T) {
 // of Task 10, which registers twelve more tools behind the same
 // optional field, and Task 11, which mirrors them over REST.
 func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -733,6 +747,7 @@ func TestAnExplicitDocumentSearchIsRefusedWithoutTheMarkdownService(t *testing.T
 // which a client would have to tell apart from a row with no values),
 // and with it the whole payload comes back.
 func TestASearchOmitsFieldsUnlessAskedToBeVerbose(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -793,6 +808,7 @@ func TestASearchOmitsFieldsUnlessAskedToBeVerbose(t *testing.T) {
 // through queryBool, so it takes the same four true spellings the two
 // listings take and refuses the same value-less parameter.
 func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 
@@ -853,6 +869,7 @@ func TestTheRESTMirrorTakesTheSameVerboseFlag(t *testing.T) {
 // keeps "a row the query names outranks a row that mentions the words" a
 // guarantee, which a keyed-by-counter catalogue would otherwise flood.
 func TestSearchFindsAnEntityByItsKeyOverTheToolSurface(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedSearchable(t, f)

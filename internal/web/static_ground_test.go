@@ -35,6 +35,7 @@ const groundModule = "static/components/mst-ground.js"
 // that is no longer true, which is a worse failure than no bound at all:
 // the sentence looks authoritative.
 func TestTheUploadPickerStatesTheServersOwnBounds(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(groundModule)
 	if err != nil {
 		t.Fatalf("read %s: %v", groundModule, err)
@@ -77,6 +78,7 @@ func TestTheUploadPickerStatesTheServersOwnBounds(t *testing.T) {
 // appearing somewhere in the file. A file that happened to contain the
 // digits in a comment would satisfy a substring scan and promise nothing.
 func TestTheGroundComponentReadsTheAssetCapItPromises(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(groundModule)
 	if err != nil {
 		t.Fatalf("read %s: %v", groundModule, err)

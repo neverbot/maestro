@@ -35,6 +35,7 @@ import (
 // rather than a Go field name, because a struct tag is the one part of
 // this that no domain test can see.
 func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	httpSrv := httptest.NewServer(f.srv)
 	defer httpSrv.Close()
@@ -124,6 +125,7 @@ func TestATraitDeclaredOverTheRealToolComesBackOverTheRealTool(t *testing.T) {
 // do — a divergence would show up here as a missing key, not as a
 // compile error.
 func TestATraitDeclaredOverTheRESTMirrorComesBackOverIt(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
@@ -189,6 +191,7 @@ func TestATraitDeclaredOverTheRESTMirrorComesBackOverIt(t *testing.T) {
 // trait is in the vocabulary, so a hand-written eighth word cannot be
 // promised to an agent that the column would then refuse.
 func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t *testing.T) {
+	t.Parallel()
 	description := servedToolDescription(t, "relation_types.upsert")
 
 	for _, trait := range metamodel.AnalysisTraits {
@@ -222,6 +225,7 @@ func TestTheRelationTypesUpsertDescriptionNamesEveryTraitAndEveryTraitIsNamed(t 
 // generated rendering of that table rather than a prose paraphrase that
 // can drift from it.
 func TestTheRelationTypesUpsertDescriptionNamesEveryRefusedCombination(t *testing.T) {
+	t.Parallel()
 	description := servedToolDescription(t, "relation_types.upsert")
 	if len(metamodel.AnalysisTraitConflicts) == 0 {
 		t.Fatal("the conflict table is empty, so every assertion below is vacuous")

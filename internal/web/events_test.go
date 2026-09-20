@@ -108,6 +108,7 @@ func readOneSSEFrame(t *testing.T, r *bufio.Reader) (kind, id, data string) {
 }
 
 func TestEventsStreamRequiresAuthentication(t *testing.T) {
+	t.Parallel()
 	srv, _, _, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/games/"+uuid.New().String()+"/events", nil)
@@ -120,6 +121,7 @@ func TestEventsStreamRequiresAuthentication(t *testing.T) {
 }
 
 func TestEventsStreamRequiresMembership(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -154,6 +156,7 @@ func TestEventsStreamRequiresMembership(t *testing.T) {
 // internal/realtime's own tests cannot check — they never touch
 // scope.ProjectID or hub.Subscribe as this handler actually wires them.
 func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -229,6 +232,7 @@ func TestEventsStreamDeliversPublishedEvent(t *testing.T) {
 // readOneSSEFrame, which is built to skip past exactly this kind of
 // comment line) specifically to assert the frame is there.
 func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -282,6 +286,7 @@ func TestEventsStreamSendsAnInitialConnectFrame(t *testing.T) {
 // stream stop trusting a caller whose access was revoked after the
 // handshake.
 func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, 100*time.Millisecond, time.Minute)
 	ctx := context.Background()
 
@@ -334,6 +339,7 @@ func TestEventsStreamClosesAtMaxLifetime(t *testing.T) {
 // pinned by TestEventsStreamClosesAtMaxLifetime) cannot be mistaken for
 // what actually closed this stream.
 func TestEventsStreamClosesOnTokenRevokedMidStream(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, 20*time.Millisecond)
 	ctx := context.Background()
 
@@ -394,6 +400,7 @@ func TestEventsStreamClosesOnTokenRevokedMidStream(t *testing.T) {
 // off by the same heartbeat re-check, via resolveProjectScope rather
 // than resolveSessionCaller.
 func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, 20*time.Millisecond)
 	ctx := context.Background()
 
@@ -458,6 +465,7 @@ func TestEventsStreamClosesOnMembershipRemovedMidStream(t *testing.T) {
 // so a regression that routed the re-check through resolveSessionCaller
 // instead of the read-only variant would fail this test by renewing.
 func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)
@@ -542,6 +550,7 @@ func TestEventsStreamReCheckDoesNotSlideSessionExpiry(t *testing.T) {
 // inside a string, so a payload built specifically to try this now
 // arrives as one harmless, single-line JSON string instead.
 func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, hub := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 
@@ -600,6 +609,7 @@ func TestEventsStreamMarshalsPayloadPreventingFrameForgery(t *testing.T) {
 // Close before or alongside http.Server.Shutdown instead of Shutdown
 // waiting on every open stream for up to its own lifetime.
 func TestEventsStreamClosesOnServerClose(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc, _ := newTestServerWithHub(t, time.Minute, time.Minute)
 	ctx := context.Background()
 

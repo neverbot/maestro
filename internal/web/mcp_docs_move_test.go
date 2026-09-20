@@ -17,6 +17,7 @@ import (
 // tool hands the caller the two facts it needs afterwards — the new path
 // and the version — and that every other read agrees.
 func TestAMoveOnTheSurfaceKeepsTheDocumentAndAnswersWithItsNewAddress(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -86,6 +87,7 @@ func TestAMoveOnTheSurfaceKeepsTheDocumentAndAnswersWithItsNewAddress(t *testing
 // move's own row legible as a move. A field on the wire nothing reads
 // back is not on the wire, so this reads it back through both.
 func TestAHistoryOnTheSurfaceSaysWhereEachVersionWasWritten(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -138,6 +140,7 @@ func TestAHistoryOnTheSurfaceSaysWhereEachVersionWasWritten(t *testing.T) {
 // snapshot. It also stops the answer echoing a caller's own casing back
 // at it as though it were the stored spelling.
 func TestReadingAVersionOfAMovedDocumentAnswersWithItsOwnPath(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -180,6 +183,7 @@ func TestReadingAVersionOfAMovedDocumentAnswersWithItsOwnPath(t *testing.T) {
 // where the field list is actually serialised — asserting the Go error
 // type would pin the domain again and not the wire.
 func TestTheMoveRefusalsReachTheSurfaceWithTheirFields(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -256,6 +260,7 @@ func TestTheMoveRefusalsReachTheSurfaceWithTheirFields(t *testing.T) {
 // the kind filter usable, so it has to be readable by the agent that
 // filters and by the browser that shows a designer what its game holds.
 func TestTheKindCatalogueReachesBothSurfaces(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -317,6 +322,7 @@ func TestTheKindCatalogueReachesBothSurfaces(t *testing.T) {
 // and the mirror exists so a browser can reach them; a route registered
 // and never driven is a route nothing pins.
 func TestTheRESTMirrorsOfMoveAndKinds(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 

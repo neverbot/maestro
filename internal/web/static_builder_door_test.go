@@ -21,6 +21,7 @@ import (
 // view in the seeded games — they all round-trip — and would quietly
 // rewrite the first query that did not.
 func TestTheBuilderDoorIsDecidedFromTheStoredQuery(t *testing.T) {
+	t.Parallel()
 	for _, page := range []struct {
 		path string
 		what string

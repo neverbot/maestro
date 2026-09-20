@@ -19,6 +19,7 @@ import (
 // Mutation: change any value in either block and this fails naming the
 // token and both values.
 func TestTheTwoDarkBlocksAgree(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
 	if err != nil {
 		t.Fatalf("read the stylesheet: %v", err)
@@ -58,6 +59,7 @@ func TestTheTwoDarkBlocksAgree(t *testing.T) {
 //
 // Mutation: drop the `:not([data-theme="light"])` and this fails.
 func TestAChosenLightThemeSurvivesADarkSystem(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("static/styles.css")
 	if err != nil {
 		t.Fatalf("read the stylesheet: %v", err)
@@ -87,6 +89,7 @@ func TestAChosenLightThemeSurvivesADarkSystem(t *testing.T) {
 // Mutation: add `defer` to the tag in any shell, or drop the tag, and
 // this fails naming the shell.
 func TestEveryShellAppliesTheThemeBeforeItPaints(t *testing.T) {
+	t.Parallel()
 	shells, err := os.ReadDir("static")
 	if err != nil {
 		t.Fatalf("read static/: %v", err)

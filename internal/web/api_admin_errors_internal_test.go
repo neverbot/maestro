@@ -26,6 +26,7 @@ import (
 // it stages a genuine deadlock between a cascading game deletion and a
 // concurrent content write, and reads the status off the real handler.
 func TestWriteUnmappedErrorClassifiesContention(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		err    error
@@ -100,6 +101,7 @@ var gameAdministrationFiles = []string{
 // request asked for already committed, where "send the same request
 // again" is advice that cannot work.
 func TestNoGameAdministrationHandlerAnswersAnUnclassifiedServerFault(t *testing.T) {
+	t.Parallel()
 	for _, name := range gameAdministrationFiles {
 		src, err := os.ReadFile(name)
 		if err != nil {

@@ -85,6 +85,7 @@ func newTestServerWithConfig(t *testing.T, adjust func(*config.Config)) (*web.Se
 }
 
 func TestBearerTokenIdentifiesCaller(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -125,6 +126,7 @@ func TestBearerTokenIdentifiesCaller(t *testing.T) {
 }
 
 func TestMissingCredentialsAreUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	rec := httptest.NewRecorder()
@@ -136,6 +138,7 @@ func TestMissingCredentialsAreUnauthorized(t *testing.T) {
 }
 
 func TestInvalidBearerTokenIsUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/me", nil)
 	req.Header.Set("Authorization", "Bearer mst_not-a-real-token")
@@ -148,6 +151,7 @@ func TestInvalidBearerTokenIsUnauthorized(t *testing.T) {
 }
 
 func TestRevokedTokenIsUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -175,6 +179,7 @@ func TestRevokedTokenIsUnauthorized(t *testing.T) {
 // project as part of the same removal; this exercises that through the
 // full authentication path, not just the identity package directly.
 func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -204,6 +209,7 @@ func TestExpelledMemberTokenIsUnauthorized(t *testing.T) {
 }
 
 func TestSessionCookieIdentifiesCaller(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -238,6 +244,7 @@ func TestSessionCookieIdentifiesCaller(t *testing.T) {
 }
 
 func TestExpiredSessionCookieIsUnauthorized(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -268,6 +275,7 @@ func TestExpiredSessionCookieIsUnauthorized(t *testing.T) {
 // server that would otherwise ignore the header instead honour the cookie
 // under different, unexpected precedence rules.
 func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -289,6 +297,7 @@ func TestInvalidBearerDoesNotFallBackToCookie(t *testing.T) {
 }
 
 func TestHealthzStaysPublic(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -300,6 +309,7 @@ func TestHealthzStaysPublic(t *testing.T) {
 }
 
 func TestVersionRejectsAnonymousRequests(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)
@@ -317,6 +327,7 @@ func TestVersionRejectsAnonymousRequests(t *testing.T) {
 // server_test.go's TestVersionRequiresAuthentication instead; this one
 // needs a real session, hence the DB-backed newTestServer here.
 func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -370,6 +381,7 @@ func TestVersionReturnsBuildVersionToAnAuthenticatedCaller(t *testing.T) {
 // offset (half the TTL, say, or the pre-cap value before LEAST applies)
 // would pass a loose lower bound but fails this bracket.
 func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)
@@ -418,6 +430,7 @@ func TestSessionRenewsPastHalfwayThroughItsLifetime(t *testing.T) {
 // hottest session-authenticated path in the product for no behavioural
 // difference most requests would ever need.
 func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -451,6 +464,7 @@ func TestSessionDoesNotRenewBeforeHalfway(t *testing.T) {
 // package web's own internal tests before caller_test.go) ever created
 // an admin and asserted on IsAdmin — it was decoded and never checked.
 func TestAdminTokenReturnsProjectAndIsAdmin(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	cfg.FirstAdminEmail = "admin@example.test"
@@ -509,6 +523,7 @@ func TestAdminTokenReturnsProjectAndIsAdmin(t *testing.T) {
 // different users. Getting the precedence wrong would resolve the wrong
 // identity for a valid request — a privilege issue, not merely a 401.
 func TestBearerTakesPrecedenceOverCookieForADifferentUser(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -554,6 +569,7 @@ func TestBearerTakesPrecedenceOverCookieForADifferentUser(t *testing.T) {
 // in this file exercises this path in CI; without it, that split could be
 // collapsed back without any test noticing.
 func TestDatabaseErrorDuringBearerAuthenticationIsInternalError(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)
@@ -580,6 +596,7 @@ func TestDatabaseErrorDuringBearerAuthenticationIsInternalError(t *testing.T) {
 }
 
 func TestDatabaseErrorDuringSessionAuthenticationIsInternalError(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)

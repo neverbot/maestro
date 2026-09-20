@@ -17,6 +17,7 @@ import (
 // Mutation: delete either assignment in handleMe and this fails naming
 // the missing field.
 func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 	if _, err := ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -95,6 +96,7 @@ func TestMeNamesTheSessionCallerInWordsAPersonWouldUse(t *testing.T) {
 //
 // Mutation: remove the project block from handleMe and this fails.
 func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{
@@ -149,6 +151,7 @@ func TestMeAnswersATokenCallerTheAddressOfItsGame(t *testing.T) {
 // Mutation: drop the `!caller.IsToken()` guard in handleMe and this fails
 // naming the field a token was told.
 func TestMeTellsATokenCallerNothingAboutThePerson(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 	owner, err := ids.CreateUser(ctx, identity.CreateUserRequest{

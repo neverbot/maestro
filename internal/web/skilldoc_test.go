@@ -29,6 +29,7 @@ import (
 // generator that skipped a whole domain produces a file that agrees with
 // it forever.
 func TestToolReferenceIsCurrent(t *testing.T) {
+	t.Parallel()
 	want := web.NewToolReferenceServer().ToolReference()
 	got := readBundleFile(t, web.ToolReferencePath)
 	if got == want {
@@ -56,6 +57,7 @@ func TestToolReferenceIsCurrent(t *testing.T) {
 // green the moment the file is regenerated from the broken generator;
 // this test goes red immediately and names all fourteen docs tools.
 func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
+	t.Parallel()
 	srv := web.NewServer(web.Options{
 		Version:   "skilldoc-test",
 		Identity:  identity.New(nil, config.Config{}),
@@ -107,6 +109,7 @@ func TestTheToolReferenceNamesEveryRegisteredTool(t *testing.T) {
 // header — or a generator that counted one table and listed another —
 // is a failing build rather than a sentence that quietly went false.
 func TestTheToolReferenceCountsWhatItLists(t *testing.T) {
+	t.Parallel()
 	body := readBundleFile(t, web.ToolReferencePath)
 	named := toolNamesIn(t, body)
 	stated := regexp.MustCompile(`(?m)^(\d+) tools\.`).FindStringSubmatch(body)
@@ -125,6 +128,7 @@ func TestTheToolReferenceCountsWhatItLists(t *testing.T) {
 // six thousand characters of contract an agent already has on the wire;
 // a bullet here is its opening sentence.
 func TestTheToolReferenceCarriesFirstSentencesAndNotDescriptions(t *testing.T) {
+	t.Parallel()
 	srv := web.NewToolReferenceServer()
 	descriptions := srv.ToolDescriptionsForTest()
 	body := readBundleFile(t, web.ToolReferencePath)
@@ -156,6 +160,7 @@ func TestTheToolReferenceCarriesFirstSentencesAndNotDescriptions(t *testing.T) {
 // real surface does not contain, which is what stops it from being a
 // rule asserted only by its own output.
 func TestTheFirstSentenceRuleIsPrecise(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, in, want string }{
 		{"a plain sentence", "Read one entity. Then read another.", "Read one entity."},
 		{
@@ -185,6 +190,7 @@ func TestTheFirstSentenceRuleIsPrecise(t *testing.T) {
 // and a group named after the empty string would be a heading an agent
 // cannot scan for.
 func TestTheIndexGroupsAnUnprefixedToolUnderSession(t *testing.T) {
+	t.Parallel()
 	page := web.ToolReferenceFromForTest(map[string]string{
 		"whoami":         "Report the calling identity. And more.",
 		"entities.get":   "Read one entity. And more.",
@@ -345,6 +351,7 @@ func conflictModeOnTheBatchUpserts(descriptions map[string]string) []string {
 // will look like when the surface changes" section, and delete this
 // test.
 func TestTheSeedingRecipeIsStillNeeded(t *testing.T) {
+	t.Parallel()
 	// The precision fixture first. Without it, a matcher that read the
 	// wrong key — or a tool list that had gone empty — would report
 	// nothing and be indistinguishable from a surface that has not
@@ -378,6 +385,7 @@ func TestTheSeedingRecipeIsStillNeeded(t *testing.T) {
 // route table: a generated artefact committed to the tree, and a test
 // that goes red when the source moved and the artefact did not.
 func TestRouteReferenceIsCurrent(t *testing.T) {
+	t.Parallel()
 	want := web.NewToolReferenceServer().RouteReference()
 	got := readBundleFile(t, web.RouteReferencePath)
 	if got == want {
@@ -402,6 +410,7 @@ func TestRouteReferenceIsCurrent(t *testing.T) {
 // Mutation: make routeReference skip a group and this names every route
 // in it.
 func TestTheRouteReferenceNamesEveryAPIRoute(t *testing.T) {
+	t.Parallel()
 	srv := web.NewServer(web.Options{
 		Version:   "skilldoc-test",
 		Identity:  identity.New(nil, config.Config{}),

@@ -195,6 +195,7 @@ func questType(t *testing.T, f restFixture) {
 }
 
 func TestRESTTypesRequireMembership(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	if _, err := f.ids.CreateUser(context.Background(), identity.CreateUserRequest{
 		Email: "stranger@example.test", DisplayName: "Stranger", Password: "password12345",
@@ -212,6 +213,7 @@ func TestRESTTypesRequireMembership(t *testing.T) {
 }
 
 func TestRESTCreateAndListTypes(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -260,6 +262,7 @@ func TestRESTCreateAndListTypes(t *testing.T) {
 // is `invalid_schema`; `schema_violation` is a stored value that no
 // longer fits a schema. This pins the code the domain actually produces.
 func TestRESTDeclaringABrokenSchemaIsInvalidSchema(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	rec := f.as(t, http.MethodPost, "/types", map[string]any{
 		"key": "quest", "label": "Quest", "label_plural": "Quests",
@@ -272,6 +275,7 @@ func TestRESTDeclaringABrokenSchemaIsInvalidSchema(t *testing.T) {
 // half of the same split, and the one the plan's snippet was reaching
 // for.
 func TestRESTAValueThatDoesNotFitItsSchemaIsSchemaViolation(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -289,6 +293,7 @@ func TestRESTAValueThatDoesNotFitItsSchemaIsSchemaViolation(t *testing.T) {
 // shape a browser needs to merge: the code, and the version the write
 // would have met.
 func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -312,6 +317,7 @@ func TestRESTAStaleVersionIsRefusedWithTheCurrentOne(t *testing.T) {
 // refusals whose status codes are this surface's own addition: a taken
 // destination is 400 invalid_input, and a stale version is 409.
 func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	declare := func(key string) string {
@@ -408,6 +414,7 @@ func TestTheRenameRoutesMirrorTheirTools(t *testing.T) {
 // anything this router serves — including with the discriminators
 // themselves, which are perfectly legal keys too.
 func TestARouteShapedKeyIsStillAddressable(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	// `rename` joins the list with types.rename: the rename route is
 	// POST /types/rename, a literal sibling of the collection route, so
@@ -464,6 +471,7 @@ func TestARouteShapedKeyIsStillAddressable(t *testing.T) {
 // database and on the MCP wire — so the two namespaces cannot collide
 // and no key needs reserving.
 func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	rec := f.as(t, http.MethodPost, "/types", map[string]any{
 		"key": "quest", "label": "Quest", "label_plural": "Quests",
@@ -534,6 +542,7 @@ func TestAGameFieldNamedLikeARowColumnNeverShadowsIt(t *testing.T) {
 // review stripped the check from five handlers without failing anything.
 // A write route added tomorrow appears in this table on its own.
 func TestEveryContentWriteRouteRefusesAViewer(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 	questType(t, f)
@@ -597,6 +606,7 @@ var wildcards = regexp.MustCompile(`\{[^}]+\}`)
 // it by silently ignoring the field — which is what "the URL wins" would
 // mean in practice — is how content lands in the wrong game.
 func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	other, err := f.proj.Create(context.Background(), "le-mans", "Le Mans", f.ownerID)
 	if err != nil {
@@ -639,6 +649,7 @@ func TestAStatedGameMustAgreeWithTheURL(t *testing.T) {
 // in the domain and never wired at the call site, with every unit test
 // green. The mirror is the call site a person's browser uses.
 func TestTheOrderReachesTheListingThroughTheURL(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
@@ -678,6 +689,7 @@ func TestTheOrderReachesTheListingThroughTheURL(t *testing.T) {
 // domain enforces reach this surface as the caller's own problem, at
 // the caller's own path, rather than as a 500.
 func TestRESTListingBoundsComeThroughUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -700,6 +712,7 @@ func TestRESTListingBoundsComeThroughUnchanged(t *testing.T) {
 // into this surface too: the graph view faces the same question the MCP
 // tool did, and both now answer it from the same code.
 func TestRESTRelationsListNamesItsEndpointsByRef(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	quest := f.as(t, http.MethodPost, "/types", map[string]any{
@@ -773,6 +786,7 @@ func TestRESTRelationsListNamesItsEndpointsByRef(t *testing.T) {
 // route is refused, and the refusal is about membership rather than
 // about the row.
 func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 	questType(t, f)
@@ -816,6 +830,7 @@ func TestRESTIsIsolatedByTheURLsGameAndNothingElse(t *testing.T) {
 // hundred. This seeds enough rows that a listing would be obvious in
 // the payload, and asserts none of them is in it.
 func TestTheGameSummaryCountsContentWithoutListingIt(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 	if rec := f.as(t, http.MethodPost, "/types", map[string]any{
@@ -865,6 +880,7 @@ func TestTheGameSummaryCountsContentWithoutListingIt(t *testing.T) {
 // answer with nothing in it, never an error and never a 404. The page's
 // own empty state is what it renders from this.
 func TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	rec := f.as(t, http.MethodGet, "/summary", nil)
 	if rec.Code != http.StatusOK {
@@ -889,6 +905,7 @@ func TestTheGameSummaryOfAnEmptyGameIsAnEmptyCatalogue(t *testing.T) {
 // longer fit its type is kept, marked, and counted here, per type and in
 // the total.
 func TestTheGameSummaryCountsTheRowsASchemaEditInvalidated(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
@@ -957,6 +974,7 @@ type gameSummary struct {
 // same token already does over MCP. What still holds is the binding:
 // the game in the URL must be the game the token is bound to.
 func TestATokenMayReadItsOwnGamesContentAndNoOthers(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 	questType(t, f)
@@ -1040,6 +1058,7 @@ func entityKeys(t *testing.T, f restFixture, query string) []string {
 // false answers "show me the broken rows" with exactly the rows that are
 // fine. It is refused at its own path instead.
 func TestTheInvalidFilterIsTriStateAndRefusesAnythingElse(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	invalid, valid := invalidAndValidQuests(t, f)
 
@@ -1082,6 +1101,7 @@ func TestTheInvalidFilterIsTriStateAndRefusesAnythingElse(t *testing.T) {
 // bad_request arm is now the empty string alone, which is the arm this
 // test was written to protect in the first place.
 func TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	declare := func(game any) *httptest.ResponseRecorder {
 		return f.as(t, http.MethodPost, "/types", map[string]any{
@@ -1120,6 +1140,7 @@ func TestAStatedGameIsJudgedTheWayTheMCPSurfaceJudgesIt(t *testing.T) {
 // neither the field nor what was wrong with it, on a surface where every
 // other refusal carries the path it is about.
 func TestAWrongTypedFieldIsNamed(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -1178,6 +1199,7 @@ func TestAWrongTypedFieldIsNamed(t *testing.T) {
 // right for a login would refuse an ordinary seed as malformed. A batch
 // far over that limit and far under this one has to land.
 func TestASeedSizedBatchIsAccepted(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -1239,6 +1261,7 @@ func TestASeedSizedBatchIsAccepted(t *testing.T) {
 // surfaces refuse the same four requests now, for the same reason and
 // at the same paths.
 func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	invalidAndValidQuests(t, f)
 
@@ -1306,6 +1329,7 @@ func TestAnIncompleteTraversalIsRefusedAndNeverAnsweredWithTheWholeGame(t *testi
 // `project_id` on the ground that an empty confirmation confirms
 // nothing. An empty filter filters nothing, by the same argument.
 func TestARepeatedOrEmptyQueryParameterIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	invalidAndValidQuests(t, f)
 
@@ -1336,6 +1360,7 @@ func TestARepeatedOrEmptyQueryParameterIsRefused(t *testing.T) {
 // it simply does not fit the int32 the field is — and unactionable,
 // because a caller told their number is not one has nowhere to go.
 func TestALimitTooLargeForTheFieldSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 
@@ -1363,6 +1388,7 @@ func TestALimitTooLargeForTheFieldSaysSo(t *testing.T) {
 // field: the JSON parsed. Naming no path is right; calling it malformed
 // is not.
 func TestABodyThatIsNotAnObjectSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	// `null` is deliberately absent: unmarshalling it into a struct is a
@@ -1390,6 +1416,7 @@ func TestABodyThatIsNotAnObjectSaysSo(t *testing.T) {
 // payloads sends — used to answer 200 having written only the first, and
 // the caller had no way to learn the second never happened.
 func TestDataAfterTheJSONBodyIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	body := `{"key":"quest","label":"Quest","label_plural":"Quests"}` +
@@ -1417,6 +1444,7 @@ func TestDataAfterTheJSONBodyIsRefused(t *testing.T) {
 // reader can actually do, and it is free here — requireProject has
 // already resolved it for the request.
 func TestTheSummaryNamesTheCallersRole(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 
@@ -1452,6 +1480,7 @@ func TestTheSummaryNamesTheCallersRole(t *testing.T) {
 // was well formed and the type is real — it is the world holding on to
 // the row, which is what 409 says and 400 does not.
 func TestRemovingATypeStillInUseIsAConflict(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 	if rec := f.as(t, http.MethodPost, "/entities", map[string]any{"items": []any{
@@ -1480,6 +1509,7 @@ func TestRemovingATypeStillInUseIsAConflict(t *testing.T) {
 // graph view — the thing the views sub-project renders an edge's
 // declared values from — still unable to see them.
 func TestRESTReadsAnEdgesOwnFields(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	quest := f.as(t, http.MethodPost, "/types", map[string]any{
@@ -1642,6 +1672,7 @@ type relationsPage struct {
 // All three states are exercised, because a route that dropped the
 // parameter on the floor would satisfy any one of them alone.
 func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	seedOneRESTEdge(t, f)
 
@@ -1698,6 +1729,7 @@ func TestRESTRelationsListFiltersByTheInvalidFlag(t *testing.T) {
 // it could only ever count entities, so a game whose every broken row was
 // an edge told its designer there was nothing to fix.
 func TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	seedOneRESTEdge(t, f)
 
@@ -1736,6 +1768,7 @@ func TestTheGameSummaryCountsTheEdgesASchemaEditInvalidated(t *testing.T) {
 // REST: an edge is now a compare-and-set, and the number to send comes
 // back in the same answer that wrote it.
 func TestRESTRelationsUpsertTakesAnExpectedVersion(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	seedOneRESTEdge(t, f)
 

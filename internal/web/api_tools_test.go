@@ -25,6 +25,7 @@ import (
 // the closed vocabulary is compared against `metamodel.AnalysisTraits`,
 // which is the one place it is authoritative.
 func TestTheToolDescriptionsAreReadableOverREST(t *testing.T) {
+	t.Parallel()
 	// The full server: a server built without the content services
 	// registers none of their tools, and the vocabulary this test is
 	// about lives on one of them.
@@ -76,6 +77,7 @@ func TestTheToolDescriptionsAreReadableOverREST(t *testing.T) {
 // this instance serves, and a signed-out reader has no business with the
 // shape of a surface they cannot call.
 func TestTheToolReferenceNeedsACaller(t *testing.T) {
+	t.Parallel()
 	srv := newRESTFixture(t).srv
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/mcp/tools", nil))

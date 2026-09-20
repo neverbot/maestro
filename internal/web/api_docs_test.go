@@ -63,6 +63,7 @@ func writeDocREST(t *testing.T, f restFixture, path, content string, expected in
 // request, and the failure is in the body with its index, its path and
 // its code. Only a refusal of the call itself carries a status.
 func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	rec := f.as(t, http.MethodPost, "/docs/batch", map[string]any{
@@ -131,6 +132,7 @@ func TestTheBatchRouteMirrorsTheBatchTool(t *testing.T) {
 // exercised through the routes a browser actually calls, never through
 // the service.
 func TestTheProseSurfaceWritesReadsAndListsThroughREST(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 
 	writeDocREST(t, f, "lore/duskwood", "---\ntitle: Duskwood\n---\n# Duskwood\n\nDark.\n", 0)
@@ -255,6 +257,7 @@ func TestTheProseSurfaceWritesReadsAndListsThroughREST(t *testing.T) {
 // which is what stops an attachment being write-only — the defect this
 // whole plan is organised around, one surface along.
 func TestTheProseLinkRoutesReadTheirOwnResultBack(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	questType(t, f)
 	rec := f.as(t, http.MethodPost, "/entities", map[string]any{
@@ -324,6 +327,7 @@ func TestTheProseLinkRoutesReadTheirOwnResultBack(t *testing.T) {
 // every one of them back — which is only possible because a document
 // path travels in the query string. See api_docs.go's header.
 func TestADocumentPathIsNeverAURLSegment(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	for _, path := range []string{"one", "history", "version", "revert", "diff", "links", "rendered", "comparison"} {
 		writeDocREST(t, f, path, "# "+path+"\n", 0)
@@ -358,6 +362,7 @@ func TestADocumentPathIsNeverAURLSegment(t *testing.T) {
 // own: rendering is a REST-only affordance, and an agent asked to
 // rewrite a script gets the markdown it will edit.
 func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	body := "# Duskwood\n\nThe *worgen* came at dusk.\n"
 	writeDocREST(t, f, "lore/duskwood", body, 0)
@@ -420,6 +425,7 @@ func TestTheReadingViewRendersAndTheRawBodyIsWhatMCPGets(t *testing.T) {
 // same diff docs.diff answers with, plus the classed lines a page
 // colours without parsing the diff itself.
 func TestTheComparisonViewRendersADiff(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	writeDocREST(t, f, "lore/duskwood", "# old\n", 0)
 	writeDocREST(t, f, "lore/duskwood", "# <b>new</b>\n", 1)
@@ -457,6 +463,7 @@ func TestTheComparisonViewRendersADiff(t *testing.T) {
 // this route is the one calling it — a handler that took a shortcut and
 // echoed the body would pass every one of them.
 func TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	writeDocREST(t, f, "lore/trap",
 		"[click](javascript:alert(1)) and [also](javascript&#58;alert(1))\n\n"+
@@ -501,6 +508,7 @@ func TestTheReadingViewNeutralisesADangerousLinkIsTheWholeReasonItIsHTML(t *test
 // its own headers and losing the policy on the one response in this
 // product that is meant to be inserted as markup.
 func TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	writeDocREST(t, f, "lore/duskwood", "# D\n", 0)
 
@@ -541,6 +549,7 @@ func TestARenderedViewCarriesTheSameSecurityHeadersEveryPageDoes(t *testing.T) {
 // enough to show that a viewer can *read* prose, which is the other half
 // of the rule and the half a too-eager gate would break.
 func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 	writeDocREST(t, f, "lore/duskwood", "# Duskwood\n", 0)
@@ -601,6 +610,7 @@ func TestAViewerMayReadProseAndMayNotWriteIt(t *testing.T) {
 // core, so a divergence here can only come from this file's own argument
 // reading — which is exactly what the table covers.
 func TestTheRESTMirrorAnswersTheSameCodesAsTheTools(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	writeDocREST(t, f, "lore/duskwood", "# Duskwood\n", 0)
 
@@ -759,6 +769,7 @@ func newProseEventServer(t *testing.T) (*web.Server, *identity.Service, *project
 // published document.written with HumanOnly: true, and the finding would
 // be that agents had silently stopped being told their base moved.
 func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newProseEventServer(t)
 	ctx := context.Background()
 
@@ -946,6 +957,7 @@ func TestADocumentEventReachesAnSSESubscriber(t *testing.T) {
 // session caller, so the event crosses from a human's write to an
 // agent's stream — the direction the filter breaks.
 func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newProseEventServer(t)
 	ctx := context.Background()
 
@@ -1052,6 +1064,7 @@ func TestADocumentLinkEventReachesAnSSESubscriber(t *testing.T) {
 // external test package and reads the routing table through the same
 // exported hooks the viewer test uses.
 func TestTheProseRoutesAreVisibleToTheConventionTests(t *testing.T) {
+	t.Parallel()
 	srv := web.NewServer(web.Options{
 		Version:  "test",
 		Identity: identity.New(nil, config.Config{}),
@@ -1102,6 +1115,7 @@ func TestTheProseRoutesAreVisibleToTheConventionTests(t *testing.T) {
 // them. requireProseService does, with the same shape
 // requireContentService uses for the metamodel.
 func TestAProseRouteOnAnInstanceWithoutTheServiceIsRefused(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := testConfig()
 	ids := identity.New(pool, cfg)

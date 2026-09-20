@@ -35,6 +35,7 @@ const (
 // and pass — the failure this repository has now hit under three
 // different names.
 func TestTheErrorCodeRegionIsFindable(t *testing.T) {
+	t.Parallel()
 	body := readSource(t, "auth.go")
 	if got := strings.Count(body, errorCodeRegionBegin); got != 1 {
 		t.Fatalf("auth.go carries %d %q markers, want exactly 1", got, errorCodeRegionBegin)
@@ -60,6 +61,7 @@ func TestTheErrorCodeRegionIsFindable(t *testing.T) {
 // the bundle names that no tool can return (a recovery for something
 // that never arrives).
 func TestBundleErrorCodesMatchTheSurface(t *testing.T) {
+	t.Parallel()
 	fences, err := skill.VocabFences(skill.Files())
 	if err != nil {
 		t.Fatalf("reading the bundle's vocab fences: %v", err)
@@ -108,6 +110,7 @@ func TestBundleErrorCodesMatchTheSurface(t *testing.T) {
 // would have missed the second and reported invalid_input as a region
 // member nothing produces.
 func TestTheErrorCodeRegionIsExactlyWhatAnMCPToolCanReturn(t *testing.T) {
+	t.Parallel()
 	region := errorCodesInRegion(t)
 	emitted := mcpEmittedErrorCodes(t)
 

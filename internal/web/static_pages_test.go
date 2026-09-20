@@ -85,6 +85,7 @@ func concreteURL(pattern string) string {
 // that pattern — driven through a real request, so a table that named
 // the wrong file fails here too.
 func TestEveryShellIsReachableByItsRoute(t *testing.T) {
+	t.Parallel()
 	routes := web.ShellRoutesForTest()
 	dispatching := web.DispatchingShellsForTest()
 	server, _, _ := newTestServer(t)
@@ -174,6 +175,7 @@ var gamesPathRegexp = regexp.MustCompile(`export const GAMES_PATH = "([^"]+)";`)
 // the route and this fails too, which is the join a shipped-dead wiring
 // slips through.
 func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
+	t.Parallel()
 	source, err := os.ReadFile(filepath.Join("static", "app.js"))
 	if err != nil {
 		t.Fatalf("read static/app.js: %v", err)
@@ -237,6 +239,7 @@ func TestThePickerHasAnAddressThatDoesNotRedirect(t *testing.T) {
 // It enumerates the shells rather than naming four, so a shell added
 // tomorrow is inside the rule the day it lands.
 func TestNoShellIsServedTwice(t *testing.T) {
+	t.Parallel()
 	server, _, _ := newTestServer(t)
 	for _, shell := range shellFiles(t) {
 		url := "/static/" + filepath.Base(shell)
@@ -277,6 +280,7 @@ var idInPath = regexp.MustCompile(`/\$\{[A-Za-z_][A-Za-z0-9_.]*\.id\b|/" \+ [A-Z
 // `Node.ID` — that is a join inside one envelope and never an address,
 // and its own doc comment says so.
 func TestNoPageURLContainsAUUID(t *testing.T) {
+	t.Parallel()
 	var offences []string
 	scanned := 0
 	for _, module := range pageModules(t) {
@@ -319,6 +323,7 @@ func TestNoPageURLContainsAUUID(t *testing.T) {
 // clean, or it never matched anything — and this repository has shipped
 // that shape twice.
 func TestTheUUIDScanReadsWhatItClaimsTo(t *testing.T) {
+	t.Parallel()
 	for name, caught := range map[string]string{
 		"a uuid in a template":     "const href = `/g/${slug}/e/1e9d6b0c-4f7a-4a9e-8a5b-2c1d3e4f5a6b`;",
 		"an id in a template path": "const href = `/g/${game.id}/views`;",
@@ -351,6 +356,7 @@ func TestTheUUIDScanReadsWhatItClaimsTo(t *testing.T) {
 // renders as unstyled text, and one without the map 404s every bare
 // specifier the moment a component is imported.
 func TestEveryShellCarriesTheImportMapAndTheStylesheet(t *testing.T) {
+	t.Parallel()
 	for _, shell := range shellFiles(t) {
 		raw, err := os.ReadFile(shell)
 		if err != nil {
@@ -384,6 +390,7 @@ func TestEveryShellCarriesTheImportMapAndTheStylesheet(t *testing.T) {
 // exception is the plumbing module the others import, which is loaded
 // because they are.
 func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
+	t.Parallel()
 	loaded := map[string]bool{}
 	for _, shell := range shellFiles(t) {
 		raw, err := os.ReadFile(shell)
@@ -435,6 +442,7 @@ func TestEveryPageModuleIsLoadedByAShell(t *testing.T) {
 // no runtime signature beats no guard, and pretending otherwise is how
 // the property gets deleted twice.
 func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("static", "pages", "view.js"))
 	if err != nil {
 		t.Fatalf("read static/pages/view.js: %v", err)
@@ -479,6 +487,7 @@ func TestTheNarrowFallbackIsWiredAtBothCallSites(t *testing.T) {
 // surface uses, a caller with the right address and the wrong method
 // still gets 405, and a known route is untouched.
 func TestAnUnknownAddressIsStillThisProduct(t *testing.T) {
+	t.Parallel()
 	server, _, _ := newTestServer(t)
 	shell, err := os.ReadFile(filepath.Join("static", "not-found.html"))
 	if err != nil {

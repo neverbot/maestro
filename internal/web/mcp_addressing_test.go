@@ -70,6 +70,7 @@ type gameRef struct{ ID uuid.UUID }
 // the ids are still on the wire everywhere they were, so nothing that
 // had one has lost it — they are simply no longer how you address a row.
 func TestEveryAddressOnThisSurfaceIsAKey(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedAddressable(t, f.deps, f.caller, gameRef{f.game})
@@ -191,6 +192,7 @@ func TestEveryAddressOnThisSurfaceIsAKey(t *testing.T) {
 // the read is what can go back into the write, with no map to build in
 // between.
 func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 	seedAddressable(t, f.deps, f.caller, gameRef{f.game})
@@ -282,6 +284,7 @@ func TestARelationTypeReadsBackTheEndpointKeysItWasDeclaredWith(t *testing.T) {
 // assembly worth having: the tool and the page report the same numbers,
 // because they are the same numbers.
 func TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	ctx := context.Background()
 	seedAddressable(t, f.deps(), f.caller(), gameRef{f.game})
@@ -359,6 +362,7 @@ func TestGamesCountsAnswersTheQuestionAPagedWalkUsedTo(t *testing.T) {
 // addressing change: two surfaces, one core each, and a mirror that was
 // never called is a mirror that compiles.
 func TestTheRESTMirrorAddressesRowsByKeyToo(t *testing.T) {
+	t.Parallel()
 	f := newRESTFixture(t)
 	seedAddressable(t, f.deps(), f.caller(), gameRef{f.game})
 

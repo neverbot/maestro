@@ -48,6 +48,7 @@ func (rt bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 // that this actually holds through the real transport, not merely in
 // the Go source.
 func TestMCPEndToEndOverHTTP(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
@@ -146,6 +147,7 @@ func TestMCPEndToEndOverHTTP(t *testing.T) {
 // that states the game it expects, and states it correctly, is not
 // refused for stating it.
 func TestMCPGamesGetAcceptsAMatchingGameConfirmation(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
@@ -186,6 +188,7 @@ func TestMCPGamesGetAcceptsAMatchingGameConfirmation(t *testing.T) {
 // every error on this surface carried a code would be wrong; this test
 // is what makes that claim checked instead of just asserted.
 func TestMCPInputValidationFailuresAreProseNotACode(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
@@ -294,6 +297,7 @@ func decodeStructured(t *testing.T, result *mcp.CallToolResult, v any) {
 // own transport, at the real routed address, not merely in the
 // in-process unit test that calls mcpHandler() directly.
 func TestMCPRejectsAnUnauthenticatedRequestOverHTTP(t *testing.T) {
+	t.Parallel()
 	srv, _, _ := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()
@@ -323,6 +327,7 @@ func TestMCPRejectsAnUnauthenticatedRequestOverHTTP(t *testing.T) {
 // TestMCPEndToEndOverHTTP) — a revoked token never even reaches a tool
 // handler.
 func TestMCPRejectsARevokedTokenOverHTTP(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	httpSrv := httptest.NewServer(srv)
 	defer httpSrv.Close()

@@ -36,6 +36,7 @@ import (
 // is the build with the most tools on it; without one, newMCPServer
 // registers only the Core three (MCPDeps.Metamodel).
 func TestEveryMCPToolGoesThroughAddScopedTool(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	cfg := config.Config{
 		SessionTTL: 24 * time.Hour,

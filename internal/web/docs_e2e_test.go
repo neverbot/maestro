@@ -307,6 +307,7 @@ func (w *proseWorld) search(t *testing.T, in web.SearchInput) web.SearchOutput {
 // TestDocumentsEndToEnd is the spec's §9 definition of done, executed as
 // one test in the order a real session would run it.
 func TestDocumentsEndToEnd(t *testing.T) {
+	t.Parallel()
 	w := newProseWorld(t)
 	ctx := context.Background()
 
@@ -1112,6 +1113,7 @@ func (w *proseWorld) assertAnotherGamesTokenIsRefusedEverywhere(t *testing.T) {
 // agent as internal_error, which no in-process test that inspects the
 // Go error can see.
 func TestAnAgentDrivesTheProseToolsOverHTTP(t *testing.T) {
+	t.Parallel()
 	w := newProseWorld(t)
 	ctx := context.Background()
 

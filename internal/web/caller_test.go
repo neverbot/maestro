@@ -10,6 +10,7 @@ import (
 // TokenID and ProjectID both set from the same resolved token, IsToken
 // true, and ScopedProject returning that exact project.
 func TestTokenCallerShape(t *testing.T) {
+	t.Parallel()
 	userID, tokenID, projectID := uuid.New(), uuid.New(), uuid.New()
 	c := newTokenCaller(userID, true, tokenID, projectID)
 
@@ -35,6 +36,7 @@ func TestTokenCallerShape(t *testing.T) {
 // produces: TokenID and ProjectID both nil, IsToken false, ScopedProject
 // reporting "no project" rather than the zero UUID being mistaken for one.
 func TestSessionCallerShape(t *testing.T) {
+	t.Parallel()
 	userID := uuid.New()
 	c := newSessionCaller(userID, false)
 
@@ -57,6 +59,7 @@ func TestSessionCallerShape(t *testing.T) {
 // admin's token is still scoped to exactly the project it is bound to.
 // ScopedProject must not special-case IsAdmin into an unscoped pass.
 func TestScopedProjectIgnoresIsAdmin(t *testing.T) {
+	t.Parallel()
 	projectID := uuid.New()
 	c := newTokenCaller(uuid.New(), true, uuid.New(), projectID)
 

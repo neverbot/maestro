@@ -463,6 +463,7 @@ func diagnosticAt(t *testing.T, diagnostics []views.Diagnostic, code, path strin
 // session runs it. Every step is the call an agent makes, and the step
 // numbers are the spec's own.
 func TestTheViewsDefinitionOfDone(t *testing.T) {
+	t.Parallel()
 	w := newE2EWorld(t)
 	ctx := context.Background()
 
@@ -1073,6 +1074,7 @@ func TestTheViewsDefinitionOfDone(t *testing.T) {
 // (node_count, edge_count) and omitted the two it does (nodes, edges).
 // Nothing read the schema, so nothing said so.
 func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
+	t.Parallel()
 	w := newE2EWorld(t)
 	ctx := context.Background()
 	httpSrv := httptest.NewServer(w.srv)
@@ -1162,6 +1164,7 @@ func TestASavedViewArrivesOverTheRealTransport(t *testing.T) {
 // The table is checked against the registry, so a tool added without a
 // call here fails rather than going unexercised.
 func TestEveryViewsToolIsCallableOverTheRealTransport(t *testing.T) {
+	t.Parallel()
 	w := newE2EWorld(t)
 	ctx := context.Background()
 	httpSrv := httptest.NewServer(w.srv)

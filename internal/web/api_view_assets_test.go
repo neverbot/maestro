@@ -147,6 +147,7 @@ func testJPEG(t *testing.T, width, height int) []byte {
 // and a browser told the wrong type for the right bytes is exactly the
 // confusion nosniff exists to stop mattering.
 func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	for _, tc := range []struct {
 		filename string
@@ -204,6 +205,7 @@ func TestAnAssetIsServedWithANoSniffHeaderAndItsOwnContentType(t *testing.T) {
 // neither. The refusal is internal/views' — this test is what proves the
 // transport does not slip a second, weaker judgement in front of it.
 func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
 	rec := f.send(t, f.cookie, http.MethodPost, f.uploadPath(f.gameSlug, "world-map.png"),
@@ -242,6 +244,7 @@ func TestAnSVGIsRefusedByTheRouteWhateverItSaysItIs(t *testing.T) {
 // the measurement. What is left to assert here is the mapping — a 400
 // naming /bytes — which is the transport's actual job.
 func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	oversize := make([]byte, views.MaxAssetBytes+1024)
 	copy(oversize, testPNG(t, 8, 8))
@@ -268,6 +271,7 @@ func TestAnOversizeUploadIsRefusedOverTheWire(t *testing.T) {
 // caller's standing, or a leaked id would serve one game's map inside
 // another's page.
 func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	theirs := f.upload(t, f.otherSlug, "le-mans.png", "image/png", testPNG(t, 12, 8))
 
@@ -313,6 +317,7 @@ func TestAnAssetOfAnotherGameIsNotServedOverHTTP(t *testing.T) {
 // writes are gated, and this one proves the *read* is not — a viewer who
 // cannot see the map cannot look at the game.
 func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	ctx := context.Background()
 	asset := f.upload(t, f.gameSlug, "azeroth.png", "image/png", testPNG(t, 20, 10))
@@ -344,6 +349,7 @@ func TestAViewerMaySeeABackgroundAndMayNotUploadOne(t *testing.T) {
 // TestEveryContentRouteIsRegisteredAsContent and
 // TestEveryContentWriteRouteRefusesAViewer without failing either.
 func TestTheAssetRoutesAreVisibleToTheConventionTests(t *testing.T) {
+	t.Parallel()
 	srv := web.NewServer(web.Options{
 		Version:  "test",
 		Identity: identity.New(nil, config.Config{}),
@@ -380,6 +386,7 @@ func TestTheAssetRoutesAreVisibleToTheConventionTests(t *testing.T) {
 // Options.Views' own doc comment promises, which the test above depends
 // on being harmless.
 func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	bare := web.NewServer(web.Options{
 		Version:  "test",
@@ -410,6 +417,7 @@ func TestAnAssetRouteOnAnInstanceWithNoViewsServiceIs404(t *testing.T) {
 // (TestAssetsArea's "the asset listing is paged and its cursor is its own"
 // case) pins the keyset itself.
 func TestTheAssetListingPagesOverTheWire(t *testing.T) {
+	t.Parallel()
 	f := newAssetFixture(t)
 	for i := 0; i < 5; i++ {
 		f.upload(t, f.gameSlug, fmt.Sprintf("map-%d.png", i), "image/png", testPNG(t, 8+i, 8))

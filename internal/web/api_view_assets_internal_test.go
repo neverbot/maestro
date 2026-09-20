@@ -34,6 +34,7 @@ import (
 // the two sources apart, and it is why the duplication is defensible
 // rather than merely argued.
 func TestTheServingRoutesNoSniffHeaderIsItsOwn(t *testing.T) {
+	t.Parallel()
 	pool := testutil.NewPool(t)
 	ctx := context.Background()
 	var project uuid.UUID

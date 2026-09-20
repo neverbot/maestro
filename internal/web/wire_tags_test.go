@@ -106,6 +106,7 @@ var domainPackages = map[string]bool{
 // checked exactly as the root is, because that is how far a client
 // reads.
 func TestEveryDomainTypeOnTheWireIsTagged(t *testing.T) {
+	t.Parallel()
 	if len(wireDomainRoots) == 0 {
 		t.Fatal("no roots: this guard swept nothing")
 	}
@@ -183,6 +184,7 @@ func walkWireType(t *testing.T, path string, typ reflect.Type, seen map[reflect.
 // extend — which is the failure it exists to close, one level up: a rule
 // established correctly and not carried one step along.
 func TestEveryDomainTypeOnTheWireIsAKnownRoot(t *testing.T) {
+	t.Parallel()
 	found := map[string]string{}
 	entries, err := os.ReadDir(".")
 	if err != nil {

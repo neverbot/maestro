@@ -11,5 +11,6 @@ import "testing"
 // for, that a column with no server-side order carries no control, and
 // that the direction is in words and not only in an arrow.
 func TestTheListingRows(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/rows_test.mjs")
 }

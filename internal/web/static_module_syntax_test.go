@@ -26,6 +26,7 @@ import (
 // `html` template in internal/web/static/components and this fails
 // naming the file and the line.
 func TestEveryModuleParsesAsAModule(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node is not installed; this guard needs the runtime the browser is closest to")
 	}

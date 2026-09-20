@@ -23,6 +23,7 @@ import (
 //
 // So both halves are asserted: the slug works, and the id does not.
 func TestAGameIsAddressedByItsSlugAndNotByItsID(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -64,6 +65,7 @@ func TestAGameIsAddressedByItsSlugAndNotByItsID(t *testing.T) {
 // agree — a designer who capitalised a bookmark is not looking at a
 // different game.
 func TestTheSlugAddressFoldsCase(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -97,6 +99,7 @@ func TestTheSlugAddressFoldsCase(t *testing.T) {
 // membership into the lookup so both cases are one answer, and this is
 // what proves it stays that way.
 func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
+	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)
 	ctx := context.Background()
 
@@ -151,6 +154,7 @@ func TestASlugThatNamesNothingAndOneYouAreNotInAreTheSameRefusal(t *testing.T) {
 // was another call. whoami's project_slug is now that address, and this
 // drives exactly that path with no id anywhere in it.
 func TestAnAgentReachesRESTWithNothingButItsTokenAndItsGamesSlug(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 	ctx := context.Background()
 
@@ -179,6 +183,7 @@ func TestAnAgentReachesRESTWithNothingButItsTokenAndItsGamesSlug(t *testing.T) {
 // refusal can name both, which is what turns "no" into "you are pointing
 // at the wrong game".
 func TestATokenNamingAnotherGamesSlugIsToldWhichGameItIsBoundTo(t *testing.T) {
+	t.Parallel()
 	f := newMetamodelFixture(t)
 
 	for _, ref := range []string{f.otherSlug, "a-game-nobody-has"} {
@@ -210,6 +215,7 @@ func TestATokenNamingAnotherGamesSlugIsToldWhichGameItIsBoundTo(t *testing.T) {
 // point — nothing between "I made a game" and "I am working in it" asks
 // for one.
 func TestAGameCreatedByNameIsImmediatelyReachableByThatName(t *testing.T) {
+	t.Parallel()
 	srv, ids, _ := newTestServer(t)
 	ctx := context.Background()
 

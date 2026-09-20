@@ -13,5 +13,6 @@ import "testing"
 // save the server would refuse is refused here first with the reason
 // beside the button rather than after a press.
 func TestTheQueryBuilder(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/builder_test.mjs")
 }

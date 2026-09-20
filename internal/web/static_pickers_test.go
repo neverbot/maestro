@@ -13,5 +13,6 @@ import "testing"
 // it asks and what it does with an answer that arrives after the
 // question has changed.
 func TestThePickerSources(t *testing.T) {
+	t.Parallel()
 	runJSTest(t, "jstest/pickers_test.mjs")
 }

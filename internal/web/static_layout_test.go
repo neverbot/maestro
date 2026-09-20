@@ -80,6 +80,7 @@ var importSpecifier = regexp.MustCompile(`(?m)^\s*(?:import|export)[^;]*?from\s*
 // made of, so that a fifth one added without a thought about workers is
 // a diff somebody reads rather than a file this test never opened.
 func TestTheLayoutModulesResolveWithoutAnImportMap(t *testing.T) {
+	t.Parallel()
 	modules := layoutModules(t)
 
 	var names []string
@@ -118,6 +119,7 @@ func TestTheLayoutModulesResolveWithoutAnImportMap(t *testing.T) {
 // "one exported constant, and the banner's sentence is generated from
 // the number".
 func TestTheLayoutBudgetIsOneNumberAndItsSentenceIsGenerated(t *testing.T) {
+	t.Parallel()
 	modules := layoutModules(t)
 	budget, ok := modules["budget.js"]
 	if !ok {
@@ -233,6 +235,7 @@ func everyOwnModule(t *testing.T) map[string]string {
 // stops being checked on the day it is carried one step along, which is
 // this sub-project's own most repeated defect.
 func TestTheComposerReadsAStoredPositionInTheSpellingTheServerWrites(t *testing.T) {
+	t.Parallel()
 	encoded, err := json.Marshal(views.Position{})
 	if err != nil {
 		t.Fatalf("marshal a position: %v", err)
@@ -307,6 +310,7 @@ func withoutComments(code string) string {
 // would make that assertion pass over a comment, which is the failure it
 // was rewritten to close.
 func TestTheCommentStripperRemovesCommentsAndKeepsCode(t *testing.T) {
+	t.Parallel()
 	const src = "// row.entity_key in a comment\nconst a = row.entity_key;\n/* row.pinned */\nconst b = 1;"
 	stripped := withoutComments(src)
 	if strings.Contains(stripped, "comment") || strings.Contains(stripped, "row.pinned") {

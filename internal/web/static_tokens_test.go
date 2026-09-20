@@ -58,7 +58,13 @@ var (
 		`(?s):root(?::not\(\[data-theme="light"\]\)|\[data-theme="(?:dark|light)"\])?\s*\{(.*?)\}`)
 	declarationRE = regexp.MustCompile(`(?m)^\s*(--[a-z0-9-]+)\s*:\s*([^;]+);`)
 	referenceRE   = regexp.MustCompile(`var\(\s*(--[a-z0-9-]+)`)
-	hexRE         = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	// Six digits, or eight: `#rrggbbaa` is a colour with an alpha
+	// channel, which is what a halo drawn on paper is, and the rule this
+	// matcher serves — only colours have a theme — is as true of one as
+	// of the other. It admitted six only, so the first token with an
+	// alpha read as "not a colour" and its dark-theme twin was reported
+	// as noise.
+	hexRE = regexp.MustCompile(`^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
 )
 
 // themeTokens reads the two token sets out of styles.css: everything a

@@ -222,7 +222,7 @@
      *beside* the button sits on the paper, where there is contrast to
      spend, and it is ink rather than the accent: the accent is the focus
      ring's, and hover and focus must not answer alike. */
-  --halo: rgba(44, 34, 27, 0.22);
+  --halo: #2c221b38;
 
   --ease: cubic-bezier(0.25, 1, 0.5, 1);
   --dur-state: 120ms;
@@ -273,9 +273,8 @@
     --paper: #1c1913;
     --ground: #13100b;
     --raised: #26221c;
-  --halo: rgba(231, 226, 217, 0.22);
     /* Ink is the light one in the dark theme, so the halo is too. */
-    --halo: rgba(231, 226, 217, 0.22);
+    --halo: #e7e2d938;
 
     --ink: #e7e2d9;
     --ink-hover: #faf6ef;
@@ -320,6 +319,7 @@
   --paper: #1c1913;
   --ground: #13100b;
   --raised: #26221c;
+  --halo: #e7e2d938;
 
   --ink: #e7e2d9;
   --ink-hover: #faf6ef;

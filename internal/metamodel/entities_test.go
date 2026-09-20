@@ -1747,6 +1747,22 @@ func (c *cancelWhenLanded) armed() bool {
 	if c.fired {
 		return true
 	}
+	// **Only between items.** pgx consults the context it is given all
+	// the way through a statement, so this probe is also called from
+	// inside item 0's own commit — and the row it watches for becomes
+	// visible the instant that commit lands on the server, which can be
+	// while pgx is still waiting for the reply. Arming there cancels the
+	// connection under the commit, and the batch stops at item 0 with
+	// the same error it should have reported for item 1: the test then
+	// fails about one run in three, on nothing the product did.
+	//
+	// An acquired connection is exactly the condition "an item is in
+	// flight": between two items withTx has returned, its connection is
+	// back in the pool, and nothing else in this test holds one. So the
+	// edge this context exists for is the only moment it can fire.
+	if c.pool.Stat().AcquiredConns() != 0 {
+		return false
+	}
 	var exists bool
 	if err := c.pool.QueryRow(context.Background(),
 		`SELECT EXISTS (SELECT 1 FROM entities WHERE project_id = $1 AND key = $2)`,

@@ -15,6 +15,15 @@ services:
       # reading this public repository reported it and the line below as
       # a company email and its password. Both were placeholders; a
       # reader could not tell.
+      # **Backups are off here, deliberately.** A development stack that
+      # wrote a nightly dump into the repository would be a directory of
+      # database copies nobody asked for. On a real instance, name a
+      # directory and mount it — readme.md's "Backups" section has the
+      # whole of it:
+      #
+      #   MAESTRO_BACKUP_DIR: /backups
+      #   MAESTRO_BACKUP_AT: "03:00"
+      #   MAESTRO_BACKUP_KEEP_DAYS: "7"
       FIRST_ADMIN_EMAIL: admin@example.test
       FIRST_ADMIN_PASSWORD: change-me-please
       # Seeds the admin account on an empty database. On a non-empty

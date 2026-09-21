@@ -34,6 +34,16 @@ const defaultSessionTTL = 720 * time.Hour
 // without forking the binary, the same way SESSION_TTL already works.
 const defaultInviteTTL = 14 * 24 * time.Hour
 
+// When the nightly dump runs and how much history is kept, when an
+// operator names a directory and nothing else. Three in the morning
+// local time, a week of dumps: the hour nobody is writing a game, and
+// enough history that a corruption noticed on Monday can be undone from
+// the Friday before it.
+const (
+	defaultBackupAt       = "03:00"
+	defaultBackupKeepDays = 7
+)
+
 // MaxInviteTTL bounds INVITE_TTL and InviteRequest.ExpiresIn (see
 // identity.InviteRequest): an operator-set or per-invite lifetime is still
 // a bearer credential the moment it exists, and an unbounded one turns a
@@ -61,6 +71,14 @@ type Config struct {
 	AllowedEmailDomains []string
 	RegistrationMode    RegistrationMode
 	Argon2              Argon2Params
+
+	// Where the nightly dump is written, when to write it, and how many
+	// days of them to keep. **An empty BackupDir disables backups**, and
+	// that is the default: an instance that says nothing about backups
+	// behaves exactly as it did before they existed.
+	BackupDir      string
+	BackupAt       string
+	BackupKeepDays int
 
 	// FirstAdminPasswordReset is the one-shot opt-in that lets a restart
 	// overwrite the configured admin's password with FIRST_ADMIN_PASSWORD
@@ -175,6 +193,19 @@ func Load(getenv func(string) string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// **Refused rather than defaulted.** A typo in the retention is a
+	// silent promise to keep a week when somebody asked for thirty days,
+	// and it is only discovered by looking for a dump that was never
+	// kept. The clock itself is checked by internal/backup, which is
+	// where the parsing of "HH:MM" lives.
+	backupKeepDays := defaultBackupKeepDays
+	if raw := strings.TrimSpace(getenv("MAESTRO_BACKUP_KEEP_DAYS")); raw != "" {
+		parsed, convErr := strconv.Atoi(raw)
+		if convErr != nil || parsed <= 0 {
+			return Config{}, fmt.Errorf("MAESTRO_BACKUP_KEEP_DAYS must be a positive integer, got %q", raw)
+		}
+		backupKeepDays = parsed
+	}
 
 	cfg := Config{
 		Addr:               orDefault(getenv("MAESTRO_ADDR"), ":8080"),
@@ -187,6 +218,9 @@ func Load(getenv func(string) string) (Config, error) {
 		FirstAdminPasswordReset: firstAdminPasswordReset,
 		RegistrationMode:        RegistrationMode(orDefault(getenv("REGISTRATION_MODE"), string(RegistrationInviteOnly))),
 		TrustedProxyCount:       trustedProxyCount,
+		BackupDir:               strings.TrimSpace(getenv("MAESTRO_BACKUP_DIR")),
+		BackupAt:                orDefault(getenv("MAESTRO_BACKUP_AT"), defaultBackupAt),
+		BackupKeepDays:          backupKeepDays,
 		Argon2: Argon2Params{
 			Time:    3,
 			Memory:  64 * 1024,

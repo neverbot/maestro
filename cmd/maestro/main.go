@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/neverbot/maestro/internal/analysis"
+	"github.com/neverbot/maestro/internal/backup"
 	"github.com/neverbot/maestro/internal/config"
 	"github.com/neverbot/maestro/internal/db"
 	"github.com/neverbot/maestro/internal/identity"
@@ -125,6 +126,25 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 
 	startPruneLoop(ctx, ids)
+
+	// The nightly dump, if this instance asked for one. It is a
+	// goroutine and not a blocker: `backup.Run` returns immediately when
+	// no directory is configured, and when one is, it sleeps until its
+	// hour and never returns while ctx is alive. An error out of it
+	// stops the backups and nothing else — a server that refused to
+	// serve a game because a dump failed would be a worse outcome than
+	// the missing dump.
+	go func() {
+		if err := backup.Run(ctx, backup.Config{
+			Dir:         cfg.BackupDir,
+			DatabaseURL: cfg.DatabaseURL,
+			At:          cfg.BackupAt,
+			KeepDays:    cfg.BackupKeepDays,
+			Logger:      slog.Default().With("subsystem", "backup"),
+		}); err != nil {
+			slog.Error("backups stopped", "err", err)
+		}
+	}()
 
 	// shutdownDone closes once the goroutine below has finished calling
 	// srv.Shutdown, not merely started it — see the comment on the

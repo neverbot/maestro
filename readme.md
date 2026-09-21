@@ -179,6 +179,63 @@ writes the new password, and logs what it did at `WARN`. **Unset
 `FIRST_ADMIN_PASSWORD_RESET` again afterwards**: left set, it is a
 standing credential for anyone who can read that environment.
 
+## Backups
+
+Off unless you ask for them. Name a directory and the instance writes
+one dump a night:
+
+```yaml
+environment:
+  MAESTRO_BACKUP_DIR: /backups
+  MAESTRO_BACKUP_AT: "03:00"        # local time, HH:MM, default 03:00
+  MAESTRO_BACKUP_KEEP_DAYS: "7"     # default 7
+  TZ: Europe/Madrid                 # or the hour above is UTC
+volumes:
+  - ./backups:/backups
+```
+
+Each file is `pg_dump --format=custom`, named
+`maestro-YYYY-MM-DD-HHMM.dump`, restored with `pg_restore`:
+
+```bash
+pg_restore --clean --if-exists --no-owner   --dbname "postgres://maestro:maestro@localhost:5432/maestro"   maestro-2026-09-21-0300.dump
+```
+
+Restoring a dump written by the shipped image into an **older** server
+prints one ignorable error — `unrecognized configuration parameter
+"transaction_timeout"` — because the image carries the Postgres 17
+client and that setting does not exist before 17. The restore itself
+completes; `pg_restore` says so as `errors ignored on restore: 1`.
+
+**The hour is local to the container, and a container has no local time
+unless you give it one.** The image carries `tzdata`, so `TZ` works:
+without it you get UTC, which is a dump at the right minute of the
+wrong hour. Set `TZ` beside the backup variables if the hour matters to
+you.
+
+A dump is the whole instance in one file — every game's content, the
+prose, the accounts and their addresses, the API tokens — so it is
+written `0600` inside a `0700` directory, and an existing directory is
+tightened on start-up. When the mount will not allow that, the instance
+logs a warning and carries on: widening the mode is never the answer,
+and granting a backup agent access by owner or by a group the host
+controls is.
+
+The database password reaches `pg_dump` through the environment, not as
+a command-line argument, so it does not appear in `ps` on the host. The
+dump is written to a `.tmp` name and renamed, so an agent copying the
+directory never picks up a file that is still being written. A dump
+interrupted by a restart leaves a `.tmp` behind; those are swept once
+they are a day old. Retention only ever removes files this instance
+wrote — anything else in that directory is yours and is left alone.
+
+**What is still your job: getting the dumps off this machine.** A
+backup on the same disk as the database survives a bad migration and
+nothing else.
+
+The image runs as UID **and** GID `65532`, both pinned, so a host that
+grants access by group can rely on the number across rebuilds.
+
 ## Building it
 
 Go 1.27 and a Postgres to test against. No Node, no bundler: the front
@@ -269,8 +326,12 @@ Said plainly, rather than left to be discovered:
   second replica has its own subscribers and its own budgets. A client
   sees only events published while its process has been running: there
   is no durable log and no catch-up on reconnect.
-- **No backups.** Backing up an instance means backing up its Postgres
-  volume, like any other database, and nothing here does it for you.
+- **Backups are opt-in and off by default.** Set `MAESTRO_BACKUP_DIR`
+  and the instance writes one `pg_dump --format=custom` a night; leave
+  it unset, as the shipped compose file does, and nothing is written
+  and nothing changes. See "Backups" below for the mode of the files,
+  the retention and what is still yours to do (copying them somewhere
+  that is not this machine).
 - **argon2id cost is fixed in code** (`Time=3`, `Memory=64MiB`,
   `Threads=2`), not configurable.
 - **Nobody has verified that the skill bundle teaches.** Its guards

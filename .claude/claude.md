@@ -312,8 +312,18 @@ Say these plainly rather than letting someone discover them:
   that document round-trips through it byte for byte, so a language
   addition it has not learned closes the door instead of silently
   dropping a clause.
-- **No backups.** Backing up an instance means backing up its Postgres
-  volume, like any other database, and nothing here does it for you.
+- **Backups are opt-in and off by default.** `internal/backup` writes
+  one `pg_dump --format=custom` a night when `MAESTRO_BACKUP_DIR` names
+  a directory, keeps `MAESTRO_BACKUP_KEEP_DAYS` of them, and does
+  nothing at all when it is unset — which is what the shipped compose
+  file does. Dumps are `0600` in a `0700` directory, the password
+  reaches `pg_dump` through the environment rather than `ps`, and the
+  write is atomic through a `.tmp` rename. **Copying them off the
+  machine is still the operator's job**, and a dump beside the database
+  it came from is not a backup of anything but a mistake.
+  The runtime image is `alpine` rather than distroless *for this*: a
+  distroless image has no `pg_dump`, so the knob would have been
+  unturnable in the image this project ships.
 - **One process only.** Events fan out from an in-memory hub, not
   Postgres `LISTEN`/`NOTIFY`, and the rate limiters are in-process, so
   a second replica has its own subscribers and its own budgets.

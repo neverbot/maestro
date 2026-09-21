@@ -25,13 +25,12 @@ RUN CGO_ENABLED=0 go build \
 # agent access by group needs them stable across image rebuilds — an
 # unpinned `addgroup -S` takes whatever number alpine has free that day.
 FROM alpine:3.21
-# **tzdata, because the backup hour is a local one and there was no
-# "local".** Alpine ships no zone database, so Go's time.Local is UTC
-# whatever `TZ` says: an operator who asked for 03:00 and set
-# TZ=Europe/Madrid would get the dump at 01:00 their time, silently.
-# Measured on the real image rather than assumed — the first end-to-end
-# run of this feature never fired at the minute it was told to.
-RUN apk add --no-cache postgresql17-client ca-certificates tzdata \
+# **No tzdata package here**, and the backup hour is still local: the
+# binary embeds the zone database itself (`_ "time/tzdata"` in
+# cmd/maestro/main.go), which is the half of this that belongs to
+# whatever reads the clock rather than to whatever base image is
+# underneath it.
+RUN apk add --no-cache postgresql17-client ca-certificates \
     && addgroup -S -g 65532 nonroot \
     && adduser -S -G nonroot -u 65532 -h /home/nonroot nonroot
 # The label is what makes the leftovers findable. Every `make dev`

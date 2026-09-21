@@ -11,6 +11,18 @@ import (
 	"syscall"
 	"time"
 
+	// **The zone database, embedded.** internal/backup fires at a local
+	// hour, and a container has no local time: the runtime image ships
+	// no zoneinfo, so Go's `time.Local` is UTC whatever `TZ` says, and
+	// an operator asking for 03:00 would get the dump at another hour in
+	// silence. Measured on the real image — the first end-to-end run of
+	// that feature never fired at the minute it was told to.
+	//
+	// It is this import rather than a package in the image because it
+	// belongs to the binary that reads the clock: 450 KB compiled in,
+	// and an instance built for any base at all keeps the behaviour.
+	_ "time/tzdata"
+
 	"github.com/neverbot/maestro/internal/analysis"
 	"github.com/neverbot/maestro/internal/backup"
 	"github.com/neverbot/maestro/internal/config"

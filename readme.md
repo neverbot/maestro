@@ -207,11 +207,16 @@ prints one ignorable error — `unrecognized configuration parameter
 client and that setting does not exist before 17. The restore itself
 completes; `pg_restore` says so as `errors ignored on restore: 1`.
 
-**The hour is local to the container, and a container has no local time
-unless you give it one.** The image carries `tzdata`, so `TZ` works:
-without it you get UTC, which is a dump at the right minute of the
-wrong hour. Set `TZ` beside the backup variables if the hour matters to
-you.
+**The hour is local, and a container has no local time unless you give
+it one.** The binary embeds the IANA zone database, so `TZ` resolves;
+leave it unset and the hour is UTC, which is a dump at the right minute
+of the wrong hour. Set `TZ` beside the backup variables if that matters.
+
+**Old dumps are removed, and only ours.** After each successful dump,
+anything matching `maestro-YYYY-MM-DD-HHMM.dump` whose modification
+time is older than `MAESTRO_BACKUP_KEEP_DAYS` goes. Files this instance
+did not write are never touched, whatever they are called — so a dump
+you took by hand, or your own notes, stay where you put them.
 
 A dump is the whole instance in one file — every game's content, the
 prose, the accounts and their addresses, the API tokens — so it is

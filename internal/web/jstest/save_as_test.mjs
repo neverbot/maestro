@@ -102,6 +102,17 @@ function fakeElement(tag) {
     getAttribute(name) {
       return el.attributes.has(name) ? el.attributes.get(name) : null;
     },
+    // `append` beside `appendChild`, because both are real DOM and this
+    // front end writes both: components/mst-dialog.js builds its head,
+    // body and foot with `append`, and a stub carrying only the other
+    // one turned that into a harness crash rather than an assertion.
+    append(...nodes) {
+      for (const node of nodes) el.appendChild(node);
+    },
+    replaceChildren(...nodes) {
+      el.childNodes = [];
+      for (const node of nodes) el.appendChild(node);
+    },
     addEventListener(name, handler) {
       (el.listeners[name] ??= []).push(handler);
     },
@@ -129,29 +140,61 @@ function fakeElement(tag) {
 }
 
 const shell = new Map();
+const defined = new Map();
 globalThis.window = globalThis;
+// Where a dialog mounts itself. It is a mount point and nothing else:
+// what matters to these checks is that the panel can be handed to a
+// dialog at all, which is a thing this harness could not do — and so the
+// dialog silently never opened and every check below passed without it.
+const body = { children: [], append(...nodes) { this.children.push(...nodes); } };
 globalThis.document = {
-  createElement: (tag) => fakeElement(tag),
+  body,
+  activeElement: null,
+  // **Custom elements are upgraded, as a browser upgrades them.** Without
+  // this the dialog is a bare element with no behaviour and an assertion
+  // about it is an assertion about nothing.
+  createElement: (tag) => {
+    if (typeof tag === "string" && tag.includes("-")) {
+      const Ctor = defined.get(tag);
+      if (Ctor) {
+        const made = new Ctor();
+        made.ownerDocument = globalThis.document;
+        made.hidden = false;
+        return made;
+      }
+    }
+    return fakeElement(tag);
+  },
   getElementById: (id) => shell.get(id) ?? null,
   // Lit reads these three at module scope. They answer nothing useful,
   // deliberately: nothing in this harness renders a Lit template, and a
   // stub that pretended to would be a second, worse browser.
   createComment: () => ({}),
   createTreeWalker: () => ({ nextNode: () => null }),
-  head: {},
+  head: { append() {} },
   addEventListener() {},
 };
 globalThis.HTMLElement = class HTMLElement {
-  attachShadow() {
-    return fakeElement("shadow-root");
+  constructor() {
+    this.listeners = {};
   }
-  dispatchEvent() {
+  attachShadow() {
+    this.shadowRoot = fakeElement("shadow-root");
+    return this.shadowRoot;
+  }
+  // **A listener added here is called**, for the reason svg_dom.mjs
+  // records: a component that announces something and a harness that
+  // listens for it both "worked" and never met.
+  dispatchEvent(event) {
+    for (const handler of this.listeners[event?.type] ?? []) handler(event);
     return true;
   }
-  addEventListener() {}
+  addEventListener(kind, handler) {
+    if (typeof handler !== "function") return;
+    (this.listeners[kind] ??= []).push(handler);
+  }
   removeEventListener() {}
 };
-const defined = new Map();
 globalThis.customElements = {
   define(name, ctor) {
     defined.set(name, ctor);
@@ -162,6 +205,7 @@ globalThis.customElements = {
 };
 
 const {
+  HEADING,
   KEY_MAX,
   KEY_REQUIRED,
   KEY_SHAPE,
@@ -536,6 +580,46 @@ check("aDesignersClicksAndKeystrokesReachTheDialog", async () => {
   const cancel = buttons(dialog.root).find((button) => button.getAttribute("data-action") === "save-as-cancel");
   await dialog.root.dispatch("click", { target: cancel });
   assert(!dialog.open, "a click on cancel did not close the dialog");
+});
+
+// --- It is a dialog, and now it behaves like one ----------------------
+//
+// **These checks are why this harness gained a body.** It had none, so
+// `openDialog` answered null, the panel rendered where it always had,
+// and every check above passed with the dialog never opening once — the
+// exact shape of defect this directory exists to catch, in the harness
+// itself.
+
+check("openingDrawsThePanelInsideTheSharedDialog", async () => {
+  const { dialog } = harness();
+  await dialog.show();
+  const modal = globalThis.document.body.children.find((child) => child.tagName === "mst-dialog" || child.panel);
+  assert(modal, "opening Save as… mounted no dialog");
+  assertEqual(modal.hidden, false, "the dialog was built and never shown");
+  assert(
+    modal.bodyEl.childNodes.includes(dialog.root),
+    "the panel is not inside the dialog: it is still lying on the page",
+  );
+  assertEqual(modal.titleEl.textContent, HEADING, "the dialog does not carry the panel's own heading");
+  // Its own Save and Cancel came with it, so the dialog adds no third
+  // button saying the same thing as one of them.
+  assertEqual(modal.footEl.childNodes.length, 0, "the dialog added a way out beside the panel's own");
+});
+
+check("escapeClosesItAndThePanelComesBack", async () => {
+  const { dialog } = harness();
+  await dialog.show();
+  const modal = globalThis.document.body.children.find((child) => child.panel);
+  modal.dispatchEvent({ type: "keydown", key: "Escape" });
+  assertEqual(dialog.open, false, "Escape left the dialog open, which is what it did for a year");
+  assertEqual(modal.hidden, true, "the dialog itself stayed on screen");
+  assert(
+    dialog.shadowRoot.childNodes.includes(dialog.root),
+    "the panel did not come back to its element, so the opener has nowhere to render",
+  );
+  // And the way in is there again, which is the half a reader notices.
+  const open = buttons(dialog.root).find((button) => button.getAttribute("data-action") === "save-as-open");
+  assert(open !== undefined, "after closing, nothing offers to open it again");
 });
 
 // The call site.

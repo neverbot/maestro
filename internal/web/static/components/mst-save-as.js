@@ -60,6 +60,7 @@ import { CONTROLS as MAP_CONTROLS, RENDERER as RENDERER_MAP } from "../render/ma
 import { CONTROLS as TABLE_CONTROLS, RENDERER as RENDERER_TABLE } from "../render/table.js";
 import { CONTROLS as TIMELINE_CONTROLS, RENDERER as RENDERER_TIMELINE } from "../render/timeline.js";
 import { adoptControlStyles } from "./control-styles.js";
+import { openDialog } from "./mst-dialog.js";
 
 // The tooltips, by the renderer that draws them. Keyed off each module's
 // own RENDERER export rather than off a list of six names typed here,
@@ -147,32 +148,19 @@ export const SAVE_AS_CSS = `
   padding: var(--s4);
   color: var(--ink);
   font-family: var(--sans);
-  /* A panel, with the tokens every other reading surface uses. It had no
-     background, no border and no shadow: an open dialog that is not a
-     surface is a column of controls lying on the desk. */
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-2);
-  /* **It scrolls inside itself.** Open, this form is about a thousand
-     pixels tall: it pushed the frame a screen and a half down and put its
-     own Cancel button below the fold, so a person who opened it lost the
-     drawing, the legend and the way back in one click. A dialog that is
-     taller than the window is a dialog with no exit. */
-  max-height: 70vh;
-  overflow-y: auto;
+  /* No surface of its own: the dialog it is drawn in is the surface. */
 }
 
-/* The two buttons stay at the foot of the panel while its body scrolls,
-   so the way out is always on screen. */
+/* **The cap, the scroll and the sticky footer are gone**, and so is the
+   panel's own surface: this form is drawn inside components/
+   mst-dialog.js now, which owns the sheet it sits on and scrolls itself
+   when the window is short. What was here was that dialog, hand-made
+   and missing the half that is behaviour. */
 .save-as .actions {
-  position: sticky;
-  bottom: calc(var(--s4) * -1);
   display: flex;
   gap: var(--s2);
   margin-top: var(--s4);
   padding: var(--s3) 0 0;
-  background: var(--paper);
   border-top: 1px solid var(--line);
 }
 .save-as h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
@@ -274,12 +262,40 @@ export class MstSaveAs extends HTMLElement {
   }
 
   // show opens the dialog, reading the catalogue first.
+  //
+  // **It is a real dialog now, and it was one all along.** This panel
+  // expanded in place, and its own stylesheet records what that cost: it
+  // is about a thousand pixels tall, so it capped itself at 70vh, made
+  // itself scroll, and pinned its own footer — an inline panel with a
+  // viewport cap and a sticky exit *is* a dialog, minus the behaviour.
+  // A reader could not close it with Escape, could not press away from
+  // it, and could Tab straight out into a page it was covering, which
+  // nothing announced as blocked.
+  //
+  // What moves is where the panel is drawn. The element stays in the
+  // page, the state machine is untouched, and `root` — the node every
+  // gesture is delegated from — is the same node, handed to the dialog
+  // as its content.
   async show() {
     this.open = true;
     this.reflectOpen();
     this.band = null;
     this.saved = null;
     this.render();
+    // Its own Save and Cancel travel with it, so the dialog adds no
+    // third button; Escape and a press on the ground still close it,
+    // and both land on hide() through the same path Cancel does.
+    this.dialog = openDialog(this.doc, {
+      title: HEADING,
+      content: [this.root],
+      dismissLabel: "",
+      // Synchronously, not a tick later: Escape and a press on the ground
+      // close the dialog, and this panel has to *be* closed by the time
+      // that gesture returns rather than shortly afterwards.
+      onClose: () => {
+        if (this.open) this.hide();
+      },
+    });
     await this.load();
     return this.open;
   }
@@ -288,6 +304,14 @@ export class MstSaveAs extends HTMLElement {
     this.open = false;
     this.reflectOpen();
     this.band = null;
+    // The panel comes back to the element it belongs to before the
+    // dialog empties itself, so the opener has somewhere to render and
+    // the delegated listeners come back with it.
+    if (this.shadowRoot && typeof this.shadowRoot.appendChild === "function") {
+      this.shadowRoot.appendChild(this.root);
+    }
+    if (this.dialog && typeof this.dialog.close === "function") this.dialog.close();
+    this.dialog = null;
     this.render();
     return this.open;
   }
@@ -446,9 +470,8 @@ export class MstSaveAs extends HTMLElement {
       return root;
     }
 
-    const heading = this.doc.createElement("h2");
-    heading.textContent = HEADING;
-    root.appendChild(heading);
+    // No heading of its own: the dialog's title carries it, so the panel
+    // does not say the same sentence twice in two type sizes.
 
     // The two sentences a designer needs *before* they fill anything in,
     // for the reason mst-ground.js states its three facts before a file

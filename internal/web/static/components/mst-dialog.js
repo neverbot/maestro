@@ -239,7 +239,6 @@ export class MstDialog extends HTMLElement {
     if (!this.shadowRoot) this.connectedCallback();
     const doc = this.ownerDocument ?? document;
     this.titleEl.textContent = String(spec.title ?? "");
-    this.dismissEl.textContent = String(spec.dismissLabel ?? DISMISS_LABEL);
     const content = Array.isArray(spec.content) ? spec.content : spec.content ? [spec.content] : [];
     this.bodyEl.replaceChildren(...content);
 
@@ -250,7 +249,13 @@ export class MstDialog extends HTMLElement {
     // to its form: both are in this shadow root, so `form="…"`
     // associates them, and Enter in a field still submits.
     const actions = Array.isArray(spec.actions) ? spec.actions : spec.actions ? [spec.actions] : [];
-    this.footEl.replaceChildren(...actions, this.dismissEl);
+    // **An empty label means the caller ships its own way out.** A panel
+    // that already carries Save and Cancel does not want a third button
+    // beside them saying the same thing as one of them; Escape and the
+    // ground still close it, so the exit is never actually gone.
+    const dismissLabel = spec.dismissLabel === undefined ? DISMISS_LABEL : String(spec.dismissLabel);
+    this.dismissEl.textContent = dismissLabel;
+    this.footEl.replaceChildren(...(dismissLabel === "" ? actions : [...actions, this.dismissEl]));
 
     // **The title names the dialog**, so a screen reader announces what
     // opened rather than "dialog".
@@ -264,8 +269,14 @@ export class MstDialog extends HTMLElement {
     this.opener = doc.activeElement ?? null;
     this.hidden = false;
     this.focusFirst();
-    // Resolved when this dialog closes, for a caller that has something
-    // to do afterwards.
+    // **Two ways to hear about the close, and the difference matters.**
+    // `closed` is a promise, so a caller that awaits it runs a tick
+    // later; `onClose` runs *inside* close(), which is what a caller
+    // needs when its own state has to be consistent by the time the
+    // gesture that closed the dialog returns — Escape and a press on the
+    // ground both land there, and an owner that learned a tick late
+    // stayed "open" in its own eyes in between.
+    this.onClose = typeof spec.onClose === "function" ? spec.onClose : null;
     this.closed = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });
@@ -281,6 +292,9 @@ export class MstDialog extends HTMLElement {
     // inspector away from a reader who thought they had dismissed it.
     if (this.opener && typeof this.opener.focus === "function") this.opener.focus();
     this.opener = null;
+    const announce = this.onClose;
+    this.onClose = null;
+    if (announce) announce();
     if (this.resolveClosed) {
       this.resolveClosed();
       this.resolveClosed = null;

@@ -21,9 +21,17 @@ RUN CGO_ENABLED=0 go build \
 # so this one dumps a Postgres 16 and a Postgres 17 alike.
 #
 # **UID *and* GID are pinned to 65532.** Files the container writes into
-# a mounted volume carry those numbers, and a host granting a backup
-# agent access by group needs them stable across image rebuilds — an
-# unpinned `addgroup -S` takes whatever number alpine has free that day.
+# a mounted volume carry those numbers, and the host grants access by
+# chowning the mount to them. An unpinned `addgroup -S` takes whatever
+# number alpine has free that day, so a rebuild could start writing files
+# under a different group — possibly one the host already uses for
+# something real, which then reads as that group's name in `ls`.
+#
+# **Pinning the group grants nobody anything.** A dump is 0600 in a 0700
+# directory, so its group bits are zero: putting a backup agent in group
+# 65532 lets it read exactly nothing. This comment used to say otherwise,
+# and it would have sent an operator to add an agent to a group, watch it
+# fail, and then widen the mode on a file holding the whole instance.
 FROM alpine:3.21
 # **No tzdata package here**, and the backup hour is still local: the
 # binary embeds the zone database itself (`_ "time/tzdata"` in

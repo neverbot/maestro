@@ -17,14 +17,12 @@
 // never returns while ctx is alive, because a backup that stops after
 // one bad night is a backup nobody notices is gone.
 //
-// **It is Nottario's, ported deliberately and not cloned by habit.**
-// That implementation has been through a security pass this one starts
-// from rather than repeats: the dump is 0600 in a 0700 directory, an
-// existing directory is tightened on start, the password reaches
-// pg_dump through the environment so it is not in `ps`, and orphan
-// `.tmp` files from an interrupted dump are swept. The one thing that
-// could not come with it is the image: Maestro's runtime was distroless
-// and distroless has no pg_dump.
+// **What it guarantees, each part of it deliberate:** the dump is 0600 in
+// a 0700 directory, an existing directory is tightened on start, the
+// password reaches pg_dump through the environment so it is not in
+// `ps`, the write is atomic through a `.tmp` rename, and orphan `.tmp`
+// files from an interrupted dump are swept. It also changed the image:
+// the runtime was distroless and distroless has no pg_dump.
 package backup
 
 import (
@@ -157,7 +155,20 @@ func dumpOnce(ctx context.Context, c Config) error {
 	tmp := filepath.Join(c.Dir, name+".tmp")
 	final := filepath.Join(c.Dir, name)
 	dsn, password := splitPassword(c.DatabaseURL)
-	cmd := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--file="+tmp, dsn)
+	// **`--dbname=` and not a bare positional.** A positional that
+	// happened to begin with a dash would be read by pg_dump as a flag;
+	// fused to its option it can only ever be the connection string.
+	//
+	// gosec's G204 flags every exec with a non-constant argument, and
+	// this one is not a shell and not user input: the program is a
+	// literal, every argument is its own argv entry with no shell to
+	// interpolate it, `tmp` is built from a fixed prefix and a time
+	// format, and the connection string is the operator's own
+	// DATABASE_URL — the same string the server already connects with.
+	// This repository runs every gosec rule, so the reasoning sits on the
+	// line it answers for rather than in a path-wide exclusion that would
+	// also cover the next exec in this file.
+	cmd := exec.CommandContext(ctx, "pg_dump", "--format=custom", "--file="+tmp, "--dbname="+dsn) //nolint:gosec // G204: literal program, argv without a shell, operator-supplied DSN; see above.
 	// The password goes through the environment: process arguments are
 	// world-readable in `ps` for as long as the dump runs.
 	if password != "" {

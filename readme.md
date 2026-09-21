@@ -222,9 +222,15 @@ A dump is the whole instance in one file — every game's content, the
 prose, the accounts and their addresses, the API tokens — so it is
 written `0600` inside a `0700` directory, and an existing directory is
 tightened on start-up. When the mount will not allow that, the instance
-logs a warning and carries on: widening the mode is never the answer,
-and granting a backup agent access by owner or by a group the host
-controls is.
+logs a warning and carries on.
+
+**Those modes leave no group or world bits**, so only UID 65532 and
+root can read a dump — adding a backup agent to a group grants it
+nothing. The mount is yours: if an agent has to reach the dumps, run it
+as that uid or as root, or relax the mode yourself with the trade-off in
+mind — every account you let in gets the whole instance. Maestro only
+sets the mode on the files and directory it creates; it never widens
+them again.
 
 The database password reaches `pg_dump` through the environment, not as
 a command-line argument, so it does not appear in `ps` on the host. The
@@ -238,8 +244,9 @@ wrote — anything else in that directory is yours and is left alone.
 backup on the same disk as the database survives a bad migration and
 nothing else.
 
-The image runs as UID **and** GID `65532`, both pinned, so a host that
-grants access by group can rely on the number across rebuilds.
+The image runs as UID **and** GID `65532`, both pinned, so a rebuild
+writes under the same numbers you chowned the mount to — and never under
+a group your host already uses for something else.
 
 ## Building it
 

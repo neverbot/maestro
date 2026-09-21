@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// The backup loop's own checks, ported from Nottario with the package.
+// The backup loop's own checks.
 //
 // **Every one of these is a property that cost something to learn**, and
 // they came across for that reason rather than for coverage: the dump

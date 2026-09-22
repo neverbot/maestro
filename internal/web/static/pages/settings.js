@@ -58,9 +58,9 @@ export function addressWarning(currentSlug, nextSlug) {
 }
 
 // The two words for a reader who may not change any of this.
-export const NOT_YOURS_HEADING = "Only an owner can change these";
+export const NOT_YOURS_HEADING = "Only a game manager can change these";
 export const NOT_YOURS_SENTENCE =
-  "A game's name and address are the owner's to change, because changing the address breaks " +
+  "A game's name and address are its managers' to change, because changing the address breaks " +
   "every link into the game for everybody in it.";
 
 export async function settingsPage(opened) {
@@ -211,7 +211,7 @@ export const YOUR_KEYS =
   "These are your own tokens. Everybody in this game has their own, and only the person who " +
   "created one can retire it.";
 export const EVERY_KEY =
-  "You own this game, so this is every token in it, whoever created it — and you can retire any " +
+  "You manage this game, so this is every token in it, whoever created it — and you can retire any " +
   "of them.";
 
 export function whoseTokens(scope) {
@@ -223,7 +223,7 @@ export const NO_TOKENS_SENTENCE =
   "A token is how an agent reaches this game. Every agent, and every machine an agent runs on, " +
   "gets its own, so one can be revoked without stopping the rest.";
 
-export const NO_MINT_HEADING = "Only an editor or the owner can create a token";
+export const NO_MINT_HEADING = "Only an editor or a game manager can create a token";
 export const NO_MINT_SENTENCE =
   "A token carries whatever access this game grants, so it is not a viewer's to hand out. You " +
   "can still see which tokens exist and revoke one.";

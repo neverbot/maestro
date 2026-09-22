@@ -254,8 +254,8 @@ export const CANCEL = "Cancel";
 export const LAST_ADMIN =
   "This instance must keep at least one administrator. Make somebody else one first.";
 export const CANNOT_DEMOTE_YOURSELF =
-  "You are signed in as an administrator. Taking it away here would lock you out of this page, so " +
-  "another administrator does it for you.";
+  "You are signed in as an administrator. Taking it away here would lock you out of this page, " +
+  "so another administrator does it for you.";
 
 // personRow is one account: who they are, how they sign in, what they
 // may do, and the way in to changing it.
@@ -470,7 +470,7 @@ if (globalThis.document && globalThis.document.getElementById("new-invite")) {
           kind: STATE_REFUSED,
           heading: "This instance is not yours to administer",
           sentence: me && me.email
-            ? "You are signed in as " + me.email + ", which is not an administrator here. An administrator can make you one."
+            ? "You are signed in as " + me.email + ", which is not an administrator. An administrator can make you one."
             : "This account does not administer this instance.",
           action: { href: "/account", label: "Your account" },
         }));

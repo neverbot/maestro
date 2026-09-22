@@ -121,25 +121,36 @@ Every setting is an environment variable on the `maestro` service.
 | `INVITE_TTL` | `336h` | How long an invitation link stays usable. |
 | `FIRST_ADMIN_EMAIL` | *(empty)* | The account seeded, and re-promoted to admin, at boot. |
 | `FIRST_ADMIN_PASSWORD` | *(empty)* | Its password, on a brand-new instance. |
-| `FIRST_ADMIN_PASSWORD_RESET` | `false` | One-shot break-glass: see *Recovering an admin*. |
+| `FIRST_ADMIN_PASSWORD_RESET` | `false` | One-shot break-glass: see *Recovering an administrator*. |
 | `TRUSTED_PROXY_COUNT` | `0` | How many reverse proxies sit in front, for client addresses. |
 
 ### Adding people
 
-Sign in as an admin and open **Administration** from the menu under your
-name. Create an invitation for an address, and Maestro answers with a
-link.
+Sign in as an **administrator** and open **Administration** from the
+menu under your name. Create an invitation for an address, and
+Maestro answers with a link.
+
+**Administrator means the instance, and nothing else.** An
+**administrator** runs this Maestro: accounts, invitations, who else
+administers it. Inside a game the three roles are **viewer**, **editor**
+and **manager**, and a manager runs that one game: its name, its
+address, who is in it. Neither implies the other — an administrator who
+is not a member of a game cannot open it, and a game manager
+administers nothing outside it.
 
 **Nothing is sent anywhere.** This instance delivers no email, by
 design, so you pass that link on yourself, and it is shown once. The
 person opens it, sets a password, and has an account — and nothing else:
-an account-only invitation grants no game. A game's owner invites
-somebody into a game, at a role, from that game.
+an account-only invitation grants no game. A **game manager** invites
+somebody into a game, at a role — viewer, editor or manager — from that
+game.
 
-The same screen makes somebody an administrator, or takes it away, by
-the address they sign in with. An admin may demote another admin, or
-themselves, as long as one remains: the instance refuses to be left with
-none.
+The same screen lists **every account** on the instance, and each one
+can be edited: the address it signs in with, its name, and whether it is
+an administrator. One administrator can take the flag from another as
+long as one remains — the instance refuses to be left
+with none — and nobody can take it from themselves on that screen, since
+it would lock them out of the page they are on.
 
 ### Passwords
 
@@ -152,18 +163,19 @@ instead. Changing a password does not revoke API tokens, which have no
 expiry and are revoked only explicitly, so anybody rotating a password
 on suspicion should also check that game's tokens.
 
-### Recovering an admin
+### Recovering an administrator
 
-With no reset flow, a forgotten admin password is recovered by an
+With no reset flow, a forgotten administrator's password is recovered by an
 operator restarting the process. Two things can happen at boot, and both
 need `FIRST_ADMIN_EMAIL` and `FIRST_ADMIN_PASSWORD` set:
 
-- **The admin flag** is restored on every restart, whether or not the
-  account ever had it.
+- **The administrator flag** is restored on every restart, whether or
+  not the account ever had it.
 - **The password** is overwritten **only** when
   `FIRST_ADMIN_PASSWORD_RESET=true` is also set. Without it,
   `FIRST_ADMIN_PASSWORD` only ever seeds a brand-new instance, which is
-  why an admin who changes their own password keeps it across restarts.
+  why an administrator who changes their own password keeps it across
+  restarts.
 
 So a recovery is one deliberate boot:
 

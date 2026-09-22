@@ -560,7 +560,7 @@ async function renderHistory(game, docPath, currentVersion, membersByID, role) {
   if (noteEl && role === "viewer") {
     noteEl.textContent =
       "Your role in this game is viewer, so this instance will refuse a revert from you: " +
-      "an editor, an admin or the owner reverts a document.";
+      "an editor or a game manager reverts a document.";
     noteEl.hidden = false;
   }
 

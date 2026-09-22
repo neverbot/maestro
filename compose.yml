@@ -31,7 +31,7 @@ services:
       # isn't already — leaving these two set permanently is deliberate.
       # Overwriting an existing account's password needs a separate
       # one-shot opt-in, FIRST_ADMIN_PASSWORD_RESET=true, for exactly
-      # one restart (see "Recovering an admin" in readme.md).
+      # one restart (see "Recovering an administrator" in readme.md).
       # Without it, an admin who rotates their own password keeps it
       # across every restart, sessions included.
       REGISTRATION_MODE: invite_only

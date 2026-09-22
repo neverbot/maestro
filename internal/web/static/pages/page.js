@@ -96,8 +96,8 @@ export const NO_VIEWS_COMPOSE =
   "The builder composes the half of the query language a sentence can hold; an agent writes the " +
   "rest.";
 export const NO_VIEWS_VIEWER =
-  "Your role in this game is viewer, so this instance will refuse a write from you: an editor, " +
-  "an admin or the owner composes one.";
+  "Your role in this game is viewer, so this instance will refuse a write from you: an editor or " +
+  "a game manager composes one.";
 export const SKILL_BUNDLE_LABEL = "How an agent writes one";
 
 // The one line in this front end that names an address outside this
@@ -548,7 +548,7 @@ export function whoWrites(role, what) {
   if (role === ROLE_VIEWER) {
     return (
       "Your role in this game is viewer, so this instance will refuse a write from you: " +
-      `an editor, an admin or the owner ${what}.`
+      `an editor or a game manager ${what}.`
     );
   }
   // **The reader is a game designer, and the sentence told them to use an

@@ -211,7 +211,7 @@ func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request, calle
 			}
 			writeError(w, http.StatusForbidden, errCodeForbidden,
 				"that token belongs to somebody else; it is revoked by the person who created it "+
-					"or by this game's owner")
+					"or by a manager of this game")
 			return
 		}
 	}

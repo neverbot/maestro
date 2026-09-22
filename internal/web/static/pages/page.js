@@ -27,7 +27,13 @@ import { fetchGames, fetchMe, goToLogin, rememberGame, renderHeader } from "../a
 // appear rather than by each page remembering to ask for it.
 import "../components/mst-hint.js";
 import { client } from "../client.js";
-import { markTables } from "../rows.js";
+// countLabel is *imported* here and not only re-exported below: a
+// re-export forwards a name to this module's consumers and never binds
+// it in this module's own scope, so expiry() calling it threw
+// `countLabel is not defined` on every invitation ever listed — on this
+// screen and on the instance's admin screen, which reads expiry from
+// here too.
+import { countLabel, markTables } from "../rows.js";
 import { STATE_EMPTY, negativeState } from "../state.js";
 
 // The route prefix of one game, and the segments under it. They are
@@ -561,6 +567,63 @@ export function whoWrites(role, what) {
   return `An agent ${what}; nothing on this page does.`;
 }
 
+// --- A secret shown once, and when an invitation stops working --------
+//
+// **Both screens that mint an invitation live here now.** The
+// administration screen makes accounts and the game's People tab makes
+// memberships, and the shape is the same one: a link nothing can show
+// again, kept on screen beside the ones minted before it. Two copies of
+// that would have been two chances to lose somebody's only link.
+
+// One link and the button that copies it. A copy that fails leaves the
+// link on screen, selectable, which is what it was there for anyway.
+//
+// **This is the other secret shown once, and it deliberately does not
+// use components/mst-dialog.js.** The token on the Agents tab moved into
+// a dialog so a credential stops sitting on a screen nobody is watching;
+// an invitation link is the same shape and the opposite case. Creating a
+// second invitation used to destroy the first link on screen — the only
+// copy of a still-valid secret, gone, with nothing said — and the fix
+// was to keep every link of this sitting and mark the earlier ones. A
+// dialog is dismissed, and dismissing it is exactly that defect again,
+// performed by the reader instead of by the page. So the links stay,
+// and this comment is here so the next survey does not "finish the job".
+export function inviteLink(doc, href) {
+  const line = doc.createElement("div");
+  line.className = "secret-line";
+
+  const code = doc.createElement("code");
+  code.className = "mono";
+  code.textContent = href;
+  line.append(code);
+
+  const copy = doc.createElement("button");
+  copy.type = "button";
+  copy.className = "ghost";
+  copy.textContent = "Copy the link";
+  copy.addEventListener("click", async () => {
+    try {
+      await globalThis.navigator.clipboard.writeText(href);
+      copy.textContent = "Copied";
+    } catch {
+      copy.textContent = "Select it and copy";
+    }
+  });
+  line.append(copy);
+  return line;
+}
+
+// When it stops working, in the words a person would use. An invitation
+// that has expired is still listed by the server until it is pruned, and
+// "expired" is a different fact from "expires in three days".
+export function expiry(value) {
+  const when = new Date(String(value ?? ""));
+  if (Number.isNaN(when.getTime())) return "no expiry recorded";
+  const days = Math.round((when.getTime() - Date.now()) / 86400000);
+  if (days < 0) return "expired";
+  if (days === 0) return "expires today";
+  return "expires in " + countLabel(days, "day", "days");
+}
 // --- The read-only notice ---------------------------------------------
 
 // **What the product cannot do, written where somebody would look for

@@ -166,6 +166,42 @@ check("whatIsTypedIsWhatIsSent", async () => {
   assertEqual(dialog.hidden, true, "a saved edit left the dialog open");
 });
 
+// **An invitation row, drawn the way the screen draws it.** Every check
+// above is about a person; the invitation list went unasserted, and a
+// function it calls threw for months on the one input a server sends.
+check("anInvitationRowSpellsWhenItStopsWorking", () => {
+  const row = admin.inviteRow(
+    dom.document,
+    {
+      id: "i1",
+      email: "vera@example.test",
+      expires_at: new Date(Date.now() + 3 * 86400000).toISOString(),
+      revoked: false,
+    },
+    null,
+  );
+  assert(row.textContent.includes("vera@example.test"), "the row does not say who was invited");
+  assert(
+    row.textContent.includes("expires in 3 days"),
+    "the row does not say when the invitation stops working: " + row.textContent,
+  );
+});
+
+check("aRevokedInvitationSaysSoAndNotWhenItWouldHaveExpired", () => {
+  const row = admin.inviteRow(
+    dom.document,
+    {
+      id: "i1",
+      email: "vera@example.test",
+      expires_at: new Date(Date.now() + 3 * 86400000).toISOString(),
+      revoked: true,
+    },
+    null,
+  );
+  assert(row.textContent.includes("revoked"), "a revoked invitation is drawn as if it still worked");
+  assert(!row.textContent.includes("expires in"), "a revoked invitation still counts down");
+});
+
 for (const [name, fn] of pending) {
   try {
     await fn();

@@ -434,6 +434,11 @@ func (s *Server) handleListMembers(w http.ResponseWriter, r *http.Request, calle
 	for _, m := range rows {
 		members = append(members, map[string]any{
 			"id": m.UserID, "display_name": m.DisplayName, "role": m.Role,
+			// **Which row is the caller's own**, decided here rather than
+			// by a browser comparing two ids it was handed. It is the one
+			// row where a change locks the reader out of the game they
+			// are standing in, and the screen refuses it on that basis.
+			"you": m.UserID == caller.UserID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"members": members})
@@ -459,7 +464,7 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may change a member's role")
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only a game manager may change a member's role")
 		return
 	}
 	targetID, err := uuid.Parse(r.PathValue("user"))
@@ -487,7 +492,7 @@ func (s *Server) handleChangeRole(w http.ResponseWriter, r *http.Request, caller
 	case errors.Is(err, projects.ErrLastOwner):
 		// See handleRemoveMember's doc comment: this is the same guard,
 		// reached here when the change would demote the game's only owner.
-		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one owner — promote someone else first")
+		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one manager — make somebody else one first")
 	case err != nil:
 		writeUnmappedError(w, r, err, "change role failed", "could not change the member's role",
 			"project_id", scope.ProjectID, "target_user_id", targetID)
@@ -541,14 +546,14 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request, call
 		return
 	}
 	if targetID != caller.UserID && !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may remove another member")
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only a game manager may remove another member")
 		return
 	}
 
 	revoked, err := s.opts.Projects.RemoveMember(r.Context(), targetID, scope.ProjectID)
 	switch {
 	case errors.Is(err, projects.ErrLastOwner):
-		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one owner — promote someone else first")
+		writeError(w, http.StatusConflict, errCodeLastOwner, "a game must keep at least one manager — make somebody else one first")
 	case err != nil:
 		writeUnmappedError(w, r, err, "remove member failed", "could not remove the member",
 			"project_id", scope.ProjectID, "target_user_id", targetID)
@@ -584,7 +589,7 @@ func (s *Server) handleUpdateGame(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may change a game's settings")
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only a game manager may change a game's settings")
 		return
 	}
 	var req updateGameRequest
@@ -685,7 +690,7 @@ func (s *Server) handleDeleteGame(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may delete a game")
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only a game manager may delete a game")
 		return
 	}
 

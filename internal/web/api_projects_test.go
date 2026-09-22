@@ -640,6 +640,63 @@ func TestListMembersNeverLeaksEmail(t *testing.T) {
 	}
 }
 
+// **The listing says which row is the caller's own.** The screen marks
+// that row and refuses to change it — a manager demoting themselves
+// loses the game they are standing in — and it must not learn which row
+// that is by comparing ids it was handed: the rule belongs here, beside
+// every other refusal about this listing.
+func TestListMembersMarksTheCallerOwnRow(t *testing.T) {
+	t.Parallel()
+	srv, ids, projSvc := newTestServer(t)
+	ctx := context.Background()
+
+	owner, _ := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "owner@example.test", DisplayName: "Owner", Password: "password12345"})
+	other, err := ids.CreateUser(ctx, identity.CreateUserRequest{Email: "editor@example.test", DisplayName: "Editor", Password: "password12345"})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	project, _ := projSvc.Create(ctx, "azeroth", "Azeroth", owner.ID)
+	if _, err := projSvc.SetRole(ctx, other.ID, project.ID, "editor"); err != nil {
+		t.Fatalf("SetRole: %v", err)
+	}
+
+	cookie := loginAs(t, srv, "owner@example.test")
+	req := httptest.NewRequest(http.MethodGet, "/api/games/"+project.Slug+"/members", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Members []struct {
+			ID   string `json:"id"`
+			You  bool   `json:"you"`
+			Role string `json:"role"`
+		} `json:"members"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (%s)", err, rec.Body.String())
+	}
+	if len(body.Members) != 2 {
+		t.Fatalf("members = %d, want 2", len(body.Members))
+	}
+	marked := 0
+	for _, m := range body.Members {
+		if !m.You {
+			continue
+		}
+		marked++
+		if m.ID != owner.ID.String() {
+			t.Fatalf("the listing marked %s as the caller, who is %s", m.ID, owner.ID)
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("rows marked as the caller's own = %d, want exactly 1", marked)
+	}
+}
+
 func TestOnlyOwnerCanChangeRole(t *testing.T) {
 	t.Parallel()
 	srv, ids, projSvc := newTestServer(t)

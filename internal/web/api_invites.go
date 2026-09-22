@@ -259,7 +259,7 @@ func requireProjectOwner(w http.ResponseWriter, caller Caller, scope ProjectScop
 		return false
 	}
 	if !roles.AtLeast(roles.Role(scope.Role), roles.Owner) {
-		writeError(w, http.StatusForbidden, errCodeForbidden, "only an owner may "+action)
+		writeError(w, http.StatusForbidden, errCodeForbidden, "only a game manager may "+action)
 		return false
 	}
 	return true

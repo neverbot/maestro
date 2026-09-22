@@ -48,6 +48,8 @@
 <nav class="tabs" id="settings-tabs" aria-label="Settings sections">
   <button type="button" class="tab" id="tab-game" data-panel="panel-game"
           role="tab" aria-selected="true" aria-controls="panel-game">Game</button>
+  <button type="button" class="tab" id="tab-people" data-panel="panel-people"
+          role="tab" aria-selected="false" aria-controls="panel-people">People</button>
   <button type="button" class="tab" id="tab-agents" data-panel="panel-agents"
           role="tab" aria-selected="false" aria-controls="panel-agents">Agents</button>
 </nav>
@@ -77,6 +79,63 @@
 <!-- The hole; pages/settings.js carries the words for a reader who may
      not change these. -->
 <div id="settings-refused" hidden></div>
+
+</section>
+
+<section id="panel-people" role="tabpanel" aria-labelledby="tab-people" hidden>
+
+<!-- **A game could be created from the web and never shared from it.**
+     The instance's invitations make accounts and grant no game; every
+     membership route existed and nothing called it, so in practice a
+     game had exactly one person in it — whoever made it. -->
+<p class="lede" id="people-lede">
+  Everybody who can open this game, and what each of them may do. A viewer reads it, an editor
+  writes its content, and a manager also renames the game, invites people and changes what they
+  may do. Administering this instance is a separate thing and grants none of this.
+</p>
+
+<h2>Invite somebody</h2>
+
+<!-- Manager-only; pages/settings.js hides this and says why for anybody
+     else, rather than offering a form the server will refuse. -->
+<form id="invite-member" hidden>
+  <label for="invite-email">Email</label>
+  <input id="invite-email" type="email" name="email" placeholder="them@example.test" autocomplete="off" required>
+  <label for="invite-role">Role</label>
+  <select id="invite-role" name="role">
+    <option value="viewer">Viewer — reads this game</option>
+    <option value="editor" selected>Editor — writes its content</option>
+    <option value="owner">Manager — runs the game</option>
+  </select>
+  <p class="muted field-note">The link is shown once, here. Nothing is sent anywhere: this
+    instance delivers no email, so you pass it on yourself.</p>
+  <button type="submit">Create an invitation</button>
+  <p class="error" id="invite-member-error" role="alert" aria-live="assertive"></p>
+</form>
+
+<!-- The hole for somebody who may read this list and not change it. -->
+<div id="people-refused" hidden></div>
+
+<!-- The secret, once. Each link stays and the earlier ones are marked,
+     because a second invitation must not destroy the only copy of the
+     first — the same decision the instance's invitations record. -->
+<div class="secret" id="invite-made" role="status" aria-live="polite" hidden>
+  <b>Send this link. It is shown once.</b>
+  <div id="invite-links"></div>
+</div>
+
+<h2>Members</h2>
+<div class="scroller">
+  <ul class="people" id="members" hidden></ul>
+</div>
+<div id="members-empty" hidden></div>
+<p class="error" id="members-error" hidden></p>
+
+<h2>Invitations outstanding</h2>
+<div class="scroller">
+  <ul class="people" id="game-invites" hidden></ul>
+</div>
+<div id="game-invites-empty" hidden></div>
 
 </section>
 

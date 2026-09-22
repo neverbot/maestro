@@ -26,6 +26,8 @@ import {
 import {
   STATE_REFUSED,
   countLabel,
+  expiry,
+  inviteLink,
   emptyOrRows,
   fillState,
   negativeState,
@@ -103,17 +105,7 @@ export function inviteRow(doc, invite, onRevoke) {
   return item;
 }
 
-// When it stops working, in the words a person would use. An invitation
-// that has expired is still listed by the server until it is pruned, and
-// "expired" is a different fact from "expires in three days".
-export function expiry(value) {
-  const when = new Date(String(value ?? ""));
-  if (Number.isNaN(when.getTime())) return "no expiry recorded";
-  const days = Math.round((when.getTime() - Date.now()) / 86400000);
-  if (days < 0) return "expired";
-  if (days === 0) return "expires today";
-  return "expires in " + countLabel(days, "day", "days");
-}
+
 
 export async function loadInvites(doc, onRevoke) {
   const noteEl = doc.getElementById("admin-note");
@@ -163,44 +155,6 @@ export async function loadInvites(doc, onRevoke) {
     ? countLabel(live, "invitation outstanding", "invitations outstanding")
     : live + " of " + invites.length + " still usable");
   return invites;
-}
-
-// One link and the button that copies it. A copy that fails leaves the
-// link on screen, selectable, which is what it was there for anyway.
-//
-// **This is the other secret shown once, and it deliberately does not
-// use components/mst-dialog.js.** The token on the Agents tab moved into
-// a dialog so a credential stops sitting on a screen nobody is watching;
-// an invitation link is the same shape and the opposite case. Creating a
-// second invitation used to destroy the first link on screen — the only
-// copy of a still-valid secret, gone, with nothing said — and the fix
-// was to keep every link of this sitting and mark the earlier ones. A
-// dialog is dismissed, and dismissing it is exactly that defect again,
-// performed by the reader instead of by the page. So the links stay,
-// and this comment is here so the next survey does not "finish the job".
-export function inviteLink(doc, href) {
-  const line = doc.createElement("div");
-  line.className = "secret-line";
-
-  const code = doc.createElement("code");
-  code.className = "mono";
-  code.textContent = href;
-  line.append(code);
-
-  const copy = doc.createElement("button");
-  copy.type = "button";
-  copy.className = "ghost";
-  copy.textContent = "Copy the link";
-  copy.addEventListener("click", async () => {
-    try {
-      await globalThis.navigator.clipboard.writeText(href);
-      copy.textContent = "Copied";
-    } catch {
-      copy.textContent = "Select it and copy";
-    }
-  });
-  line.append(copy);
-  return line;
 }
 
 export function wireInviteForm(doc, reload) {

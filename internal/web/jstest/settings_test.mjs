@@ -439,6 +439,281 @@ check("theTabsDefaultToTheGameAndFollowAPress", async () => {
   assertEqual(world.replaced.pop(), "#agents", "the address did not follow the selection");
 });
 
+// --- The People tab ---------------------------------------------------
+//
+// **The half of a game that is not its content.** A game is a set of
+// people with standings, and until this tab existed the only way to give
+// somebody one was an instance-wide invitation plus a database. The
+// properties asserted here are the refusals, because every one of them
+// is a rule the server also holds and the screen must not contradict:
+// only a manager may change a standing, nobody may change their own, and
+// a game keeps one manager.
+
+const PEOPLE_IDS = [
+  "members",
+  "members-empty",
+  "members-error",
+  "game-invites",
+  "game-invites-empty",
+  "invite-member",
+  "invite-email",
+  "invite-role",
+  "invite-member-error",
+  "invite-made",
+  "invite-links",
+  "people-refused",
+];
+
+function mountPeople({ members = [], invites = [], answers = {} } = {}) {
+  const elements = {};
+  for (const id of PEOPLE_IDS) {
+    elements[id] = dom.document.createElement("div");
+    elements[id].setAttribute("id", id);
+  }
+  const body = { children: [], append(...nodes) { this.children.push(...nodes); } };
+  const create = (tag) => {
+    if (typeof tag === "string" && tag.includes("-")) {
+      const Ctor = globalThis.customElements.get(tag);
+      if (Ctor) {
+        const made = new Ctor();
+        made.ownerDocument = doc;
+        made.hidden = false;
+        return made;
+      }
+    }
+    return dom.document.createElement(tag);
+  };
+  const doc = {
+    body,
+    activeElement: null,
+    createElement: create,
+    getElementById: (id) => (Object.prototype.hasOwnProperty.call(elements, id) ? elements[id] : null),
+  };
+  const calls = [];
+  const client = {
+    async listMembers() {
+      calls.push(["listMembers"]);
+      return { ok: true, result: { members } };
+    },
+    async listGameInvites() {
+      calls.push(["listGameInvites"]);
+      return { ok: true, result: { invites } };
+    },
+    async setRole(id, role) {
+      calls.push(["setRole", id, role]);
+      return answers.setRole || { ok: true, result: {} };
+    },
+    async removeMember(id) {
+      calls.push(["removeMember", id]);
+      return answers.removeMember || { ok: true, result: {} };
+    },
+    async inviteToGame(email, role) {
+      calls.push(["inviteToGame", email, role]);
+      return { ok: true, result: { redeem_path: "/join/" + email } };
+    },
+    async revokeGameInvite(id) {
+      calls.push(["revokeGameInvite", id]);
+      return { ok: true, result: {} };
+    },
+  };
+  globalThis.window = { location: { hash: "", origin: ORIGIN }, history: { replaceState() {} } };
+  return { opened: { document: doc, client, origin: ORIGIN, slug: "ashfall" }, doc, elements, calls };
+}
+
+// Three days out, which is what every invitation in these checks is:
+// the row spells the distance, so it has to be a real one.
+function soon() {
+  return new Date(Date.now() + 3 * 86400000).toISOString();
+}
+
+function cellsOf(row) {
+  return row.childNodes.map((child) => child.textContent);
+}
+
+// The dialog holds what it was given in two slots of its own shadow
+// root, so a check reads those and never the element's textContent —
+// which the strict stub does not carry across the shadow boundary, and
+// a check that read it would pass on an empty string.
+function dialogParts(world) {
+  const modal = world.doc.body.children.find((child) => child.bodyEl !== undefined);
+  assert(modal, "the dialog never opened");
+  return modal;
+}
+
+function dialogText(modal) {
+  return modal.bodyEl.textContent + " " + modal.footEl.textContent;
+}
+
+function findById(node, id) {
+  if (node.getAttribute && node.getAttribute("id") === id) return node;
+  for (const child of node.childNodes || []) {
+    const found = findById(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function buttonLabelled(node, label) {
+  if (node.tagName === "button" && node.textContent === label) return node;
+  for (const child of node.childNodes || []) {
+    const found = buttonLabelled(child, label);
+    if (found) return found;
+  }
+  return null;
+}
+
+check("aMemberIsDrawnWithTheWordAGameUsesForTheirStanding", async () => {
+  const world = mountPeople({ members: [{ id: "u1", display_name: "Vera", role: "owner", you: false }] });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const row = world.elements["members"].childNodes[0];
+  assert(cellsOf(row).includes("manager"), "a game's owner is not called a manager on the screen");
+  assert(!row.textContent.includes("owner"), "the wire word reached a person's eyes");
+  assertEqual(row.childNodes.length, 4, "the row lost a cell and stopped lining up");
+});
+
+check("theReaderOwnRowIsMarkedAndCannotBeChanged", async () => {
+  const world = mountPeople({ members: [{ id: "me", display_name: "Vera", role: "owner", you: true }] });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const row = world.elements["members"].childNodes[0];
+  assert(row.textContent.includes(settings.YOU), "nothing says which row is the reader's own");
+  const edit = row.childNodes.find((child) => child.tagName === "button");
+  await edit.dispatch("click");
+  const modal = dialogParts(world);
+  const select = findById(modal.bodyEl, "member-role");
+  assertEqual(select.disabled, true, "a manager was offered a way to demote themselves out of their own game");
+  assert(
+    dialogText(modal).includes(settings.CANNOT_CHANGE_YOURSELF),
+    "the refusal is enforced and never stated",
+  );
+  assertEqual(
+    buttonLabelled(modal.footEl, settings.SAVE).disabled,
+    true,
+    "a control was drawn whose only outcome is the server's refusal",
+  );
+  assertEqual(
+    buttonLabelled(modal.footEl, settings.REMOVE).disabled,
+    true,
+    "a manager was offered a way to remove themselves from their own game",
+  );
+});
+
+check("theDialogSaysWhoseStandingIsAboutToChange", async () => {
+  const world = mountPeople({ members: [{ id: "u1", display_name: "Vera", role: "editor", you: false }] });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const row = world.elements["members"].childNodes[0];
+  await row.childNodes.find((child) => child.tagName === "button").dispatch("click");
+  const modal = dialogParts(world);
+  assert(
+    modal.titleEl.textContent.includes("Vera"),
+    "the dialog changes somebody's standing without naming them, and the row is behind a scrim",
+  );
+});
+
+check("aViewerIsToldWhyTheyCanChangeNothing", async () => {
+  const world = mountPeople({ members: [{ id: "u1", display_name: "Vera", role: "editor", you: false }] });
+  await settings.peopleTab(world.opened, "viewer");
+  assertEqual(world.elements["invite-member"].hidden, true, "a viewer was offered the invitation form");
+  assertEqual(world.elements["people-refused"].hidden, false, "the screen changed nothing and said nothing");
+  assert(
+    world.elements["people-refused"].textContent.includes(settings.NOT_A_MANAGER_HEADING),
+    "the notice does not say who may change this",
+  );
+  const row = world.elements["members"].childNodes[0];
+  assert(
+    !row.childNodes.some((child) => child.tagName === "button"),
+    "a viewer was offered an edit the server refuses",
+  );
+});
+
+check("theLastManagerRefusalIsReadInTheDialogAndNotSwallowed", async () => {
+  const world = mountPeople({
+    members: [{ id: "u1", display_name: "Vera", role: "owner", you: false }],
+    answers: { setRole: { ok: false, code: "last_owner", error: { message: "" } } },
+  });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const row = world.elements["members"].childNodes[0];
+  await row.childNodes.find((child) => child.tagName === "button").dispatch("click");
+  const modal = dialogParts(world);
+  const form = findById(modal.bodyEl, "edit-member");
+  findById(modal.bodyEl, "member-role").value = "viewer";
+  await form.dispatch("submit", { preventDefault() {} });
+  assert(dialogText(modal).includes(settings.LAST_MANAGER), "the server refused and the screen said nothing");
+  assertEqual(modal.hidden, false, "the dialog closed on a change that did not happen");
+});
+
+check("removingSomebodyAsksFirstInTheRow", async () => {
+  const world = mountPeople({ members: [{ id: "u1", display_name: "Vera", role: "editor", you: false }] });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const row = world.elements["members"].childNodes[0];
+  await row.childNodes.find((child) => child.tagName === "button").dispatch("click");
+  const modal = dialogParts(world);
+  const remove = buttonLabelled(modal.footEl, settings.REMOVE);
+  assert(remove, "the dialog offers no way to remove anybody");
+  await remove.dispatch("click");
+  assertEqual(remove.textContent, settings.REMOVE_CONFIRM, "one press removed somebody from the game");
+  assertEqual(
+    world.calls.some((call) => call[0] === "removeMember"),
+    false,
+    "the first press already reached the server",
+  );
+  await remove.dispatch("click");
+  assert(world.calls.some((call) => call[0] === "removeMember"), "the armed press removed nobody");
+});
+
+check("eachInvitationLinkSurvivesTheNextOne", async () => {
+  const world = mountPeople();
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const form = world.elements["invite-member"];
+  world.elements["invite-email"].value = "vera@example.com";
+  world.elements["invite-role"].value = "editor";
+  await form.dispatch("submit", { preventDefault() {} });
+  world.elements["invite-email"].value = "ana@example.com";
+  await form.dispatch("submit", { preventDefault() {} });
+  const links = world.elements["invite-links"].childNodes;
+  assertEqual(links.length, 2, "a second invitation destroyed the only copy of the first link");
+  assert(links[0].className.includes("spent"), "the superseded link is not marked as spent");
+  assertEqual(world.elements["invite-made"].hidden, false, "nothing told the manager the link is there");
+});
+
+check("aRevokedInvitationLeavesTheListItIsNoLongerOn", async () => {
+  const world = mountPeople({
+    invites: [
+      { id: "i1", email: "vera@example.com", role: "editor", expires_at: soon(), revoked: true },
+      { id: "i2", email: "ana@example.com", role: "viewer", expires_at: soon(), revoked: false },
+    ],
+  });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const rows = world.elements["game-invites"].childNodes;
+  assertEqual(rows.length, 1, "a revoked invitation is still listed as outstanding");
+  assert(rows[0].textContent.includes("ana@example.com"), "the wrong invitation survived the filter");
+});
+
+check("anInvitationIsRevokedInItsOwnWordsAndNotATokenWords", async () => {
+  const world = mountPeople({ invites: [{
+      id: "i1",
+      email: "vera@example.com",
+      role: "editor",
+      // **A real timestamp, because the row spells it.** Without one,
+      // inviteRow never reaches the code that formats it, and the first
+      // version of this check passed while the screen threw on the only
+      // input a server ever sends.
+      expires_at: soon(),
+    }] });
+  await settings.peopleTab(world.opened, settings.ROLE_MANAGER);
+  const row = world.elements["game-invites"].childNodes[0];
+  const revoke = row.childNodes.find((child) => child.tagName === "button");
+  await revoke.dispatch("click");
+  assertEqual(revoke.textContent, settings.REVOKE_INVITE_CONFIRM, "revoking an invitation does not ask first");
+  assert(
+    !revoke.textContent.includes("token"),
+    "an invitation is revoked with the wording written for a token",
+  );
+  assert(
+    row.textContent.includes("expires in 3 days"),
+    "the row does not say when the invitation stops working",
+  );
+});
+
 for (const [name, fn] of pending) {
   try {
     await fn();

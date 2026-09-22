@@ -24,6 +24,8 @@ import {
   STATE_REFUSED,
   TAB_AGENTS,
   expired,
+  expiry,
+  inviteLink,
   fillState,
   gameURL,
   negativeState,
@@ -95,6 +97,7 @@ export async function settingsPage(opened) {
   // The tabs first, so the address's #agents is honoured whether or not
   // the reader may touch the half this page used to be all of.
   wireTabs(doc, globalThis.window);
+  void peopleTab(opened, role);
   void agentsTab(opened, role);
 
   // Owner, and nothing less — **for this tab**. The server refuses
@@ -149,6 +152,361 @@ export async function settingsPage(opened) {
   return opened;
 }
 
+
+// --- The People tab ---------------------------------------------------
+//
+// **A game could be created from the web and never shared from it.**
+// Every membership route has existed since Task 8 and nothing in the
+// interface called one: the instance's invitations make an account and
+// grant no game, so a game had exactly one person in it, whoever made
+// it. This tab is the other half.
+
+// The three roles, in the words a person reads. `owner` is the key on
+// the wire — the API, the database's CHECK constraint and the skill
+// bundle all say it — and "manager" is what it is called on a screen.
+// The key is never printed.
+export const ROLE_WORDS = { owner: "manager", editor: "editor", viewer: "viewer" };
+export const ROLE_MANAGER = "owner";
+
+export function roleWord(role) {
+  return ROLE_WORDS[String(role || "")] ?? String(role || "");
+}
+
+export const YOU = "you";
+export const EDIT = "Edit";
+export const REMOVE = "Remove from this game";
+export const REMOVE_CONFIRM = "Remove them?";
+export const REVOKE_INVITE = "Revoke";
+export const REVOKE_INVITE_CONFIRM = "Revoke this invitation?";
+export const MEMBER_TITLE = "What they may do";
+export const SAVE = "Save";
+export const CANCEL = "Cancel";
+export const NO_MEMBERS_HEADING = "Only you";
+export const NO_MEMBERS_SENTENCE =
+  "Nobody else can open this game. An invitation above puts somebody in it, at the role you " +
+  "choose.";
+export const NO_INVITES_HEADING = "Nobody is waiting";
+export const NO_INVITES_SENTENCE =
+  "No invitation into this game is outstanding. One appears here from the moment you create it " +
+  "until the person uses it or you revoke it.";
+export const NOT_A_MANAGER_HEADING = "Only a game manager can change who is here";
+export const NOT_A_MANAGER_SENTENCE =
+  "You can see who is in this game and what they may do. Inviting somebody, changing a role or " +
+  "removing a member is a manager's.";
+export const LAST_MANAGER =
+  "This game must keep at least one manager. Make somebody else one first.";
+export const CANNOT_CHANGE_YOURSELF =
+  "This is your own membership. Another manager changes it, so nobody can take their own way " +
+  "into a game away by accident.";
+
+// memberRow is one person in this game: who they are, what they may do,
+// and the way in to changing it. The role is a word and not a chooser:
+// this list is read far more often than it is written, and a select in
+// every row is a row that changes under a stray scroll.
+export function memberRow(doc, member, onEdit) {
+  const item = doc.createElement("li");
+  item.className = "person";
+
+  const name = doc.createElement("span");
+  name.className = "person-name";
+  name.textContent = member.display_name || "";
+  item.append(name);
+
+  const role = doc.createElement("span");
+  role.className = "person-email";
+  role.textContent = roleWord(member.role);
+  item.append(role);
+
+  const mine = doc.createElement("span");
+  mine.className = "person-standing";
+  mine.textContent = member.you === true ? YOU : "";
+  item.append(mine);
+
+  if (!onEdit) {
+    const nothing = doc.createElement("span");
+    item.append(nothing);
+    return item;
+  }
+  const edit = doc.createElement("button");
+  edit.type = "button";
+  edit.className = "ghost";
+  edit.textContent = EDIT;
+  edit.addEventListener("click", () => onEdit(member));
+  item.append(edit);
+  return item;
+}
+
+// editMember is the one form that changes what somebody may do here,
+// and the one place they are removed from the game.
+//
+// **Not your own membership.** A manager demoting themselves walks out
+// of the door they are standing in: the server would allow it while
+// another manager exists, and the reader would lose the screen they are
+// on with no way back. Another manager does it.
+export function editMember(doc, member, actions) {
+  const form = doc.createElement("form");
+  form.setAttribute("id", "edit-member");
+
+  const label = doc.createElement("label");
+  label.setAttribute("for", "member-role");
+  label.textContent = "Role";
+  const select = doc.createElement("select");
+  select.setAttribute("id", "member-role");
+  for (const [key, word] of Object.entries(ROLE_WORDS)) {
+    const option = doc.createElement("option");
+    option.setAttribute("value", key);
+    option.textContent = word;
+    if (key === member.role) option.selected = true;
+    select.append(option);
+  }
+  if (member.you === true) select.disabled = true;
+
+  const note = doc.createElement("p");
+  note.className = "muted";
+  note.textContent = member.you === true ? CANNOT_CHANGE_YOURSELF : "";
+
+  const error = doc.createElement("p");
+  error.className = "error";
+  error.setAttribute("role", "alert");
+
+  form.append(label, select, note, error);
+
+  const save = doc.createElement("button");
+  save.type = "submit";
+  save.textContent = SAVE;
+  save.setAttribute("form", "edit-member");
+  // **Nothing on your own row is offered.** The select is already
+  // disabled, and a Save beside it is a control whose only outcome is
+  // the server's refusal — the shape this repository calls a knob with
+  // no reader, drawn where a person can press it.
+  if (member.you === true) save.disabled = true;
+
+  const remove = doc.createElement("button");
+  remove.type = "button";
+  remove.className = "ghost";
+  remove.textContent = REMOVE;
+  if (member.you === true) remove.disabled = true;
+  remove.addEventListener("click", async () => {
+    // Armed in place, like every other destructive control here: a
+    // second dialog on top of a dialog is a question nobody reads.
+    if (remove.getAttribute("data-armed") !== "true") {
+      remove.setAttribute("data-armed", "true");
+      remove.textContent = REMOVE_CONFIRM;
+      return;
+    }
+    const answer = await actions.remove(member);
+    if (answer && answer.ok === false) {
+      error.textContent = answer.code === "last_owner" ? LAST_MANAGER : answer.message;
+      remove.removeAttribute("data-armed");
+      remove.textContent = REMOVE;
+      return;
+    }
+    closeDialog(doc);
+  });
+
+  form.addEventListener("submit", async (event) => {
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    error.textContent = "";
+    setFormBusy(form, true, "Saving…");
+    const answer = await actions.setRole(member, select.value);
+    setFormBusy(form, false);
+    if (answer && answer.ok === false) {
+      error.textContent = answer.code === "last_owner" ? LAST_MANAGER : answer.message;
+      return;
+    }
+    closeDialog(doc);
+  });
+
+  // **The dialog carries the name.** "What they may do" over a role
+  // select says nothing about whose game standing is about to change,
+  // and the row it came from is behind a scrim by then.
+  const title = member.display_name ? MEMBER_TITLE + ": " + member.display_name : MEMBER_TITLE;
+  return openDialog(doc, { title, content: [form], actions: [save, remove], dismissLabel: CANCEL });
+}
+
+function closeDialog(doc) {
+  const dialog = doc._mstDialog;
+  if (dialog && typeof dialog.close === "function") dialog.close();
+}
+
+// inviteRow is one outstanding invitation into this game: who it is for,
+// what it grants, when it stops working, and the way to take it back.
+export function inviteRow(doc, invite, onRevoke) {
+  const item = doc.createElement("li");
+  item.className = "person";
+
+  const who = doc.createElement("span");
+  who.className = "person-name";
+  who.textContent = invite.email || "anyone with the link";
+  item.append(who);
+
+  const role = doc.createElement("span");
+  role.className = "person-email";
+  role.textContent = roleWord(invite.role);
+  item.append(role);
+
+  const when = doc.createElement("span");
+  when.className = "person-standing";
+  when.textContent = expiry(invite.expires_at);
+  item.append(when);
+
+  if (!onRevoke) {
+    item.append(doc.createElement("span"));
+    return item;
+  }
+  const revoke = doc.createElement("button");
+  revoke.type = "button";
+  revoke.className = "ghost";
+  revoke.textContent = REVOKE_INVITE;
+  revoke.addEventListener("click", () => {
+    if (revoke.getAttribute("data-armed") === "true") {
+      void onRevoke(invite.id);
+      return;
+    }
+    revoke.setAttribute("data-armed", "true");
+    revoke.textContent = REVOKE_INVITE_CONFIRM;
+  });
+  item.append(revoke);
+  return item;
+}
+
+// peopleTab fills the third half of this screen: who is here, who is
+// invited, and the one form that adds somebody.
+export async function peopleTab(opened, role) {
+  const doc = opened.document;
+  const manages = role === ROLE_MANAGER;
+  const membersEl = doc.getElementById("members");
+  const membersEmpty = doc.getElementById("members-empty");
+  const errorEl = doc.getElementById("members-error");
+  const invitesEl = doc.getElementById("game-invites");
+  const invitesEmpty = doc.getElementById("game-invites-empty");
+  const form = doc.getElementById("invite-member");
+
+  if (form) form.hidden = !manages;
+  const refused = doc.getElementById("people-refused");
+  if (refused) {
+    refused.replaceChildren(
+      ...(manages
+        ? []
+        : [negativeState(doc, {
+            kind: STATE_REFUSED,
+            heading: NOT_A_MANAGER_HEADING,
+            sentence: NOT_A_MANAGER_SENTENCE,
+          })]),
+    );
+    refused.hidden = manages;
+  }
+
+  const actions = {
+    async setRole(member, next) {
+      const answer = await opened.client.setRole(member.id, next);
+      if (answer.ok) await refresh();
+      return answer;
+    },
+    async remove(member) {
+      const answer = await opened.client.removeMember(member.id);
+      if (answer.ok) await refresh();
+      return answer;
+    },
+  };
+
+  async function refresh() {
+    const answer = await opened.client.listMembers();
+    if (!answer.ok) {
+      if (expired(answer)) {
+        goToLogin();
+        return;
+      }
+      say(errorEl, answer.error.message);
+      if (errorEl) errorEl.hidden = false;
+      return;
+    }
+    const members = Array.isArray(answer.result.members) ? answer.result.members : [];
+    if (membersEl) {
+      membersEl.replaceChildren(
+        ...members.map((member) =>
+          memberRow(doc, member, manages ? (who) => editMember(doc, who, actions) : null),
+        ),
+      );
+      membersEl.hidden = members.length === 0;
+    }
+    fillState(doc, "members-empty", { heading: NO_MEMBERS_HEADING, sentence: NO_MEMBERS_SENTENCE });
+    // "Only you" is the state worth a sentence: a game with one member
+    // is a game nobody else can open, and that is the thing this tab
+    // exists to fix. An empty list is impossible — a game always has a
+    // manager — so it is not a state at all.
+    if (membersEmpty) membersEmpty.hidden = members.length > 1;
+    await refreshInvites();
+  }
+
+  async function refreshInvites() {
+    if (!invitesEl) return;
+    const answer = await opened.client.listGameInvites();
+    if (!answer.ok) {
+      // A viewer may read the members and not the invitations; that is
+      // the server's rule and not a fault to report on this screen.
+      invitesEl.hidden = true;
+      if (invitesEmpty) invitesEmpty.hidden = true;
+      return;
+    }
+    // **Revoked ones are gone from here.** The server keeps them — the
+    // instance's admin screen lists them struck through, which is the
+    // right answer for an audit — but this heading says *outstanding*
+    // and the empty state below it promises the row leaves "when the
+    // person uses it or you revoke it". Without this filter a revoke
+    // answered 204 and changed nothing a person could see, which is
+    // how it shipped the first time it was opened in a browser.
+    const all = Array.isArray(answer.result.invites) ? answer.result.invites : [];
+    const invites = all.filter((invite) => invite.revoked !== true);
+    invitesEl.replaceChildren(
+      ...invites.map((invite) =>
+        inviteRow(doc, invite, manages ? async (id) => {
+          const gone = await opened.client.revokeGameInvite(id);
+          if (gone.ok) await refreshInvites();
+        } : null),
+      ),
+    );
+    invitesEl.hidden = invites.length === 0;
+    fillState(doc, "game-invites-empty", { heading: NO_INVITES_HEADING, sentence: NO_INVITES_SENTENCE });
+    if (invitesEmpty) invitesEmpty.hidden = invites.length > 0;
+  }
+
+  if (form && manages) {
+    const emailEl = doc.getElementById("invite-email");
+    const roleEl = doc.getElementById("invite-role");
+    const formError = doc.getElementById("invite-member-error");
+    const madeEl = doc.getElementById("invite-made");
+    const linksEl = doc.getElementById("invite-links");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      say(formError, "");
+      setFormBusy(form, true, "Creating…");
+      const answer = await opened.client.inviteToGame(
+        emailEl ? emailEl.value : "",
+        roleEl ? roleEl.value : "editor",
+      );
+      setFormBusy(form, false);
+      if (!answer.ok) {
+        say(formError, answer.error.message || "Could not create that invitation.");
+        return;
+      }
+      // **Shown once, and never overwritten.** A second invitation must
+      // not destroy the only copy of the first link on screen; the
+      // earlier ones are marked instead, which is the decision the
+      // instance's invitations already record.
+      const path = String(answer.result.redeem_path || "");
+      if (linksEl && path !== "") {
+        for (const older of linksEl.children) older.classList.add("spent");
+        linksEl.append(inviteLink(doc, globalThis.window.location.origin + path));
+      }
+      if (madeEl) madeEl.hidden = false;
+      if (emailEl) emailEl.value = "";
+      await refreshInvites();
+    });
+  }
+
+  await refresh();
+}
 
 // --- The Agents tab ---------------------------------------------------
 
@@ -323,11 +681,14 @@ export async function copyInto(button, text) {
 
 // showTab moves the selection. The panels are `hidden` rather than
 // styled away, so what is not shown is not in the tab order either.
+export const TABS = ["game", "people", "agents"];
+
 export function showTab(doc, which) {
-  const tabs = [
-    { button: doc.getElementById("tab-game"), panel: doc.getElementById("panel-game"), name: "game" },
-    { button: doc.getElementById("tab-agents"), panel: doc.getElementById("panel-agents"), name: "agents" },
-  ];
+  const tabs = TABS.map((name) => ({
+    name,
+    button: doc.getElementById("tab-" + name),
+    panel: doc.getElementById("panel-" + name),
+  }));
   for (const tab of tabs) {
     const on = tab.name === which;
     if (tab.button) tab.button.setAttribute("aria-selected", on ? "true" : "false");
@@ -336,13 +697,14 @@ export function showTab(doc, which) {
 }
 
 export function wireTabs(doc, win) {
-  const tabs = [doc.getElementById("tab-game"), doc.getElementById("tab-agents")];
+  const tabs = TABS.map((name) => doc.getElementById("tab-" + name));
   for (const tab of tabs) {
     if (!tab) continue;
     tab.addEventListener("click", () => {
       // The panel a tab opens is the attribute the shell wrote beside
       // it, not the tab's own id spelled a second time here.
-      const which = tab.getAttribute("data-panel") === "panel-agents" ? "agents" : "game";
+      const panel = String(tab.getAttribute("data-panel") || "");
+      const which = TABS.includes(panel.replace("panel-", "")) ? panel.replace("panel-", "") : "game";
       showTab(doc, which);
       // The address follows the selection, so this page can be linked to
       // and reloaded on the half the reader was looking at.
@@ -351,7 +713,9 @@ export function wireTabs(doc, win) {
       }
     });
   }
-  showTab(doc, win && win.location && win.location.hash === TAB_AGENTS ? "agents" : "game");
+  const hash = win && win.location ? String(win.location.hash || "") : "";
+  const asked = hash.replace("#", "");
+  showTab(doc, TABS.includes(asked) ? asked : "game");
 }
 
 // agentsTab fills the second half: who may mint, what exists, and the

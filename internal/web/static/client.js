@@ -752,6 +752,45 @@ export function client({
     });
   }
 
+  // --- Who is in this game ---------------------------------------------
+  //
+  // Four calls the interface never made: a game could be created from
+  // the web and never shared from it. The gates are the server's — any
+  // member may read the list, a manager does everything else — and this
+  // module states none of them.
+  async function listMembers() {
+    return get(base + "/members");
+  }
+
+  // setRole upserts: it promotes, demotes, and grants a membership to
+  // somebody who has none, which is what makes an invitation and a role
+  // change the same call on the server.
+  async function setRole(userID, role) {
+    return request(base + "/members/" + encodeURIComponent(String(userID || "")), {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify({ role: String(role || "") }),
+    });
+  }
+
+  async function removeMember(userID) {
+    return request(base + "/members/" + encodeURIComponent(String(userID || "")), { method: "DELETE" });
+  }
+
+  // **The invitation into a game carries a role**, unlike the instance
+  // one, which grants an account and nothing else.
+  async function inviteToGame(email, role) {
+    return send(base + "/invites", { email: String(email || ""), role: String(role || "") });
+  }
+
+  async function listGameInvites() {
+    return get(base + "/invites");
+  }
+
+  async function revokeGameInvite(id) {
+    return request(base + "/invites/" + encodeURIComponent(String(id || "")), { method: "DELETE" });
+  }
+
   // --- The game's tokens ----------------------------------------------
   //
   // Three calls this module has never carried, because until the Agents
@@ -1170,6 +1209,12 @@ export function client({
     games,
     summary,
     updateGame,
+    listMembers,
+    setRole,
+    removeMember,
+    inviteToGame,
+    listGameInvites,
+    revokeGameInvite,
     listTokens,
     createToken,
     revokeToken,

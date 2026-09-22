@@ -138,3 +138,67 @@ func TestTheDialogIsASurfaceAndTrapsItsOwnFocus(t *testing.T) {
 		}
 	}
 }
+
+// **The People tab's ids, read out of the code that reads them.**
+// jstest mounts its own document, so every check in settings_test.mjs
+// passes against a page that does not exist: the tab could look for
+// `members` for a year while the shell calls it `member-list` and
+// nothing would go red. This is the crossing — the ids the code asks
+// for, against the shell that has to carry them — and the same shape of
+// defect this repository has shipped more than once.
+func TestThePeopleTabAsksForIdsTheShellActuallyCarries(t *testing.T) {
+	t.Parallel()
+	page, err := os.ReadFile("static/pages/settings.js")
+	if err != nil {
+		t.Fatalf("read settings.js: %v", err)
+	}
+	shell, err := os.ReadFile("static/settings.html")
+	if err != nil {
+		t.Fatalf("read settings.html: %v", err)
+	}
+	body := string(page)
+	start := strings.Index(body, "export async function peopleTab(")
+	if start < 0 {
+		t.Fatal("peopleTab is gone from settings.js; this guard now protects nothing")
+	}
+	end := strings.Index(body[start:], "\nexport ")
+	if end < 0 {
+		end = len(body) - start
+	}
+	tab := body[start : start+end]
+
+	lookups := 0
+	for rest := tab; ; {
+		at := strings.Index(rest, `getElementById("`)
+		if at < 0 {
+			break
+		}
+		rest = rest[at+len(`getElementById("`):]
+		id := rest[:strings.Index(rest, `"`)]
+		lookups++
+		if !strings.Contains(string(shell), `id="`+id+`"`) {
+			t.Errorf("peopleTab reads #%s and settings.html has no such element", id)
+		}
+	}
+	// fillState is given its host by name too, and it is the half that
+	// draws the empty states.
+	for _, id := range []string{"members-empty", "game-invites-empty"} {
+		if !strings.Contains(string(shell), `id="`+id+`"`) {
+			t.Errorf("peopleTab fills #%s and settings.html has no such element", id)
+		}
+	}
+	if lookups < 8 {
+		t.Fatalf("found %d id lookups in peopleTab, want at least 8; the scan stopped matching the code", lookups)
+	}
+
+	// And the tab itself is reachable: a panel nothing opens is a screen
+	// nobody sees.
+	for _, id := range []string{"tab-people", "panel-people"} {
+		if !strings.Contains(string(shell), `id="`+id+`"`) {
+			t.Errorf("settings.html has no #%s, so the People tab cannot be opened", id)
+		}
+	}
+	if !strings.Contains(string(shell), `data-panel="panel-people"`) {
+		t.Error("the People tab button names no panel, so pressing it opens nothing")
+	}
+}
